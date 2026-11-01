@@ -1,0 +1,127 @@
+#app.has-world-chat{--world-chat-width:clamp(280px,24vw,360px);min-height:0}
+#app.explore-page.has-world-chat{grid-template-columns:78px 260px minmax(0,1fr) var(--world-chat-width)}
+#app.settlement-page.has-world-chat{grid-template-columns:78px minmax(0,1fr) var(--world-chat-width)}
+.has-world-chat .topbar{grid-column:2/-1}
+.has-world-chat .map{grid-column:3/-1;grid-row:2}
+.has-world-chat .map canvas#world{width:calc(100% - var(--world-chat-width))}
+.world-chat{grid-column:4;grid-row:2;z-index:6;display:flex;flex-direction:column;min-height:0;min-width:0;margin:12px;padding:12px;gap:8px;border:1px solid #c6e8a433;border-radius:14px;background:linear-gradient(145deg,#10201899,#15281a66);backdrop-filter:blur(12px);box-shadow:0 8px 30px #0003}
+.settlement-page .world-chat{grid-column:3}
+.world-chat>header{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}
+.world-chat h2{display:flex;align-items:center;gap:6px;font-size:12px;margin:0}
+.world-chat h2 .icon{width:18px;height:18px;flex-shrink:0}
+.world-chat>header .button{font-size:11px;padding:6px;min-height:44px;flex-shrink:0}
+.world-chat .chat-page{flex:1}
+.world-chat [data-communicate]{gap:6px}
+.world-chat .chat-summary{display:none}
+.world-chat .chat-status{margin:0;font-size:10px;line-height:1.5}
+.world-chat .chat-tools{gap:6px}
+.world-chat .chat-tools .button{font-size:10px;padding:4px 6px}
+.world-chat .chat-guidelines{margin-left:auto}
+.world-chat .chat-messages{min-height:40px;background:#0e1d1259;border-color:#c6e8a41c;padding:8px}
+.world-chat .chat-message{padding:6px 0}
+.world-chat .chat-message p{font-size:11px;line-height:1.6}
+.world-chat .chat-empty{font-size:11px;padding:4px 0}
+.world-chat .chat-composer{grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:start}
+.world-chat .chat-composer textarea{height:44px;max-height:44px;background:#0e1d1273;font-size:12px;padding:7px}
+.world-chat .chat-composer>div{flex-direction:column-reverse;gap:2px;font-size:9px}
+.world-chat .chat-composer .button{min-width:58px;font-size:11px;padding:6px}
+.world-chat [data-chat-self]{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.world-chat [data-visitor-status]{font-size:10px;line-height:1.5;margin:0}
+.dock-channel{display:grid;gap:4px;font-size:10px;flex-shrink:0}
+.dock-channel select{width:100%;min-width:0;min-height:44px;padding:8px;border:1px solid #c6e8a433;border-radius:8px;color:#e3e7dd;background:#12211999;font:inherit;font-size:11px}
+.dock-channel option{color:#e3e7dd;background:#17251b}
+.has-world-chat .map-heading{width:1px;height:1px;overflow:hidden;clip-path:inset(50%);padding:0;margin:0}
+.has-world-chat .map-coordinate{display:none}
+.has-world-chat .map-status{position:absolute;left:24px;right:calc(var(--world-chat-width) + 16px);top:20px;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:12px;pointer-events:none}
+.has-world-chat .map-environment{position:static;flex-shrink:0;background:#172b1ba6}
+.has-world-chat .map-toolbar{right:calc(var(--world-chat-width) + 16px);top:auto;bottom:28px;flex-direction:row}
+.has-world-chat .compass-rose{display:none}
+.has-world-chat .minimap{left:24px;right:auto;bottom:24px;width:160px}
+.has-world-chat .location-card{position:static;display:grid;grid-template-columns:minmax(0,1fr);justify-content:stretch;flex:0 1 340px;width:340px;min-width:0;max-width:100%;gap:10px;padding:12px;border-radius:12px;background:linear-gradient(145deg,#102018b3,#15281a80);backdrop-filter:blur(12px);pointer-events:auto}
+.has-world-chat .tile-heading{display:flex;align-items:center;gap:10px;min-width:0}
+.has-world-chat .location-icon{display:grid;width:34px;height:34px;flex-shrink:0}
+.has-world-chat .location-icon .icon{width:22px;height:22px}
+.has-world-chat .location-description{min-width:0;flex:1}
+.has-world-chat .location-description .eyebrow{display:block;font-size:9px;line-height:1.2;letter-spacing:.5px}
+.has-world-chat .location-description h3{margin:3px 0 0;font-size:14px;line-height:1.4;word-break:keep-all;overflow-wrap:anywhere}
+.tile-coordinates{flex-shrink:0;padding:4px 6px;border:1px solid #c6e8a422;border-radius:6px;color:#a9bd99;font-size:10px;font-variant-numeric:tabular-nums}
+.tile-resource{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #c6e8a41c;padding-top:8px}
+.tile-resource>div{display:grid;gap:3px;min-width:0}
+.tile-resource-name{font-size:12px;color:#d5e4c8}
+.tile-pending{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px;font-size:10px;color:#a9bd99}
+.tile-pending strong{color:#d5e4c8;font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.has-world-chat .location-card .gather-button{min-width:44px;min-height:44px;margin:0;padding:8px 10px;font-size:11px;flex-shrink:0}
+.has-world-chat .map-bottom{display:none}
+.has-world-chat .settlement-view{grid-column:2/-1;background:#17291d}
+.has-world-chat .settlement-panorama{right:var(--world-chat-width)}
+.has-world-chat .settlement-task-panel,.has-world-chat .settlement-task-panel:has(.inventory-panel){position:absolute;top:14px;right:calc(var(--world-chat-width) + 14px);bottom:92px;left:auto;width:min(440px,calc(100% - var(--world-chat-width) - 28px));height:auto;max-width:none}
+.has-world-chat .settlement-dock{left:calc((100% - var(--world-chat-width))/2);max-width:calc(100% - var(--world-chat-width) - 24px)}
+.has-world-chat .settlement-goal{right:calc(var(--world-chat-width) + 16px)}
+.inbox-full-page .community-view{padding:0}
+.inbox-heading{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid #c6e8a422;flex-shrink:0}
+.inbox-heading h1{font-size:22px;margin:0 auto 0 0}
+.inbox-heading .button{font-size:11px}
+.inbox-full-page .inbox-layout{gap:0;grid-template-columns:300px minmax(0,1fr)}
+.inbox-full-page .inbox-directory,.inbox-full-page .chat-page{border-radius:0;border-width:0 1px 0 0}
+.inbox-full-page .chat-page{padding:20px}
+@media(min-width:651px) and (max-width:1100px){
+  #app.has-world-chat{--world-chat-width:240px}
+  #app.explore-page.has-world-chat{grid-template-columns:60px 180px minmax(0,1fr) var(--world-chat-width)}
+  #app.settlement-page.has-world-chat{grid-template-columns:60px minmax(0,1fr) var(--world-chat-width)}
+  .world-chat{margin:8px;padding:8px}
+  .has-world-chat .map-heading p,.has-world-chat .map-coordinate,.has-world-chat .minimap{display:none}
+  .has-world-chat .map-status{left:12px;right:calc(var(--world-chat-width) + 12px);top:12px;gap:10px}
+  .has-world-chat .location-card{flex-basis:300px;width:300px}
+  .has-world-chat .map-toolbar{right:calc(var(--world-chat-width) + 12px);bottom:12px}
+}
+@media(min-width:651px) and (max-height:500px){
+  .has-world-chat .location-card{grid-template-columns:minmax(0,1fr) auto}
+  .has-world-chat .tile-heading{gap:8px}
+  .has-world-chat .location-description h3{font-size:12px}
+  .has-world-chat .tile-resource{display:contents}
+  .has-world-chat .tile-resource>div{display:none}
+  .has-world-chat .location-card .gather-button{grid-column:2;grid-row:1}
+}
+@media(min-width:651px) and (max-width:900px) and (max-height:500px){
+  #app.explore-page.has-world-chat,#app.settlement-page.has-world-chat{grid-template-rows:var(--game-header-height) minmax(0,1fr)}
+  .world-chat>header .button,.world-chat .chat-guidelines,.world-chat [data-chat-settings],.world-chat [data-chat-self],.dock-channel>span{display:none}
+  .has-world-chat .settlement-view:has(.settlement-task-panel:not([hidden])){z-index:20;overflow:visible}
+  .has-world-chat .settlement-task-panel,.has-world-chat .settlement-task-panel:has(.inventory-panel){position:fixed;inset:8px calc(var(--world-chat-width) + 8px) 8px 68px;width:auto;height:auto}
+}
+@media(min-width:651px) and (max-width:750px){
+  .has-world-chat .location-card{display:none}
+}
+@media(max-width:650px){
+  #app.explore-page.has-world-chat,#app.settlement-page.has-world-chat{--world-chat-height:clamp(260px,36dvh,320px);height:max(100dvh,calc(var(--game-header-height) + 234px + var(--world-chat-height) + var(--game-footer-height)));overflow:clip;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(234px,1fr) var(--world-chat-height) var(--game-footer-height)}
+  .has-world-chat .rail{position:sticky;bottom:0;align-self:end}
+  .has-world-chat .topbar{grid-column:1}
+  .has-world-chat .map,.has-world-chat .settlement-view{grid-column:1;grid-row:2}
+  .has-world-chat .map{background:#101b14}
+  .world-chat,.settlement-page .world-chat{grid-column:1;grid-row:3;margin:0 8px 8px;padding:8px;gap:6px}
+  .world-chat>header .button{min-height:44px}
+  .world-chat .chat-guidelines{display:none}
+  .world-chat .chat-tools,.world-chat [data-chat-settings],.world-chat [data-chat-self]{display:none}
+  .world-chat .chat-tools .button{min-height:44px}
+  .dock-channel>span{display:none}
+  .has-world-chat .sidebar{grid-column:1;grid-row:2;align-self:end;z-index:4;margin:8px;width:calc(100% - 16px);max-height:110px;min-height:0;border:1px solid #c6e8a422;border-radius:12px;background:#14231ba6;backdrop-filter:blur(12px)}
+  .has-world-chat .sidebar-mobile-heading,.has-world-chat .sidebar-bottom{display:none}
+  .has-world-chat #sidebar-content{padding:6px;overflow:auto}
+  .has-world-chat .sidebar-primary-actions{margin:0}
+  .has-world-chat .sidebar-action-row>.button{min-height:76px}
+  .has-world-chat .map canvas#world{width:100%;height:calc(100% - 114px)}
+  .has-world-chat .map-heading,.has-world-chat .map-coordinate,.has-world-chat .location-card,.has-world-chat .minimap{display:none}
+  .has-world-chat .map-status{display:contents}
+  .has-world-chat .map-environment{position:absolute;left:12px;right:auto;top:10px;padding:6px;font-size:10px}
+  .has-world-chat .map-toolbar{left:auto;right:12px;top:10px;bottom:auto;display:grid;grid-template-columns:repeat(2,44px);gap:4px}
+  .has-world-chat .map-toolbar button{width:44px;height:44px;min-width:44px}
+  .has-world-chat .settlement-panorama{right:0}
+  .has-world-chat .settlement-dock{left:50%;max-width:calc(100% - 16px)}
+  .has-world-chat .settlement-goal{right:12px}
+  .has-world-chat .settlement-view:has(.settlement-task-panel:not([hidden])){z-index:20;overflow:visible}
+  .has-world-chat .settlement-task-panel,.has-world-chat .settlement-task-panel:has(.inventory-panel){position:fixed;inset:8px 8px clamp(calc(var(--game-footer-height) + 8px),calc(var(--world-chat-height) + var(--game-footer-height) + 132px),calc(100dvh - 320px));width:auto;height:auto;border-radius:12px}
+  .inbox-heading{padding:8px 12px;gap:8px}
+  .inbox-heading h1{font-size:18px}
+  .inbox-heading .button{font-size:11px;padding:6px}
+  .inbox-full-page .inbox-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:190px minmax(0,1fr)}
+  .inbox-full-page .chat-page{padding:12px}
+}

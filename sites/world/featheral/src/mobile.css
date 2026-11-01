@@ -1,0 +1,326 @@
+.nav-label-mobile{display:none}
+.topbar #resource-bar .resource-total-compact{display:none}
+.exchange-catalog-choice>summary{display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;list-style:none;font-size:12px}
+.exchange-catalog-choice>summary::-webkit-details-marker{display:none}
+.exchange-catalog-choice>summary>span{color:#b8c5a9}
+.exchange-catalog-choice>summary>strong{margin-left:auto;overflow-wrap:anywhere}
+.exchange-catalog-choice>summary>.icon{width:16px;height:16px;transform:rotate(90deg)}
+.exchange-catalog-choice[open]>summary{margin-bottom:14px;border-bottom:1px solid #c6e8a422}
+.exchange-catalog-choice[open]>summary>.icon{transform:rotate(270deg)}
+.exchange-catalog-status{font-size:11px;line-height:1.5;color:#b3c2a2;margin:6px 0 0}
+.chat-guidelines{margin-left:auto;min-width:0}
+.chat-guidelines summary{display:flex;align-items:center;gap:8px;min-height:44px;font-size:12px;cursor:pointer}
+.chat-guidelines summary::after{content:'+'}
+.chat-guidelines[open]{flex-basis:100%}
+.chat-guidelines[open] summary::after{content:'-'}
+.chat-guidelines .chat-rules{margin:0 0 8px}
+.account-content,.account-subview,.exchange-assets,.resource-tooltip,.consumption-dialog{scrollbar-width:thin;scrollbar-color:#6f865b #142018}
+
+@media(max-width:650px),(max-width:900px) and (max-height:500px){
+  #app{--game-header-height:144px;--game-footer-height:calc(64px + env(safe-area-inset-bottom));grid-template-rows:var(--game-header-height) minmax(0,1fr) var(--game-footer-height);font-size:14px}
+  #app.explore-page{grid-template-rows:var(--game-header-height) minmax(0,1fr) auto var(--game-footer-height)}
+  #app.settlement-page{--settlement-footer:var(--game-footer-height)}
+  .topbar{grid-template-rows:44px 56px 44px}
+  .topbar .server-clock{height:44px}
+  .topbar #world-time{font-size:12px;gap:4px 8px}
+  .topbar #clock-speed{font-size:11px}
+  .topbar #clock-sync-status{display:none;font-size:11px;letter-spacing:0}
+  .topbar .server-clock.sync-paused #clock-sync-status{display:inline}
+  .topbar .server-clock.sync-paused #clock-speed{display:none}
+  .topbar .clock-calendar>span:first-child,.topbar .clock-week-label small{font-size:11px}
+  .topbar #resource-bar{padding-top:0}
+  .topbar #resource-bar .resource{display:flex;flex:1;gap:0;min-width:44px}
+  .topbar #resource-bar .mobile-resource-hidden{display:none}
+  .topbar #resource-bar .resource-summary{min-height:44px;width:100%;gap:5px}
+  .topbar #resource-bar .resource-summary small{font-size:11px}
+  .topbar #resource-bar .resource-summary strong{font-size:14px}
+  .topbar #resource-bar .resource-summary>.icon{width:18px;height:18px}
+  .topbar #resource-bar .resource-total-full{display:none}
+  .topbar #resource-bar .resource-total-compact{display:inline}
+  .topbar #resource-bar .resource-pending{font-size:11px;line-height:12px}
+  .topbar #resource-bar:has(.resource-oil:not(.mobile-resource-hidden),.resource-lithium:not(.mobile-resource-hidden)) .resource-summary>.icon{display:none}
+  .topbar #resource-bar:has(.resource-oil:not(.mobile-resource-hidden),.resource-lithium:not(.mobile-resource-hidden)) .resource-summary strong{font-size:13px}
+  .topbar #resource-bar .claim-all{min-width:44px;min-height:44px;font-size:11px}
+  .topbar .population-bar.resource-bar{display:flex;align-items:center;height:44px;border-top:1px solid #ffffff0b;gap:10px;padding:0}
+  .topbar .population-card:has([data-population="federation"]),.topbar .population-card:has([data-population="global"]){display:none}
+  .topbar .population-bar .population-card{flex:0 0 auto}
+  .topbar .population-bar .population-count{min-width:84px;min-height:44px;height:44px;gap:6px}
+  .topbar .population-count small{font-size:11px}
+  .topbar .population-count strong{font-size:14px}
+  .topbar .population-count>.icon{width:18px;height:18px}
+  .topbar .population-workforce{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;flex:1;justify-items:end;font-size:11px;line-height:16px;min-width:0}
+  .topbar .population-workforce strong{font-size:12px}
+  .rail{height:var(--game-footer-height);padding:0 0 env(safe-area-inset-bottom);border-top:1px solid #c6e8a422;background:#142018}
+  .rail .rail-links{margin:0;padding:4px 6px;gap:3px;height:64px;align-items:stretch}
+  .rail-links .nav-button{min-height:56px;padding:6px 2px;gap:5px;border-radius:10px}
+  .rail-links .nav-button span{font-size:11px;line-height:14px;letter-spacing:0}
+  .rail-links .nav-button .icon{width:20px;height:20px}
+  .rail-links .nav-button.active{background:#c6e8a412;color:#e4edda}
+  .rail-links .nav-button.active:before{display:none}
+  .rail-links .nav-label-desktop{display:none}
+  .rail-links .nav-label-mobile{display:inline}
+  #app .button{min-height:44px;font-size:13px}
+  #app .fineprint,#app .upgrade-guidance{font-size:12px;line-height:1.75}
+  #app summary{min-height:44px;cursor:pointer}
+  .resource .resource-tooltip{display:none;font-size:13px}
+  .resource:not(.tooltip-dismissed):is(:hover,:focus-within) .resource-tooltip{display:block}
+  .topbar .resource .resource-tooltip{position:fixed;top:var(--game-header-height);left:12px;right:auto;width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - var(--game-header-height) - var(--game-footer-height) - 12px);overflow:auto;transform:none}
+  .resource .resource-tooltip dt,.resource .resource-tooltip dd,.resource .resource-tooltip h4{font-size:13px}
+  .resource .resource-tooltip p,.resource .resource-tooltip small{font-size:12px;line-height:1.6}
+
+  .explore-page .sidebar-action-row>.button{min-height:92px;padding:8px;gap:4px}
+  .explore-page .sidebar-action-row .quick-action-heading{font-size:14px}
+  .explore-page .sidebar-action-row .quick-action-cost,.explore-page .sidebar-action-row [data-invite-cost]{display:flex;align-items:center;padding:5px 7px;gap:6px}
+  .explore-page .sidebar-action-row [data-invite-cost][hidden]{display:none}
+  .explore-page .sidebar-action-row .quick-action-cost>small,.explore-page .sidebar-action-row [data-invite-cost]>small{font-size:11px;white-space:nowrap}
+  .explore-page .sidebar-action-row .cost{flex:1;min-width:0}
+  .explore-page .sidebar-action-row .cost>span{font-size:12px}
+  .explore-page .sidebar-action-row .quick-action-duration,.explore-page .sidebar-action-row [data-invite-duration]{font-size:11px}
+  .explore-page .sidebar-mobile-heading .button{font-size:12px}
+  .explore-page .sidebar-primary-actions .fineprint{font-size:12px}
+  .explore-page .map-toolbar{display:grid;grid-template-columns:repeat(2,44px);top:auto;bottom:12px;right:12px;gap:6px;padding:6px}
+  .explore-page .map-toolbar button{width:44px;height:44px;min-width:44px;min-height:44px}
+  .explore-page .map-toolbar>span,.explore-page .compass-rose{display:none}
+  .explore-page .minimap{left:12px;right:auto;bottom:12px}
+  .explore-page .map-heading{max-width:calc(100% - 90px)}
+  .explore-page .map-heading p{font-size:13px;line-height:1.6}
+  .explore-page .map-coordinate{display:none}
+  .explore-page .minimap-title,.explore-page .live-label{font-size:11px}
+
+  .settlement-task-panel,.settlement-task-panel:has(.inventory-panel){position:absolute;inset:0 0 132px;width:100%;height:auto;max-width:none;border-radius:0;border-width:0 0 1px;background:#18291f;box-shadow:none}
+  .settlement-task-heading{padding:8px 12px}
+  .settlement-task-heading h2{font-size:19px}
+  .settlement-task-body{padding:16px;scroll-padding-bottom:16px}
+  .settlement-view:has(.settlement-task-panel:not([hidden])) .settlement-panorama{bottom:132px;visibility:hidden}
+  .settlement-view:has(.settlement-task-panel:not([hidden])) .district-heading{display:none}
+  .settlement-dock{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:6px;gap:4px;bottom:8px}
+  .settlement-dock>button{flex-direction:row;min-width:0;min-height:48px;height:48px;padding:6px;gap:6px;font-size:12px}
+  .settlement-dock>button>span{white-space:normal;line-height:16px}
+  .settlement-dock .icon{width:18px;height:18px}
+  .settlement-dock .task-badge{font-size:10px;right:2px}
+  .settlement-panorama{bottom:132px}
+  .settlement-saving{bottom:134px}
+  .district-heading h1 button,.district-heading>.button{min-width:44px;min-height:44px}
+  .settlement-task-body h3,.settlement-task-body .settlement-section-title h3{font-size:15px}
+  .settlement-task-body .crew-controls label,.settlement-task-body .crew-plan,.settlement-task-body .inventory-item-detail p,.settlement-task-body .inventory-page-empty{font-size:12px;line-height:1.7}
+  .settlement-task-body .item-card p,.settlement-task-body .storage-card p,.settlement-task-body .building-card p,.settlement-task-body .settlement-activity small{font-size:13px;line-height:1.7}
+  .settlement-task-body .settlement-activity strong{font-size:14px}
+  .settlement-task-body .inventory-filters{flex-wrap:wrap}
+  .settlement-task-body .inventory-filters .button{flex:1;min-width:64px}
+  .settlement-task-body .inventory-pages>span{font-size:12px}
+  .settlement-task-body .inventory-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .settlement-task-body .item-grid,.settlement-task-body .storage-grid{grid-template-columns:minmax(0,1fr)}
+  .settlement-task-body .tier-name{font-size:14px}
+  .settlement-task-body .tier-cost,.settlement-task-body .cost{font-size:12px}
+  .settlement-task-body small,.settlement-task-body .panel-section-heading>span,.settlement-task-body .stock-label>span,.settlement-task-body .completion-caption strong,.settlement-task-body .completion-caption small{font-size:12px;line-height:1.6}
+  .settlement-task-body .eyebrow,.settlement-task-body .requirement,.settlement-task-body .mini-rule{font-size:12px;letter-spacing:0;line-height:1.6}
+  .notice.water-upkeep{height:164px;min-height:164px;grid-template-rows:20px 24px 32px 44px}
+  .water-upkeep-heading,.water-upkeep-countdown{font-size:12px}
+  .water-upkeep-countdown strong{font-size:14px}
+  .water-upkeep p{font-size:11px}
+  .water-upkeep-links a{display:inline-flex;align-items:center;min-width:44px;min-height:44px;font-size:12px}
+
+  .marketplace-view{padding:14px 12px;scroll-padding:14px}
+  .marketplace-view input,.marketplace-view select{font-size:16px}
+  .exchange-heading{margin-bottom:12px}
+  .exchange-catalog{display:block;padding:10px 12px}
+  .exchange-catalog-choice>summary{font-size:12px}
+  .catalog-filters{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .catalog-filters .exchange-search{grid-column:1/-1}
+  .catalog-toolbar{gap:8px}
+  .catalog-count{flex-basis:100%;order:3}
+  .catalog-view-switch{margin-left:auto}
+  .market-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .catalog-tile{padding:10px}
+  .catalog-identity{gap:6px}
+  .catalog-identity strong{font-size:12px}
+  .catalog-identity .icon,.catalog-identity .item-art{width:26px;height:26px}
+  .marketplace-view .market-catalog-table th,.marketplace-view .market-catalog-table td{padding:6px}
+  .market-catalog-table .catalog-name-cell{min-width:0;width:44%;max-width:120px}
+  .market-catalog-table .catalog-price{min-width:44px;padding:6px 2px}
+  .market-catalog-table .catalog-price strong{font-size:12px}
+  .market-catalog-table .catalog-owned-inline{display:block;font-size:11px}
+  .catalog-owned-column,.catalog-last-column{display:none}
+  .exchange-catalog label,.exchange-card label{font-size:12px}
+  .exchange-assets{display:grid;max-height:240px;min-height:0;overflow:auto;overscroll-behavior:contain}
+  .exchange-asset{min-width:0;width:100%;min-height:64px;padding:10px}
+  .exchange-asset strong{font-size:12px}
+  .exchange-asset small{font-size:11px}
+  .exchange-trading{display:contents}
+  .exchange-instrument{display:none}
+  .exchange-order-entry{grid-column:1;grid-row:2;order:0}
+  .exchange-order-book{grid-column:1;grid-row:4}
+  .exchange-chart-card{grid-column:1;grid-row:3}
+  .exchange-card h2{font-size:16px}
+  .exchange-card h3{font-size:12px}
+  .exchange-instrument [role=status],.exchange-venue,.exchange-section-title>span{font-size:11px;line-height:1.5}
+  .exchange-tabs button{flex:1 1 0;min-width:44px;min-height:44px;font-size:12px}
+  .exchange-order-entry form{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+  .exchange-order-entry .exchange-tabs{min-width:0;margin:0}
+  .exchange-order-entry label{margin:0}
+  .exchange-order-entry label:not([data-market-limit]),.exchange-order-entry .exchange-preview,.exchange-order-entry form>p,.exchange-order-entry form>.button,.exchange-order-entry .exchange-help{grid-column:1/-1}
+  .exchange-order-entry .exchange-preview{margin:4px 0;gap:10px}
+  .exchange-order-entry .exchange-help{margin-top:0}
+  .exchange-book{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .exchange-book>div{min-width:0;overflow:auto}
+  .exchange-book td[colspan]{white-space:normal}
+  .exchange-preview,.exchange-pool{font-size:12px}
+  .exchange-pool small,.exchange-help,.market-chart-data{font-size:11px}
+  .marketplace-view table{font-size:12px}
+  .marketplace-view th{font-size:11px}
+  .marketplace-view .market-table-scroll .button{min-height:44px;font-size:12px}
+  .market-chart-data summary{display:flex;align-items:center}
+
+  .community-page .page-heading p,.community-page .page-card>p{font-size:14px;line-height:1.75}
+  .community-page .page-card h2{font-size:19px}
+  .community-page .eyebrow{font-size:12px;letter-spacing:0}
+  .community-page .stat-grid{grid-template-columns:minmax(0,1fr);gap:8px}
+  .community-page .stat-grid>div{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:10px;padding:12px}
+  .community-page .stat-grid small{font-size:12px;letter-spacing:0}
+  .community-page .stat-grid strong{font-size:22px}
+  .community-page .stat-grid em{font-size:12px}
+  .community-page .stat-grid progress{grid-column:2/-1;width:100%}
+  .community-page .building-grid{grid-template-columns:minmax(0,1fr)}
+  .community-page .building h3{font-size:17px}
+  .community-page .requirement,.community-page .mini-rule,.community-page .bonus-number small{font-size:12px;line-height:1.7}
+  .community-page .visual-proposal{grid-template-columns:44px minmax(0,1fr)}
+  .community-page .visual-proposal>.button{grid-column:1/-1}
+  .community-page .page-census{grid-template-columns:minmax(0,1fr);gap:18px}
+  .community-page .page-census span{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .community-page .page-census small{font-size:13px}
+  .community-page .page-census strong{font-size:24px}
+  .community-page:has([data-communicate]) .page-heading{margin-bottom:12px}
+  .community-page:has([data-communicate]) .page-heading p{display:none}
+  .chat-page{padding:12px}
+  .chat-page [data-communicate]{gap:8px}
+  .chat-page .chat-summary{font-size:15px}
+  .chat-page .chat-summary>span,.chat-page .chat-tools,.chat-page .chat-profile small,.chat-page .chat-rules{font-size:12px;line-height:1.6}
+  .chat-page .chat-status,.chat-page .chat-profile label{font-size:13px}
+  .chat-page .chat-message p,.chat-page .chat-empty{font-size:15px;line-height:1.8}
+  .chat-page .chat-message header{font-size:13px}
+  .chat-page .chat-message time{font-size:11px}
+  .chat-page:has(.chat-profile:not([hidden])) .chat-messages{display:none}
+  .chat-page .chat-composer{position:sticky;bottom:0;z-index:1;background:#19261c;padding-top:8px}
+  .chat-page .chat-composer>div{font-size:12px}
+  .chat-page .chat-latest{min-height:44px;font-size:13px}
+  .guide-index nav a,.account-subview .guide-index nav a{min-height:44px;font-size:13px}
+  .guide-article figcaption,.guide-facilities small,.guide-week small,.guide-results{font-size:12px}
+  .guide-facilities{grid-template-columns:minmax(0,1fr)}
+  .guide-facilities strong{font-size:14px}
+  .account-pane{font-size:14px}
+  .account-pane .account-section p{font-size:14px}
+  .account-pane .account-note,.account-pane .account-wallet small,.account-pane form>small{font-size:12px;line-height:1.7}
+  .account-pane .account-wallet strong{font-size:13px}
+  .account-setting,.account-amount,.account-balance>span,.account-balance>a,.account-links>button{font-size:14px}
+  .account-pane .button,.account-subview .panel-actions .button{font-size:13px;min-height:44px}
+  .account-subview .guide-hero>p{font-size:14px}
+  .consumption-dialog{position:fixed;inset:auto 0 0;margin:0;width:100%;max-width:none;max-height:calc(100dvh - 12px);border-radius:20px 20px 0 0;padding:20px 16px calc(16px + env(safe-area-inset-bottom));font-size:14px;overscroll-behavior:contain;scroll-padding-bottom:76px}
+  .consumption-details,.consumption-note,.consumption-section h3{font-size:13px;line-height:1.7}
+  .consumption-actions{position:sticky;bottom:0;background:#161d17;padding-top:12px;margin-top:12px}
+  .consumption-actions .button{min-height:48px;font-size:14px}
+}
+
+@media(min-width:651px) and (max-width:900px) and (max-height:500px){
+  #app{--game-header-height:104px;min-height:0;height:100dvh;grid-template-columns:60px 220px minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr)}
+  #app.explore-page{grid-template-rows:var(--game-header-height) minmax(0,1fr)}
+  #app.settlement-page,#app.marketplace-page,#app.community-page{grid-template-columns:60px minmax(0,1fr)}
+  .topbar{display:grid;grid-column:2/-1;grid-template-columns:130px minmax(0,1fr) 44px;grid-template-rows:60px 44px;padding:0 10px;gap:0 8px}
+  .topbar .wordmark{display:none}
+  .topbar>.server-clock{grid-column:1;grid-row:1}
+  .topbar>#resource-bar{grid-column:2;grid-row:1}
+  .topbar>.account-avatar{grid-column:3;grid-row:1}
+  .topbar .population-bar.resource-bar{position:static;grid-column:1/-1;grid-row:2}
+  .topbar #world-time{font-size:11px}
+  .topbar #clock-sync-status{display:none}
+  .topbar .server-clock.sync-paused #clock-sync-status{display:inline}
+  .topbar .resource .resource-tooltip{left:72px;width:min(360px,calc(100vw - 84px));max-height:calc(100dvh - var(--game-header-height) - 12px)}
+  .rail{grid-column:1;grid-row:1/-1;height:100dvh;flex-direction:column;padding:8px 2px;border-top:0;border-right:1px solid #c6e8a422}
+  .rail .brand-mark{display:none}
+  .rail .rail-links{flex-direction:column;width:100%;height:auto;flex:1;padding:0;gap:6px}
+  .rail-links .nav-button{width:100%;flex:1;max-height:64px}
+  .explore-page .sidebar{display:flex;grid-column:2;grid-row:2;min-height:0}
+  .explore-page .sidebar-mobile-heading{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px}
+  .explore-page .sidebar-mobile-heading>div{display:flex;gap:6px}
+  .explore-page #sidebar-content{padding:0 10px 10px;overflow:auto}
+  .explore-page #sidebar-content>:not(.sidebar-primary-actions),.explore-page .sidebar-bottom{display:none}
+  .explore-page .sidebar-primary-actions{margin-top:0}
+  .explore-page .sidebar-action-row{grid-template-columns:minmax(0,1fr)}
+  .explore-page .map{grid-column:3;grid-row:2}
+  .explore-page .map-heading{top:14px;left:14px}
+  .explore-page .map-heading h1{font-size:24px}
+  .explore-page .map-heading p,.explore-page .map-coordinate,.explore-page .compass-rose,.explore-page .minimap,.explore-page .map-bottom,.explore-page .location-card{display:none}
+  .explore-page .map-toolbar{display:flex;top:auto;bottom:12px;right:12px;flex-direction:row}
+  .explore-page .map-toolbar>span{display:none}
+  .settlement-view,.marketplace-view,.community-view{grid-column:2;grid-row:2}
+  .settlement-dock{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .settlement-task-panel,.settlement-task-panel:has(.inventory-panel){inset:0 0 84px}
+  .settlement-panorama{bottom:84px}
+  .settlement-view:has(.settlement-task-panel:not([hidden])) .settlement-panorama{bottom:84px}
+  .settlement-task-body .inventory-grid{grid-template-columns:repeat(8,minmax(0,1fr))}
+  .settlement-task-body .item-grid,.settlement-task-body .storage-grid,.settlement-task-body .building-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .exchange-layout{grid-template-columns:minmax(0,1fr)}
+  .exchange-catalog{position:static}
+  .exchange-book{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .community-page:has([data-communicate]) .page-heading{display:none}
+  .community-page .page-census{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .community-page .page-census span{display:grid}
+  .account-pane{width:100vw;border-radius:0}
+}
+
+@media(max-width:650px) and (max-height:740px){
+  .explore-page .map-toolbar{display:flex;bottom:10px}
+}
+@media(max-width:650px) and (max-height:650px){
+  .explore-page .map-toolbar{left:10px;right:auto;flex-direction:row}
+}
+
+.rail-links{margin-top:0}
+.server-clock #world-time{font-size:12px}
+.settlement-goal{display:none}
+.settlement-district>.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.settlement-command-card{position:absolute;z-index:4;top:16px;right:16px;width:min(330px,calc(100% - 32px));padding:16px;border:1px solid #d5dfad40;border-radius:16px;background:linear-gradient(145deg,#14221cef,#16271fef);color:#e3e7dd;box-shadow:0 16px 42px #08130d66;backdrop-filter:blur(16px)}
+.settlement-command-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.settlement-command-heading .eyebrow{font-size:8px;letter-spacing:1.5px;color:#a8bd98}
+.settlement-command-heading h2{margin-top:4px;font-size:19px;letter-spacing:-.4px}
+.settlement-command-heading h2 button{padding:0;background:none;color:inherit;text-align:left;font:inherit}
+.settlement-stage-tag{padding:5px 8px;border:1px solid #c6e8a42e;border-radius:999px;background:#c6e8a40d;color:#c6e8a4;font-size:9px;text-transform:uppercase;letter-spacing:.8px}
+.settlement-command-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px 0 12px}
+.settlement-command-stats>div{display:grid;gap:3px;min-width:0;padding:9px 10px;border:1px solid #ffffff0c;border-radius:10px;background:#ffffff05}
+.settlement-command-stats small,.settlement-command-stats span{color:#9eaf99;font-size:9px}
+.settlement-command-stats strong{font-size:17px;font-variant-numeric:tabular-nums}
+.settlement-command-stats span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.settlement-tier-progress{display:grid;gap:8px;margin:0 0 12px;padding:10px;border:1px solid #d7bc7c30;border-radius:10px;background:#d7bc7c09}
+.settlement-tier-progress>div{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px}
+.settlement-tier-progress small{font-size:8px;letter-spacing:1px;color:#d7bc7c}
+.settlement-tier-progress strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+.settlement-tier-progress span{font-size:9px;color:#c4cdb9;font-variant-numeric:tabular-nums}
+.settlement-tier-progress progress{height:4px}
+.settlement-complete{display:block;color:#c6e8a4;font-size:11px}
+.settlement-command-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.settlement-command-actions .button{position:relative;min-width:0;min-height:44px;justify-content:flex-start;padding:8px 10px;border-color:#ffffff12;border-radius:9px;background:#ffffff07;color:#dfe9d4;font-size:10px}
+.settlement-command-actions .button:hover{border-color:#c6e8a45c;background:#c6e8a412}
+.settlement-command-actions .icon{width:16px;height:16px;color:#c6e8a4}
+.settlement-command-actions .task-badge{top:3px;right:4px}
+.settlement-district.decoration-mode .settlement-command-card{display:none}
+.settlement-dock{gap:4px}
+.settlement-dock>button{min-width:82px}
+@media(max-width:900px){
+  .settlement-command-card{top:12px;right:12px;width:min(300px,calc(100% - 24px))}
+  #app.has-world-chat .settlement-command-card{right:calc(var(--world-chat-width) + 12px)}
+}
+@media(max-width:650px){
+  .settlement-command-card{top:8px;right:8px;left:8px;width:auto;padding:8px;border-radius:12px}
+  #app.has-world-chat .settlement-command-card{right:8px}
+  .settlement-command-heading{align-items:center}
+  .settlement-command-heading h2{font-size:15px}
+  .settlement-command-stats{gap:5px;margin:7px 0}
+  .settlement-command-stats>div{grid-template-columns:1fr auto;align-items:center;gap:2px 6px;padding:5px 7px}
+  .settlement-command-stats small{font-size:8px}
+  .settlement-command-stats strong{grid-column:2;grid-row:1/3;font-size:14px}
+  .settlement-command-stats span{font-size:8px}
+  .settlement-tier-progress{gap:5px;margin-bottom:7px;padding:6px 8px}
+  .settlement-command-actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+  .settlement-command-actions .button{min-height:40px;flex-direction:column;justify-content:center;gap:2px;padding:4px;font-size:8px}
+  .settlement-command-actions .icon{width:15px;height:15px}
+  .settlement-dock{grid-template-columns:repeat(3,minmax(0,1fr))}
+}

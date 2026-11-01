@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Featheral Dollar (FTH$) · Layer-3 currency of Featheral World</title>
+<meta name="description" content="Featheral Dollar (FTH$) is the layer-3 currency of Featheral World with its own native, signed block ledger, distributed as daily minified JSON files and bridged to FTHG on Ethereum Mainnet.">
+<meta property="og:title" content="Featheral Dollar (FTH$)">
+<meta property="og:description" content="Layer-3 game currency with a native, publicly replicable block ledger. Bridged to FTHG on Ethereum Mainnet.">
+<meta property="og:image" content="/shared/logo-dollar.svg">
+<link rel="icon" href="/shared/logo-dollar.svg">
+<meta name="theme-color" content="#07100c">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+</head>
+<body class="site-dollar">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo-dollar.svg" alt="" width="34" height="34"><b>Featheral Dollar</b></a>
+  <nav>
+    <a href="#stats">Stats</a>
+    <a href="#how">How it works</a>
+    <a href="#ledger">Ledger</a>
+    <a href="/explorer/">Explorer</a>
+    <a href="/docs/">Docs</a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+
+<section class="hero">
+  <img class="hero-logo" src="/shared/logo-dollar.svg" alt="Featheral feather" width="112" height="112">
+  <h1>Featheral Dollar <span>FTH$</span></h1>
+  <p class="lead">The everyday currency of <b>Featheral World</b>. FTH$ runs on its own layer-3 ledger — signed blocks every second, free wallet-signed transfers, and a public file history anyone can replicate.</p>
+  <div class="hero-actions">
+    <a class="btn primary" href="/wallet/">Open FTH$ Wallet</a>
+    <a class="btn" href="/explorer/">Explore the ledger</a>
+  </div>
+  <p class="chain-pill"><span class="dot"></span><span id="heroTip">Layer 3 · settles to Ethereum Mainnet</span></p>
+</section>
+
+<main>
+<section id="stats">
+  <div class="section-head">
+    <h2>Live ledger statistics</h2>
+    <p class="row"><span id="statsUpdated" class="muted" aria-live="polite">Reading the FTH$ ledger…</span> <button id="refreshStats" class="btn small" type="button">Refresh</button></p>
+  </div>
+  <div class="stat-grid" id="primaryStats">
+    <div class="stat skeleton"><span>Supply</span><b>—</b></div><div class="stat skeleton"><span>Holders</span><b>—</b></div><div class="stat skeleton"><span>Block height</span><b>—</b></div><div class="stat skeleton"><span>Transactions</span><b>—</b></div>
+  </div>
+  <div class="grid-2">
+    <div>
+      <div class="section-head"><h3>Latest blocks</h3><a class="muted" href="/explorer/#/blocks">All blocks →</a></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Block</th><th>Hash</th><th class="num">Txs</th><th>Age</th></tr></thead>
+        <tbody id="blockRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      </table></div>
+    </div>
+    <div>
+      <div class="section-head"><h3>Latest transactions</h3><a class="muted" href="/explorer/#/transactions">All transactions →</a></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Type</th><th>Hash</th><th class="num">Amount</th><th>Age</th></tr></thead>
+        <tbody id="txRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="section-head"><h3>Top holders</h3><a class="muted" href="/explorer/#/rich-list">Full rich list →</a></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>Account</th><th class="num">Balance</th><th class="num">USD est.</th><th class="num">Share</th></tr></thead>
+    <tbody id="holderRows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+  </table></div>
+</section>
+
+<section id="how">
+  <h2>How FTH$ works</h2>
+  <div class="flow">
+    <a class="flow-step accent-gold" data-site="gold"><span>Ethereum Mainnet</span><b>FTHG</b><small>Fixed-supply ERC-20. Balances and transfers live only on Ethereum. Open Featheral Gold →</small></a>
+    <div class="flow-arrow" aria-hidden="true">⇄</div>
+    <div class="flow-step highlight"><span>Bridge rate</span><b id="rateValue">1 FTHG = 1,000 FTH$</b><small id="rateNote">Opening rate. A constant-product bridge curve sets the price once the pool is funded.</small></div>
+    <div class="flow-arrow" aria-hidden="true">⇄</div>
+    <div class="flow-step"><span>Layer 3</span><b>FTH$</b><small>Native block ledger. Credits are sealed only after the bridge transaction confirms on Mainnet.</small></div>
+  </div>
+  <div class="cards">
+    <div class="card"><span class="kicker">01 · Convert</span><h3>FTHG → FTH$</h3><p>Convert FTHG on the Ethereum bridge contract. Once the transaction confirms, the writer node seals a <b>CREDIT</b> to your wallet's FTH$ account.</p></div>
+    <div class="card"><span class="kicker">02 · Spend &amp; send</span><h3>Free transfers</h3><p>Sign a plain-text message in your wallet — no gas. The writer verifies the signature and a strictly increasing nonce, then seals a <b>TRANSFER</b> within about a second.</p></div>
+    <div class="card"><span class="kicker">03 · Withdraw</span><h3>FTH$ → FTHG</h3><p>Withdrawals are <b>RESERVED</b> on the ledger, paid in FTHG by the bridge on Ethereum, then <b>SETTLED</b> with the Mainnet transaction hash. Cancelled requests are <b>RELEASED</b>.</p></div>
+  </div>
+</section>
+
+<section id="ledger">
+  <div class="section-head">
+    <h2>An open, replicable ledger</h2>
+    <a class="muted" href="/explorer/#/files">Browse ledger files →</a>
+  </div>
+  <div class="grid-2">
+    <div class="panel">
+      <h3>Storage format</h3>
+      <dl class="kv">
+        <dt>Layout</dt><dd><code>YYYY/YYYY-MM-DD.jsonl</code> — one folder per year, one file per UTC day</dd>
+        <dt>Encoding</dt><dd>One block per line, canonical minified JSON (sorted keys)</dd>
+        <dt>Block hash</dt><dd><code>sha256(canonical({h, t, p, x}))</code> chained via <code>p</code></dd>
+        <dt>Signatures</dt><dd id="signingInfo">Ed25519 writer signature <code>S</code> over each block hash</dd>
+        <dt>Topology</dt><dd>One writer node, any number of read replicas</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h3>Run a read replica</h3>
+      <p class="muted">Replicas pull blocks from <code>/api/v1/fth/sync</code>, re-verify every hash, signature and transaction, and serve the same public API. Past day files are immutable and safe to cache or mirror.</p>
+      <pre class="hash" style="margin:0">FTH_LEDGER_MODE=reader
+FTH_LEDGER_UPSTREAM_URL=https://dollar.featheral.com
+FTH_LEDGER_WRITER_PUBLIC_KEY=&lt;writer key&gt;
+npm start</pre>
+      <div class="stat-grid" id="fileStats"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <p>© <a data-site="foundation" href="https://featheral.com">Featheral Foundation</a> · <a data-site="gold" href="https://gold.featheral.com">Featheral Gold</a> · <a data-site="world" href="https://world.featheral.com">Featheral World</a></p>
+  <p class="muted fine">FTH$ is an in-game currency on the Featheral Dollar layer-3 ledger. It is not an ERC-20, not a stablecoin, and not redeemable for US dollars. USD figures derive from the internal $0.01/FTHG reference estimate and the bridge rate; they are not a market price or offer.</p>
+</footer>
+<script src="/shared/site-links.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script src="/fth.js"></script>
+<script src="/landing.js"></script>
+</body>
+</html>

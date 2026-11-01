@@ -1,0 +1,10 @@
+html:lang(ko){font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+html:lang(ko) :is(h1,h2,h3,.resource strong,#world-time,.territory-name){font-family:inherit;letter-spacing:-.03em}
+html:lang(ko) :is(.eyebrow,.mini-tag,.preview-label){letter-spacing:.04em}
+.language-picker{display:inline-flex;align-items:center;flex-shrink:0;font-size:11px}
+.language-picker>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.language-picker select{font:inherit;color:inherit;background:transparent;border:1px solid #87977d;border-radius:6px;min-height:36px;padding:5px 7px;cursor:pointer;max-width:90px}
+.language-picker option{color:#213e32;background:#f5f5ec}
+.language-picker select:focus-visible{outline:2px solid #6b9554;outline-offset:3px}
+.site-footer .language-picker select{min-height:44px}
+@media(max-width:650px){.site-header .header-actions{gap:7px}.site-header .btn-small{gap:6px;padding:10px}.site-header .brand-symbol{display:none}html:lang(ko) .map-bottom>span:after{content:'드래그로 이동 · 눌러서 탐험';letter-spacing:.03em}}

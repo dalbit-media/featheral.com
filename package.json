@@ -1,0 +1,39 @@
+{
+  "name": "featheral.com",
+  "version": "1.0.0",
+  "description": "Featheral Gold (FTHG) token contract and admin site",
+  "main": "hardhat.config.js",
+  "scripts": {
+    "prestart": "node scripts/export-abi.js && npm run build:world",
+    "start": "node scripts/serve.js",
+    "build:world": "npm run build --prefix sites/world/featheral",
+    "compile": "hardhat compile",
+    "abi": "node scripts/export-abi.js",
+    "deploy:bridge": "node scripts/deploy-bridge.js",
+    "generate:service-keys": "node services/token-api/keygen.js",
+    "test": "hardhat test"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dalbit-media/featheral.com.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dalbit-media/featheral.com/issues"
+  },
+  "homepage": "https://github.com/dalbit-media/featheral.com#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "^5.6.1",
+    "hardhat": "^2.29.1"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
+  }
+}

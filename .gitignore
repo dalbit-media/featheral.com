@@ -1,0 +1,8 @@
+node_modules/
+artifacts/
+cache/
+bytecode.txt
+/data/
+.env
+.env.*
+!.env.example

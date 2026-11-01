@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Featheral Foundation · Gold, Dollar and World</title>
+<meta name="description" content="The Featheral Foundation stewards Featheral Gold (FTHG) on Ethereum Mainnet, the Featheral Dollar (FTH$) layer-3 ledger, and the Featheral World game.">
+<meta property="og:title" content="Featheral Foundation">
+<meta property="og:description" content="Featheral Gold, Featheral Dollar and Featheral World — one ecosystem.">
+<meta property="og:image" content="/shared/logo.svg">
+<link rel="icon" href="/shared/logo.svg">
+<meta name="theme-color" content="#0d0c0a">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+</head>
+<body class="site-foundation">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo.svg" alt="" width="34" height="34"><b>Featheral Foundation</b></a>
+  <nav>
+    <a href="#ecosystem">Ecosystem</a>
+    <a href="#architecture">Architecture</a>
+    <a href="/governance/">Governance</a>
+    <a href="/docs/">Docs</a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+
+<section class="hero">
+  <img class="hero-logo" src="/shared/logo.svg" alt="Featheral feather" width="112" height="112">
+  <h1>The <span>Featheral</span> ecosystem</h1>
+  <p class="lead">A fixed-supply utility token on Ethereum, a fast layer-3 game currency with an open ledger, and the world they power.</p>
+  <div class="hero-actions">
+    <a class="btn primary" href="#ecosystem">Explore the ecosystem</a>
+    <a class="btn" data-site="dollar" data-path="/wallet/">Open FTH$ Wallet</a>
+  </div>
+</section>
+
+<main>
+<section id="ecosystem">
+  <h2>Ecosystem</h2>
+  <div class="cards">
+    <a class="card accent-gold" data-site="gold"><img class="card-logo" src="/shared/logo.svg" alt="" width="44" height="44"><span class="kicker">Ethereum Mainnet · ERC-20</span><h3>Featheral Gold · FTHG</h3><p>216,265,000 FTHG — one per kilogram of the world's above-ground gold. Fixed supply, never minted again.</p><span class="card-stat" id="goldStat">Reading Ethereum…</span></a>
+    <a class="card accent-dollar" data-site="dollar"><img class="card-logo" src="/shared/logo-dollar.svg" alt="" width="44" height="44"><span class="kicker">Layer 3 · native ledger</span><h3>Featheral Dollar · FTH$</h3><p>The everyday game currency. Signed blocks every second, free wallet-signed transfers, publicly replicable daily ledger files.</p><span class="card-stat" id="dollarStat">Reading the FTH$ ledger…</span></a>
+    <a class="card accent-world" data-site="world"><img class="card-logo" src="/shared/logo-world.svg" alt="" width="44" height="44"><span class="kicker">Game</span><h3>Featheral World</h3><p>The game where FTH$ is earned and spent. Convert FTHG into FTH$ to play, and withdraw back to FTHG on Ethereum.</p><span class="card-stat">Coming soon</span></a>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>Architecture</h2>
+  <div class="flow">
+    <div class="flow-step"><span>Layer 1</span><b>Ethereum</b><small>FTHG balances, transfers and the bridge contract live only on Ethereum Mainnet.</small></div>
+    <div class="flow-arrow" aria-hidden="true">⇄</div>
+    <div class="flow-step highlight"><span>Bridge</span><b>FTHG ⇄ FTH$</b><small>Opening at 1 FTHG = 1,000 FTH$; a constant-product curve sets the rate once funded.</small></div>
+    <div class="flow-arrow" aria-hidden="true">⇄</div>
+    <div class="flow-step"><span>Layer 3</span><b>FTH$ ledger</b><small>One writer node, many read replicas; daily minified-JSON block files under yearly folders.</small></div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <p>© Featheral Foundation · <a data-site="gold">Featheral Gold</a> · <a data-site="dollar">Featheral Dollar</a> · <a data-site="world">Featheral World</a></p>
+  <p class="muted fine">Nothing on this site is an offer or investment advice. FTH$ is an in-game currency and is not redeemable for US dollars.</p>
+</footer>
+<script src="/shared/site-links.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script>
+(() => {
+  FeatheralProfile.mount(document.getElementById("walletButton"), { walletUrl: FeatheralSites.url("dollar", "/wallet/") });
+  const n = (raw, digits = 0) => (Number(BigInt(raw || 0) / 10n ** 12n) / 1e6).toLocaleString("en-US", { maximumFractionDigits: digits });
+  fetch("/api/v1/fth/stats?blocks=1&transactions=1&holders=1", { cache: "no-store" }).then((r) => r.json()).then(({ ledger: s }) => {
+    document.getElementById("dollarStat").textContent = `${n(s.supply)} FTH$ supply · ${Number(s.holders).toLocaleString("en-US")} holders · block #${Number(s.height).toLocaleString("en-US")}`;
+  }).catch(() => { document.getElementById("dollarStat").textContent = "FTH$ ledger unavailable"; });
+  fetch("/api/v1/stats", { cache: "no-store" }).then((r) => r.json()).then((s) => {
+    document.getElementById("goldStat").textContent = s.chain?.totalSupply ? `${n(s.chain.totalSupply)} FTHG total supply · ~$0.01 / FTHG est.` : "216,265,000 FTHG fixed supply";
+  }).catch(() => { document.getElementById("goldStat").textContent = "216,265,000 FTHG fixed supply"; });
+})();
+</script>
+</body>
+</html>

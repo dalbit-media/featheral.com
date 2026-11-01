@@ -1,0 +1,60 @@
+.paper-header{gap:12px}
+.paper-tools{display:flex;align-items:center;gap:12px}
+.paper-tools select{font:inherit;font-size:14px;color:var(--ink);background:#fffef8;border:1px solid var(--line);border-radius:10px;min-height:44px;padding:8px;max-width:96px}
+.paper-tools .btn{min-height:44px;font-size:14px;padding:10px 16px}
+.paper-layout{display:grid;grid-template-columns:260px minmax(0,780px);gap:56px;max-width:1200px;margin:auto;padding:48px 32px 80px;align-items:start}
+.paper-sidebar{position:sticky;top:112px;max-height:calc(100dvh - 132px);overflow:auto;padding:20px;border:1px solid var(--line);border-radius:16px;background:#fffef8;scrollbar-width:thin;scrollbar-color:#9aa98b #fffef8}
+.paper-sidebar summary{min-height:44px;font-size:16px;font-weight:650;line-height:1.5;cursor:pointer;padding:10px 0}
+.paper-sidebar details[open] summary{margin-bottom:12px}
+.paper-sidebar nav{display:grid;gap:4px}
+.paper-sidebar a{display:flex;align-items:center;min-height:44px;padding:10px 8px;border-radius:8px;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.paper-sidebar a:hover,.paper-sidebar a:focus-visible{background:#e8efdf}
+.whitepaper-copy{min-width:0;font-size:16px;line-height:1.9;overflow-wrap:anywhere}
+.whitepaper-copy h1{font-size:52px;line-height:1.15;letter-spacing:-2px;margin:0 0 20px}
+.whitepaper-copy h2{font-size:28px;line-height:1.45;letter-spacing:-.5px;margin:56px 0 20px}
+.whitepaper-copy>h2:first-of-type{font-size:23px;margin-top:0;color:var(--muted)}
+.whitepaper-copy h3{font-size:20px;line-height:1.5;margin:32px 0 12px}
+.whitepaper-copy h4{font-size:17px;line-height:1.5;margin:24px 0 12px}
+.whitepaper-copy p{margin:0 0 20px}
+.whitepaper-copy ul,.whitepaper-copy ol{padding-left:24px;margin:16px 0 24px}
+.whitepaper-copy li{margin:8px 0}
+.whitepaper-copy a{text-decoration:underline;text-underline-offset:4px;color:#34764f}
+.whitepaper-copy blockquote{margin:24px 0;padding:20px 24px;border-left:4px solid #7aa365;border-radius:0 12px 12px 0;background:#e8efdf}
+.whitepaper-copy blockquote p:last-child{margin-bottom:0}
+.whitepaper-copy code{font-size:.88em;background:#e8ecdf;border-radius:4px;padding:2px 5px}
+.whitepaper-copy pre{max-width:100%;overflow:auto;padding:20px;border:1px solid var(--line);border-radius:12px;background:#fffef8;line-height:1.7}
+.whitepaper-copy pre code{padding:0;background:transparent;overflow-wrap:normal}
+.paper-table{max-width:100%;overflow:auto;margin:24px 0;border:1px solid var(--line);border-radius:12px;scrollbar-width:thin}
+.paper-table table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.7;background:#fffef8}
+.paper-table th,.paper-table td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;min-width:120px}
+.paper-table th{background:#e8efdf;font-weight:650}
+.paper-table tr:last-child td{border-bottom:0}
+.paper-footer{display:flex;justify-content:center;gap:24px;padding:24px;border-top:1px solid var(--line);font-size:14px}
+.paper-footer a{display:flex;align-items:center;min-height:44px}
+@media(max-width:900px){
+  .paper-layout{grid-template-columns:minmax(0,1fr);gap:32px;max-width:820px}
+  .paper-sidebar{position:static;max-height:none}
+  .paper-sidebar nav{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:650px){
+  .paper-page .paper-header{padding:12px 16px;min-height:72px}
+  .paper-header .site-brand{font-size:24px}
+  .paper-tools{gap:8px}
+  .paper-tools select{width:80px}
+  .paper-tools .btn{padding:10px 12px}
+  .paper-layout{padding:24px 20px 48px;gap:28px}
+  .paper-sidebar{padding:16px}
+  .paper-sidebar nav{grid-template-columns:minmax(0,1fr)}
+  .whitepaper-copy h1{font-size:38px}
+  .whitepaper-copy h2{font-size:24px;margin-top:40px}
+  .whitepaper-copy>h2:first-of-type{font-size:20px}
+  .whitepaper-copy blockquote{padding:16px}
+}
+@media print{
+  .paper-header,.paper-sidebar,.paper-footer,.skip-link{display:none}
+  .paper-layout{display:block;max-width:none;padding:0}
+  .whitepaper-copy{font-size:11pt;color:#000}
+  .whitepaper-copy h2,.whitepaper-copy h3{break-after:avoid}
+  .paper-table,.whitepaper-copy pre{overflow:visible}
+  .whitepaper-copy pre{white-space:pre-wrap}
+}

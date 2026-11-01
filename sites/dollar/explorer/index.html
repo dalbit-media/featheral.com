@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FTH$ Explorer · Featheral Dollar</title>
+<meta name="description" content="Explore blocks, transactions, accounts, holders and daily ledger files of the Featheral Dollar (FTH$) layer-3 ledger.">
+<link rel="icon" href="/shared/logo-dollar.svg">
+<meta name="theme-color" content="#07100c">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+</head>
+<body class="site-dollar">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo-dollar.svg" alt="" width="34" height="34"><b>FTH$ Explorer</b></a>
+  <nav>
+    <a href="/">Overview</a>
+    <a href="/docs/">Docs</a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+
+<main>
+<section style="border-top:0">
+  <form class="search" id="searchForm" role="search"><input id="searchInput" placeholder="Search by block height, transaction hash, wallet address, account id or @username" spellcheck="false" aria-label="Search the FTH$ ledger"><button class="btn primary" type="submit">Search</button></form>
+  <div class="stat-grid" id="summaryStats"></div>
+  <nav class="tabs" role="tablist" aria-label="Explorer views">
+    <button type="button" data-route="blocks" role="tab">Blocks</button>
+    <button type="button" data-route="transactions" role="tab">Transactions</button>
+    <button type="button" data-route="rich-list" role="tab">Rich list</button>
+    <button type="button" data-route="files" role="tab">Ledger files</button>
+    <button type="button" data-route="sql" role="tab">SQL</button>
+  </nav>
+  <div id="view" aria-live="polite"><p class="muted">Loading…</p></div>
+</section>
+</main>
+
+<footer>
+  <p>© <a data-site="foundation" href="https://featheral.com">Featheral Foundation</a> · <a data-site="gold" href="https://gold.featheral.com">Featheral Gold</a> · <a data-site="world" href="https://world.featheral.com">Featheral World</a></p>
+  <p class="muted fine">Data is served by this node's copy of the Featheral Dollar layer-3 ledger. Anyone can download the daily files and re-verify every block hash and writer signature.</p>
+</footer>
+<script src="/shared/site-links.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script src="/shared/sql-console.js"></script>
+<script src="/fth.js"></script>
+<script src="/explorer/explorer.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+.admin-page{font-size:14px;line-height:1.5;--admin-header-height:61px;--admin-eco-height:34px}
+.admin-page main{max-width:1100px;padding:20px}
+.admin-tabs{position:sticky;top:var(--admin-header-height);z-index:4;display:flex;gap:4px;flex-wrap:wrap;padding:8px 20px;border-bottom:1px solid var(--line);background:var(--bg)}
+.admin-page .wp-panel{top:calc(var(--admin-header-height) + var(--admin-eco-height) + 12px);max-height:calc(100vh - var(--admin-header-height) - var(--admin-eco-height) - 24px)}
+.admin-tabs button{margin:0;padding:8px 12px;border:1px solid transparent;border-radius:6px;background:none;color:var(--mut);font:inherit;cursor:pointer}
+.admin-tabs button:hover{border-color:var(--line);color:var(--txt)}
+.admin-tabs button[aria-selected=true]{background:var(--panel);color:var(--gold);border-color:var(--line)}
+.admin-tabs button[hidden],.admin-panel[hidden],[role=tabpanel][hidden]{display:none!important}
+.admin-panel{padding:0;border-top:0}
+.admin-page main>section{padding:0;border-top:0}
+.admin-page .card,.admin-page .supply-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0;overflow-wrap:anywhere}
+.admin-page h1{font-size:24px;margin:0 0 12px}
+.admin-page h2{font-size:22px;margin:0 0 14px}
+.admin-page h3{font-size:17px}
+.admin-page .stat-grid{gap:10px}
+.admin-page .stat{padding:12px}
+.admin-page .stat b{font-size:18px}
+.admin-page .admin-intro{margin-bottom:20px}
+.admin-page .admin-gate{max-width:100%;flex-wrap:wrap;overflow-wrap:anywhere}
+.admin-page .admin-status{overflow-wrap:anywhere}
+.admin-page button:disabled{opacity:.5;cursor:not-allowed}
+.admin-page .admin-links{display:flex;flex-wrap:wrap;gap:8px}
+.admin-page .admin-links a{padding:10px 14px;border:1px solid var(--line);border-radius:8px;text-decoration:none;background:var(--panel)}
+.admin-page .moderation-row{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;border-bottom:1px solid var(--line);padding:12px 0}
+.admin-page .moderation-row>div{flex:1;min-width:180px;overflow-wrap:anywhere}
+.admin-page .moderation-text{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:640px){.admin-page main{padding:16px}.admin-tabs{padding:8px 14px}.admin-page .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

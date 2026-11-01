@@ -1,0 +1,99 @@
+import type { Game, Resource, Stock } from './engine.ts';
+import type { ClockSpeed, Environment } from './environment.ts';
+import type { CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from './items.ts';
+import type { GridPosition, SettlementEntity } from './settlement-layout.ts';
+import type { WaterFacility } from './water-facilities.ts';
+import type { IncomeFacility } from './income.ts';
+import type { Construction } from './constructions.ts';
+import type { CollectionItem } from './collection.ts';
+import type { ActivityItem, ActivityKind } from './automation.ts';
+
+export type Command =
+  | { type: 'move'; x: number; y: number }
+  | { type: 'assign'; resource: Resource; workers: number }
+  | { type: 'automatic'; enabled: boolean }
+  | { type: 'trade'; resource: Resource; direction: 'buy' | 'sell'; amount: number }
+  | { type: 'build'; kind: 'bank' | 'townhall' | WaterFacility | IncomeFacility }
+  | { type: 'construction'; kind: Construction }
+  | { type: 'craft'; item: CraftableItem }
+  | { type: 'equip'; item: VisibilityItem | null }
+  | { type: 'decorate'; slot: DecorationSlot; item: DecorationItem | null }
+  | { type: 'arrange'; entity: SettlementEntity; position: GridPosition | null }
+  | { type: 'diplomacy'; action: 'gift' | 'join' | 'form' | 'vote' }
+  | { type: 'claim'; resource?: Resource }
+  | { type: 'collect-sell'; resource: Resource; quantity: number; minimumDollars: number }
+  | { type: 'activate-collection'; item: CollectionItem }
+  | { type: 'activate-activity'; item: ActivityItem }
+  | { type: 'activity-automation'; activity: ActivityKind; enabled: boolean }
+  | { type: 'upgrade' | 'invite' | 'home' | 'warehouse' | 'item-storage' | 'collect-items' };
+
+export interface ResourceCrew {
+  workers: number;
+  readyAt: number;
+  weeklyYield: number;
+  weeklyMetalCost: number;
+  weeklyDollarsCost?: number;
+  automaticDelivery?: true;
+  payOnPickup?: true;
+}
+export interface Expedition {
+  x: number;
+  y: number;
+  workers: number;
+  readyAt: number;
+  surveyRadius: number;
+  dollarReward?: number;
+  finds?: { collectible: boolean; collection: number; activity: number };
+}
+export interface Workforce {
+  version: 3;
+  transportVersion?: 1;
+  automatic: boolean;
+  allocation: Stock;
+  cycleAt: number;
+  unfundedWorkers: number;
+  crews: Partial<Record<Resource, ResourceCrew>>;
+  expeditions: Expedition[];
+}
+export interface Snapshot {
+  physicalVersion?: 1;
+  collection?: { fees: Stock; automationUntil: Stock };
+  activityAutomation?: Record<ActivityKind, { until: number; enabled: boolean; nextAt: number; reason: string | null }>;
+  fthg: number;
+  dollars: number;
+  income: { weekly: number; readyAt: number };
+  inventory: ItemInventory;
+  game: Game;
+  pending: Stock;
+  rates: Stock;
+  capacity: number;
+  claimThreshold: number;
+  warehouse: number;
+  warehouseCost: { wood: number; metal: number; dollars: number } | null;
+  revision: number;
+  serverTime: number;
+  environment: Environment;
+  inviteReadyAt: number;
+  recruitment: { population: number; startedAt: number; readyAt: number } | null;
+  waterUpkeep: { readyAt: number; dailyConsumption: number; weeklyConsumption: number; shortage: number; populationLoss: number; lastPopulationLoss: number; paused: boolean } | null;
+  workforce: Workforce;
+  availableWorkers: number;
+  resourceAccess: Record<Resource, ResourceAccess>;
+  recruitmentDollars: number;
+}
+export interface CollectionQuote {
+  resource: Resource; quantity: number; transport: number; proceeds: number; net: number; available: boolean;
+}
+export interface CollectionResponse extends ApiState { collectionQuote: CollectionQuote }
+export interface ResourceAccess {
+  weeklyConsumption?: number;
+  available: boolean;
+  distance: number;
+  efficiency: number;
+  perWorker: number;
+  dollarsPerWorker: number;
+}
+export interface PopulationTotals { global: number; federation: number | null }
+export interface PublicTotals { settlements: number; fthgTransactions: number; metal: number; population: number; fthg: number; dollars: number; goldRate: number }
+export interface PublicStats extends PublicTotals { updatedAt: number }
+export interface ApiState extends Snapshot { csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string }

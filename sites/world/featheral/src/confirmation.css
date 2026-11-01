@@ -1,0 +1,34 @@
+.consumption-dialog{width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid #c6e8a430;border-radius:16px;background:#161d17;color:#e3e7dd;padding:26px;box-shadow:0 24px 100px #0009;font:inherit}
+.consumption-dialog::backdrop{background:#080d0bd9;backdrop-filter:blur(5px)}
+.consumption-eyebrow{font-size:10px;font-weight:600;letter-spacing:.08em;color:#a6b397}
+.consumption-dialog h2{margin:8px 0;font-size:23px}
+.consumption-subject{margin:0 0 22px;color:#a6b397;overflow-wrap:anywhere}
+.consumption-section{padding:14px;background:#ffffff04;border:1px solid #ffffff0d;border-radius:9px;margin:12px 0}
+.consumption-section h3{margin:0 0 12px;font-size:11px;color:#a6b397}
+.consumption-dialog dl{margin:0}
+.consumption-dialog dl>div{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0}
+.consumption-dialog dt{display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere}
+.consumption-dialog dd{margin:0;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.consumption-cost dd{color:#e5ad92}
+.consumption-receive dd{color:#c6e8a4}
+.consumption-icon{display:flex;color:#a6b397}
+.consumption-details{font-size:12px;padding:6px 0 14px}
+.consumption-details dt{color:#a6b397}
+.consumption-note{font-size:11px;line-height:1.7;color:#a6b397;margin:10px 0}
+.consumption-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:22px}
+.consumption-actions .button{min-height:44px;justify-content:center}
+.consumption-actions .button:focus-visible{outline:2px solid #c6e8a4;outline-offset:3px}
+@media(max-width:480px){.consumption-dialog{padding:20px}.consumption-dialog h2{font-size:21px}}
+@media(min-width:901px){
+  .consumption-dialog{width:min(760px,calc(100vw - 48px));padding:20px}
+  .consumption-dialog[open]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:14px}
+  .consumption-eyebrow,.consumption-dialog h2,.consumption-subject,.consumption-details,.consumption-actions{grid-column:1/-1}
+  .consumption-subject{margin-bottom:10px}
+  .consumption-section{min-width:0;padding:12px;margin:8px 0}
+  .consumption-section:only-of-type{grid-column:1/-1}
+  .consumption-section:only-of-type dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:20px}
+  .consumption-dialog dl>div{gap:10px}
+  .consumption-note{margin:6px 0;line-height:1.5}
+  .consumption-note:last-of-type{grid-column:1/-1}
+  .consumption-actions{margin-top:14px}
+}

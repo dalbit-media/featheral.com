@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Docs · Featheral Dollar</title>
+<meta name="description" content="FTH$ ledger specification, API reference, wallet signing and replication guides.">
+<link rel="icon" href="/shared/logo-dollar.svg">
+<meta name="theme-color" content="#07100c">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+</head>
+<body class="site-dollar">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo-dollar.svg" alt="" width="34" height="34"><b>Featheral Dollar</b></a>
+  <nav>
+    <a href="/#stats">Stats</a>
+    <a href="/#how">How it works</a>
+    <a href="/#ledger">Ledger</a>
+    <a href="/explorer/">Explorer</a>
+    <a href="/docs/" aria-current="page">Docs</a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+
+<section class="hero">
+  <img class="hero-logo" src="/shared/logo-dollar.svg" alt="" width="112" height="112">
+  <h1>Docs</h1>
+  <p class="lead">FTH$ ledger specification, API reference, wallet signing and replication guides.</p>
+  <p class="muted">Coming soon. This page is a placeholder.</p>
+  <div class="cta"><a class="btn" href="/">Back to Featheral Dollar</a></div>
+</section>
+
+<footer>
+  <p>© <a data-site="foundation">Featheral Foundation</a> · <a data-site="gold">Featheral Gold</a> · <a data-site="dollar">Featheral Dollar</a> · <a data-site="world">Featheral World</a></p>
+</footer>
+<script src="/shared/site-links.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script>FeatheralProfile.mount(document.getElementById("walletButton"), { primaryCurrency: "fthDollar", walletUrl: FeatheralSites.url("dollar", "/wallet/") });</script>
+</body>
+</html>

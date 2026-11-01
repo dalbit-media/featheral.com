@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Home · Featheral World</title>
+<meta name="description" content="Featheral World: a wallet-signed social network. Every post, like, repost and follow is recorded on the World communication ledger.">
+<meta property="og:title" content="Featheral World">
+<meta property="og:image" content="/shared/logo-world.svg">
+<link rel="icon" href="/shared/logo-world.svg">
+<meta name="theme-color" content="#f6f7fb">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body class="site-world world-app">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top world-header">
+  <a class="brand" href="/"><img src="/shared/logo-world.svg" alt="" width="34" height="34"><b>Featheral World</b></a>
+  <nav aria-label="World site">
+    <a href="/ledger/">Ledger</a>
+    <a href="/about/">About</a>
+    <a href="/docs/">Docs</a>
+    <a class="play-launch" data-play-launch href="/play/" target="_blank" rel="noopener" aria-label="Play (opens a new window)" title="Play in a new window"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Play</span></a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+<div class="app">
+  <aside class="rail" aria-label="Featheral World">
+    <nav class="rail-nav">
+      <a href="#/" data-nav="home" aria-label="Home"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span><b>Home</b></a>
+      <a href="#/explore" data-nav="explore" aria-label="Explore"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg></span><b>Explore</b></a>
+      <a href="#/me" data-nav="me" aria-label="Profile"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><b>Profile</b></a>
+    </nav>
+    <button id="railPost" class="btn primary rail-post" type="button">Post</button>
+  </aside>
+
+  <main class="column" id="column">
+    <header class="col-head" id="colHead"></header>
+    <div id="composerHost"></div>
+    <div id="newBanner" hidden></div>
+    <div id="feed" aria-live="polite"><p class="muted pad">Loading…</p></div>
+  </main>
+
+  <aside class="side" aria-label="Search and suggestions">
+    <form id="searchForm" role="search"><input id="searchInput" type="search" placeholder="Search posts, @username or wallet" aria-label="Search Featheral World" autocomplete="off"></form>
+    <section class="side-card" id="ledgerCard"><h2>World ledger</h2><p class="muted fine">Loading…</p></section>
+    <section class="side-card" id="followCard"><h2>Who to follow</h2><p class="muted fine">Loading…</p></section>
+    <p class="muted fine side-foot">Posts are signed by your wallet and recorded on the open World communication ledger. <a href="/ledger/#/sql">Query it with SQL</a> · <a href="/about/">About</a> · <a href="/docs/">Docs</a></p>
+  </aside>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="/shared/site-links.js"></script>
+<script src="/play-launch.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

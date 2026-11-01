@@ -1,0 +1,24 @@
+{
+  "name": "featheral",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "zip": "git archive --format=zip --output=featheral.zip HEAD",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --experimental-strip-types --test src/engine.test.ts src/environment.test.ts src/physical-economy.test.ts src/site.test.ts src/count-up.test.ts src/i18n.test.ts src/game-pages.test.ts src/account.test.ts src/consumption.test.ts server/*.test.ts",
+    "server": "node --experimental-strip-types server/index.ts --dev",
+    "server:production": "node --experimental-strip-types server/index.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "marked": "^16.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  }
+}
