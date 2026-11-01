@@ -3,7 +3,6 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
-import { environmentDetails } from './environment-view.ts';
 import { itemArt } from './item-art.ts';
 import { isDecorationItem } from './items.ts';
 import { homeCount, settlementBuildings, settlementEntityName, settlementPositions, settlementRadius } from './settlement-layout.ts';
@@ -43,7 +42,6 @@ export function settlementScene(state: ApiState, language: Language, editing = f
     </aside>
     <div class="settlement-panorama" data-season="${environment.season}" data-phase="${environment.phase}">
       <canvas id="settlement-world" tabindex="0" aria-label="Settlement grid. Drag to pan, scroll to zoom. Select a building to manage it. In Layout, drag buildings or choose a land cell to move them. Arrow keys move the cursor; Enter selects.">Open Layout to manage buildings and decorations.</canvas>
-      <div class="map-environment" data-map-environment aria-label="World conditions">${environmentDetails(environment)}</div>
       <span class="panorama-hint">${icon('compass')} Drag to pan · Scroll to zoom</span>
       <div class="settlement-camera-controls" aria-label="Settlement map controls"><button class="button" data-action="settlement-zoom-out" aria-label="Zoom out">${icon('minus')}</button><button class="button" data-action="settlement-centre" aria-label="Center settlement">${icon('home')}</button><button class="button" data-action="settlement-zoom-in" aria-label="Zoom in">${icon('plus')}</button><button class="button" data-settlement-panel="decorate">Arrange buildings</button></div>
     </div>

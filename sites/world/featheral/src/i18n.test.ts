@@ -296,7 +296,7 @@ test('static Korean entry copy stays aligned with the catalog for English switch
 });
 test('all static server-facing gameplay and HTTP errors have Korean translations', () => {
   let checked = 0;
-  for (const file of ['engine.ts', '../server/economy.ts', '../server/inventory.ts', '../server/store.ts', '../server/http.ts', '../server/market.ts', '../server/gold.ts', '../server/chat.ts']) {
+  for (const file of ['engine.ts', '../server/economy.ts', '../server/inventory.ts', '../server/store.ts', '../server/http.ts', '../server/market.ts', '../server/funds.ts', '../server/chat.ts']) {
     const source = ts.createSourceFile(file, readFileSync(new URL(file, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
     const visit = (node: ts.Node): void => {
       if (ts.isNewExpression(node) && ['ApiError', 'GameError'].includes(node.expression.getText(source))) {
@@ -315,13 +315,13 @@ test('both white papers expose all ten sections and retain all critical launch d
   for (const language of ['', '.ko']) {
     const paper = readFileSync(new URL(`../public/WHITEPAPER${language}.md`, import.meta.url), 'utf8');
     for (let section = 1; section <= 10; section++) assert.match(paper, new RegExp(`^## ${section}\\.`, 'm'));
-    for (const token of ['FTHG', 'Ethereum', '0x0000000000000000000000000000000000000000']) {
+    for (const token of ['FTHG', 'Ethereum', '0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665']) {
       if (language === '.ko' && token === 'Ethereum') assert.match(paper, /이더리움/);
       else assert.ok(paper.includes(token), token);
     }
   }
   const koreanPaper = readFileSync(new URL('../public/WHITEPAPER.ko.md', import.meta.url), 'utf8');
-  for (const term of ['채집팀', '자원지', '주민 모집', '쿨타임', '거버넌스', '제로 주소']) assert.ok(koreanPaper.includes(term), term);
+  for (const term of ['채집팀', '자원지', '주민 모집', '쿨타임', '거버넌스', '개인 키']) assert.ok(koreanPaper.includes(term), term);
   assert.doesNotMatch(koreanPaper, /시제품|작업반|자원 산지|영 주소|공회당|주민 초대|모집[가는를]|콘셉트[은을]/);
   assert.match(koreanPaper, /FTH\$는 게임 기본 재화, 금속은 건설 자원입니다/);
   assert.match(koreanPaper, /토큰 스테이킹이나 암호화폐 보상 프로그램이 아닙니다/);
@@ -329,7 +329,9 @@ test('both white papers expose all ten sections and retain all critical launch d
   assert.match(koreanPaper, /서버 시간 168분/);
   assert.match(koreanPaper, /저장량 50% 조건은 없습니다/);
   assert.match(koreanPaper, /창고레벨\*500/);
-  assert.match(koreanPaper, /영구 소각/);
+  assert.match(koreanPaper, /FTH\$ 신규 발행은 중단/);
+  assert.match(koreanPaper, /시스템 금고/);
+  assert.match(koreanPaper, /과거 소각 기록은 그대로 재생/);
   assert.match(koreanPaper, /최대 8레벨/);
 });
 test('white paper pages render every chapter, table and contract disclosure with web language links', () => {
@@ -342,9 +344,8 @@ test('white paper pages render every chapter, table and contract disclosure with
     assert.match(html, /<blockquote>/);
     assert.match(html, /<strong>/);
     assert.match(html, /<ol>/);
-    assert.match(html, /<pre><code class="language-text">/);
     assert.match(html, /<div class="paper-table" tabindex="0" role="region"/);
-    assert.match(html, /0x0000000000000000000000000000000000000000/);
+    assert.match(html, /0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665/);
     assert.match(html, /https:\/\/www\.who\.int\//);
     assert.ok(html.includes(`/play/whitepaper/?lang=${language === 'ko' ? 'en' : 'ko'}`));
     assert.doesNotMatch(html, /href="[^"]*WHITEPAPER[^"]*\.md"/);

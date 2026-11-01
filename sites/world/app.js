@@ -304,9 +304,13 @@
     document.body.append(modal);
   }
 
-  function setHead(...children) { $("colHead").replaceChildren(...children); }
+  function setHead(pageTitle, ...children) {
+    $("colHead").replaceChildren(...children);
+    $("colHead").hidden = children.length === 0;
+    document.title = `${pageTitle} · Featheral World`;
+  }
   function title(text, sub, back) {
-    return el("div", { className: "col-title" }, back ? el("a", { className: "back", href: "#/", textContent: "←", "aria-label": "Back" }) : null, el("div", {}, el("h1", { textContent: text }), sub ? el("small", { textContent: sub }) : null));
+    return el("div", { className: "col-title" }, back ? el("a", { className: "back", href: "#/feed", textContent: "←", "aria-label": "Back" }) : null, el("div", {}, text ? el("h1", { textContent: text }) : null, sub ? el("small", { textContent: sub }) : null));
   }
   function tabs(items, selected, onSelect) {
     return el("div", { className: "tabs-row", role: "tablist" }, ...items.map(([id, label]) => el("button", { type: "button", role: "tab", textContent: label, "aria-selected": String(id === selected), onclick: () => onSelect(id) })));
@@ -337,7 +341,7 @@
 
   async function showHome(scope) {
     const id = state.renderId;
-    setHead(title("Home"), tabs([["all", "For you"], ["following", "Following"]], scope, (next) => { location.hash = next === "all" ? "#/" : "#/following"; }));
+    setHead("Community feed", tabs([["all", "For you"], ["following", "Following"]], scope, (next) => { location.hash = next === "all" ? "#/feed" : "#/following"; }));
     $("composerHost").replaceChildren(composer({ onPosted: () => { route(); loadSide(); } }));
     if (scope === "following" && !state.account) {
       $("feed").replaceChildren(el("p", { className: "muted pad", textContent: "Connect your wallet to see posts from people you follow." }));
@@ -348,7 +352,7 @@
 
   async function showPost(postId) {
     const id = state.renderId;
-    setHead(title("Post", null, true));
+    setHead("Post", title("Post", null, true));
     $("composerHost").replaceChildren();
     const data = await api(`/posts/${postId}${state.account ? `?viewer=${ethers.getAddress(state.account)}` : ""}`);
     if (id !== state.renderId) return;
@@ -365,14 +369,14 @@
     if (id !== state.renderId) return;
     const mine = viewer && viewer === address;
     const followButton = mine
-      ? el("button", { type: "button", className: "btn", textContent: "Edit profile", onclick: () => $("walletButton").click() })
+      ? el("a", { className: "btn", textContent: "Edit profile", href: "#/setup" })
       : el("button", { type: "button", className: "btn primary", textContent: stats.viewerFollows ? "Following" : "Follow", onclick: (event) => guarded(async () => {
         const button = event.currentTarget;
         button.disabled = true;
         await act(stats.viewerFollows ? "UNFOLLOW" : "FOLLOW", { u: address });
         route();
       }) });
-    setHead(title(nameOf(profile, address), `${count(stats.posts + stats.replies) || 0} posts`, true));
+    setHead(nameOf(profile, address), title(nameOf(profile, address), `${count(stats.posts + stats.replies) || 0} posts`, true));
     $("composerHost").replaceChildren();
     const head = el("div", {},
       el("div", { className: "profile-banner" }),
@@ -392,7 +396,7 @@
 
   async function showSearch(query) {
     const id = state.renderId;
-    setHead(title("Explore", query ? `Results for “${query}”` : null, Boolean(query)));
+    setHead("Explore", ...(query ? [title(null, `Results for “${query}”`, true)] : []));
     $("composerHost").replaceChildren();
     if (!query) {
       $("feed").replaceChildren(el("p", { className: "muted pad", textContent: "Search posts, @usernames or wallet addresses. Showing the latest posts from everyone." }));
@@ -429,10 +433,34 @@
       }) : [el("p", { className: "muted fine", textContent: "No suggestions yet." })]));
     } catch { /* suggestions are optional */ }
   }
+  async function loadWorldStatus() {
+    const host = $("worldStatus");
+    try {
+      const response = await fetch("/api/dollar/game/stats", { credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error(`Public totals HTTP ${response.status}`);
+      const data = await response.json();
+      if (![data.settlements, data.population].every(value => Number.isSafeInteger(value) && value >= 0)
+        || typeof data.dollars !== "number" || !Number.isFinite(data.dollars) || data.dollars < 0) throw new Error("Invalid public world totals.");
+      host.replaceChildren(el("h2", { textContent: "A growing world" }), el("dl", {},
+        ...[["Settlements", data.settlements.toLocaleString("en-US")], ["Residents", data.population.toLocaleString("en-US")],
+          ["FTH$ supply", data.dollars.toLocaleString("en-US", { maximumFractionDigits: 2 })]]
+          .flatMap(([label, value]) => [el("dt", { textContent: label }), el("dd", { textContent: value })])),
+        el("p", { className: "muted fine", textContent: "Includes inactive settlements. Residents are simulated population, not online players. FTH$ is not USD." }));
+    } catch (error) {
+      host.replaceChildren(el("h2", { textContent: "A growing world" }), el("p", { className: "muted fine", role: "status", textContent: `Public totals unavailable: ${error.message}` }));
+    }
+  }
 
   function renderRail() {
     const me = document.querySelector('[data-nav="me"]');
     me.href = state.account ? `#/user/${ethers.getAddress(state.account)}` : "#/me";
+  }
+  function showGettingStarted(setup = false) {
+    setHead("Getting started");
+    $("gettingStarted").hidden = false;
+    $("composerHost").replaceChildren();
+    $("feed").replaceChildren();
+    if (setup) $("profileSetup").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* -------------------------------- router -------------------------------- */
@@ -441,15 +469,23 @@
     const id = ++state.renderId;
     const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
     const [name, arg, extra] = parts;
-    state.route = name || "home";
-    document.querySelectorAll(".rail-nav a").forEach((link) => link.classList.toggle("active", link.dataset.nav === (name === "following" || !name ? "home" : name === "user" && state.account && arg?.toLowerCase() === state.account.toLowerCase() ? "me" : name === "search" ? "explore" : name)));
+    state.route = name || "start";
+    document.querySelectorAll(".rail-nav a").forEach((link) => {
+      const active = link.dataset.nav === (["following", "feed"].includes(name) ? "feed" : !name || name === "setup" ? "start" : name === "user" && state.account && arg?.toLowerCase() === state.account.toLowerCase() ? "me" : name === "search" ? "explore" : name);
+      link.classList.toggle("active", active);
+      if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+    });
     $("newBanner").hidden = true;
+    $("gettingStarted").hidden = true;
+    $("gettingGuide").hidden = true;
     try {
-      if (name === "post" && /^0x[0-9a-f]{64}$/.test(arg || "")) await showPost(arg);
+      if (!name || name === "setup") showGettingStarted(name === "setup");
+      else if (name === "guide") { setHead("Game guide"); $("composerHost").replaceChildren(); $("feed").replaceChildren(); $("gettingGuide").hidden = false; }
+      else if (name === "post" && /^0x[0-9a-f]{64}$/.test(arg || "")) await showPost(arg);
       else if (name === "user" && /^0x[0-9a-fA-F]{40}$/.test(arg || "")) await showUser(ethers.getAddress(arg.toLowerCase()), ["replies", "likes"].includes(extra) ? extra : "posts");
       else if (name === "me") {
         if (state.account) location.hash = `#/user/${ethers.getAddress(state.account)}`;
-        else { setHead(title("Profile")); $("composerHost").replaceChildren(composer()); $("feed").replaceChildren(); }
+        else showGettingStarted(true);
       } else if (name === "explore") await showSearch("");
       else if (name === "search") await showSearch(arg || "");
       else if (name === "following") await showHome("following");
@@ -466,10 +502,10 @@
     location.hash = query ? `#/search/${encodeURIComponent(query)}` : "#/explore";
   });
   $("railPost").addEventListener("click", () => {
-    if (state.route !== "home" && state.route !== "following") location.hash = "#/";
+    if (state.route !== "feed" && state.route !== "following") location.hash = "#/feed";
     setTimeout(() => focusComposer(), 50);
   });
-  window.addEventListener("hashchange", () => { route(); window.scrollTo({ top: 0 }); });
+  window.addEventListener("hashchange", () => { window.scrollTo({ top: 0 }); route(); });
 
   // The wallet chip is shared by every Featheral site; react whenever it connects, disconnects, or changes profile.
   let lastAccount = null;
@@ -479,7 +515,10 @@
     const changed = (account || "") !== lastAccount;
     state.account = account || "";
     renderRail();
-    if (!changed) return;
+    if (!changed) {
+      if (state.route === "user" && location.hash.toLowerCase().includes((account || "").toLowerCase()) && account) route();
+      return;
+    }
     if (account && !lastAccount && drafts.has(":") && !drafts.has(`${account.toLowerCase()}:`)) {
       drafts.set(`${account.toLowerCase()}:`, drafts.get(":"));
       drafts.delete(":");
@@ -498,7 +537,7 @@
 
   // Light polling: offer new posts instead of shifting the timeline under the reader.
   setInterval(async () => {
-    if (document.hidden || !["home", "following"].includes(state.route) || window.scrollY > 0 && $("newBanner").hidden === false) return;
+    if (document.hidden || !["feed", "following"].includes(state.route) || window.scrollY > 0 && $("newBanner").hidden === false) return;
     try {
       const scope = state.route === "following" ? "following" : "all";
       const data = await api(`/timeline?scope=${scope}&limit=1${state.account ? `&viewer=${ethers.getAddress(state.account)}` : ""}`);
@@ -510,8 +549,9 @@
     } catch { /* offline */ }
   }, 12_000);
   setInterval(loadSide, 60_000);
+  setInterval(() => { if (!document.hidden) loadWorldStatus(); }, 60_000);
 
-  FeatheralProfile.mount($("walletButton"), { primaryCurrency: "fthDollar", walletUrl: FeatheralSites.url("dollar", "/wallet/") });
+  FeatheralProfile.mount($("walletButton"), { profileRoot: $("profileEditor"), walletUrl: FeatheralSites.url("dollar", "/wallet/") });
   const siteHeader = document.querySelector(".world-header");
   const ecoBar = document.querySelector(".eco-bar");
   const updateHeaderHeight = () => {
@@ -525,4 +565,5 @@
   renderRail();
   route();
   loadSide();
+  loadWorldStatus();
 })();

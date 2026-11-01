@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
 const { ethers } = require("ethers");
-const { createTokenApi } = require("../services/token-api/server");
+const { createDollarApi: createTokenApi } = require("../services/dollar-api/server");
 const { createWorldApi } = require("../services/social-ledger/api");
 const { socialMessage } = require("../services/social-ledger/social");
 

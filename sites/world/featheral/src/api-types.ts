@@ -94,6 +94,6 @@ export interface ResourceAccess {
   dollarsPerWorker: number;
 }
 export interface PopulationTotals { global: number; federation: number | null }
-export interface PublicTotals { settlements: number; fthgTransactions: number; metal: number; population: number; fthg: number; dollars: number; goldRate: number }
+export interface PublicTotals { settlements: number; metal: number; population: number; dollars: number }
 export interface PublicStats extends PublicTotals { updatedAt: number }
-export interface ApiState extends Snapshot { csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string }
+export interface ApiState extends Snapshot { csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string; fundWallet?: string | null }

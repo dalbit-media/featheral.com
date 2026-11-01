@@ -5,8 +5,9 @@ import { dailyClimate, expeditionFindPlan, productionClimate, recruitmentClimate
 import { climateCycleDays, environmentAt, seasonMs, worldDayMs, worldEpoch, worldWeekMs } from './environment.ts';
 import { recruitmentAmount } from './engine.ts';
 import { waterConsumptionForDays, waterUpkeep } from './upkeep.ts';
+import { dollarsUnits } from './dollars.ts';
 
-test('national trading units use exact accounting lots without changing price times quantity', () => {
+test('familiar trading units use exact accounting lots without changing price times quantity', () => {
   for (const asset of ['wood', 'water', 'metal', 'oil'] as const) {
     for (const lots of [1, 3, 29, 100, 9999, 10000]) {
       assert.equal(accountingQuantity(asset, displayQuantity(asset, lots)), lots);
@@ -14,8 +15,24 @@ test('national trading units use exact accounting lots without changing price ti
       assert.equal(accountingPrice(asset, displayPrice(asset, 2)), 2);
     }
   }
-  assert.equal(formatResourceAmount('wood', 180, 'en-US'), '18 m\u00b3');
-  assert.equal(formatResourceAmount('water', 2560, 'ko-KR'), '25.6 m\u00b3');
+  assert.equal(formatResourceAmount('wood', 180, 'en-US'), '9,000 kg');
+  assert.equal(formatResourceAmount('water', 2560, 'ko-KR'), '25,600 L');
+  assert.equal(displayQuantity('wood', 1), 50);
+  assert.equal(displayQuantity('water', 1), 10);
+  assert.equal(accountingQuantity('wood', 50), 1);
+  assert.equal(accountingQuantity('water', 10), 1);
+  assert.equal(displayPrice('wood', 4), .08);
+  assert.equal(displayPrice('water', 2), .2);
+  assert.equal(displayPrice('wood', .0001), .000002);
+  assert.equal(displayPrice('water', .0001), .00001);
+  assert.ok(Math.abs(accountingPrice('wood', .000002) - .0001) < 1e-12);
+  assert.ok(Math.abs(accountingPrice('water', .00001) - .0001) < 1e-12);
+  assert.equal(dollarsUnits(accountingPrice('wood', .000002)), 1);
+  assert.equal(dollarsUnits(accountingPrice('water', .00001)), 1);
+  assert.throws(() => dollarsUnits(accountingPrice('wood', .000003)), RangeError);
+  assert.throws(() => dollarsUnits(accountingPrice('water', .000015)), RangeError);
+  assert.equal(displayQuantity('wood', 10000), 500000);
+  assert.equal(displayQuantity('water', 10000), 100000);
   assert.equal(formatResourceAmount('metal', 80, 'en-US'), '0.8 t');
   assert.equal(formatResourceAmount('oil', 14, 'en-US'), '14 bbl');
   assert.equal(formatResourceAmount('torch', 2, 'en-US'), '2 ea');

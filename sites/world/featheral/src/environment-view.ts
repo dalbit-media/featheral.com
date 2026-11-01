@@ -1,6 +1,7 @@
 import type { DayPhase, Environment, Season } from './environment.ts';
 import { worldDayMs, worldEpoch, worldWeeksPerYear } from './environment.ts';
 import { icon } from './icons.ts';
+import { productionClimate, recruitmentClimate, waterDemandClimate } from './climate.ts';
 
 const seasonIcons: Record<Season, string> = { Spring: 'flower', Summer: 'sun', Autumn: 'leaf', Winter: 'snowflake' };
 const phaseIcons: Record<DayPhase, string> = { Dawn: 'sunrise', Day: 'sun', Dusk: 'sunset', Night: 'moon' };
@@ -99,10 +100,32 @@ export function updateWeekCalendar(root: HTMLElement, environment: Environment,
   }
   updateClockTime(root, serverTime);
 }
-export function environmentDetails(environment: Environment): string {
+export function environmentDetails(environment: Environment, effects = false): string {
   const { season, phase, weather, daylight, temperature } = environment;
   const weatherIcon = weather === 'Clear skies' ? daylight < .25 ? 'moon' : 'sun'
     : ({ Overcast: 'cloud', Rain: 'rain', Snow: 'snow', Storm: 'storm' } as const)[weather];
   return `<div class="map-environment-calendar"><span class="map-season">${icon(seasonIcons[season], 'season-icon')}<span>${season}</span></span><span class="map-phase">${dayPhaseIcon(phase)}<span>${phase}</span></span></div>
-    <div class="map-environment-weather" aria-label="Simulated world weather">${icon(weatherIcon)}<span>${weather}</span><strong>${temperature}°C</strong></div>`;
+    <div class="map-environment-weather" aria-label="Simulated world weather">${icon(weatherIcon)}<span>${weather}</span><strong>${temperature}°C</strong></div>${effects ? environmentEffects(environment) : ''}`;
+}
+export function overallWeatherImpact(environment: Environment): 'best' | 'good' | 'bad' | 'worst' {
+  const production = (['wood', 'water', 'metal', 'oil'] as const)
+    .reduce((sum, resource) => sum + productionClimate(resource, environment) - 1, 0);
+  const score = (production + recruitmentClimate(environment) - 1 - (waterDemandClimate(environment) - 1)) / 6;
+  return score >= .05 ? 'best' : score >= 0 ? 'good' : score > -.25 ? 'bad' : 'worst';
+}
+export function environmentEffects(environment: Environment): string {
+  const change = (factor: number, demand = false): string => {
+    const value = Math.round((factor - 1) * 100);
+    const tone = value === 0 ? 'neutral' : (value > 0) !== demand ? 'benefit' : 'penalty';
+    return `<strong class="climate-${tone}" data-no-localize>${value > 0 ? '+' : ''}${value}%</strong>`;
+  };
+  const impact = overallWeatherImpact(environment);
+  const label = { best: 'Best overall conditions', good: 'Good overall conditions', bad: 'Bad overall conditions', worst: 'Worst overall conditions' }[impact];
+  const symbol = { best: 'spark', good: 'check', bad: 'minus', worst: 'close' }[impact];
+  return `<details class="weather-effects"><summary class="weather-impact weather-impact-${impact}" aria-label="${label}" title="${label}">${icon(symbol)}</summary><p><strong>Expected effects</strong></p><p>Season, weather and temperature compared with normal conditions:</p><dl>
+    ${(['wood', 'water', 'metal', 'oil'] as const).map(resource => `<div><dt>${{ wood: 'Wood production', water: 'Water production', metal: 'Metal production', oil: 'Oil production' }[resource]}</dt><dd>${change(productionClimate(resource, environment))}</dd></div>`).join('')}
+    <div><dt>Recruitment suitability</dt><dd>${change(recruitmentClimate(environment))}</dd></div>
+    <div><dt>Water demand</dt><dd>${change(waterDemandClimate(environment), true)}</dd></div></dl>
+    <p>Overall indicator averages four production modifiers and recruitment suitability, with higher water demand counted as a penalty.</p>
+    <p>Current-condition estimates. Actual production and recruitment use daily averages; expedition finds use weekly averages.</p></details>`;
 }

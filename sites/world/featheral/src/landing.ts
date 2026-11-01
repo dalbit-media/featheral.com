@@ -4,7 +4,6 @@ import { formatPublicTotal, resolvePublicSite } from './site.ts';
 import type { PublicStats } from './api-types.ts';
 import { language, languageLocale, localize, wireLanguageControls } from './i18n-dom.ts';
 import { translate } from './i18n.ts';
-import { fthgUnits, fthgScale } from './fthg.ts';
 import { dollarsUnits, dollarsScale, formatDollars } from './dollars.ts';
 
 localize(document);
@@ -69,11 +68,8 @@ const whole = (value: unknown): value is number => typeof value === 'number' && 
 function validStats(value: unknown): value is PublicStats {
   return value !== null && typeof value === 'object'
     && 'settlements' in value && whole(value.settlements)
-    && 'fthgTransactions' in value && whole(value.fthgTransactions)
     && 'metal' in value && whole(value.metal)
-    && 'fthg' in value && typeof value.fthg === 'number' && Number.isFinite(value.fthg) && value.fthg >= 0
     && 'dollars' in value && typeof value.dollars === 'number' && Number.isFinite(value.dollars) && value.dollars >= 0
-    && 'goldRate' in value && typeof value.goldRate === 'number' && Number.isFinite(value.goldRate) && value.goldRate > 0
     && 'population' in value && whole(value.population)
     && 'updatedAt' in value && whole(value.updatedAt);
 }
@@ -88,24 +84,22 @@ function scheduleStats(): void {
 async function refreshStats(): Promise<void> {
   if (document.hidden || statsLoading) return;
   statsLoading = true;
+  void refreshGoldStats();
   try {
-    const response = await fetch('/api/stats', { credentials: 'omit', signal: AbortSignal.timeout(10000) });
+    const response = await fetch('/api/dollar/game/stats', { credentials: 'omit', signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Public statistics failed (${response.status}).`);
     const data: unknown = await response.json();
     if (!validStats(data)) throw new Error('Public statistics returned invalid totals.');
     if (Date.now() - data.updatedAt > 90000 || data.updatedAt > Date.now() + 10000) throw new Error('Public statistics are out of date.');
     for (const { element, counter } of counters) {
       const key = element.dataset.total;
-      if (key !== 'settlements' && key !== 'fthgTransactions' && key !== 'metal' && key !== 'population' && key !== 'fthg' && key !== 'dollars') throw new Error('Unknown public statistic.');
-      const target = key === 'dollars' ? dollarsUnits(data[key]) : key === 'fthg' ? Math.floor(fthgUnits(data[key]) / fthgScale) : data[key];
+      if (key !== 'settlements' && key !== 'metal' && key !== 'population' && key !== 'dollars') throw new Error('Unknown public statistic.');
+      const target = key === 'dollars' ? dollarsUnits(data[key]) : data[key];
       const text = key === 'dollars' ? formatDollars(data.dollars, languageLocale) : target.toLocaleString(languageLocale);
       element.parentElement!.setAttribute('aria-label', text);
       element.title = text;
       counter.set(target, !document.hidden && !reducedMotion.matches);
     }
-    document.querySelectorAll<HTMLElement>('[data-public-gold-rate]').forEach(element => {
-      element.textContent = formatDollars(data.goldRate, languageLocale);
-    });
     hasStats = true;
     const message = translate('Live snapshot \u00b7 updates about every 30s', language);
     if (statsStatus.textContent !== message) statsStatus.textContent = message;
@@ -125,6 +119,23 @@ async function refreshStats(): Promise<void> {
     statsLoading = false;
     nextStatsRefresh = performance.now() + 30000 + Math.random() * 5000;
     scheduleStats();
+  }
+  async function refreshGoldStats(): Promise<void> {
+    try {
+      const response = await fetch('/api/v1/gold/stats', { credentials: 'omit', signal: AbortSignal.timeout(10000) });
+      const data = await response.json();
+      if (!response.ok || data.chain?.id !== 1 || !/^\d+$/.test(data.chain?.totalSupply)) throw new Error(data.error || 'Gold API returned invalid Ethereum statistics.');
+      const supply = Number(BigInt(data.chain.totalSupply) / 10n ** 18n);
+      document.querySelectorAll<HTMLElement>('[data-gold-supply]').forEach(element => { element.textContent = formatPublicTotal(supply, languageLocale); element.title = supply.toLocaleString(languageLocale); });
+      const rate = data.bridge?.spotRateFthDollarPerFthg;
+      document.querySelectorAll<HTMLElement>('[data-public-gold-rate]').forEach(element => {
+        element.textContent = data.bridge?.initialized && typeof rate === 'string' && /^\d+$/.test(rate)
+          ? formatDollars(Number(BigInt(rate) / 10n ** 12n) / 1e6, languageLocale) : translate('Pool not initialized', language);
+      });
+    } catch (error) {
+      console.error('Gold statistics unavailable:', error);
+      document.querySelectorAll<HTMLElement>('[data-gold-supply], [data-public-gold-rate]').forEach(element => { element.textContent = '—'; element.title = translate('Gold API unavailable', language); });
+    }
   }
 }
 document.addEventListener('visibilitychange', () => {

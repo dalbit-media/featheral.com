@@ -7,9 +7,10 @@ const { ZERO_HASH, canonical, txHash, blockHash } = require("./codec");
 const { walletAccountId, accountWallet, verifyTransfer } = require("./transfer");
 const { verifySignedProfile, assertFreshSignature } = require("../token-api/profile");
 const { createFthDb, ingestFthBlock } = require("./sql");
+const { validateGoldTransaction, goldEntries, TREASURY, REDEMPTION_ESCROW } = require("../gold-api/reserve");
 
-const KINDS = new Set(["GENESIS", "CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "PROFILE"]);
-const VALUE_KINDS = new Set(["CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER"]);
+const KINDS = new Set(["GENESIS", "CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "PROFILE", "GAME", "GOLD", "GOLD_POLICY"]);
+const VALUE_KINDS = new Set(["CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "GAME", "GOLD"]);
 const CREDIT_SOURCES = new Set(["FthgConverted", "StakeClaimed"]);
 const MAX_TX_PER_BLOCK = 1000;
 const MAX_PAGE = 500;
@@ -86,6 +87,7 @@ class FthLedger {
     this.kindCounts = {};
     this.transferVolume = 0n;
     this.genesis = null;
+    this.goldReserve = null;
     this.sql?.reset();
   }
 
@@ -129,7 +131,7 @@ class FthLedger {
   }
 
   // Validates completely before mutating, so a rejected transaction never leaves partial state.
-  applyTx(tx, { height = null, fresh = false, now = Date.now() } = {}) {
+  applyTx(tx, { height = null, fresh = false, now = Date.now(), validateOnly = false } = {}) {
     if (!tx || typeof tx !== "object") throw ledgerError("Transaction must be an object.");
     if (typeof tx.i !== "string" || !tx.i || tx.i.length > 200) throw ledgerError("Transaction id must be 1-200 characters.");
     if (!KINDS.has(tx.k)) throw ledgerError(`Unknown transaction kind ${tx.k}.`);
@@ -145,8 +147,30 @@ class FthLedger {
       if (amount <= 0n) throw ledgerError("Amount must be positive.");
       if (!BYTES32.test(tx.a) || tx.a === ethers.ZeroHash) throw ledgerError("A non-zero account is required.");
     };
+    if (this.genesis?.goldPublicKey && ["RESERVE", "SETTLE", "RELEASE"].includes(tx.k)) {
+      throw ledgerError("Finite-reserve withdrawals must use Gold conversion, not the legacy bridge.", 409);
+    }
     let commit;
     switch (tx.k) {
+      case "GOLD_POLICY": {
+        const { signature, ...policy } = d;
+        if (this.genesis?.goldPublicKey || !this.genesis?.gamePublicKey || tx.a !== "" || tx.v !== "0"
+          || this.supply !== 0n || this.balances.size || this.redemptions.size
+          || Object.keys(this.kindCounts).some(kind => !["GENESIS", "PROFILE"].includes(kind))
+          || policy.previousTip !== this.tipHash || policy.mode !== "live"
+          || typeof signature !== "string"
+          || !crypto.verify(null, Buffer.from(canonical({ i: tx.i, k: tx.k, a: tx.a, v: tx.v, d: policy, t: tx.t })), this.genesis.gamePublicKey, Buffer.from(signature, "base64"))) {
+          throw ledgerError("Live reserve activation requires an authorized, unused zero-supply Dollar ledger.", 409);
+        }
+        const key = crypto.createPublicKey(policy.goldPublicKey);
+        if (key.asymmetricKeyType !== "ed25519" || !policy.goldMarkets || typeof policy.goldMarkets !== "object"
+          || !Object.keys(policy.goldMarkets).length || Object.entries(policy.goldMarkets).some(([asset, target]) =>
+            !/^[a-z0-9-]{1,64}$/.test(asset) || !target || !Number.isSafeInteger(target.quantity) || target.quantity < 2 || target.quantity > 10000
+            || typeof target.pricePerLot !== "string" || !/^[1-9]\d{0,77}$/.test(target.pricePerLot)
+            || BigInt(target.pricePerLot) % 10n ** 14n)) throw ledgerError("Invalid live reserve policy.");
+        commit = () => { Object.assign(this.genesis, { goldPublicKey: policy.goldPublicKey, goldMarkets: policy.goldMarkets, reserveMode: "live" }); };
+        break;
+      }
       case "GENESIS": {
         if (height !== 0 || this.height !== -1) throw ledgerError("Genesis is only valid as the first transaction of block 0.", 409);
         commit = () => { this.genesis = { ...d, createdAt: new Date(tx.t).toISOString() }; };
@@ -154,6 +178,7 @@ class FthLedger {
       }
       case "CREDIT": {
         valueCheck();
+        if (this.genesis?.goldPublicKey) throw ledgerError("Finite-reserve ledgers cannot accept bridge or staking issuance.", 409);
         if (!CREDIT_SOURCES.has(d.src)) throw ledgerError("Credits must reference a verified bridge event.");
         if (!/^0x[0-9a-f]{64}$/.test(d.tx || "")) throw ledgerError("Credits must reference an Ethereum transaction hash.");
         commit = () => {
@@ -201,6 +226,7 @@ class FthLedger {
       case "TRANSFER": {
         valueCheck();
         const transfer = verifyTransfer({ wallet: d.w, to: d.to, amount: tx.v, nonce: d.n, memo: d.m, issuedAt: d.ts, signature: d.sig });
+        if (this.genesis?.goldPublicKey && transfer.to === REDEMPTION_ESCROW) throw ledgerError("Redemption escrow accepts Gold-authorized conversions only.", 409);
         if (transfer.from !== tx.a || transfer.to !== d.to || transfer.wallet !== d.w) throw ledgerError("Transfer fields are not normalized.");
         if (fresh) assertFreshSignature(transfer.issuedAtMs, now, "Transfer");
         const expected = (this.nonces.get(tx.a) || 0) + 1;
@@ -232,12 +258,67 @@ class FthLedger {
         };
         break;
       }
+      case "GAME": {
+        if (tx.a !== "" || !Array.isArray(d.entries) || !d.entries.length || d.entries.length > 1000) throw ledgerError("Invalid game fund entries.");
+        const publicKey = this.genesis?.gamePublicKey;
+        const payload = canonical({ i: tx.i, k: tx.k, a: tx.a, v: tx.v, entries: d.entries, t: tx.t });
+        if (!publicKey || typeof d.signature !== "string" || !crypto.verify(null, Buffer.from(payload), publicKey, Buffer.from(d.signature, "base64"))) {
+          throw ledgerError("Game fund transaction signature does not verify.");
+        }
+        const accounts = new Set();
+        let total = 0n;
+        const entries = d.entries.map((entry) => {
+          if (!entry || !BYTES32.test(entry.account) || entry.account === ethers.ZeroHash || accounts.has(entry.account)
+            || typeof entry.delta !== "string" || !/^-?[1-9]\d{0,77}$/.test(entry.delta)) throw ledgerError("Invalid or duplicate game fund entry.");
+          accounts.add(entry.account);
+          const delta = BigInt(entry.delta);
+          if (this.genesis?.goldPublicKey && (entry.account === REDEMPTION_ESCROW || entry.account === TREASURY && delta < 0n)) {
+            throw ledgerError("Only Gold can spend treasury or change redemption escrow funds.", 409);
+          }
+          const current = this.balances.get(entry.account) || { balance: 0n, reserved: 0n };
+          if (current.balance + delta < current.reserved) throw ledgerError("Insufficient available FTH$ for gameplay.", 409);
+          total += delta;
+          return { account: entry.account, delta };
+        });
+        if (total > 0n || -total !== amount) throw ledgerError("Gameplay cannot issue FTH$; debits must equal credits plus the recorded burn.");
+        if (this.genesis?.goldPublicKey && total !== 0n) throw ledgerError("Finite-reserve gameplay cannot burn FTH$.", 409);
+        commit = () => {
+          for (const entry of entries) this.account(entry.account).balance += entry.delta;
+          this.supply -= amount;
+        };
+        break;
+      }
+      case "GOLD": {
+        commit = validateGoldTransaction(this, tx, fresh, now);
+        break;
+      }
       default:
         throw ledgerError("Unsupported transaction kind.");
     }
-    commit();
-    this.ids.set(tx.i, hash);
+    if (!validateOnly) {
+      commit();
+      this.ids.set(tx.i, hash);
+    }
     return hash;
+  }
+
+  commitGame(tx) {
+    return this.commitAuthorized(tx);
+  }
+
+  commitAuthorized(tx, { fresh = false } = {}) {
+    this.requireWriter();
+    if (!["GAME", "GOLD", "GOLD_POLICY"].includes(tx.k)) throw ledgerError("Only signed gameplay or Gold transactions can use synchronous settlement.");
+    const previous = this.ids.get(tx.i);
+    if (previous) {
+      const existing = this.findTx(previous);
+      if (!existing || canonical(existing.tx) !== canonical(tx)) throw ledgerError("Game commit conflicts with an existing transaction.", 409);
+      if (!existing.location && !this.seal()) throw ledgerError("Game commit could not be sealed.", 503);
+      return;
+    }
+    const hash = this.applyTx(tx, { fresh });
+    this.pending.push({ tx, hash });
+    if (!this.seal() || !this.ids.has(tx.i)) throw ledgerError("Game commit could not be persisted.", 503);
   }
 
   /* -------------------------------- writes -------------------------------- */
@@ -376,7 +457,10 @@ class FthLedger {
       this.kindCounts[tx.k] = (this.kindCounts[tx.k] || 0) + 1;
       if (tx.k === "TRANSFER") this.transferVolume += BigInt(tx.v);
       if (!VALUE_KINDS.has(tx.k)) return;
-      for (const accountId of new Set([tx.a, tx.k === "TRANSFER" ? tx.d.to : ""].filter(Boolean))) {
+      const accounts = tx.k === "GAME" ? tx.d.entries.map(entry => entry.account)
+        : tx.k === "GOLD" ? goldEntries(this, tx.d).map(entry => entry.account)
+          : [tx.a, tx.k === "TRANSFER" ? tx.d.to : ""];
+      for (const accountId of new Set(accounts.filter(Boolean))) {
         const list = this.accountTxs.get(accountId) || [];
         list.push(hash);
         this.accountTxs.set(accountId, list);
@@ -436,6 +520,9 @@ class FthLedger {
       case "RELEASE": return { ...base, to: tx.a, redemptionId: d.r };
       case "PROFILE": return { ...base, from: tx.a, username: d.username };
       case "GENESIS": return { ...base, data: d };
+      case "GAME": return { ...base, data: d };
+      case "GOLD": return { ...base, data: d };
+      case "GOLD_POLICY": return { ...base, data: d };
       default: return base;
     }
   }
@@ -491,14 +578,24 @@ class FthLedger {
   }
 
   accountHistory(accountId, limit = 50) {
+    accountId = String(accountId).toLowerCase();
     const hashes = this.accountTxs.get(String(accountId).toLowerCase()) || [];
     const size = clampLimit(limit, 50, 200);
     const pending = this.pending
-      .filter((item) => VALUE_KINDS.has(item.tx.k) && (item.tx.a === accountId || item.tx.d.to === accountId))
+      .filter((item) => VALUE_KINDS.has(item.tx.k) && (item.tx.a === accountId || item.tx.d.to === accountId
+        || (item.tx.k === "GAME" && item.tx.d.entries.some((entry) => entry.account === accountId))
+        || (item.tx.k === "GOLD" && goldEntries(this, item.tx.d).some(entry => entry.account === accountId))))
       .reverse()
       .map((item) => this.withWallets(this.describeTx(item.tx, null)));
     const sealed = hashes.slice(-size).reverse().map((hash) => this.tx(hash));
-    return [...pending, ...sealed].slice(0, size);
+    return [...pending, ...sealed].slice(0, size).map((tx) => {
+      if (!["GAME", "GOLD"].includes(tx.kind)) return tx;
+      const entries = tx.kind === "GAME" ? tx.data.entries : goldEntries(this, tx.data);
+      const entry = entries.find((entry) => entry.account === accountId);
+      const delta = BigInt(entry.delta);
+      return { ...tx, amount: (delta < 0n ? -delta : delta).toString(), from: delta < 0n ? accountId : "", to: delta > 0n ? accountId : "",
+        ...(tx.kind === "GAME" ? { gameDelta: entry.delta } : { goldDelta: entry.delta }) };
+    });
   }
 
   balance(accountId) {

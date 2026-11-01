@@ -14,6 +14,7 @@ import { marketAssets } from '../src/market.ts';
 import type { Account } from './economy.ts';
 import type { Resource } from '../src/engine.ts';
 import { SqliteStore } from './store.ts';
+import { seedFixturePools } from './test-support.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -151,13 +152,13 @@ test('exploration gives tradable consumables and overflow collection preserves d
 test('new automation markets never bootstrap extra currency and collection policy is startup-guarded', () => {
   const db=new DatabaseSync(':memory:');
   try {
-    db.exec('CREATE TABLE sessions(id TEXT PRIMARY KEY,expires INTEGER,data TEXT);CREATE TABLE gold_pool(id INTEGER PRIMARY KEY,dollars INTEGER);INSERT INTO gold_pool VALUES(1,0)');
+    db.exec('CREATE TABLE sessions(id TEXT PRIMARY KEY,expires INTEGER,data TEXT)');
     new Exchange(db);enforceMonetaryPolicy(db);
     const before=db.prepare('SELECT SUM(dollars) AS total FROM market_pools').get()!.total;
     db.prepare('DELETE FROM market_pools WHERE asset=?').run('collection-wood-1');
     new Exchange(db);
     assert.deepEqual({...db.prepare('SELECT units,dollars FROM market_pools WHERE asset=?').get('collection-wood-1')},{units:0,dollars:0});
-    assert.ok(Number(db.prepare('SELECT SUM(dollars) AS total FROM market_pools').get()!.total)<Number(before));
+    assert.equal(Number(db.prepare('SELECT SUM(dollars) AS total FROM market_pools').get()!.total),Number(before));
     enforceMonetaryPolicy(db);
     db.exec("UPDATE collection_policy SET fingerprint='changed'");
     assert.throws(()=>enforceMonetaryPolicy(db),/Collection policy changed/);
@@ -167,6 +168,7 @@ test('cashless collect-and-sell burns only transport, rolls back bad quotes and 
   const directory=mkdtempSync(join(tmpdir(),'featheral-pickup-')),path=join(directory,'save.sqlite');
   let now=start+1000;
   const store=new SqliteStore(path,()=>now),identity=store.create();
+  seedFixturePools(store);
   const db=new DatabaseSync(path,{readOnly:true});
   try {
     store.transaction(identity.token,s=>{s.account=colony();s.account.game.dollars=0;});

@@ -9,8 +9,8 @@
     "zip": "git archive --format=zip --output=featheral.zip HEAD",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --experimental-strip-types --test src/engine.test.ts src/environment.test.ts src/physical-economy.test.ts src/site.test.ts src/count-up.test.ts src/i18n.test.ts src/game-pages.test.ts src/account.test.ts src/consumption.test.ts server/*.test.ts",
-    "server": "node --experimental-strip-types server/index.ts --dev",
-    "server:production": "node --experimental-strip-types server/index.ts"
+    "server": "node ../../../scripts/serve.js --dev",
+    "server:production": "node ../../../scripts/serve.js"
   },
   "dependencies": {
     "ethers": "^6.17.0"

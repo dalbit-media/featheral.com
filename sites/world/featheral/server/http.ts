@@ -2,12 +2,15 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { GameError } from '../src/engine.ts';
-import { accrue, ApiError, apply, snapshot } from './economy.ts';
+import { accrue, ApiError, apply, parseActionEnvelope, parseCommand, snapshot } from './economy.ts';
 import type { Store } from './store.ts';
-import { isMarketAsset, isMarketResource, marketQuantityLimit } from '../src/market.ts';
+import { isMarketAsset, isMarketResource, marketQuantityLimit, marketResources } from '../src/market.ts';
+import type { MarketAsset } from '../src/market.ts';
+import { parseMarketCommand } from './market.ts';
 import { ChatHub, chatNickname, chatSubmission } from './chat.ts';
 import { chatCapacity } from '../src/chat.ts';
-import { isStakingYears } from '../src/bank.ts';
+import { isAddress, verifyMessage } from 'ethers';
+import { walletLinkMessage } from '../src/funds.ts';
 import { verifyWorldProfileLink } from './world-profile.ts';
 import type { WorldProfile } from '../src/world-profile.ts';
 
@@ -28,7 +31,7 @@ async function json(request: IncomingMessage): Promise<unknown> {
   try { return JSON.parse(Buffer.concat(chunks).toString()); }
   catch { throw new ApiError(400, 'Invalid JSON.'); }
 }
-export function createApi(store: Store, origin: string, readWorldProfile?: (address: string) => Promise<WorldProfile | null>) {
+export function createApi(store: Store, origin: string, readWorldProfile?: (address: string) => Promise<WorldProfile | null>, scope: 'world' | 'dollar' | 'all' = 'all') {
   if (readWorldProfile) store.chatDirectory.useWorldProfiles();
   const url = new URL(origin);
   if (url.origin !== origin || !['http:', 'https:'].includes(url.protocol)) throw new Error('APP_ORIGIN must be an exact HTTP(S) origin.');
@@ -51,6 +54,10 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
   };
   const server = createServer(async (request, response) => {
     try {
+      if (request.url?.startsWith('/api/dollar/game/')) request.url = request.url.replace('/api/dollar/game/', '/api/');
+      const path = new URL(request.url ?? '/', origin).pathname;
+      const worldRoute = path === '/api/session' || path.startsWith('/api/chat');
+      if ((scope === 'world' && !worldRoute) || (scope === 'dollar' && worldRoute)) throw new ApiError(404, 'This API does not own that operation.');
       const address = request.socket.remoteAddress ?? 'unknown', now = Date.now();
       for (const [key, value] of limits) if (now - value.start >= 60000) limits.delete(key);
       let limit = limits.get(address);
@@ -79,6 +86,34 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         const session = store.create();
         response.setHeader('Set-Cookie', `${cookie}=${session.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800${secure ? '; Secure' : ''}`);
         reply(response, 201, { csrf: session.csrf });
+        return;
+      }
+      if (path === '/api/wallet/link' || path === '/api/wallet/revoke') {
+        if (request.method !== 'POST') throw new ApiError(405, 'Method not allowed.');
+        if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
+        const identity = store.chatSession(token);
+        if (typeof request.headers['x-csrf-token'] !== 'string' || !equal(request.headers['x-csrf-token'], identity.csrf)) throw new ApiError(403, 'CSRF token rejected.');
+        const body = await json(request);
+        let activeToken = token, lifetime = 400 * 86400;
+        if (path === '/api/wallet/revoke') {
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length) throw new ApiError(400, 'Invalid wallet link.');
+          activeToken = store.revokeWallet(token).token;
+          lifetime = 7 * 86400;
+        } else {
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).sort().join() !== 'address,issuedAt,signature') throw new ApiError(400, 'Invalid wallet link.');
+          const { address, issuedAt, signature } = body as Record<string, unknown>;
+          if (typeof address !== 'string' || !isAddress(address) || /^0x0{40}$/i.test(address)
+            || typeof issuedAt !== 'string' || !Number.isFinite(Date.parse(issuedAt)) || Math.abs(now - Date.parse(issuedAt)) > 300000
+            || typeof signature !== 'string') throw new ApiError(400, 'Invalid or expired wallet authorization.');
+          let signer: string;
+          try { signer = verifyMessage(walletLinkMessage(address, identity.csrf, issuedAt, origin), signature); }
+          catch { throw new ApiError(401, 'Wallet signature could not be verified.'); }
+          if (signer.toLowerCase() !== address.toLowerCase()) throw new ApiError(401, 'Wallet signature does not match.');
+          store.linkWallet(token, address.toLowerCase());
+        }
+        const result = store.read(activeToken, session => ({ ...snapshot(session.account), csrf: session.csrf }));
+        response.setHeader('Set-Cookie', `${cookie}=${activeToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${lifetime}${secure ? '; Secure' : ''}`);
+        reply(response, 200, { ...result, fundWallet: store.wallet(activeToken), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
         return;
       }
       if (chatRoute) {
@@ -166,43 +201,60 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       const marketUrl = new URL(request.url ?? '/', origin), marketRead = marketUrl.pathname === '/api/market', marketAction = request.url === '/api/market/actions';
       const halfRead = marketUrl.pathname === '/api/market/half';
       const collectionRead = marketUrl.pathname === '/api/collection';
-      const goldRead = marketUrl.pathname === '/api/gold', goldAction = request.url === '/api/gold/actions';
-      const bankRead = marketUrl.pathname === '/api/bank', bankAction = request.url === '/api/bank/actions';
-      if (request.url !== '/api/state' && request.url !== '/api/actions' && !marketRead && !marketAction && !goldRead && !goldAction && !halfRead && !collectionRead && !bankRead && !bankAction) throw new ApiError(404, 'API route not found.');
-      if (((request.url === '/api/state' || marketRead || goldRead || halfRead || collectionRead || bankRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction || goldAction || bankAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
+      if (request.url !== '/api/state' && request.url !== '/api/actions' && !marketRead && !marketAction && !halfRead && !collectionRead) throw new ApiError(404, 'API route not found.');
+      if (((request.url === '/api/state' || marketRead || halfRead || collectionRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
       if (halfRead && [...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid half-sale query.');
       const asset = marketUrl.searchParams.get('asset') ?? 'wood', quantity = Number(marketUrl.searchParams.get('quantity') ?? '1');
       if (collectionRead && ([...marketUrl.searchParams.keys()].length !== 1 || !marketUrl.searchParams.has('asset') || !isMarketAsset(asset) || !isMarketResource(asset))) throw new ApiError(400, 'Invalid collection query.');
       if (marketRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || !isMarketAsset(asset)
         || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketQuantityLimit(asset))) throw new ApiError(400, 'Invalid market query.');
-      if (goldRead && [...marketUrl.searchParams.keys()].some(key => key !== 'quantity')) throw new ApiError(400, 'Invalid Gold query.');
-      const bankYears = Number(marketUrl.searchParams.get('years') ?? 1);
-      if (bankRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'quantity' && key !== 'years')
-        || [...marketUrl.searchParams.keys()].length !== new Set(marketUrl.searchParams.keys()).size || !isStakingYears(bankYears))) throw new ApiError(400, 'Invalid bank query.');
       if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
+      if (request.method === 'GET' && (marketRead || collectionRead) && isMarketAsset(asset)) {
+        await store.ensureLiquidity?.(token, asset);
+      }
+      if (request.method === 'GET' && halfRead) {
+        for (const resource of marketResources) await store.ensureLiquidity?.(token, resource);
+      }
       const body = request.method === 'POST' ? await json(request) : null;
-      const result = request.method === 'POST'
-        ? store.transaction(token, (session, time, realTime, exchange, owner, bank) => {
+      if (request.method === 'POST' && store.liquidityEnabled) {
+        store.read(token, session => {
           const csrf = request.headers['x-csrf-token'];
           if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
-          return { ...(bankAction ? bank.apply(owner, session.account, body, time, realTime) : goldAction ? exchange.gold.apply(owner, session.account, body, time, realTime) : marketAction ? exchange.action(owner, session, body, time, realTime) : apply(session.account, body, time, realTime,
+        });
+        const envelope = parseActionEnvelope(body);
+        const assets: MarketAsset[] = [];
+        if (marketAction) {
+          const command = parseMarketCommand(envelope.command);
+          if (command.type === 'spot' || command.type === 'limit') assets.push(command.asset);
+          else if (command.type === 'sell-half') assets.push(...command.sales.map(sale => sale.asset));
+        } else {
+          const command = parseCommand(envelope.command);
+          if (command.type === 'collect-sell') assets.push(command.resource);
+        }
+        for (const asset of assets) await store.ensureLiquidity?.(token, asset);
+      }
+      const result = request.method === 'POST'
+        ? store.transaction(token, (session, time, realTime, exchange, owner) => {
+          const csrf = request.headers['x-csrf-token'];
+          if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
+          return { ...(marketAction ? exchange.action(owner, session, body, time, realTime) : apply(session.account, body, time, realTime,
             command => exchange.collectSell(owner, session.account, command, time, realTime))), csrf: session.csrf };
         })
-        : store.transaction(token, (session, time, realTime, exchange, owner, bank) => {
+        : store.transaction(token, (session, time, realTime, exchange, owner) => {
           accrue(session.account, time);
           return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity) : snapshot(session.account)),
-            ...(goldRead ? { gold: exchange.gold.read(quantity) } : {}),
-            ...(bankRead && isStakingYears(bankYears) ? { bank: bank.read(owner, session.account, quantity, bankYears) } : {}), csrf: session.csrf };
+            csrf: session.csrf };
         });
       const lifetime = store.read(token, (session, _time, realTime) => session.expires - realTime);
       if (lifetime > 7 * 86400000) response.setHeader('Set-Cookie', `${cookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.min(400 * 86400, Math.floor(lifetime / 1000))}${secure ? '; Secure' : ''}`);
-      reply(response, 200, { ...result, clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
+      reply(response, 200, { ...result, fundWallet: store.wallet(token), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
     } catch (error) {
       const status = error instanceof ApiError ? error.status : error instanceof GameError ? 409 : 500;
       if (status === 500) console.error('API request failed', error);
       if (response.headersSent) { response.destroy(error instanceof Error ? error : undefined); return; }
       if (status === 429) response.setHeader('Retry-After', error instanceof ApiError && error.message === 'Wait three seconds between messages.' ? '3'
         : error instanceof ApiError && error.message === 'Global chat is busy. Wait a moment before sending.' ? '1' : '60');
+      if (status === 401 && request.url === '/api/state') response.setHeader('Set-Cookie', `${cookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`);
       reply(response, status, { error: status === 500 ? 'Internal server error.' : (error as Error).message });
     }
   });

@@ -14,10 +14,31 @@
   }
 
   async function api(path, init) {
-    const response = await fetch(`/api/v1${path}`, { cache: "no-store", headers: { accept: "application/json", ...(init?.body ? { "content-type": "application/json" } : {}) }, ...init });
+    const response = await fetch(`/api/v1/dollar${path}`, { cache: "no-store", headers: { accept: "application/json", ...(init?.body ? { "content-type": "application/json" } : {}) }, ...init });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(body.error || `HTTP ${response.status}`), { status: response.status });
     return body;
+  }
+  async function settleBridge(txHash, onPending) {
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const result = await api("/settlements", { method: "POST", body: JSON.stringify({ txHash }) });
+      if (result.status !== "confirming") return result;
+      onPending(`Waiting for Ethereum finality: ${result.confirmations}/${result.requiredConfirmations} confirmations. FTH$ has not settled yet.`);
+      await new Promise((resolve) => setTimeout(resolve, 20_000));
+    }
+    throw new Error("Ethereum finality is taking longer than expected. The transaction is on-chain but its Dollar ledger settlement must be retried.");
+  }
+  async function goldApi(path) {
+    const response = await fetch(`/api/v1/gold${path}`, { cache: "no-store", headers: { accept: "application/json" } });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || `Gold API HTTP ${response.status}`);
+    return body;
+  }
+  async function requireIssuance() {
+    const stats = await api("/stats");
+    if (stats.monetaryPolicy?.issuanceEnabled !== true) {
+      throw new Error("FTH$ issuance is closed. Conversion and staking rewards are disabled; existing FTH$ can still be transferred and traded.");
+    }
   }
 
   const toNumber = (raw) => Number(BigInt(raw || 0) / 10n ** 12n) / 1e6;
@@ -57,8 +78,8 @@
     return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   }
 
-  const explorerUrl = (route) => `/explorer/#/${route}`;
-  const KIND_LABELS = { TRANSFER: "Transfer", CREDIT: "Bridge credit", RESERVE: "Withdrawal reserved", SETTLE: "Withdrawn to FTHG", RELEASE: "Withdrawal released", PROFILE: "Profile", GENESIS: "Genesis" };
+  const explorerUrl = (route) => window.FeatheralSites?.url("dollar", `/explorer/#/${route}`) || `/explorer/#/${route}`;
+  const KIND_LABELS = { TRANSFER: "Transfer", CREDIT: "Bridge credit", RESERVE: "Withdrawal reserved", SETTLE: "Withdrawn to FTHG", RELEASE: "Withdrawal released", PROFILE: "Profile", GENESIS: "Genesis", GAME: "World gameplay", GOLD: "Gold reserve" };
   const kindBadge = (kind) => el("span", { className: `kind ${kind}`, textContent: KIND_LABELS[kind] || kind, title: kind });
   function accountLink(accountId, wallet, label) {
     if (!accountId) return el("span", { className: "muted", textContent: "—" });
@@ -89,7 +110,14 @@
   // Live bridge spot rate (18-decimal FTH$ per FTHG) once the pool is funded; opening rate otherwise.
   async function loadRate() {
     try {
-      const stats = await api("/stats");
+      const stats = await goldApi("/stats");
+      if (stats.goldReserve?.enabled) {
+        state.rate = Number(stats.goldReserve.rate);
+        state.rateLive = false;
+        state.bridge = null;
+        window.FeatheralProfile?.setRate(state.rate);
+        return stats;
+      }
       const bridge = stats.bridge || {};
       state.bridge = bridge;
       const live = bridge.deployed && bridge.initialized && bridge.reserveFthg !== "0" && bridge.reserveFthDollar !== "0" && bridge.spotRateFthDollarPerFthg;
@@ -117,7 +145,7 @@
 
   window.FTH = {
     ONE, USD_PER_FTHG_ESTIMATE, OPENING_FTH_DOLLAR_PER_FTHG, state,
-    el, api, amount, fth, usd, money, count, toNumber,     parseAmount, accountIdFor, short, isAddress, isAccountId, timeAgo, explorerUrl,
+    el, api, goldApi, requireIssuance, settleBridge, amount, fth, usd, money, count, toNumber, parseAmount, accountIdFor, short, isAddress, isAccountId, timeAgo, explorerUrl,
     KIND_LABELS, kindBadge, accountLink, txLink, blockLink, ethTxLink, stat, emptyRow, signedAmount, loadRate, copy,
   };
 })();

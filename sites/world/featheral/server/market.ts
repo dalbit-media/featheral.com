@@ -1,18 +1,16 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { accrue, ApiError, restoreSnapshotUpkeep, snapshot } from './economy.ts';
+import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot } from './economy.ts';
 import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { note } from '../src/engine.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketBasePrice, marketQuantityLimit, marketResources } from '../src/market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketQuantityLimit, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
-import { GoldExchange } from './gold.ts';
 import { poolPayment } from '../src/pool-pricing.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
-import { migrateItemLiquidity } from './item-liquidity.ts';
 import type { CollectionQuote, Command } from '../src/api-types.ts';
 
 interface Pool { units: number; dollars: number }
@@ -32,6 +30,11 @@ function orderRow(row: Record<string, unknown>): Order {
 }
 export function parseMarketCommand(value: unknown): MarketCommand {
   const c = object(value);
+  if (c.type === 'fund-pool') {
+    if (Object.keys(c).sort().join() !== 'asset,dollars,quantity,type' || !isMarketAsset(c.asset) || !isLiquidAsset(c.asset)
+      || !positive(c.quantity, marketQuantityLimit(c.asset))) throw new ApiError(400, 'Invalid pool funding command.');
+    return { type: 'fund-pool', asset: c.asset, quantity: c.quantity, dollars: paymentUnits(c.dollars, 10000000000) };
+  }
   if (c.type === 'sell-half') {
     if (Object.keys(c).sort().join() !== 'sales,type' || !Array.isArray(c.sales) || !c.sales.length || c.sales.length > 4)
       throw new ApiError(400, 'Invalid half-sale command.');
@@ -89,10 +92,8 @@ function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: numbe
 }
 export class Exchange {
   private db: DatabaseSync;
-  readonly gold: GoldExchange;
   constructor(db: DatabaseSync) {
     this.db = db;
-    this.gold = new GoldExchange(db);
     db.exec(`CREATE TABLE IF NOT EXISTS market_pools (asset TEXT PRIMARY KEY, units INTEGER NOT NULL, dollars INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS market_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, asset TEXT NOT NULL,
       side TEXT NOT NULL, price INTEGER NOT NULL, quantity INTEGER NOT NULL, remaining INTEGER NOT NULL, status TEXT NOT NULL, createdAt INTEGER NOT NULL);
@@ -104,13 +105,9 @@ export class Exchange {
       CREATE INDEX IF NOT EXISTS market_history ON market_fills(asset, id);
       CREATE TABLE IF NOT EXISTS market_receipts (owner TEXT NOT NULL, id TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,id));`);
     const insert = db.prepare('INSERT OR IGNORE INTO market_pools VALUES (?, ?, ?)');
-    const bootstrap = Number(db.prepare('SELECT COUNT(*) AS count FROM market_pools').get()!.count) === 0
-      && !db.prepare("SELECT 1 FROM sqlite_master WHERE name='monetary_policy'").get();
     for (const asset of marketAssets) {
-      const units = bootstrap && isLiquidAsset(asset) ? isMarketResource(asset) ? monetaryPolicy.rawInitialUnits : monetaryPolicy.itemInitialUnits : 0;
-      insert.run(asset, units, units * marketBasePrice(asset) * dollarsScale);
+      insert.run(asset, 0, 0);
     }
-    migrateItemLiquidity(db);
   }
   private pool(asset: MarketAsset): Pool {
     const row = this.db.prepare('SELECT units, dollars FROM market_pools WHERE asset = ?').get(asset)!;
@@ -227,10 +224,7 @@ export class Exchange {
     return note(account.game, 'Completed resources sold. FTH$ transport deducted from proceeds.');
   }
   action(owner: string, session: Session, value: unknown, now: number, realTime: number): ExchangeResult {
-    const body = object(value), account = session.account;
-    if (Object.keys(body).sort().join() !== 'command,id,revision' || typeof body.id !== 'string'
-      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.id)
-      || typeof body.revision !== 'number' || !Number.isSafeInteger(body.revision) || body.revision < 0) throw new ApiError(400, 'Invalid action envelope.');
+    const body = parseActionEnvelope(value), account = session.account;
     const request = JSON.stringify({ revision: body.revision, command: body.command });
     const receipt = this.db.prepare('SELECT request, result FROM market_receipts WHERE owner = ? AND id = ?').get(owner, body.id);
     if (receipt) {
@@ -261,6 +255,9 @@ export class Exchange {
         throw new ApiError(409, 'Resources changed. Refresh the half-sale quote.');
       asset = command.sales[0].asset;
       for (const sale of command.sales) this.processOrder(owner, account, { type: 'spot', side: 'sell', ...sale }, now, realTime);
+    } else if (command.type === 'fund-pool') {
+      asset = command.asset;
+      this.fundPool(account, asset, command.quantity, command.dollars);
     } else {
       asset = command.asset;
       this.processOrder(owner, account, command, now, realTime);
@@ -268,12 +265,24 @@ export class Exchange {
     this.check(account);
     account.revision++; account.lastActionAt = realTime;
     const message = note(account.game, command.type === 'cancel' ? 'Market order cancelled. Escrow returned.'
-      : command.type === 'sell-half' ? 'Half of your owned resources sold for FTH$.' : 'Market order processed.');
+      : command.type === 'fund-pool' ? 'Existing FTH$ and owned assets donated to market liquidity.'
+        : command.type === 'sell-half' ? 'Half of your owned resources sold for FTH$.' : 'Market order processed.');
     const result = { ...this.read(owner, account, now, realTime, asset, 1), message };
     this.db.prepare('INSERT INTO market_receipts VALUES (?,?,?,?)').run(owner, body.id, request, JSON.stringify(result));
     return result;
   }
-  private processOrder(owner: string, account: Account, command: Exclude<MarketCommand, { type: 'cancel' | 'sell-half' }>, now: number, realTime: number): void {
+  fundPool(account: Account, asset: MarketAsset, quantity: number, dollars: number): void {
+    if (!isLiquidAsset(asset) || !Number.isSafeInteger(quantity) || quantity <= 0 || !Number.isSafeInteger(dollars) || dollars <= 0) throw new ApiError(400, 'Pool funding requires positive owned assets and FTH$.');
+    if (account.game.dollars < dollars) throw new ApiError(409, 'Not enough FTH$ to fund this pool.');
+    const pool = this.pool(asset);
+    if (!Number.isSafeInteger(pool.units + quantity) || !Number.isSafeInteger(pool.dollars + dollars)) throw new ApiError(409, 'Market pool limit reached.');
+    this.reserve(account, { type: 'spot', asset, side: 'sell', quantity, limitDollars: 0 }, 0);
+    this.release(account, asset, quantity, 'sell');
+    account.game.dollars -= dollars;
+    this.check(account);
+    this.db.prepare('UPDATE market_pools SET units=units+?,dollars=dollars+? WHERE asset=?').run(quantity, dollars, asset);
+  }
+  private processOrder(owner: string, account: Account, command: Extract<MarketCommand, { type: 'spot' | 'limit' }>, now: number, realTime: number): void {
       const asset = command.asset;
       if (command.type === 'limit' && Number(this.db.prepare("SELECT COUNT(*) AS count FROM market_orders WHERE owner = ? AND status = 'open'").get(owner)!.count) >= 50) throw new ApiError(409, 'Cancel an open order before placing more. Maximum 50.');
       const steps = this.plan(owner, asset, command.side, command.quantity, realTime, command.type === 'limit' ? command.price : undefined);
@@ -345,7 +354,7 @@ export class Exchange {
       items.splice(index, 1);
     }
   }
-  private reserve(account: Account, command: Exclude<MarketCommand, { type: 'cancel' | 'sell-half' }>, dollars: number): void {
+  private reserve(account: Account, command: Extract<MarketCommand, { type: 'spot' | 'limit' }>, dollars: number): void {
     const { asset, quantity, side } = command, bag = inventory(account);
     if (side === 'buy' && account.game.dollars < dollars) throw new ApiError(409, 'Not enough FTH$ for this order.');
     if (isMarketResource(asset)) {

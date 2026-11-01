@@ -3,7 +3,7 @@
 const TOKEN = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
 const SOURCE_WALLET = "0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c";
 const RESERVE_WALLET = "0x706CCb6109046a6a4A08dbAD4444A46408703ccb";
-const RPC_URL = "https://ethereum-rpc.publicnode.com";
+const RPC_URL = `${location.origin}/api/v1/gold/rpc`;
 const BLOCKSCOUT_API = "https://eth.blockscout.com/api/v2";
 const BLOCKSCOUT_URL = "https://eth.blockscout.com";
 const USD_PER_FTHG_ESTIMATE = 0.01;
@@ -100,9 +100,12 @@ async function loadExplorerStats() {
   return { holders: Number(info.holders_count), transfers: Number(counters.transfers_count) };
 }
 async function loadApiStats() {
-  const response = await fetch("/api/v1/stats", { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  const [gold, dollar] = await Promise.all(["/api/v1/gold/stats", "/api/v1/dollar/stats"].map(async (url) => {
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`HTTP ${response.status} from ${url}`);
+    return response.json();
+  }));
+  return { ...gold, fthDollar: dollar.fthDollar };
 }
 
 function renderPrimary(chain, explorer) {
@@ -140,18 +143,23 @@ function renderSupply(chain) {
         address ? el("small", {}, el("a", { href: `${BLOCKSCOUT_URL}/address/${address}`, target: "_blank", rel: "noopener noreferrer", textContent: short(address) })) : null))));
 }
 function renderEconomy(api) {
-  const bridge = api?.bridge;
-  const ledger = api?.fthDollar;
-  const live = Boolean(bridge?.initialized && bridge.spotRateFthDollarPerFthg && bridge.spotRateFthDollarPerFthg !== "0");
-  if (live) {
-    $("rateValue").textContent = `1 FTHG = ${tokens(bridge.spotRateFthDollarPerFthg, 2)} FTH$`;
-    $("rateNote").textContent = `Live spot rate from the funded bridge pool${bridge.paused ? " (paused)" : ""}. Larger trades move the price.`;
+  if (api?.goldReserve?.enabled) {
+    const reserve = api.goldReserve;
+    $("rateValue").textContent = `1 FTHG = ${Number(reserve.rate).toLocaleString("en-US")} FTH$`;
+    $("rateNote").textContent = `Fixed-rate ${reserve.mode === "live" ? "live off-chain reserve" : "isolated reserve test"}. Market prices still respond to demand. No Mainnet transfers are submitted.`;
+    $("economyStats").replaceChildren(
+      stat("Reserve mode", reserve.initialized ? "Initialized" : "Not initialized", reserve.mode === "live" ? "Live off-chain allocation" : "Separate test journal"),
+      stat("Remaining initial allocation", `${compact(reserve.remaining || "0")} FTHG`, "Immutable verified origin cap; no automatic increases"),
+      stat("Redeemable backing", `${compact(reserve.redeemableBacking || "0")} FTHG`, "Confirmed Ethereum backing only"),
+      stat("Pending settlement", `${compact(reserve.pendingIn || "0")} FTHG`, "Manual sync preview on Conversion & sync"),
+    );
+    return;
   }
-  const apr = bridge?.baseAprBps ?? api?.staking?.baseAprBps ?? 600;
+  const ledger = api?.fthDollar;
+  $("rateValue").textContent = "1 FTHG = 1,000 FTH$";
+  $("rateNote").textContent = api ? "Finite reserve engine is not enabled. Existing FTH$ circulates; no automatic issuance." : "Reserve service unavailable. Conversion eligibility cannot be verified.";
   $("economyStats").replaceChildren(
-    stat("Bridge status", live ? (bridge.paused ? "Paused" : "Live") : bridge?.deployed ? "Awaiting funding" : "Coming soon", live ? "Dynamic constant-product pool" : "Opening rate 1 : 1,000"),
-    stat("Pool reserves", live ? `${compact(bridge.reserveFthg)} FTHG` : "—", live ? `${compact(bridge.reserveFthDollar)} FTH$ game budget` : "Only actual deposits count as liquidity"),
-    stat("Staking APR", `${(apr / 100).toFixed(2)}%`, "Simple interest in FTH$ · 1–30 game-years"),
+    stat("Reserve engine", api ? "Not enabled" : "Unavailable", "Check reserve admin before any conversion or transfer"),
     stat("FTH$ supply (L3)", ledger ? `${compact(ledger.supply || "0")} FTH$` : "—", ledger ? `${Number(ledger.holders).toLocaleString("en-US")} holders · block #${Number(ledger.height).toLocaleString("en-US")}` : "Featheral Dollar ledger"),
   );
 }

@@ -4,8 +4,15 @@
   const F = window.FTH;
   const { el, api, fth, usd, money, count, short, timeAgo, stat, emptyRow, kindBadge, txLink, blockLink, accountLink, ethTxLink, state } = F;
   const $ = (id) => document.getElementById(id);
+  if (new URLSearchParams(location.search).get("embedded") === "1") {
+    for (const link of document.querySelectorAll('header a[href="/"], header a[href="/explorer/"], header a[href="/docs/"]')) {
+      link.href = window.FeatheralSites.url("dollar", link.getAttribute("href"));
+      link.target = "_blank";
+      link.rel = "noopener";
+    }
+  }
   const FTHG = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
-  const RPC_URL = "https://ethereum-rpc.publicnode.com";
+  const RPC_URL = `${location.origin}/api/v1/gold/rpc`;
   let snap = { account: "" };
   let account = "";
   let wallet = null;
@@ -125,24 +132,6 @@
     $("sendButton").disabled = Boolean(problem) || !amount || !resolvedRecipient;
   }
 
-  function transferMessage({ wallet: from, to, amount, nonce, memo, issuedAt }) {
-    const recipientWallet = to.startsWith("0x") && to.length === 42 ? to : "";
-    return [
-      "Featheral Dollar (FTH$) transfer",
-      "",
-      `From: ${from}`,
-      recipientWallet ? `To: ${recipientWallet}` : `To account: ${to}`,
-      `Amount: ${ethers.formatUnits(amount, 18)} FTH$`,
-      `Base units: ${amount}`,
-      `Nonce: ${nonce}`,
-      `Memo: ${memo || "(none)"}`,
-      `Issued at: ${issuedAt}`,
-      "Ledger: Featheral Dollar L3 (settles to Ethereum Mainnet)",
-      "",
-      "Signing is free and only authorizes this FTH$ ledger transfer.",
-    ].join("\n");
-  }
-
   function setStatus(id, text, kind = "") {
     $(id).textContent = text;
     $(id).className = `status ${kind}`;
@@ -163,7 +152,7 @@
       const fresh = await api(`/wallets/${account}`);
       const transfer = { wallet: ethers.getAddress(account), to: resolvedRecipient.to, amount: amount.toString(), nonce: fresh.nonce + 1, memo, issuedAt: new Date().toISOString() };
       if (amount > BigInt(fresh.fthDollar.available)) throw new Error(`Exceeds your available ${fth(fresh.fthDollar.available)}.`);
-      const message = transferMessage(transfer);
+      const message = window.FeatheralDollarTransferMessage(transfer);
       $("sendMessage").textContent = message;
       $("sendPreview").hidden = false;
       setStatus("sendStatus", "Confirm the signature request in your wallet (free, no gas)…");
@@ -211,6 +200,15 @@
 
   async function updateQuote() {
     const request = ++quoteRequest;
+    try { await F.requireIssuance(); }
+    catch (error) {
+      if (request !== quoteRequest) return;
+      $("convertQuote").textContent = error.message;
+      $("convertButton").disabled = true;
+      $("bridgeNotice").textContent = error.message;
+      return;
+    }
+    if (request !== quoteRequest) return;
     const amount = F.parseAmount($("convertAmount").value);
     const fthg = fthgBalance();
     if (!$("convertAmount").value.trim() || amount === null || amount === 0n) {
@@ -240,6 +238,7 @@
     if (!amount || !bridgeLive() || !account) return;
     $("convertButton").disabled = true;
     try {
+      await F.requireIssuance();
       await abis();
       const provider = new ethers.BrowserProvider(FeatheralProfile.getProvider());
       if (Number((await provider.getNetwork()).chainId) !== 1) throw new Error("Switch your wallet to Ethereum Mainnet first.");
@@ -255,10 +254,12 @@
         await (await token.approve(state.bridge.address, amount)).wait();
       }
       setStatus("convertStatus", "Confirm the conversion in your wallet…");
+      await F.requireIssuance();
       const tx = await bridge.convertFthg(amount, minOut, accountId);
       setStatus("convertStatus", `Submitted ${short(tx.hash, 10, 6)} · waiting for confirmation…`);
       await tx.wait();
-      $("convertStatus").replaceChildren("Confirmed on Ethereum. FTH$ is credited once the writer seals the bridge event. ", ethTxLink(tx.hash));
+      await F.settleBridge(tx.hash, (message) => setStatus("convertStatus", message));
+      $("convertStatus").replaceChildren("Confirmed on Ethereum and settled on the Dollar ledger. ", ethTxLink(tx.hash));
       $("convertStatus").className = "status ok";
       $("convertAmount").value = "";
       await FeatheralProfile.refresh();

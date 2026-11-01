@@ -19,7 +19,7 @@ function app(options = {}) {
   const simulated = [];
   const confirmations = [];
   const state = {
-    connected: true, chainId: 1, deployed: true, initialized: true, paused: false, clock: true,
+    connected: true, chainId: 1, deployed: true, initialized: true, paused: false, clock: true, issuanceEnabled: false,
     x: E(100), y: E(100000), staked: E(10), custody: E(115), apr: 600n, year: 5n,
     roles: [true, true, true, true], allowance: 0n, walletBalance: E(100),
     position: { account, fthgAmount: E(10), rewardFthDollar: E(600), maturityGameYear: 6n, claimed: false },
@@ -78,16 +78,26 @@ function app(options = {}) {
   }
   const helpers = {
     el: (tag, props) => props,
+    fth: (value) => `${Number(ethers.formatUnits(value, 18)).toLocaleString("en-US", { maximumFractionDigits: 2 })} FTH$`,
     stat: (label, value) => ({ label, value }),
-    async json(url) {
-      return url === "/api/v1/stats" ? { bridge: { address, deployed: state.deployed } } : { abi: [] };
-    },
+    async settleBridge() { return { status: "settled" }; },
     async api(url) {
+      if (url !== "/stats") throw new Error(`Unexpected Dollar API path ${url}`);
+      return { monetaryPolicy: { issuanceEnabled: state.issuanceEnabled } };
+    },
+    async requireIssuance() {
+      if (!state.issuanceEnabled) throw new Error("FTH$ issuance is closed.");
+    },
+    async json(url) {
+      return url === "/api/v1/gold/stats" ? { bridge: { address, deployed: state.deployed } } : { abi: [] };
+    },
+    async goldApi(url) {
       if (url !== "/stats") throw new Error(`Unexpected API path ${url}`);
       return { bridge: { address, deployed: state.deployed } };
     },
   };
   vm.runInNewContext(options.wallet ? stakingSource : source, {
+    location: { origin: "http://dollar.localhost:8080" },
     document: { getElementById: node },
     window: {
       FeatheralProfile: profile,
@@ -139,8 +149,8 @@ describe("Dollar bridge admin", () => {
     expect(ui.nodes.depositButton.disabled).to.equal(true);
   });
 
-  it("keeps mature claims available while paused and disables new stakes", async () => {
-    const ui = app({ wallet: true, paused: true, year: 6n });
+  it("keeps legacy mature claims available while paused only when Dollar permits issuance", async () => {
+    const ui = app({ wallet: true, paused: true, year: 6n, issuanceEnabled: true });
     await settle();
     ui.nodes.stakeId.value = "1";
     await ui.submit("claimForm");
@@ -149,12 +159,12 @@ describe("Dollar bridge admin", () => {
   });
 
   it("previews the exact contract simple-interest formula and supported term", async () => {
-    const ui = app({ wallet: true });
+    const ui = app({ wallet: true, y: E("100001.2345") });
     await settle();
     ui.nodes.stakeAmount.value = "10";
     ui.nodes.stakeTerm.value = "2";
     ui.nodes.stakeAmount.input();
-    expect(ui.nodes.stakeQuote.textContent).to.include("1200.0 FTH$");
+    expect(ui.nodes.stakeQuote.textContent).to.include("1,200.01 FTH$");
     expect(ui.nodes.stakeQuote.textContent).to.include("game year 7");
   });
 
@@ -173,7 +183,7 @@ describe("Dollar bridge admin", () => {
     ui.nodes.initialBudget.value = "99999";
     await ui.submit("initializeForm");
     expect(ui.sent).to.deep.equal([]);
-    expect(ui.nodes.bridgeStatus.textContent).to.include("exactly 100000.0");
+    expect(ui.nodes.bridgeStatus.textContent).to.include("exactly 100,000 FTH$");
     ui.nodes.initialBudget.value = "100000";
     await ui.submit("initializeForm");
     expect(ui.sent[0]).to.deep.equal({ method: "initializePool", args: [E(100000)] });
@@ -253,8 +263,8 @@ describe("Dollar bridge admin", () => {
     expect(ui.sent[0]).to.deep.equal({ method: "setGameYear", args: [6n] });
   });
 
-  it("stakes with exact approval and a wallet-derived game account", async () => {
-    const ui = app({ wallet: true });
+  it("stakes with exact approval and a wallet-derived game account when Dollar permits issuance", async () => {
+    const ui = app({ wallet: true, issuanceEnabled: true });
     await settle();
     ui.nodes.stakeAmount.value = "10";
     await ui.submit("stakeForm");
@@ -276,7 +286,7 @@ describe("Dollar bridge admin", () => {
   });
 
   it("rejects unsupported staking terms before approval", async () => {
-    const ui = app({ wallet: true });
+    const ui = app({ wallet: true, issuanceEnabled: true });
     await settle();
     ui.nodes.stakeAmount.value = "10";
     ui.nodes.stakeTerm.value = "3";
@@ -285,8 +295,8 @@ describe("Dollar bridge admin", () => {
     expect(ui.nodes.bridgeStatus.textContent).to.include("Unsupported staking term");
   });
 
-  it("claims only a mature unclaimed stake", async () => {
-    const ui = app({ wallet: true, year: 6n });
+  it("claims only a mature unclaimed stake when Dollar permits issuance", async () => {
+    const ui = app({ wallet: true, year: 6n, issuanceEnabled: true });
     await settle();
     ui.nodes.stakeId.value = "1";
     await ui.submit("claimForm");
@@ -295,6 +305,19 @@ describe("Dollar bridge admin", () => {
     ui.state.position.claimed = true;
     await ui.submit("claimForm");
     expect(ui.nodes.claimButton.disabled).to.equal(true);
+  });
+  it("blocks stakes and mature reward claims under the closed Dollar policy while allowing inspection", async () => {
+    const ui = app({ wallet: true, year: 6n });
+    await settle();
+    expect(ui.nodes.stakeButton.disabled).to.equal(true);
+    ui.nodes.stakeId.value = "1";
+    await ui.submit("claimForm");
+    expect(ui.nodes.claimButton.disabled).to.equal(true);
+    ui.nodes.stakeAmount.value = "10";
+    await ui.submit("stakeForm");
+    await ui.click("claimButton");
+    expect(ui.sent).to.deep.equal([]);
+    expect(ui.nodes.bridgeStatus.textContent).to.include("issuance is closed");
   });
 
   it("does not submit after cancellation or a failed simulation", async () => {

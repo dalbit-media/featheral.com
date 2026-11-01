@@ -1,5 +1,5 @@
 import { chatPing, chatSend, readChat } from './api.ts';
-import { chatHistoryLimit, chatMessageLimit, chatProfileChangedEvent, chatProfileSettingsEvent } from './chat.ts';
+import { chatHistoryLimit, chatMessageLimit, chatProfileChangedEvent, chatProfileSettingsEvent, chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
 import type { ChatInfo, ChatMessage, ChatSubmission } from './chat.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -26,6 +26,9 @@ export class Communicate {
   private messages = new Map<number, ChatMessage>();
   private nodes = new Map<number, HTMLElement>();
   private unread = 0;
+  private readonly visibilityChanged = (): void => {
+    if (this.visible()) { this.list.scrollTop = this.list.scrollHeight; this.clearUnread(); }
+  };
   constructor(root: HTMLElement, csrf: () => string, language: Language, room?: string, title = 'Public chat', privateRoom = false) {
     this.room = room; this.privateRoom = privateRoom;
     this.root = root; this.csrf = csrf; this.language = language;
@@ -53,22 +56,28 @@ export class Communicate {
     });
     root.querySelector('[data-chat-reconnect]')!.addEventListener('click', () => { void this.load(); });
     root.querySelector('[data-chat-latest]')!.addEventListener('click', () => { this.list.scrollTop = this.list.scrollHeight; this.clearUnread(); });
-    this.list.addEventListener('scroll', () => { if (this.atBottom()) this.clearUnread(); });
+    this.list.addEventListener('scroll', () => { if (this.visible() && this.atBottom()) this.clearUnread(); });
+    root.addEventListener(chatVisibilityChangedEvent, this.visibilityChanged);
+    document.addEventListener('visibilitychange', this.visibilityChanged);
     this.timer = setInterval(() => this.composer(), 500);
     void this.load();
   }
   private get input(): HTMLTextAreaElement { return this.root.querySelector<HTMLTextAreaElement>('[data-chat-text]')!; }
   private get list(): HTMLElement { return this.root.querySelector<HTMLElement>('[data-chat-messages]')!; }
   private atBottom(): boolean { return this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 48; }
+  private visible(): boolean { return !document.hidden && this.list.getClientRects().length > 0; }
   private status(text: string, error = false): void {
     const status = this.root.querySelector<HTMLElement>('[data-chat-status]')!;
     status.textContent = translate(text, this.language); status.classList.toggle('error', error);
   }
   private presence(online: number, capacity: number): void {
+    if (!Number.isSafeInteger(online) || online < 0 || !Number.isSafeInteger(capacity) || capacity < online) throw new Error('Invalid chat presence');
     this.root.querySelector('[data-chat-online]')!.textContent = translate(`${online} / ${capacity} online`, this.language);
+    this.root.dispatchEvent(new CustomEvent<number>(chatPresenceChangedEvent, { bubbles: true, detail: online }));
   }
   private stop(): void {
     this.connected = false; this.stream?.close(); this.stream = null; clearInterval(this.pingTimer); this.composer();
+    this.root.dispatchEvent(new CustomEvent<null>(chatPresenceChangedEvent, { bubbles: true, detail: null }));
   }
   private fail(message: string): void {
     if (this.closed) return;
@@ -155,11 +164,17 @@ export class Communicate {
     finally { this.saving = false; this.composer(); if (!this.closed && this.connected) this.input.focus({ preventScroll: true }); }
   }
   private paint(batch: ChatMessage[], reset: boolean): void {
-    const bottom = this.atBottom(), anchor = [...this.list.children].find(node => node.getBoundingClientRect().bottom >= this.list.getBoundingClientRect().top);
+    const bottom = this.visible() && this.atBottom(), anchor = [...this.list.children].find(node => node.getBoundingClientRect().bottom >= this.list.getBoundingClientRect().top);
     const anchorTop = anchor?.getBoundingClientRect().top ?? 0;
-    if (reset) { this.messages.clear(); this.nodes.clear(); this.clearUnread(); }
+    const known = new Set(this.messages.keys());
+    const hadHistory = known.size > 0;
+    if (reset) { this.messages.clear(); this.nodes.clear(); }
     let added = 0;
-    for (const message of batch) { if (!this.messages.has(message.id)) added++; this.messages.set(message.id, message); }
+    for (const message of batch) {
+      if (!known.has(message.id) && message.author !== this.info?.profile?.id && (!reset || hadHistory)) added++;
+      known.add(message.id);
+      this.messages.set(message.id, message);
+    }
     const messages = [...this.messages.values()].sort((a, b) => a.id - b.id).slice(-chatHistoryLimit), retained = new Set(messages.map(message => message.id));
     for (const id of this.messages.keys()) if (!retained.has(id)) { this.messages.delete(id); this.nodes.delete(id); }
     const fragment = document.createDocumentFragment();
@@ -177,14 +192,21 @@ export class Communicate {
     }
     if (!messages.length) { const empty = document.createElement('p'); empty.className = 'chat-empty'; empty.textContent = translate('No messages yet. Start the conversation.', this.language); fragment.append(empty); }
     this.list.replaceChildren(fragment);
-    if (bottom || reset) this.list.scrollTop = this.list.scrollHeight;
+    if (bottom) { this.list.scrollTop = this.list.scrollHeight; this.clearUnread(); }
     else {
       if (anchor?.isConnected) this.list.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
       this.unread += added;
       const latest = this.root.querySelector<HTMLButtonElement>('[data-chat-latest]')!;
       latest.hidden = !this.unread; latest.textContent = translate(`Jump to latest (${this.unread})`, this.language);
+      this.notifyUnread();
     }
   }
-  private clearUnread(): void { this.unread = 0; this.root.querySelector<HTMLElement>('[data-chat-latest]')!.hidden = true; }
-  close(): void { this.attempt++; this.stop(); this.closed = true; clearInterval(this.timer); window.removeEventListener(chatProfileChangedEvent, this.profileChanged); }
+  private notifyUnread(): void { this.root.dispatchEvent(new CustomEvent<number>(chatUnreadChangedEvent, { bubbles: true, detail: this.unread })); }
+  private clearUnread(): void { this.unread = 0; this.root.querySelector<HTMLElement>('[data-chat-latest]')!.hidden = true; this.notifyUnread(); }
+  close(): void {
+    this.attempt++; this.stop(); this.closed = true; clearInterval(this.timer); this.clearUnread();
+    window.removeEventListener(chatProfileChangedEvent, this.profileChanged);
+    this.root.removeEventListener(chatVisibilityChangedEvent, this.visibilityChanged);
+    document.removeEventListener('visibilitychange', this.visibilityChanged);
+  }
 }

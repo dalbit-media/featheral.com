@@ -4,7 +4,7 @@ const paths: Record<string, string> = {
   well: '<ellipse cx="12" cy="16" rx="8" ry="3"/><path d="M4 16v4c0 4 16 4 16 0v-4M6 14V6m12 8V6M3 6l9-4 9 4H3ZM12 6v8"/>',
   rainCollector: '<path d="M4 12h16v6a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4v-6ZM4 16h16M6 2l-1 5m7-5-1 5m7-5-1 5"/>',
   pumpingStation: '<path d="M3 21V10h12v11M1 21h22M7 10V4h10v5h4v8h-4V9h-6v1M6 15h6"/><circle cx="9" cy="18" r="2"/>',
-  communicate: '<path d="M3 5h18v14H3V5ZM3 12h5l2 3h4l2-3h5"/>',
+  communicate: '<path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h6"/>',
   contacts: '<circle cx="9" cy="7" r="3"/><path d="M3 20v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v2"/>',
   world: '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c5 5 5 11 0 16-5-5-5-11 0-16Z"/>',
   compass: '<circle cx="12" cy="12" r="8"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5L16 8Z"/>',

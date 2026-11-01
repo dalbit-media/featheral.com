@@ -4,7 +4,7 @@
 // Uses raw EIP-1193 / JSON-RPC so it works with or without ethers on the page.
 (() => {
   const TOKEN = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
-  const RPC_URL = "https://ethereum-rpc.publicnode.com";
+  const RPC_URL = `${window.location.origin}/api/v1/gold/rpc`;
   const USD_PER_FTHG_ESTIMATE = 0.01;
   const AVATAR_SIZE = 160;
   const MAX_AVATAR_BYTES = 40 * 1024;
@@ -26,6 +26,7 @@
   let adminCheck = 0;
   let adminConfig;
   let moderators;
+  let inlineProfileKey;
   const getProvider = () => selectedProvider;
 
   function addWallet(provider, name) {
@@ -242,7 +243,7 @@
   async function loadProfile() {
     if (!state.account) return;
     const account = state.account;
-    const response = await fetch(`/api/v1/profiles/${account}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    const response = await fetch(`/api/v1/dollar/profiles/${account}`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`World profile HTTP ${response.status}`);
     const body = await response.json();
     if (account.toLowerCase() !== state.account.toLowerCase()) return;
@@ -250,7 +251,7 @@
   }
 
   async function loadWallet(account) {
-    const response = await fetch(`/api/v1/wallets/${account}`, { headers: { accept: "application/json" }, cache: "no-store" });
+    const response = await fetch(`/api/v1/dollar/wallets/${account}`, { headers: { accept: "application/json" }, cache: "no-store" });
     if (!response.ok) throw new Error(`FTH$ ledger HTTP ${response.status}`);
     return response.json();
   }
@@ -299,11 +300,12 @@
     } else if (img) {
       img.remove();
     }
+    renderInlineProfile();
   }
 
   function closePanel() {
     state.open = false;
-    state.pendingAvatar = undefined;
+    if (!options.profileRoot) state.pendingAvatar = undefined;
     panel.hidden = true;
     button.setAttribute("aria-expanded", "false");
     document.removeEventListener("keydown", onKey);
@@ -315,17 +317,14 @@
   }
 
   function setStatus(text, kind = "") {
-    const status = panel.querySelector(".wp-status");
+    const status = (options.profileRoot || panel).querySelector(".wp-status");
     if (!status) return;
     status.textContent = text;
     status.dataset.kind = kind;
   }
 
-  function renderPanel() {
-    if (!state.open) return;
-    const fthg = state.balances?.fthg;
-    const eth = state.balances?.eth;
-    const value = (raw, fmt) => (raw === null || raw === undefined ? "—" : fmt(raw));
+  function profileEditor() {
+    const editorAccount = state.account;
     const preview = el("img", { className: "wp-preview", src: avatarFor(), alt: "Avatar preview", width: 72, height: 72 });
     const fileInput = el("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif", hidden: true });
     const usernameInput = el("input", {
@@ -342,7 +341,9 @@
       fileInput.value = "";
       if (!file) return;
       try {
-        state.pendingAvatar = await resizeAvatar(file);
+        const avatar = await resizeAvatar(file);
+        if (state.account !== editorAccount) throw new Error("Wallet changed. Select your avatar again.");
+        state.pendingAvatar = avatar;
         preview.src = avatarFor();
         setStatus("New avatar ready. Save to publish it.");
       } catch (error) {
@@ -353,6 +354,7 @@
     saveButton.addEventListener("click", async () => {
       saveButton.disabled = true;
       try {
+        if (state.account !== editorAccount) throw new Error("Wallet changed. Review your profile again.");
         await saveProfile(usernameInput.value.trim());
         preview.src = avatarFor();
       } catch (error) {
@@ -361,6 +363,45 @@
         saveButton.disabled = false;
       }
     });
+    return [
+      el("div", { className: "wp-avatar-row" },
+        preview,
+        el("div", { className: "wp-avatar-actions" },
+          (() => { const b = el("button", { type: "button", textContent: "Upload avatar" }); b.addEventListener("click", () => fileInput.click()); return b; })(),
+          (() => {
+            const b = el("button", { type: "button", className: "wp-link", textContent: "Use default" });
+            b.addEventListener("click", () => { state.pendingAvatar = ""; preview.src = identicon(state.account); setStatus("Default avatar selected. Save to publish it."); });
+            return b;
+          })(),
+          el("small", { textContent: "PNG, JPEG, WebP, or GIF. Cropped to a square." }),
+        ), fileInput),
+      el("label", { className: "wp-field" }, el("span", { textContent: "Username" }), usernameInput),
+      el("small", { className: "wp-hint", textContent: "3–24 letters, numbers, _ . or -. Usernames are unique." }),
+      saveButton,
+      el("p", { className: "wp-status", role: "status" }),
+      el("p", { className: "wp-fine", textContent: "Saving asks for a free wallet signature, not an Ethereum transaction. Your profile and avatar are public and recorded on the shared Featheral Dollar ledger." }),
+    ];
+  }
+  function renderInlineProfile() {
+    const root = options.profileRoot;
+    if (!root) return;
+    const key = `${state.account.toLowerCase()}:${state.profile?.username || ""}:${state.profile?.avatar || ""}`;
+    if (key === inlineProfileKey) return;
+    inlineProfileKey = key;
+    if (!state.account) {
+      const connect = el("button", { type: "button", className: "wp-primary", textContent: "Connect wallet to set up profile" });
+      connect.addEventListener("click", onButtonClick);
+      root.replaceChildren(el("p", { textContent: "Choose a recognizable avatar and username for community posts and game chat. You can skip this and start exploring." }), connect);
+      return;
+    }
+    root.replaceChildren(...profileEditor());
+    if (!state.profile) setStatus("No profile yet. Pick a username and avatar.");
+  }
+  function renderPanel() {
+    if (!state.open) return;
+    const fthg = state.balances?.fthg;
+    const eth = state.balances?.eth;
+    const value = (raw, fmt) => (raw === null || raw === undefined ? "—" : fmt(raw));
     const wrongNetwork = state.chainId && state.chainId !== 1;
     const copyButton = el("button", { type: "button", className: "wp-link", textContent: "Copy" });
     copyButton.addEventListener("click", async () => {
@@ -416,24 +457,8 @@
         el("small", { textContent: state.balances?.checkedAt ? `Balances read ${state.balances.checkedAt.toLocaleTimeString()} (Mainnet + FTH$ ledger)` : "Reading balances…" }),
         refreshButton,
       ),
-      el("h4", { textContent: "Profile" }),
-      el("div", { className: "wp-avatar-row" },
-        preview,
-        el("div", { className: "wp-avatar-actions" },
-          (() => { const b = el("button", { type: "button", textContent: "Upload avatar" }); b.addEventListener("click", () => fileInput.click()); return b; })(),
-          (() => {
-            const b = el("button", { type: "button", className: "wp-link", textContent: "Use default" });
-            b.addEventListener("click", () => { state.pendingAvatar = ""; preview.src = avatarFor(); setStatus("Default avatar selected. Save to publish it."); });
-            return b;
-          })(),
-          el("small", { textContent: "PNG, JPEG, WebP, or GIF. Cropped to a square." }),
-        ),
-        fileInput,
-      ),
-      el("label", { className: "wp-field" }, el("span", { textContent: "Username" }), usernameInput),
-      el("small", { className: "wp-hint", textContent: "3–24 letters, numbers, _ . or -. Usernames are unique." }),
-      saveButton,
-      el("p", { className: "wp-status", role: "status" }),
+      ...(options.profileRoot || options.profileUrl ? [el("a", { className: "wp-open-wallet", href: options.profileUrl || "#/setup", target: options.profileUrl ? "_blank" : "", rel: options.profileUrl ? "noopener" : "", textContent: "Edit avatar & profile on Getting started", onclick: closePanel })]
+        : [el("h4", { textContent: "Profile" }), ...profileEditor()]),
       el("div", { className: "wp-footer" },
         el("p", { className: "wp-fine", textContent: "Saving asks your wallet for a free signature (no transaction). Profiles are public and recorded on the Featheral Dollar L3 ledger." }),
         (() => {
@@ -445,7 +470,7 @@
         })(),
       ),
     ].filter(Boolean));
-    if (!state.profile) setStatus("No profile yet. Pick a username and avatar.");
+    if (!options.profileRoot && !options.profileUrl && !state.profile) setStatus("No profile yet. Pick a username and avatar.");
   }
 
   function readImage(file) {
@@ -481,16 +506,20 @@
     const avatar = state.pendingAvatar !== undefined ? state.pendingAvatar : state.profile?.avatar || "";
     const issuedAt = new Date().toISOString();
     setStatus("Waiting for your wallet signature…");
+    const provider = getProvider();
     const message = await profileMessage({ address, username, avatar, issuedAt });
-    const signature = await getProvider().request({ method: "personal_sign", params: [toHexUtf8(message), state.account] });
+    if (state.account.toLowerCase() !== address.toLowerCase() || getProvider() !== provider) throw new Error("Wallet changed. Review your profile again.");
+    const signature = await provider.request({ method: "personal_sign", params: [toHexUtf8(message), address] });
+    if (state.account.toLowerCase() !== address.toLowerCase() || getProvider() !== provider) throw new Error("Wallet changed. Review your profile again.");
     setStatus("Saving to the shared ledger…");
-    const response = await fetch("/api/v1/profiles", {
+    const response = await fetch("/api/v1/dollar/profiles", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ address, username, avatar, issuedAt, signature }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error || `Profile save failed (HTTP ${response.status}).`);
+    if (state.account.toLowerCase() !== address.toLowerCase()) throw new Error("Profile was saved for the previous wallet. Refresh that wallet to view it.");
     state.profile = body.profile;
     state.pendingAvatar = undefined;
     emit();
@@ -613,11 +642,12 @@
   function mount(target, mountOptions = {}) {
     button = target;
     options = mountOptions;
+    if (!options.profileRoot && !options.profileUrl && window.FeatheralSites?.current === "world") options = { ...options, profileUrl: "/#/setup" };
     button.innerHTML = '<svg class="wp-avatar-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>';
     button.setAttribute("aria-haspopup", "dialog");
     button.setAttribute("aria-expanded", "false");
     const headerNav = button.closest("header.top nav");
-    if (headerNav) {
+    if (headerNav && !headerNav.querySelector('a[href="/admin/"]')) {
       adminLink = el("a", { href: "/admin/", textContent: "Admin", className: "admin-nav", hidden: true });
       if (window.location.pathname === "/admin/" || window.location.pathname === "/admin/index.html") adminLink.setAttribute("aria-current", "page");
       headerNav.insertBefore(adminLink, headerNav.querySelector("[data-play-launch]") || button);

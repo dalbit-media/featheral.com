@@ -5,11 +5,11 @@
 
 **Status:** Research draft and playable prototype. Not a token offering.
 
-**Main currency:** Featheral Dollar (FTH$). **Gold:** Featheral Gold (FTHG), a separate off-chain balance for a future Ethereum-linked token.
+**Main currency:** Featheral Dollar (FTH$), recorded on the authoritative Dollar ledger. **Gold:** Featheral Gold (FTHG), the actual Ethereum Mainnet token at `0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665`.
 
-**Intended network:** Ethereum. No deployment exists.
+**Network:** Ethereum Mainnet. The separate bridge requires operator deployment, funding and configuration.
 
-> Featheral is a single-player simulation with a server-backed mock economy. It is not a live DAO, investment product, source of monetary rewards, or system of real-world political authority. All game balances, residents, markets, votes, and rewards are simulated.
+> Featheral gameplay and governance are simulations, not a live DAO or political authority. Resources, residents and votes are virtual, but authorized gameplay spends actual FTH$ from the Dollar ledger and FTHG remains on Ethereum. This is not an investment product or a promise of monetary returns.
 
 ## 1. The idea
 
@@ -59,7 +59,7 @@ Settlement management is **single-player**, not live cooperative multiplayer. Th
 
 Each upgrade also consumes resources. The simulator lists its exact costs.
 
-Joining Evergreen Union requires at least a Village and 50 relationship points. A goodwill shipment costs 4 m³ of timber and 0.3 m³ of Water and adds 25 relationship points, up to 100.
+Joining Evergreen Union requires at least a Village and 50 relationship points. A goodwill shipment costs 2,000 kg of timber and 300 L of Water and adds 25 relationship points, up to 100.
 
 Founding the named mock Verdant Federation requires at least a City, **strictly more than 10,000 residents**, and 50 t of Metal. Founding is not a contract deployment.
 
@@ -71,45 +71,51 @@ The standalone `/play/market/` exchange has **53 markets**: four raw resources, 
 
 Card browsing highlights artwork, category, holdings and separate Buy/Sell FTH$ quotes. Missing offers are labelled rather than shown as fictitious prices. Account opens **Featheral Bank** (`/play/bank/`) from its FTHG card; Gold conversion is no longer embedded in the marketplace.
 
-### Featheral Bank: funded long-term staking
+### Wallet and staking
 
-Stake FTHG for **1, 2, 5, 10, 20 or 30 game years** and receive FTH$ simple interest. A year is exactly 52 game weeks: 6 real days 1 hour 36 minutes at production speed, or 7 hours 16 minutes 48 seconds at development 20x speed. Real-time duration and estimated maturity are displayed; saved game-time deadlines are unaffected by later clock-speed changes.
+**Closed issuance policy:** new FTHG conversions, new stakes and reward claims are disabled in the wallet because Dollar no longer credits new FTH$. Existing Ethereum stakes remain inspectable. This policy does not change a deployed contract or transfer any origin-wallet FTHG; externally submitted conversions/claims must not be treated as settled Dollar funds.
 
-At deposit, the current Gold-pool reference ratio determines a fixed FTH$ valuation, rounded down to 0.0001. Interest is `floor(valuation subunits × APR basis points × years / 10,000)`; it does not compound. The valuation, approved APR, principal, total interest and term must match the reviewed quote exactly. Existing positions never change when exchange prices or council rates change.
+**Isolated finite-reserve prototype:** Gold alone authorizes initial reserve allocations at **1 FTHG = 1,000 FTH$**, capped permanently by verified finalized origin-wallet holdings. Dollar spends system treasury funds first and allocates only the deficit for one-time funding of each eligible market, up to 10,000 accounting lots at its pinned base price. This is opt-in testing in separate journals, not a live migration. Off-chain obligations are not Ethereum transfers. Pending backing cannot redeem; redeemed FTH$ stays locked until confirmed returned FTHG is reconverted using those same Dollars, with no new supply. Gold's conversion page offers a strongly warned sync preview and finalized receipt reconciliation, never automatic Mainnet submissions. New players receive no FTH$. Market prices remain dynamic, and finite reserves do not guarantee stable prices or endless liquidity.
 
-Server-appointed councillors set APR through strict-majority votes, with one vote per member and the proposer initially voting yes. Rates range from 0% to 100% in 0.01% increments. A membership change cancels pending proposals; new rates apply only to new deposits. No configured council, no approved positive rate or insufficient funding means staking is unavailable.
+**Authorized live mode:** after backup and operator approval, an unused zero-supply Dollar ledger can activate this model through an append-only signed policy block. Existing genesis and settlements remain intact. Established players obtain FTH$ by selling resources into one-time funded markets. Live off-chain allocations still do not submit Ethereum transfers or permit redemption of unconfirmed backing.
 
-Rewards come only from irrevocable voluntary donations of **existing FTH$**. Full-term interest is reserved before acceptance, separately from FTHG principal. At maturity, the owner claims original FTHG and reserved FTH$ atomically. There is no early withdrawal, new currency issuance or use of principal to pay interest. Bank rewards and locked principal remain included in currency-supply accounting.
+World embeds the real Dollar wallet at `/play/bank/`. Its Ethereum bridge supports FTHG staking for **1, 2, 5, 10, 20 or 30 game years**, with simple-interest FTH$ rewards and a spot-price lock at stake time. The deployed contract and its authorized game-service clock determine maturity; browser time and local gameplay speed do not advance that clock.
 
-This is in-game staking, not an Ethereum transaction or a guarantee of real-money returns. Unclaimed positions and councillors are protected from ordinary session cleanup; bank visits renew a 400-day browser cookie. Clearing this anonymous browser identity can lose access: exported records are not authentication or recoverable balances.
+Gold API owns Ethereum reads. Ethereum approvals, conversion, staking and claims require the selected wallet's explicit signature. Confirmed conversion and reward events are settled on the Dollar ledger by unique transaction/log ID; a submitted transaction is not a settled FTH$ balance.
+
+There is no simulated Gold balance, local bank council, or local staking treasury. Bridge reserve funding, APR administration and game-clock updates require their actual on-chain roles. The separate bridge must be deployed, funded and configured before these features are available.
+
+Account's **Use wallet for gameplay** authorizes spending from the same Dollar wallet. FTH$ displays at most two decimals, gameplay accounts at four decimals, and the native journal retains 18-decimal amounts. Smaller wallet dust remains untouched. Disconnect or revoke removes the browser spending capability; a new wallet signature restores the same saved settlement.
+
+FTH$ is not USD, a fiat deposit or a promise of cash redemption. FTH$ to FTHG redemption remains an authorized service flow, not an unrestricted public withdrawal form. Mainnet transactions involve gas, price impact and contract risk; no return is guaranteed.
 
 ### Marketplace order rules and Gold conversion
 
-Player limit orders use price-time priority and cannot match themselves. Constant-product pools provide additional liquidity with a 1% spread per side. Exact BigInt arithmetic rounds buys up and sells down to 0.0001 FTH$. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Initial pools hold 100,000 accounting lots per raw resource and 1,000 pieces per item, with reference-price FTH$ reserves. Metal starts at FTH$200/t before spread, not a peg. These finite simulated reserves have no real financial backing.
+Player limit orders use price-time priority and cannot match themselves. Constant-product pools provide additional liquidity with a 1% spread per side. Exact BigInt arithmetic rounds buys up and sells down to 0.0001 FTH$; displays cap at two decimals. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Every pool starts empty. Owners may permanently donate existing assets and existing Dollar wallet funds; gameplay never creates liquidity.
 
-Buy orders escrow FTH$ and sell orders escrow owned assets. Partial fills retain unfilled escrow; cancellation returns it. Item bids and asks reserve inventory slots. The limit is 50 open orders per session; orders expire with the seven-day session. Resource orders accept 1–10,000 accounting lots: timber 0.1–1,000 m³ in 0.1 m³ increments, Water 0.01–100 m³ and Metal 0.01–100 t in 0.01 increments, Oil 1–10,000 bbl. Liquid items use whole pieces; unique collectibles use one piece. Limit prices retain FTH$0.0001–1,000,000 per accounting lot; displayed per-unit prices and ticks are multiplied by lots per unit (10 for timber, 100 for Water/Metal, 1 for Oil/items). Charts show the latest 120 real executions, never fabricated history. Quotes refresh every five seconds. SQLite persists both accounts, escrow, reserves, trades and idempotent receipts atomically.
+Buy orders escrow FTH$ and sell orders escrow owned assets. Partial fills retain unfilled escrow; cancellation returns it. Item bids and asks reserve inventory slots. The limit is 50 open orders per session; orders expire with the seven-day session. Resource orders accept 1–10,000 accounting lots: timber 50–500,000 kg in 50 kg increments, Water 10–100,000 L in 10 L increments, Metal 0.01–100 t in 0.01 t increments, Oil 1–10,000 bbl. Liquid items use whole pieces; unique collectibles use one piece. Limit prices retain FTH$0.0001–1,000,000 per accounting lot; displayed per-unit prices and ticks are multiplied by lots per unit (0.02 for timber, 0.1 for Water, 100 for Metal, 1 for Oil/items). Charts show the latest 120 real executions, never fabricated history. Quotes refresh every five seconds. SQLite persists both accounts, escrow, reserves, trades and idempotent receipts atomically.
 
-FTH$ and Featheral Gold (FTHG) are separate balances, each stored as 10,000 integer subunits per unit. APIs expose ordinary amounts, not subunits. Gold remains the future Ethereum-linked token concept, not the marketplace quote currency. A separate reserve pool buys and sells fractional Gold (0.0001–10,000), with a live reference rate, 1% spread per side and 2% confirmation protection. A fresh world's pool starts with 1,000 Gold and FTH$1,000,000: FTH$1,000 per Gold before spread. Trades move the rate and retain fees in the pool. An existing world preserves its former market Gold reserves in this pool and seeds the corresponding FTH$ reserve at the same initial reference rate.
+World has no Gold exchange pool. Actual FTHG conversion and staking belong to Ethereum and Gold API; FTH$ belongs to Dollar API. The game uses only existing Dollar wallet, market-pool and escrow balances.
 
-The version-4 migration converts owned and pending Lithium to FTH$ 1:1, preserves existing Gold wallets, cancels old Gold orders and refunds Gold buy escrow or original sell assets. Paid resource work and expedition deadlines remain; Lithium crews and allocations are removed. Historical Gold pools, orders, fills and receipts are archived in `legacy_gold_market_*`, never relabelled as FTH$ trades. Weekly income is disabled under the subsequent no-mint rules. Stale receipts and revisions are invalidated. Invalid balances or orphan escrow roll back the whole transaction; restart never refunds twice.
+The zero-start model refuses legacy simulated Gold/bank databases rather than converting old balances into real funds. Back up the game database, signing key and Dollar journal together. Local reset cannot reset deployed Ethereum contracts.
 
 ### Finite FTH$ balances and spending
 
 New players and founding settlements start with **FTH$0**. Residents, banks, commercial buildings and exploration never grant FTH$, including offline time and previously dispatched expeditions. Existing balances, buildings, paid work and receipts remain intact; there are no retroactive refunds. The no-mint rule invalidates stale new action revisions once.
 
-Recruitment still costs **FTH$50 per arriving resident**. Exploration still costs FTH$ by distance/difficulty but rewards discovery and collectibles, not currency. Transport and upgrades consume FTH$. Marketplace sales transfer existing player escrow or pool reserves into the seller's wallet; Gold exchanges transfer existing reserves. Initial market reserves are provisioned once and never replenished by gameplay. No action mints new FTH$, and fixed-price legacy trades and global currency reward claims are disabled.
+Recruitment costs **FTH$50 per arriving resident**. Exploration costs FTH$ by distance/difficulty but rewards discovery and collectibles, not currency. Transport and upgrades consume FTH$. Marketplace sales transfer player escrow or funded pool reserves into the seller's Dollar wallet. Default live pools have no automatic bootstrap. The isolated reserve prototype permits one-time Gold-authorized bootstrap only; no game action independently mints FTH$.
 
-Commercial buildings retain their ownership, placement and material/FTH$ construction costs, but generate no income: Market stall (Camp; 8 m³ timber + 0.4 t Metal + FTH$200), Commercial workshop (Neighborhood; 20 m³ timber + 1 t Metal + FTH$600), Trade hub (Town; 50 m³ timber + 3 t Metal + FTH$1,800). The bank still unlocks Oil collection and resource trading. FTH$ is simulated game currency, not USD or an on-chain token; cash withdrawals are disabled.
+Commercial buildings retain their ownership, placement and material/FTH$ construction costs, but generate no income: Market stall (Camp; 4,000 kg timber + 0.4 t Metal + FTH$200), Commercial workshop (Neighborhood; 10,000 kg timber + 1 t Metal + FTH$600), Trade hub (Town; 25,000 kg timber + 3 t Metal + FTH$1,800). The city-bank building still unlocks Oil collection and resource trading; it does not manage funds. FTH$ is an off-chain ledger currency, not USD or an on-chain token.
 
 **Settlement → Sell resources** is available immediately after founding, without a bank or commercial building. Review the live spot quote to sell `floor(owned / 2)` of every raw resource in one confirmation. Pending stock and sell-order escrow are excluded; zero quantities are skipped. Exact halves above 10,000 units are supported. Each resource retains the conservative 2% minimum-proceeds protection and existing market spread. One atomic transaction sells everything or nothing, including player orders, pool movements and fills; retries cannot sell twice. Selling Water can reduce upkeep reserves, so review the Water warning before confirming.
 
 ### Permanent monetary policy, version 1
 
-After the one-time reserve bootstrap, FTH$ is never issued. Gameplay payments are **permanent burns**, not treasury deposits. Trades only transfer existing wallet, escrow and pool balances; pool spreads stay in the reserves. Advanced play can eventually exhaust currency or liquidity. Free basic gathering and non-destructive shortages keep residents and basic activity available, but do not promise endless monetary funding.
+FTH$ issuance is closed, including new bridge conversion and staking-reward credits. Gameplay payments transfer to the **system treasury** without changing supply; historical burns replay unchanged. Trades transfer existing wallet, escrow and pool balances; pool spreads stay in reserves. All market pools start empty and require permanent voluntary donations of owned assets and existing FTH$. Donations grant no liquidity shares or withdrawal rights. Demand raises marginal buy prices along the existing constant-product curve. A zero-supply ledger cannot fund liquidity without restoring existing funds.
 
-Resource and Gold pools share one integer constant-product rule. With currency reserve R, asset reserve S and quantity q: buys pay `ceil(R*q*101 / (100*(S-q)))`; sells receive `floor(R*q*99 / (100*(S+q)))`. R is in 10,000 FTH$ subunits; Gold uses subunits for S and q, while resources use whole units. Orders retain 2% quote protection. Player orders keep price-time priority. Market prices can change without changing this formula.
+Resource and item pools use one integer constant-product rule. With currency reserve R, asset reserve S and quantity q: buys pay `ceil(R*q*101 / (100*(S-q)))`; sells receive `floor(R*q*99 / (100*(S+q)))`. R is in 10,000 FTH$ subunits; S and q are asset accounting units. Orders retain 2% quote protection and player orders keep price-time priority. Ethereum bridge pricing is separate.
 
-The policy constants and fingerprint are persisted alongside the measured initial supply. Startup refuses changed policy settings or holdings above that supply ceiling. New or missing markets after bootstrap start with zero system reserves, never newly issued FTH$; player orders remain available. This is an off-chain operational safeguard, not cryptographic immutability against future administrators.
+Gameplay policy constants and their fingerprint are persisted and checked at startup. Signed Dollar `GAME` entries verify conservation, burns and available balances; a durable SQLite outbox recovers interrupted journal settlement exactly once. Pending settlement blocks further fund mutations until recovery. This remains an operational safeguard, not protection against a compromised authorized game service.
 
 ### Eight-level useful constructions
 
@@ -117,10 +123,10 @@ All materials and FTH$ below multiply by the **target level**, up to level 8. Ef
 
 | Construction | Unlock | Level-one materials and FTH$ | Benefit per level |
 |---|---|---|---|
-| Residential quarter | Settlement | 6 m³ timber + 0.2 m³ Water + 0.1 t Metal + FTH$300 | Future recruitment batch +25%; no new population cap |
-| Water reservoir | Settlement | 8 m³ timber + 0.3 t Metal + FTH$380 | One additional population-scaled week of Water capacity, including 50% hot-weather reserve |
-| Commercial workshop | Neighborhood | 20 m³ timber + 1 t Metal + FTH$600 | Wood, Metal and Oil yield +25% |
-| Trade hub | Town | 50 m³ timber + 3 t Metal + FTH$1,800 | Effective collection distance reduced by two tiles |
+| Residential quarter | Settlement | 3,000 kg timber + 200 L Water + 0.1 t Metal + FTH$300 | Future recruitment batch +25%; no new population cap |
+| Water reservoir | Settlement | 4,000 kg timber + 0.3 t Metal + FTH$380 | One additional population-scaled week of Water capacity, including 50% hot-weather reserve |
+| Commercial workshop | Neighborhood | 10,000 kg timber + 1 t Metal + FTH$600 | Wood, Metal and Oil yield +25% |
+| Trade hub | Town | 25,000 kg timber + 3 t Metal + FTH$1,800 | Effective collection distance reduced by two tiles |
 
 Existing workshops and trade hubs count as level 1 without repurchase. Facilities never grant currency. Sustainable identity, session retention, sharding, moderation and large-scale social services are **deferred**; the current seven-day anonymous sessions, 10,000-session limit and 1,000-chat limit are not billion-user infrastructure.
 
@@ -128,7 +134,7 @@ Existing workshops and trade hubs count as level 1 without repurchase. Facilitie
 
 Every settlement upgrade after founding requires materials and FTH$. The fees are Camp FTH$200, Neighborhood FTH$300, Village FTH$400, Town FTH$500, District FTH$600, City FTH$700, Metropolis FTH$800 and Capital FTH$800 (its existing fee is retained). Founding has no FTH$ fee. Resource warehouses add FTH$50 × new level; item storage adds FTH$100 × new level, alongside existing materials.
 
-Other buildings and visibility equipment without an existing FTH$ price add their material reference value: timber FTH$40/m³, Water FTH$200/m³, Metal FTH$200/t and Oil FTH$24/bbl (equivalent to the preserved 4/2/2/24 FTH$ accounting-lot references). Thus banks cost an additional FTH$3,200; town halls FTH$1,500; wells FTH$280; rain collectors FTH$570; pumping stations FTH$1,140; campfire kits FTH$70; torches FTH$120; lamps FTH$320. Existing income-building FTH$ costs and the lantern's FTH$4 remain unchanged. Already-owned upgrades are preserved, and moving or equipping owned items is free.
+Other buildings and visibility equipment without an existing FTH$ price add their material reference value: timber FTH$0.08/kg, Water FTH$0.20/L, Metal FTH$200/t and Oil FTH$24/bbl (equivalent to the preserved 4/2/2/24 FTH$ accounting-lot references). Thus banks cost an additional FTH$3,200; town halls FTH$1,500; wells FTH$280; rain collectors FTH$570; pumping stations FTH$1,140; campfire kits FTH$70; torches FTH$120; lamps FTH$320. Existing income-building FTH$ costs and the lantern's FTH$4 remain unchanged. Already-owned upgrades are preserved, and moving or equipping owned items is free.
 
 Construct a market stall, trade hub or city bank to unlock **Sell resources for FTH$** in Settlement → Buildings and Production. Choose a physical quantity or Max, check the live spot total, then review and confirm. Only owned, claimed resources can be sold, up to 10,000 accounting lots per order. Settlement sales use the same marketplace endpoint, player-order/pool matching, 1% pool spread and conservative 2% price protection; banks never invent a fixed sale price. New gathering waits for paid pickup unless funded automatic collection is active. The full marketplace remains accessible before constructing these buildings.
 
@@ -144,27 +150,27 @@ The gatherable resources are wood, water, metal and oil. FTH$ and Gold are balan
 
 | Resource | Trading / storage unit | One exact accounting lot |
 |---|---|---|
-| Timber | m³ | 0.1 m³ |
-| Water | m³ | 0.01 m³ = 10 L |
+| Timber | kilogram (kg) | 50 kg |
+| Water | liter (L) | 10 L |
 | Generic Metal | metric tonne (t) | 0.01 t = 10 kg |
 | Oil | barrel (bbl) | 1 bbl = 158.987294928 L |
 
-The petroleum barrel is [42 US gallons](https://www.eia.gov/tools/glossary/index.php?id=B). One metric tonne is 1,000 kg; one m³ is 1,000 L. Prices are FTH$ per displayed commodity unit, not per hidden lot. Inputs accept whole accounting lots: 0.1 m³ timber, 0.01 m³ Water, 0.01 t Metal, or 1 bbl Oil. Items remain counted in pieces. These are real-world units with playable, simplified infrastructure budgets, not literal industrial engineering or real commodity contracts; generic Metal does not represent a quoted steel, copper or lithium grade, and FTH$ is not USD.
+The petroleum barrel is [42 US gallons](https://www.eia.gov/tools/glossary/index.php?id=B). One metric tonne is 1,000 kg. Wood uses a fixed game conversion of 500 kg per former m³, not a universal timber density. Prices are FTH$ per displayed commodity unit, not per hidden lot. Inputs accept whole accounting lots: 50 kg timber, 10 L Water, 0.01 t Metal, or 1 bbl Oil. Items remain counted in pieces. These are real-world units with playable, simplified infrastructure budgets, not literal industrial engineering or real commodity contracts; generic Metal does not represent a quoted steel, copper or lithium grade, and FTH$ is not USD.
 
-Physical model version 1 assigns these exact lot sizes without rescaling stored integers. Stocks, pending fractions, pool quantities, orders, prices, escrow, currency and receipts retain their economic value. Displayed quantities divide by lots per unit while displayed prices multiply by the same factor. Initial raw pools therefore contain 10,000 m³ timber, 1,000 m³ Water, 1,000 t Metal and 100,000 bbl Oil. Monetary-policy version 1 and its fingerprint are unchanged. Migration records a cutover timestamp; earlier work uses its saved terms, and completed actions are not replayed.
+Physical model version 1 retains stored integers. Stocks, pending fractions, pool quantities, orders, prices, escrow, currency and receipts retain their economic value. Displayed quantities divide by lots per unit while displayed prices multiply by the same factor. Historical 100,000-lot raw pools correspond to 5,000,000 kg timber, 1,000,000 L Water, 1,000 t Metal and 100,000 bbl Oil. Monetary-policy version 1 and its fingerprint are unchanged. Migration records a cutover timestamp; earlier work uses its saved terms, and completed actions are not replayed. The kg/L display change requires no save migration.
 
 There is **no passive resource production**. After settling, residents are automatically allocated by resource, not individual tiles. All explored resources are connected using the best net-value route from the settlement; ties favor shorter routes. Each resident has one job, with two residents reserved for expeditions. One crew per resource delivers every **seven world days**. Baseline weekly yields per resident are:
 
 | Resource | Production |
 |---|---|
-| Wood | 10 m³ multiplied by tier number and site yield |
-| Water | 6 m³ multiplied by tier number and site yield |
+| Wood | 5,000 kg multiplied by tier number and site yield |
+| Water | 6,000 L multiplied by tier number and site yield |
 | Metal | 1 t multiplied by tier number and site yield |
 | Oil | 14 bbl multiplied by tier number and site yield, with a city bank |
 
-Settlement is tier number 1. Terrain efficiency ranges from 80% to 180%; federation metal crews receive a further 20%. New work additionally applies season, weather and temperature factors averaged over all eight daily weather windows in seven calendar days. Output is rounded down to whole accounting lots per worker, not whole m³ or tonnes, and locked when the work week starts. Production is real-world-inspired rather than a claim about actual national industrial productivity.
+Settlement is tier number 1. Terrain efficiency ranges from 80% to 180%; federation metal crews receive a further 20%. New work additionally applies season, weather and temperature factors averaged over all eight daily weather windows in seven calendar days. Output is rounded down to whole accounting lots per worker, not whole displayed units, and locked when the work week starts. Production is real-world-inspired rather than a claim about actual national industrial productivity.
 
-New games receive 18 m³ timber, 25.6 m³ Water and 0.8 t Metal, leaving 25.2 m³ Water after founding for 12 residents. FTH$ starts at zero. Sell owned resources or collect-and-sell completed production to fund transportation. Every crew pays transport at pickup; there is no free-transport allowance for new jobs. Water storage scales to at least two population-weeks with a 50% hot-weather reserve.
+New games receive 9,000 kg timber, 25,600 L Water and 0.8 t Metal, leaving 25,200 L Water after founding for 12 residents. FTH$ starts at zero. Sell owned resources or collect-and-sell completed production to fund transportation. Every crew pays transport at pickup; there is no free-transport allowance for new jobs. Water storage scales to at least two population-weeks with a 50% hot-weather reserve.
 
 Automatic allocation targets **50% total utilization**, rounded down, including residents already exploring. New gathering is limited to `max(0, min(floor(population / 2) - active explorers, population - max(2, active explorers)))` residents. Population-scaled Water storage and growth materials take priority within that budget. Explorers at or above the target pause new gathering, not paid expeditions. Gathering can start without FTH$, but completed production cannot be taken into inventory until its transport is paid. Automation of allocation is separate from item-enabled auto-collection. Workers need a whole game week; selling resources transfers existing marketplace FTH$ rather than creating money.
 
@@ -174,17 +180,17 @@ After priority crews are allocated, extra gathering fills only the remaining 50%
 
 After founding, build any of these permanent facilities once in Settlement → Buildings, using owned Wood, Metal and the FTH$ upgrade fees listed above:
 
-| Facility | Wood (m³) | Metal (t) | FTH$ | Additional base Water output |
+| Facility | Wood (kg) | Metal (t) | FTH$ | Additional base Water output |
 |---|---:|---:|---:|---:|
-| Well | 6 | 0.2 | 280 | +100% |
-| Rain collector | 12 | 0.45 | 570 | +200% |
-| Pumping station | 24 | 0.9 | 1,140 | +400% |
+| Well | 3,000 | 0.2 | 280 | +100% |
+| Rain collector | 6,000 | 0.45 | 570 | +200% |
+| Pumping station | 12,000 | 0.9 | 1,140 | +400% |
 
 Water facility bonuses are additive: all three give 8x Water output per assigned resident, combined with tier and terrain before rounding. They need a discovered site and residents, have no extra upkeep, and apply only to new full-week crews. Warehouses and reservoirs provide room for the output; moving facilities does not change effects.
 
 ### Population Water upkeep
 
-Household Water starts at **50 L/person/game day**, or 0.35 m³ per week, a playable service-level target informed by [WHO domestic water guidance](https://www.who.int/publications/i/item/9789240015241), not a universal household average. Demand increases with summer, heat and sunny hot weather, up to a 1.45x multiplier before aggregate rounding up to the next 10 L lot. Daily bills average all eight weather periods. Owned Water alone pays consumption; debt is never created. Shortages pause advanced activity without removing residents or cancelling paid jobs.
+Household Water starts at **50 L/person/game day**, or 350 L per week, a playable service-level target informed by [WHO domestic water guidance](https://www.who.int/publications/i/item/9789240015241), not a universal household average. Demand increases with summer, heat and sunny hot weather, up to a 1.45x multiplier before aggregate rounding up to the next 10 L lot. Daily bills average all eight weather periods. Owned Water alone pays consumption; debt is never created. Shortages pause advanced activity without removing residents or cancelling paid jobs.
 
 Water crew planning includes forecast consumption during the work week, so full tanks do not prevent replacement production. Completed deliveries still obey actual owned-plus-pending storage limits. Changing population or buying Water cannot overfill storage or replay production.
 
@@ -227,10 +233,10 @@ Only permanent utility equipment, cosmetic decorations, and collectibles occupy 
 
 | Item | Recipe | Survey radius |
 |---|---|---|
-| Campfire kit | 1.5 m³ timber + 0.05 m³ Water | 5 |
-| Torch | 3 m³ timber | 6 |
-| Lamp | 6 m³ timber + 0.4 t Metal | 8 |
-| Explorer lantern | 8 m³ timber + 8 bbl Oil + FTH$4 | 10 |
+| Campfire kit | 750 kg timber + 50 L Water | 5 |
+| Torch | 1,500 kg timber | 6 |
+| Lamp | 3,000 kg timber + 0.4 t Metal | 8 |
+| Explorer lantern | 4,000 kg timber + 8 bbl Oil + FTH$4 | 10 |
 
 Equip one visibility item; unequipped radius is 4. Equipment never expires and changes only future expeditions, not ongoing teams or already explored terrain. Better newly crafted equipment auto-equips. Legacy torch/lantern upgrades migrate free to torch/lamp items with their existing 6/8-radius view.
 
@@ -238,7 +244,7 @@ Material-and-FTH$ item storage tiers are Bag (20 slots), Carrier (40; 0.5 t Meta
 
 Expeditions that reveal new tiles use the climate-dependent discovery plan above. No new tiles means no find; duplicate and overlapping surveys cannot duplicate unique keepsakes. Permits can be owned in multiple copies. Finds enter free slots automatically. Overflow remains pending without loss; expand item storage and collect as many as fit, leaving the rest pending. Weekly raw-resource output waits for paid pickup unless that resource has an active, funded auto-collection permit; already-paid legacy jobs still deliver normally.
 
-Decorations can occupy any empty land cell in the settlement parcel, not just six designated spaces. Craft flower planters (2 m³ timber, 0.1 m³ Water), benches (3 m³ timber), pioneer banners (2 m³ timber, 0.1 t Metal), fountains (3 m³ timber, 0.4 m³ Water, 0.3 t Metal), boardwalks (4.5 m³ timber), and market canopies (5 m³ timber, 0.15 t Metal), using discovered ingredients and owned resources. Equipment and decoration recipes represent settlement supply bundles, not literal material bills for individual handheld objects.
+Decorations can occupy any empty land cell in the settlement parcel, not just six designated spaces. Craft flower planters (1,000 kg timber, 100 L Water), benches (1,500 kg timber), pioneer banners (1,000 kg timber, 0.1 t Metal), fountains (1,500 kg timber, 400 L Water, 0.3 t Metal), boardwalks (2,250 kg timber), and market canopies (2,500 kg timber, 0.15 t Metal), using discovered ingredients and owned resources. Equipment and decoration recipes represent settlement supply bundles, not literal material bills for individual handheld objects.
 
 Placement is free after founding and uses owned items only. Each building or decoration occupies one cell; occupied cells, water and positions outside the parcel are rejected. Move or return a decoration to inventory before reusing its cell. Returning decorations never destroys items, and placed decorations still occupy one inventory slot. These cosmetics never change production, workforce, exploration visibility or rewards. Positions persist with transactional saves and exact-once retry receipts. Existing six-space layouts migrate onto the grid without losing items or ongoing work. New tier buildings find empty cells without moving existing custom layouts.
 
@@ -246,7 +252,7 @@ Placement is free after founding and uses owned items only. Each building or dec
 
 Active residents complete a full game week before resources become ready for pickup. Each resource button opens its collection controls; there is no aggregate header Claim button or 50% threshold. Pickup costs `workers*(1+max(0,ceil((effectiveDistance-4)/4)))` FTH$ for every worker, including Wood and Water. No payment is taken at dispatch. Completed quantities and their transport fees remain pending until collected. Owned and pending quantities share storage room; full storage pauses new work.
 
-Capacity calculations use integer accounting lots. Raw capacity is the larger of `100 + tierIndex*100 + warehouseLevel*500` and the largest next-tier material requirement times `warehouseLevel+1`. Water uses the larger of raw capacity +2,900 and `ceil(population*35*1.5)*(2+reservoirLevel)` lots. UI converts each resource's capacity to its own physical unit. Warehouses have ten levels and cost `targetLevel*(8 m³ timber + 0.2 t Metal + FTH$50)`; Water facility bonuses do not expand storage.
+Capacity calculations use integer accounting lots. Raw capacity is the larger of `100 + tierIndex*100 + warehouseLevel*500` and the largest next-tier material requirement times `warehouseLevel+1`. Water uses the larger of raw capacity +2,900 and `ceil(population*35*1.5)*(2+reservoirLevel)` lots. UI converts each resource's capacity to its own physical unit. Warehouses have ten levels and cost `targetLevel*(4,000 kg timber + 0.2 t Metal + FTH$50)`; Water facility bonuses do not expand storage.
 
 Existing balances, fractional remainders, currency, escrow, receipts and deadlines are preserved. Already-paid legacy deliveries complete under their existing terms without a second transport charge. New jobs use paid pickup.
 
@@ -320,7 +326,7 @@ Counters are updated transactionally and read by indexed lookup. They are not ve
 
 The homepage shows established settlements, FTH$ circulation, the live Gold/FTH$ reserve rate and this same global population census. Circulating Metal is not displayed on the homepage. Inactive settlements and their last recorded balances remain in the totals.
 
-The **Featheral Dollar · FTH$ circulation** counter includes player balances, buy escrow, marketplace reserves, the Gold pool and bank treasury (available and reserved), including inactive accounts, at four-decimal precision. Locked staking principal stays in FTHG supply. No founding, resident, building or exploration grants increase supply. Gameplay fees burn FTH$; trades, donations and staking payouts transfer existing balances. Historical deleted balances cannot be reconstructed. These are simulated statistics, not USD or on-chain supply.
+The **Featheral Dollar · FTH$ circulation** counter reads total supply from the authoritative Dollar journal, including wallets, market reserves, escrow and system treasury. It displays at most two decimals without rounding stored funds. Gameplay fees, trades and donations transfer existing funds; new bridge conversions and reward credits are disabled. FTHG supply and staking principal are read separately from Ethereum. FTH$ is not USD or an on-chain token.
 
 These are near-live snapshots, refreshed every 30-35 real seconds while the page is visible, with up to 15 seconds of shared-cache reuse. An arrival count-up reaches the real totals over 2.2 seconds; later increases or decreases animate over 1.4 seconds. The animation interpolates only toward actual reported totals, never predicts growth or continues beyond its target. Hidden tabs or failed updates settle at the last known target. Failed updates explicitly mark last-known totals; a first-load failure does not display invented zeros. Reduced-motion users and screen readers receive actual snapshot totals without stepping through animated intermediate values.
 
@@ -328,32 +334,22 @@ Settlement and metal totals initialize from worlds still persisted when the feat
 
 The current vote is a simulation record inside a player's world. Token-weighted governance, delegation, identity systems, sybil resistance, quorum rules, treasury execution, and real public decision-making are **not implemented**.
 
-## 6. Featheral Gold: in-game utility, not an on-chain deployment
+## 6. Featheral Gold on Ethereum
 
 | Item | Current status |
 |---|---|
 | Name | Featheral Gold |
 | Ticker | FTHG |
-| Intended network | Ethereum |
-| Contract deployment | None |
-| Live token supply | No token has been issued by this prototype |
+| Network | Ethereum Mainnet |
+| Contract | `0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665` |
+| Live token supply | Read from Ethereum through Gold API |
 | Token sale or presale | None |
 | Airdrop or token claims | None |
-| Wallet connection | None |
-| Gold exchange | Two-way FTH$/Gold reserve exchange at a dynamic rate |
+| Wallet connection | Selected Ethereum wallet with explicit authorization |
+| Gold exchange | Separate deployed/funded Ethereum bridge, when configured |
 | Investment return or governance right | None promised |
 
-### Placeholder contract address
-
-```text
-0x0000000000000000000000000000000000000000
-```
-
-**This is the zero address. It is a display placeholder, not a deployed FTHG contract, funding address, sale address, or wallet you should pay. Do not send ETH or tokens to it. This project includes no Solidity implementation or deployment through this placeholder.**
-
-FTHG is usable now only as an off-chain game currency. Any future on-chain token remains a separate research topic: no on-chain supply cap, allocation, vesting schedule, launch date, redemption program or right to future issuance is finalized. In-game FTHG is not a claim on any future token.
-
-Any future token proposal would require separate technical specifications, public disclosures, legal analysis, independent contract review, operational controls, and a deliberate decision about whether a token is appropriate at all. No such outcome is guaranteed by this paper.
+FTHG is never simulated or issued by World. Token custody and staking principal remain on Ethereum. The separate bridge and reserve deposits are operator prerequisites, not consequences of starting the game. Always verify contract addresses and approvals independently.
 
 This paper is not an offer to sell, solicitation to buy, financial advice, or a promise of profit. Access to the simulator does not create investment, ownership, revenue-sharing, redemption, voting, or other legal rights.
 
@@ -364,9 +360,9 @@ Never share private keys or seed phrases. Do not approve wallet transactions bas
 The current implementation uses:
 
 1. A TypeScript/Vite browser client.
-2. A Node HTTP mock API.
+2. Gold API for Ethereum reads and Dollar API for all FTH$ operations; World owns sessions and chat.
 3. A replaceable Store boundary.
-4. SQLite for sessions, authoritative account state, action receipts, clock anchors, and population aggregates.
+4. SQLite for gameplay state, sessions, receipts, clock anchors and aggregates; the signed Dollar journal is authoritative for currency, pools and escrow.
 
 The browser sends a strictly allowlisted command, expected revision, and request identifier. The server derives ownership from the session cookie, obtains trusted time, validates the command, and commits accepted changes atomically.
 
@@ -397,7 +393,7 @@ Exact global/federation, settlement, and metal counters become shared write hot 
 
 The landing page does not create a game identity, connect a wallet, enroll notifications, or collect an email address. It requests public aggregate statistics without sending session cookies; no individual world, credential, or wallet data is included in that response. Starting the simulator creates or resumes an anonymous cookie session.
 
-The cookie grants access to one server-owned world for seven real days. Losing or expiring it loses access; recovery is not available. Keep the same browser and hostname to return. Exports are informational and cannot restore authoritative balances.
+Guest cookies grant access for seven real days and cannot recover an unlinked world once lost. Wallet-authorized sessions can last 400 days; a new wallet signature restores the same linked settlement. Revocation ends the current browser capability without deleting the settlement or wallet funds. Exports cannot restore balances.
 
 The backend processes session credentials and direct connection addresses for authentication and request limiting. Hosting providers may process normal access logs. Deployment-specific retention, consent, identity, and privacy policies must be established before public production use.
 

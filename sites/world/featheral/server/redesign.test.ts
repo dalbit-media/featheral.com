@@ -246,26 +246,19 @@ test('recruits never join already-paid deliveries or receive partial-week output
   assert.equal(account.game.stock.wood, first.rates.wood + second.weeklyYield);
   assert.equal(account.workforce!.crews.wood!.workers, Math.min(28, account.game.population - 2));
 });
-test('permanent policy refuses mutation and issuance; later market registration cannot seed new FTH$', () => {
+test('permanent gameplay policy refuses mutation; later market registration cannot seed FTH$', () => {
   const db = new DatabaseSync(':memory:');
   try {
-    db.exec(`CREATE TABLE sessions(id TEXT PRIMARY KEY,expires INTEGER,data TEXT);
-      CREATE TABLE gold_pool(id INTEGER PRIMARY KEY,gold INTEGER,dollars INTEGER);
-      INSERT INTO gold_pool VALUES(1,10000000,10000000000);`);
+    db.exec('CREATE TABLE sessions(id TEXT PRIMARY KEY,expires INTEGER,data TEXT)');
     new Exchange(db);
     enforceMonetaryPolicy(db);
     const before = Number(db.prepare('SELECT SUM(dollars) AS dollars FROM market_pools').get()!.dollars);
     const missing = Number(db.prepare("SELECT dollars FROM market_pools WHERE asset='wood'").get()!.dollars);
-    db.prepare('UPDATE gold_pool SET dollars=dollars+?').run(missing);
     db.exec("DELETE FROM market_pools WHERE asset='wood'");
     new Exchange(db);
     assert.equal(Number(db.prepare('SELECT SUM(dollars) AS dollars FROM market_pools').get()!.dollars), before - missing);
     assert.deepEqual({ ...db.prepare("SELECT units,dollars FROM market_pools WHERE asset='wood'").get()! }, { units: 0, dollars: 0 });
     enforceMonetaryPolicy(db);
-    db.exec('UPDATE gold_pool SET dollars=dollars-1');
-    enforceMonetaryPolicy(db);
-    db.exec('UPDATE gold_pool SET dollars=dollars+2');
-    assert.throws(() => enforceMonetaryPolicy(db), /issuance/);
     db.exec("UPDATE monetary_policy SET fingerprint='modified'");
     assert.throws(() => enforceMonetaryPolicy(db), /policy changed/);
   } finally { db.close(); }

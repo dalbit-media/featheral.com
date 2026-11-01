@@ -658,12 +658,16 @@ export function restoreSnapshotUpkeep(saved: { game: Snapshot['game']; waterUpke
     shortage, populationLoss: 0, readyAt,
     lastPopulationLoss: legacy ? 0 : upkeep.lastPopulationLoss };
 }
-export function apply(account: Account, value: unknown, time: number, realTime = time,
-  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string): Snapshot & { message: string } {
+export function parseActionEnvelope(value: unknown): { id: string; revision: number; command: unknown } {
   const body = object(value);
   if (Object.keys(body).sort().join() !== 'command,id,revision' || typeof body.id !== 'string'
     || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.id)
     || typeof body.revision !== 'number' || !Number.isSafeInteger(body.revision) || body.revision < 0) throw new ApiError(400, 'Invalid action envelope.');
+  return { id: body.id, revision: body.revision, command: body.command };
+}
+export function apply(account: Account, value: unknown, time: number, realTime = time,
+  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string): Snapshot & { message: string } {
+  const body = parseActionEnvelope(value);
   const request = JSON.stringify({ revision: body.revision, command: body.command });
   if (account.receipt?.id === body.id) {
     if (account.receipt.request !== request) throw new ApiError(409, 'Idempotency key already used for a different request.');

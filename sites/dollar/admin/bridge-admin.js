@@ -3,9 +3,10 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const { json, stat, el } = window.AdminKit;
+  const { fth } = window.FTH;
   const TOKEN = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
   const ONE = 10n ** 18n;
-  const readProvider = new ethers.JsonRpcProvider("https://ethereum-rpc.publicnode.com", 1);
+  const readProvider = new ethers.JsonRpcProvider(`${location.origin}/api/v1/gold/rpc`, 1);
   const tokenAbi = ["function balanceOf(address) view returns (uint256)", "function transfer(address,uint256) returns (bool)"];
   const readToken = new ethers.Contract(TOKEN, tokenAbi, readProvider);
   const buttons = ["depositButton", "initializeButton", "syncButton", "budgetButton", "pauseButton", "resumeButton", "aprButton", "gameYearButton", "serviceButton"];
@@ -64,7 +65,7 @@
     controls();
     $("bridgeAccess").textContent = "Reading bridge and wallet roles...";
     try {
-      const data = await json("/api/v1/stats");
+      const data = await json("/api/v1/gold/stats");
       const address = data.bridge?.address;
       if (!data.bridge?.deployed || !ethers.isAddress(address) || address === ethers.ZeroAddress) throw new Error("Bridge is not deployed/configured. Deploy the existing FthgGameBridge and configure TOKEN_API_BRIDGE_ADDRESS before using these controls.");
       if (!abi) {
@@ -90,7 +91,7 @@
       snapshot = { address, account, wallet, connected, initialized, x, y, staked, custody, apr, year, clock, paused, pending: custody - x - staked, treasury: roles[0], admin: roles[1], pauser: roles[2], service: roles[3] };
       const roleNames = ["Treasury", "Admin", "Pauser", "Game service"].filter((_, index) => roles[index]);
       $("bridgeAccess").replaceChildren("Bridge ", el("code", { textContent: address }), ` | block ${blockTag} | ${paused ? "Paused" : "Active"} | ${connected ? roleNames.join(", ") || "Connected: no management roles (staking only)" : "Read-only: connect a wallet on Mainnet"}`);
-      $("bridgeStats").replaceChildren(stat("Curve FTHG", `${units(x)} FTHG`), stat("Available FTH$ budget", `${units(y)} FTH$`), stat("Custody (including stakes)", `${units(custody)} FTHG`), stat("Spot FTH$ / FTHG", initialized && x > 0n && y > 0n ? units(y * ONE / x) : "Pool unavailable"));
+      $("bridgeStats").replaceChildren(stat("Curve FTHG", `${units(x)} FTHG`), stat("Available FTH$ budget", fth(y)), stat("Custody (including stakes)", `${units(custody)} FTHG`), stat("Spot FTH$ / FTHG", initialized && x > 0n && y > 0n ? fth(y * ONE / x) : "Pool unavailable"));
       $("stakingStats").replaceChildren(stat("Locked principal", `${units(staked)} FTHG`), stat("Base APR for new stakes", `${ethers.formatUnits(apr, 2)}%`), stat("Game clock", clock ? year.toString() : "Not initialized"), stat("Stakes created", (nextStakeId - 1n).toString()));
       $("pendingDeposit").textContent = snapshot.pending < 0n ? "WARNING: custody is below accounted curve + stake balances. Do not fund or initialize until investigated." : `${units(snapshot.pending)} FTHG deposited but not yet in the curve.`;
       if (document.activeElement !== $("baseApr")) $("baseApr").value = ethers.formatUnits(apr, 2);
@@ -148,8 +149,8 @@
   form("initializeForm", "Initialize pool", async ({ bridge, token, current, send }) => {
     const custody = await token.balanceOf(current.address);
     const budget = amount("initialBudget");
-    if (custody === 0n || budget !== custody * 1000n) throw new Error(`Initial budget must be exactly ${units(custody * 1000n)} FTH$ for the actual deposited FTHG.`);
-    if (confirm(`Initialize with ${units(custody)} FTHG and ${units(budget)} FTH$ budget? Confirm the budget is approved. This is a one-time operation.`)) await send(bridge, "initializePool", [budget]);
+    if (custody === 0n || budget !== custody * 1000n) throw new Error(`Initial budget must be exactly ${fth(custody * 1000n)} for the actual deposited FTHG.`);
+    if (confirm(`Initialize with ${units(custody)} FTHG and ${fth(budget)} budget? Confirm the budget is approved. This is a one-time operation.`)) await send(bridge, "initializePool", [budget]);
   });
   $("syncButton").addEventListener("click", () => transaction("Sync FTHG", async ({ bridge, token, current, send }) => {
     const [custody, x, staked] = await Promise.all([token.balanceOf(current.address), bridge.reserveFthg(), bridge.totalStakedFthg()]);
@@ -158,7 +159,7 @@
   }));
   form("budgetForm", "Add FTH$ budget", async ({ bridge, send }) => {
     const value = amount("additionalBudget");
-    if (confirm(`Add ${units(value)} FTH$ to the reward/curve budget? Confirm this budget is approved by the game ledger. This changes the spot rate and does not credit a wallet.`)) await send(bridge, "addFthDollarBudget", [value]);
+    if (confirm(`Add ${fth(value)} to the reward/curve budget? Confirm this budget is approved by the game ledger. This changes the spot rate and does not credit a wallet.`)) await send(bridge, "addFthDollarBudget", [value]);
   });
   form("aprForm", "Set staking APR", async ({ bridge, send }) => {
     const bps = aprBps();

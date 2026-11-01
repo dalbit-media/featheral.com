@@ -2,7 +2,7 @@ export const gamePages = {
   world: { label: 'Explore', path: '/play/' },
   home: { label: 'Settlement', path: '/play/settlement/' },
   market: { label: 'Market', path: '/play/market/' },
-  bank: { label: 'Featheral Bank', path: '/play/bank/' },
+  bank: { label: 'Wallet and staking', path: '/play/bank/' },
   communicate: { label: 'Inbox', path: '/play/communicate/' },
   contacts: { label: 'Contacts', path: '/play/contacts/' },
   federation: { label: 'Federation', path: '/play/federation/' },

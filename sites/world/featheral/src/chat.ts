@@ -3,6 +3,9 @@ export const chatHistoryLimit = 100;
 export const chatMessageLimit = 300;
 export const chatProfileChangedEvent = 'featheral-profile-changed';
 export const chatProfileSettingsEvent = 'featheral-profile-settings';
+export const chatUnreadChangedEvent = 'featheral-chat-unread';
+export const chatPresenceChangedEvent = 'featheral-chat-presence';
+export const chatVisibilityChangedEvent = 'featheral-chat-visibility';
 export interface ChatProfile { id: string; nickname: string; address?: string }
 export interface ChatMessage { id: number; author: string; nickname: string; text: string; time: number }
 export interface ChatInfo { profile: ChatProfile | null; online: number; capacity: number; connected: boolean; serverTime: number }

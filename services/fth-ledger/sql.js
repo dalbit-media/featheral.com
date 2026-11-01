@@ -3,6 +3,7 @@
 const { LedgerDb } = require("../ledger-sql/ledgerDb");
 const { canonical, txHash } = require("./codec");
 const { accountWallet } = require("./transfer");
+const { goldEntries } = require("../gold-api/reserve");
 
 const SCHEMA = `
 CREATE TABLE blocks (
@@ -65,6 +66,8 @@ function ingestFthBlock(ledger, block, file) {
       );
       if (tx.a) touched.add(tx.a);
       if (counterparty) touched.add(counterparty);
+      if (tx.k === "GAME") for (const entry of d.entries) touched.add(entry.account);
+      if (tx.k === "GOLD") for (const entry of goldEntries(ledger, d)) touched.add(entry.account);
       if (tx.k === "PROFILE") {
         const profile = ledger.profiles.get(accountWallet(tx.a).toLowerCase());
         if (profile) db.run("INSERT OR REPLACE INTO profiles VALUES (?,?,?,?,?)", profile.address, tx.a, profile.username, profile.avatar ? 1 : 0, profile.issuedAt);

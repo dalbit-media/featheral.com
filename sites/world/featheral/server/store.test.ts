@@ -14,12 +14,11 @@ import { terrainDetails } from '../src/engine.ts';
 import { waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
 import { isMarketResource, marketAssets, marketBasePrice } from '../src/market.ts';
 import { waterFacilityKeys, waterProductionMultiplier } from '../src/water-facilities.ts';
-import { automateFixtureCollections, fundFixtureFromReserves } from './test-support.ts';
+import { automateFixtureCollections, fundFixtureFromReserves, seedFixturePools } from './test-support.ts';
 
-const initialFthg = 1000;
 function populationAndMaterialTotals(store: SqliteStore) {
-  const { settlements, metal, population, fthg } = store.publicTotals();
-  return { settlements, metal, population, fthg };
+  const { settlements, metal, population } = store.publicTotals();
+  return { settlements, metal, population };
 }
 
 test('Water facility construction persists, charges once on retries and preserves the upkeep deadline', () => {
@@ -139,11 +138,12 @@ test('weekly upkeep saves migrate once to a full daily grace period without retr
 test('public totals count settled owned metal, not pending or visitors, and preserve atomicity and inactive worlds', () => {
   let time = 1000000;
   const store = new SqliteStore(':memory:', () => time);
+  seedFixturePools(store);
   const a = store.create(), b = store.create();
   const act = (token: string, command: Command) => store.transaction(token, (session, now) =>
     apply(session.account, { id: randomUUID(), revision: session.account.revision, command }, now));
   try {
-    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 0, metal: 0, population: 0, fthg: initialFthg });
+    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 0, metal: 0, population: 0 });
     store.transaction(a.token, session => {
       session.account.game.seed = 1542;
       session.account.game.explored = ['0,0', '-3,0', '3,0', '0,3'];
@@ -154,7 +154,7 @@ test('public totals count settled owned metal, not pending or visitors, and pres
     act(a.token, { type: 'upgrade' });
     act(b.token, { type: 'upgrade' });
     for (const token of [a.token, b.token]) store.transaction(token, session => { session.account.game.stock.water = 1000000; session.account.game.dollars = 1000000 * 10000; automateFixtureCollections(session.account); });
-    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 2, metal: 160, population: 24, fthg: initialFthg });
+    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 2, metal: 160, population: 24 });
     time += 1000;
     act(a.token, { type: 'assign', resource: 'metal', workers: 5 });
     time += worldWeekMs;
@@ -275,7 +275,7 @@ test('legacy migration, restarts and clock speed switches preserve balances, cen
     time += 1000;
     store = new SqliteStore(path, () => time, 10);
     assert.deepEqual(store.population('Evergreen Union'), { global: 12, federation: 12 });
-    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 1, metal: 80, population: 12, fthg: initialFthg });
+    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 1, metal: 80, population: 12 });
     const migrated = store.read(token, session => session.account);
     assert.equal(migrated.pending.wood, 0);
     assert.equal('growthMultiplier' in migrated, false);
@@ -298,7 +298,7 @@ test('legacy migration, restarts and clock speed switches preserve balances, cen
     assert.equal(readyAt - serverTime, worldWeekMs - 10000);
     store.close();
     store = new SqliteStore(path, () => time, 1);
-    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 1, metal: 80, population: 12, fthg: initialFthg });
+    assert.deepEqual(populationAndMaterialTotals(store), { settlements: 1, metal: 80, population: 12 });
     assert.equal(store.read(token, (_, now) => now), serverTime);
     assert.equal(store.read(token, session => session.account.inviteReadyAt), readyAt);
     time += 1000;

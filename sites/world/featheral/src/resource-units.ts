@@ -1,9 +1,10 @@
 import type { Resource } from './engine.ts';
+import { dollarsScale } from './dollars.ts';
 
 export const physicalResourceVersion = 1;
 export const resourceUnits = {
-  wood: { unit: 'm\u00b3', lotsPerUnit: 10, litresPerLot: 100 },
-  water: { unit: 'm\u00b3', lotsPerUnit: 100, litresPerLot: 10 },
+  wood: { unit: 'kg', lotsPerUnit: 1 / 50, kilogramsPerLot: 50 },
+  water: { unit: 'L', lotsPerUnit: 1 / 10, litresPerLot: 10 },
   metal: { unit: 't', lotsPerUnit: 100, kilogramsPerLot: 10 },
   oil: { unit: 'bbl', lotsPerUnit: 1, litresPerLot: 158.987294928 },
 } as const;
@@ -23,10 +24,13 @@ export function accountingQuantity(asset: string, amount: number): number {
   return Math.abs(value - rounded) < 1e-8 ? rounded : value;
 }
 export function displayPrice(asset: string, pricePerLot: number): number {
-  return isResource(asset) ? pricePerLot * resourceUnits[asset].lotsPerUnit : pricePerLot;
+  return pricePerLot / displayQuantity(asset, 1);
 }
 export function accountingPrice(asset: string, pricePerUnit: number): number {
-  return isResource(asset) ? pricePerUnit / resourceUnits[asset].lotsPerUnit : pricePerUnit;
+  const value = pricePerUnit * displayQuantity(asset, 1);
+  const scaled = value * dollarsScale;
+  const rounded = Math.round(scaled);
+  return Math.abs(scaled - rounded) < 1e-8 ? rounded / dollarsScale : value;
 }
 export function formatResourceAmount(asset: string, lots: number, locale: string, compact = false): string {
   const value = displayQuantity(asset, lots);

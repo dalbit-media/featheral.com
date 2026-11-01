@@ -16,11 +16,12 @@ import { dollarsScale } from '../src/dollars.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { terrainDetails } from '../src/engine.ts';
 import type { MarketAsset, MarketCommand, MarketResponse } from '../src/market.ts';
-import { fundFixtureFromReserves } from './test-support.ts';
+import { fundFixtureFromReserves, seedFixturePools } from './test-support.ts';
 
 function setup(path = ':memory:') {
   let time = 1000000;
   const store = new SqliteStore(path, () => time);
+  seedFixturePools(store);
   const create = () => {
     const identity = store.create();
     store.transaction(identity.token, session => {

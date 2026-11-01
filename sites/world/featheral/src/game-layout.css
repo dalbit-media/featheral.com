@@ -1,0 +1,126 @@
+:root{--surface:#17241f;--surface-raised:#1e3028;--surface-border:#cfdfd326;--muted:#a6b9ad;--mint:#c5e7b4;--panel-shadow:0 12px 36px #06120e38;color:#edf3ec;color-scheme:dark}
+html:has(#app),body:has(#app){height:100%;overflow:hidden}
+#app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:88px;--game-header-height:96px;--game-footer-height:0px;--layout-gap:20px;position:relative;height:100dvh;min-height:0;grid-template-columns:var(--game-rail-width) minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr);font-size:14px;background:#0e1914}
+#app .rail{grid-column:1;grid-row:1/-1;padding:20px 10px 16px;border-color:var(--surface-border);background:#101d17}
+.game-brand{display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;color:var(--mint);font:800 30px 'Manrope',sans-serif;line-height:1}
+.game-brand span{font:600 9px 'DM Sans',sans-serif;letter-spacing:2px}
+.game-brand img{display:block;width:34px;height:34px}
+#app .rail-links{margin:28px 0 0;padding:0;gap:8px}
+#app .nav-button{min-height:64px;gap:8px;padding:10px 4px;border-radius:12px;color:#a3b4a8}
+#app .nav-button span{font-size:11px;letter-spacing:0}
+#app .nav-button.active{background:#c5e7b414;color:#e2f3d8;box-shadow:inset 0 0 0 1px #c5e7b426}
+#app .nav-button.active:before{display:none}
+#app .nav-button:hover{background:#c5e7b40c;color:#e2f3d8}
+#app .topbar{grid-column:2;grid-row:1;display:grid;grid-template-columns:minmax(170px,.8fr) minmax(320px,2fr) 44px auto auto;grid-template-rows:minmax(0,1fr);gap:12px;padding:12px 20px;border-color:var(--surface-border);background:#101d17f5}
+#app .server-clock{grid-column:1;grid-row:1}
+#app #world-time{--season-size:44px}
+#app .clock-calendar{position:static;width:auto;height:auto;clip-path:none;overflow:visible;white-space:normal}
+#app .clock-calendar>span:first-child,#app .clock-week-label{font-size:11px}
+#app .topbar #resource-bar{grid-column:2;grid-row:1;height:64px;margin:0;grid-template-columns:repeat(4,minmax(0,1fr));border-color:var(--surface-border);background:#ffffff03;border-radius:12px}
+#app .topbar #resource-bar .resource{padding:4px 10px;grid-template-rows:44px minmax(0,1fr)}
+#app .topbar #resource-bar .resource-summary{padding:0;gap:8px}
+#app .topbar #resource-bar .resource-summary small{font-size:11px;color:var(--muted)}
+#app .topbar #resource-bar .resource-summary strong{font-size:14px;line-height:1.25;white-space:normal;overflow-wrap:anywhere}
+#app .resource-manager-button{grid-column:3;grid-row:1;align-self:center;justify-self:end;width:44px;height:44px;border-color:var(--surface-border)}
+#app .topbar .population-health{grid-column:4;grid-row:1;min-height:52px;padding:8px 12px;border-color:var(--surface-border);background:#ffffff03}
+#app .topbar-account{grid-column:5;grid-row:1;gap:10px}
+#app .header-wallet{max-width:150px;white-space:normal;overflow-wrap:anywhere;border-color:var(--surface-border);background:#c5e7b40a}
+#app .header-wallet strong{display:block;min-width:0;max-width:none;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#app .header-wallet small{flex-shrink:0}
+#app .account-avatar{background:#294335;border-color:#c5e7b44d;box-shadow:none}
+#app .button,.account-pane .button{min-height:44px;border-radius:10px;font-size:13px;gap:8px;border-color:var(--surface-border)}
+#app .button:hover:not(:disabled),.account-pane .button:hover:not(:disabled){transform:none;background:#c5e7b416}
+#app .button.primary,.account-pane .button.primary{background:var(--mint);border-color:var(--mint);color:#203623}
+#app .button.primary:hover:not(:disabled),.account-pane .button.primary:hover:not(:disabled){background:#d9efcd}
+#app :is(.page-card,.exchange-card,.exchange-catalog,.inbox-directory,.chat-page){border-color:var(--surface-border);background:var(--surface);border-radius:16px}
+#app :is(.community-view,.marketplace-view){grid-column:2;grid-row:2;padding:32px;min-height:0;background:radial-gradient(ellipse at top right,#2b47372b,transparent 60%),#101c16;scrollbar-width:thin;scrollbar-color:#607d69 transparent}
+#app :is(.page-heading,.exchange-heading,.bank-heading){max-width:1200px;margin:0 auto 28px;gap:20px}
+#app :is(.page-heading,.exchange-heading,.bank-heading) h1{font-family:'Manrope',sans-serif;font-size:30px;font-weight:750;line-height:1.25;letter-spacing:-.8px}
+#app :is(.page-heading,.bank-heading) p{color:var(--muted);font-size:14px;line-height:1.7}
+#app .page-card{padding:24px}
+#app .exchange-layout{max-width:1200px;grid-template-columns:minmax(0,1fr) 340px;gap:20px}
+#app .market-bank-link{width:min(1200px,100%);margin:0 auto 20px}
+#app .exchange-card{padding:20px}
+#app .exchange-assets{max-height:320px}
+#app .exchange-asset{padding:12px;min-height:64px}
+#app .exchange-asset strong{font-size:13px}
+#app .exchange-asset small{font-size:11px}
+#app :is(.marketplace-view,.community-view) :is(input,select,textarea){border-color:var(--surface-border);border-radius:10px;background:#0e1a14;font-size:14px}
+#app .inbox-layout{gap:20px;grid-template-columns:280px minmax(0,1fr)}
+#app .inbox-heading{display:flex;align-items:center;gap:12px;padding:0 0 20px;margin-bottom:20px;border-bottom:1px solid var(--surface-border);flex-shrink:0}
+#app .inbox-heading h1{margin-right:auto;font-size:26px}
+#app .inbox-directory,#app .inbox-layout .chat-page{padding:20px}
+#app .chat-message p{font-size:14px;line-height:1.7}
+#app .chat-message time{font-size:11px}
+#app .featheral-bank-view>p{max-width:1200px;margin:0 auto;color:var(--muted);line-height:1.8}
+#app .world-dollar-wallet{max-width:1200px;margin-inline:auto}
+.management-dialog,.account-pane{background:var(--surface);border-color:var(--surface-border);box-shadow:var(--panel-shadow)}
+.management-dialog{border-radius:20px}
+.management-dialog::backdrop,.account-pane::backdrop{background:#07140bb3;backdrop-filter:blur(6px)}
+.management-dialog>header,.account-heading{border-color:var(--surface-border)}
+.management-content,.account-content{scrollbar-width:thin;scrollbar-color:#607d69 transparent}
+@media(max-width:1199px){
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:76px;--game-header-height:132px;--layout-gap:16px}
+  #app .topbar{grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:48px 56px;gap:8px 12px;padding:10px 16px}
+  #app .topbar .population-health{grid-column:2;grid-row:1;min-height:44px}
+  #app .topbar-account{grid-column:3;grid-row:1}
+  #app .topbar #resource-bar{grid-column:1/-1;grid-row:2;height:56px;margin-right:56px}
+  #app .topbar #resource-bar .resource{padding:2px 10px;grid-template-rows:44px minmax(0,1fr)}
+  #app .resource-manager-button{grid-column:3;grid-row:2}
+  #app .exchange-layout{grid-template-columns:minmax(0,1fr) 300px;gap:16px}
+}
+@media(max-width:900px){
+  #app :is(.community-view,.marketplace-view){padding:20px}
+  #app .exchange-layout{grid-template-columns:minmax(0,1fr)}
+  #app .exchange-order-entry{grid-column:1;grid-row:2;position:static}
+  #app .exchange-instrument{grid-row:3}
+  #app .exchange-chart-card{grid-row:4}
+  #app .exchange-order-book{grid-row:5}
+  #app .exchange-history-card{grid-row:6}
+  #app .clock-calendar{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+}
+@media(max-width:650px){
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:0px;--game-header-height:124px;--game-footer-height:calc(68px + env(safe-area-inset-bottom));--layout-gap:12px;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr) var(--game-footer-height)}
+  #app .rail{position:absolute;inset:auto 0 0;grid-column:1;grid-row:3;height:var(--game-footer-height);padding:0 8px env(safe-area-inset-bottom);border:0;border-top:1px solid var(--surface-border)}
+  #app .game-brand{display:none}
+  #app .rail-links{flex-direction:row;align-items:stretch;margin:0;gap:4px;height:68px}
+  #app .nav-button{min-height:60px;padding:8px 2px;gap:6px;flex:1}
+  #app .nav-button span{font-size:10px}
+  #app .topbar{grid-column:1;grid-template-columns:minmax(0,1fr) 44px auto;padding:8px 12px;gap:8px}
+  #app .topbar .population-health{padding:4px;flex-direction:column;justify-content:center;gap:2px;min-width:44px}
+  #app .topbar .population-health-total small,#app .topbar .population-health-work,#app .topbar .population-health-status{display:none}
+  #app .population-health>.icon{width:16px;height:16px}
+  #app .population-health-total strong{font-size:14px}
+  #app .topbar #resource-bar .resource{padding-inline:6px}
+  #app .topbar #resource-bar .resource-summary strong{font-size:12px}
+  #app .topbar #resource-bar .resource-summary small{font-size:10px}
+  #app .topbar-account{gap:6px}
+  #app .header-wallet{padding:10px 8px;max-width:88px}
+  #app .header-wallet strong{font-size:12px}
+  #app :is(.community-view,.marketplace-view){grid-column:1;grid-row:2;padding:16px}
+  #app :is(.page-heading,.exchange-heading,.bank-heading){margin-bottom:20px;gap:12px}
+  #app :is(.page-heading,.exchange-heading,.bank-heading) h1{font-size:25px}
+  #app .page-card,#app .exchange-card{padding:16px}
+  #app .inbox-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:160px minmax(0,1fr);gap:12px}
+  #app .inbox-directory,#app .inbox-layout .chat-page{padding:12px}
+  #app .page-census{gap:12px}
+  #app .page-census strong{font-size:22px}
+}
+@media(min-width:651px) and (max-height:500px){
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:68px;--game-header-height:112px;--layout-gap:12px}
+  #app .game-brand{display:none}
+  #app .rail{padding:8px 6px}
+  #app .rail-links{margin:0;gap:2px}
+  #app .nav-button{min-height:52px;padding:6px 2px;gap:4px}
+  #app .rail-bottom{display:none}
+  #app .topbar{padding-block:6px;grid-template-rows:44px 48px}
+  #app .topbar #resource-bar{height:48px}
+  #app .topbar .population-health{padding:4px 8px}
+  #app .topbar .population-health-work{gap:0}
+  #app :is(.community-view,.marketplace-view){padding:16px}
+  #app .inbox-layout{grid-template-columns:220px minmax(0,1fr)}
+}
+@media(min-width:1200px) and (max-height:500px){
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-header-height:80px}
+  #app .topbar{grid-template-rows:minmax(0,1fr)}
+}

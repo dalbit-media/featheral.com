@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolvePublicSite } from './src/site.ts';
 import { renderWhitepaper } from './src/whitepaper-render.ts';
 
-const proxy = { '/api': 'http://127.0.0.1:3001' };
+const proxy = { '/api': 'http://127.0.0.1:8080', '/wallet': 'http://127.0.0.1:8080', '/fth.js': 'http://127.0.0.1:8080', '/shared': 'http://127.0.0.1:8080' };
 export function worldProfileAssets(): Plugin {
   return {
     name: 'featheral-world-profile',

@@ -44,6 +44,7 @@ export interface HalfSaleQuote {
 }
 export interface HalfSaleResponse extends ApiState { halfSale: HalfSaleQuote }
 export type MarketCommand =
+  | { type: 'fund-pool'; asset: MarketAsset; quantity: number; dollars: number }
   | { type: 'sell-half'; sales: HalfSaleOrder[] }
   | { type: 'spot'; asset: MarketAsset; side: MarketSide; quantity: number; limitDollars: number }
   | { type: 'limit'; asset: MarketAsset; side: MarketSide; quantity: number; price: number }

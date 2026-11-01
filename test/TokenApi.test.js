@@ -4,11 +4,12 @@ const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
 const { ethers } = require("ethers");
-const { createTokenApi } = require("../services/token-api/server");
+const { createDollarApi: createTokenApi } = require("../services/dollar-api/server");
 const { FthLedger } = require("../services/fth-ledger/ledger");
 const { transferMessage } = require("../services/fth-ledger/transfer");
 const { blockHash } = require("../services/fth-ledger/codec");
 const { profileMessage } = require("../services/token-api/profile");
+const vm = require("node:vm");
 
 describe("Token API routing", () => {
   let directory;
@@ -62,6 +63,21 @@ describe("Token API routing", () => {
     expect(handled).to.equal(true);
     expect(res.statusCode).to.equal(404);
     expect(JSON.parse(res.body).error).to.equal("API route not found.");
+  });
+  it("blocks wallet issuance operations when Dollar policy is closed or unavailable", async () => {
+    let failed = false;
+    const sandbox = { window: {}, fetch: async () => {
+      if (failed) throw new Error("Dollar unavailable");
+      return { ok: true, json: async () => ({ monetaryPolicy: { issuanceEnabled: false } }) };
+    } };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../sites/dollar/fth.js"), "utf8"), sandbox);
+    await expect(sandbox.window.FTH.requireIssuance()).to.be.rejectedWith("issuance is closed");
+    failed = true;
+    await expect(sandbox.window.FTH.requireIssuance()).to.be.rejectedWith("Dollar unavailable");
+    for (const file of ["wallet.js", "staking.js"]) {
+      const source = fs.readFileSync(path.join(__dirname, "../sites/dollar/wallet", file), "utf8");
+      expect(source).to.include("await ").and.include("requireIssuance()");
+    }
   });
 
   it("returns an explicit authorization error for protected account reads", async () => {

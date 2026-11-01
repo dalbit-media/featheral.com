@@ -2,6 +2,7 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <script>window.location.replace('/' + window.location.search + '#/');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7fb" />
     <meta name="description" content="21가지 지형을 탐험하고 주민을 배치해 자원을 모으세요. 정착지를 수도까지 키우는 무료 싱글플레이 게임 Featheral. 설치·지갑 연결·결제 없이 브라우저에서 지금 시작하세요." />
@@ -27,7 +28,7 @@
       <a class="brand" href="/"><img src="/shared/logo-world.svg" alt="" width="34" height="34"><b>Featheral World</b></a>
       <div class="world-live-cards" role="group" aria-label="Live world statistics" data-state="loading">
         <div class="world-live-card" role="group" aria-label="Settlements"><span>Settlements</span><strong><span data-total="settlements">—</span></strong></div>
-        <div class="world-live-card" role="group" aria-label="FTHG trades"><span>FTHG trades</span><strong><span data-total="fthgTransactions">—</span></strong></div>
+        <div class="world-live-card" role="group" aria-label="Ethereum FTHG supply"><span>Ethereum FTHG supply</span><strong><span data-gold-supply>—</span></strong></div>
         <div class="world-live-card" role="group" aria-label="FTH$ supply"><span>FTH$ supply</span><strong><span data-total="dollars">—</span></strong></div>
         <div class="world-live-card" role="group" aria-label="Population"><span>Population</span><strong><span data-total="population">—</span></strong></div>
       </div>
@@ -46,11 +47,11 @@
           <div class="world-stats-heading"><p id="stats-title" class="eyebrow">함께 자라나는 세계</p><p id="stats-status" role="status">실시간 통계를 보려면 자바스크립트가 필요합니다.</p></div>
           <dl class="world-stats-grid">
             <div class="world-stat" title="서버에 생성된 정착지 수입니다. 비활성 정착지도 포함하며, 홈페이지 방문만으로는 정착지가 생성되지 않습니다."><dt>정착지 수</dt><dd><span class="stat-icon" data-icon="home" aria-hidden="true"></span><span data-total="settlements">&mdash;</span></dd></div>
-            <div class="world-stat" title="페더럴 은행에서 기록된 FTHG 매수·매도 완료 건수입니다. 실패한 요청, 재시도, 스테이킹은 제외하며 온체인 거래 수가 아닙니다."><dt>FTHG 누적 거래</dt><dd><span class="stat-icon" data-icon="gold" aria-hidden="true"></span><span data-total="fthgTransactions">&mdash;</span></dd></div>
-            <div class="world-stat world-stat-fthg" title="플레이어 잔액, 구매 주문 예치금과 거래소·골드 교환 풀의 FTH$ 준비금을 포함합니다. 비활성 계정의 마지막 잔액도 유지합니다. 실제 달러나 온체인 토큰이 아닙니다."><dt>페더럴 달러 · FTH$ 총유통량</dt><dd><span class="stat-icon" data-icon="dollars" aria-hidden="true"></span><span data-total="dollars">&mdash;</span></dd></div>
+            <div class="world-stat" title="Verified Ethereum Mainnet FTHG total supply from the Gold API."><dt>Ethereum FTHG supply</dt><dd><span class="stat-icon" data-icon="gold" aria-hidden="true"></span><span data-gold-supply>&mdash;</span></dd></div>
+            <div class="world-stat world-stat-fthg" title="Dollar ledger supply, including wallets, game market pools and escrow. FTH$ is not fiat currency."><dt>페더럴 달러 · FTH$ 총유통량</dt><dd><span class="stat-icon" data-icon="dollars" aria-hidden="true"></span><span data-total="dollars">&mdash;</span></dd></div>
             <div class="world-stat" title="비활성 정착지를 포함한 게임 내 전체 주민 수입니다. 실제 이용자 수나 동시 접속자 수가 아닙니다."><dt>월드 전체 인구</dt><dd><span class="stat-icon" data-icon="people" aria-hidden="true"></span><span data-total="population">&mdash;</span></dd></div>
           </dl>
-          <div class="world-stats-footer"><p><span>1 페더럴 골드 =</span> <strong data-public-gold-rate>&mdash;</strong> <span>FTH$ · 준비금 기준 실시간 환율</span></p><p>게임 내 가상 월드·주민·FTH$·FTHG 거래 통계입니다. 비활성 정착지의 마지막 저장 잔액도 포함합니다.</p></div>
+          <div class="world-stats-footer"><p><span>1 페더럴 골드 =</span> <strong data-public-gold-rate>&mdash;</strong> <span>FTH$ · 준비금 기준 실시간 환율</span></p><p>World gameplay statistics, Dollar ledger supply and verified Ethereum FTHG data. Each fund service remains authoritative.</p></div>
         </section>
         <div class="hero-copy">
           <div class="eyebrow"><span class="status-light"></span> 무료 싱글플레이 탐험·건설 게임</div>
@@ -123,8 +124,8 @@
       </section>
 
       <section id="token" class="token-section section-shell" aria-labelledby="token-title">
-        <div class="token-copy"><p class="eyebrow">FEATHERAL DOLLAR · FTH$ / FEATHERAL GOLD · FTHG</p><h2 id="token-title">FTH$로 성장하고 거래하세요.<br />골드는 변동 환율로 교환하세요.</h2><p>페더럴 달러(FTH$)는 모집·탐험·거래소에서 사용하는 기본 재화입니다. 정착·주민·건물·탐험으로 새로 지급하지 않으며, 자산 판매로 거래소의 기존 잔액을 받습니다. 페더럴 골드(FTHG)는 FTH$ 준비금 풀에서 사고팔 수 있는 별도 재화이며, 향후 Ethereum 연동 토큰으로 준비 중입니다.</p><a class="text-link" href="/play/whitepaper/">백서 살펴보기 <span aria-hidden="true">&nearr;</span></a></div>
-        <div class="token-card"><div class="token-card-heading"><span class="token-emblem" aria-hidden="true">F</span><div><h3>Featheral Gold <span>FTHG</span></h3><p>게임 내 재화 · 오프체인</p></div><span class="concept-badge">게임 전용</span></div><dl class="token-facts"><div><dt>컨트랙트</dt><dd>미배포</dd></div><div><dt>토큰 판매</dt><dd>없음</dd></div><div><dt>지갑 필요 여부</dt><dd>아니요</dd></div></dl><div class="contract-placeholder"><span>예시 주소 · 배포된 컨트랙트가 아닙니다</span><code>0x0000000000000000000000000000000000000000</code></div><p class="token-warning"><span data-icon="lock" aria-hidden="true"></span> 이 주소는 제로 주소이며, 배포된 FTHG 컨트랙트가 아닙니다. ETH나 토큰을 절대 전송하지 마세요.</p><p class="token-disclosure">FTH$는 게임·거래소 기본 재화이고 금속은 건설 자원입니다. FTH$와 골드는 게임 내 변동 시세로 서로 교환할 수 있습니다. 둘 다 온체인 토큰이 아니며 현금화할 수 없습니다. 투자 수익이나 거버넌스 권리를 약속하지 않습니다.</p></div>
+        <div class="token-copy"><p class="eyebrow">FEATHERAL DOLLAR · FTH$ / FEATHERAL GOLD · FTHG</p><h2 id="token-title">Real wallet funds, virtual worlds.</h2><p>World uses your authorized Dollar wallet for FTH$ gameplay. Gold API reads actual Ethereum FTHG; Dollar API owns all FTH$ balances and settlement. New accounts and market pools start empty.</p><a class="text-link" href="/play/whitepaper/">백서 살펴보기 <span aria-hidden="true">&nearr;</span></a></div>
+        <div class="token-card"><div class="token-card-heading"><span class="token-emblem" aria-hidden="true">F</span><div><h3>Featheral Gold <span>FTHG</span></h3><p>Ethereum Mainnet</p></div></div><div class="contract-placeholder"><span>FTHG token contract</span><code data-no-localize>0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665</code></div><p class="token-warning"><span data-icon="lock" aria-hidden="true"></span> Verify contracts and wallet approvals independently. Never share recovery phrases or private keys.</p><p class="token-disclosure">FTH$ is not USD or an on-chain token. Conversion and staking require a deployed, funded Ethereum bridge. Gameplay spending burns existing FTH$; no investment return or governance right is promised.</p></div>
       </section>
 
       <section id="questions" class="faq-section section-shell" aria-labelledby="faq-title">
@@ -133,8 +134,8 @@
           <details><summary>Featheral은 어떤 게임인가요?<span aria-hidden="true">+</span></summary><p>Featheral은 브라우저에서 즐기는 캐주얼 정착지 건설·Web3 거버넌스 시뮬레이션입니다. 지도를 탐험하고 정착지를 키우며, 주민을 배치해 자원을 모으고 가상의 연방과 의회에 참여할 수 있습니다. 현재는 시뮬레이션 서버 기반 싱글플레이 프로토타입이며, 실제 배포된 DAO가 아닙니다.</p></details>
           <details><summary>지갑이나 암호화폐가 필요한가요?<span aria-hidden="true">+</span></summary><p>아니요. 지갑 연결, 결제, 가스비, 토큰 클레임 없이 브라우저에서 바로 플레이하세요. 자산을 판매해 기존 FTH$를 받고 게임과 거래소에서 사용하세요. 정착·주민·건물·탐험 지급금은 없습니다.</p></details>
           <details><summary>자원을 모으고 성장하려면 어떻게 하나요?<span aria-hidden="true">+</span></summary><p>정착하면 주민이 자원별로 자동 배치됩니다. 채집팀이 게임 시간 7일마다 자원을 보내며, 미배치 주민은 자원을 생산하지 않습니다. 거리에 따른 주간 운송비, 탐험 출발 비용, 주민 모집에 쓸 금속을 준비하세요. 모집 비용은 인구가 늘수록 높아집니다. 탐험에는 주민 2명이 필요하고 게임 시간 1~3주가 걸립니다. 탐험한 지역은 무료로 즉시 이동할 수 있습니다. 각 자원은 저장량 50%부터 받을 수 있으며, 주민 모집은 금속을 먼저 지불하면 게임 시간 1주 뒤에 완료됩니다. 한 번에 한 팀만 모집하며 자동으로 반복하지 않습니다.</p></details>
-          <details><summary>내 세계는 저장되나요?<span aria-hidden="true">+</span></summary><p>시뮬레이션 서버가 익명 브라우저 세션에 진행 상황을 저장합니다. 같은 브라우저와 사이트 주소로 접속하세요. 세션 쿠키는 실제 7일간 유효합니다. 쿠키가 삭제되거나 만료되면 내 월드에 접근할 수 없으며, 현재 프로토타입에는 복구 기능이 없습니다. 내보낸 스냅샷은 확인용으로, 자원 복원에 사용할 수 없습니다.</p></details>
-          <details><summary>페더럴 골드(FTHG)는 출시되었나요?<span aria-hidden="true">+</span></summary><p>골드는 FTH$ 준비금 풀의 변동 환율로 교환하는 게임 내 오프체인 재화입니다. 온체인 토큰 배포, 토큰 세일, 에어드롭, 현금 출금은 지원하지 않습니다. 제로 주소는 예시이므로 자산을 절대 전송하지 마세요.</p></details>
+          <details><summary>내 세계는 저장되나요?<span aria-hidden="true">+</span></summary><p>Progress is saved by the Dollar game service. Guest access depends on its browser cookie; an authorized wallet can restore its linked settlement by signing again. Exported snapshots cannot restore funds.</p></details>
+          <details><summary>페더럴 골드(FTHG)는 출시되었나요?<span aria-hidden="true">+</span></summary><p>FTHG is an actual Ethereum Mainnet token. World never creates simulated FTHG. Open Wallet and staking for configured bridge operations; FTH$ redemption requires an authorized service, not a public withdrawal form.</p></details>
           <details><summary>어떻게 참여하고 소식을 받을 수 있나요?<span aria-hidden="true">+</span></summary><p>공식 GitHub, Discord, X, Telegram 링크는 아직 공개되지 않았으며 각 카드에 준비 중으로 표시되어 있습니다. 검증된 링크가 추가되면 해당 채널에서 공지를 확인하고 참여하세요. 이메일 목록, 자동 알림 등록, 외부 계정 연결 기능은 운영하지 않습니다.</p></details>
         </div>
       </section>

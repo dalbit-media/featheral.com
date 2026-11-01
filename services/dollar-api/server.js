@@ -1,23 +1,20 @@
 "use strict";
 
 const crypto = require("node:crypto");
-const fs = require("node:fs");
 const path = require("node:path");
 const { ethers } = require("ethers");
 const { FthLedger, walletAccountId, accountWallet } = require("../fth-ledger/ledger");
 const { normalizeAccount, verifyTransfer } = require("../fth-ledger/transfer");
-const { ServiceAuthenticator, canonicalRequest, readTrustedServices } = require("./auth");
-const { verifySignedProfile } = require("./profile");
+const { ServiceAuthenticator, canonicalRequest, readTrustedServices } = require("../token-api/auth");
+const { verifySignedProfile } = require("../token-api/profile");
+const { createGoldApi } = require("../gold-api/server");
+const { SYSTEM_TREASURY_ACCOUNT } = require("./funds");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const TOKEN_ADDRESS = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
 const SOURCE_ADDRESS = "0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c";
 const RESERVE_ADDRESS = "0x706CCb6109046a6a4A08dbAD4444A46408703ccb";
 const CHAIN_ID = 1;
-const TOKEN_ABI = [
-  "function totalSupply() view returns (uint256)",
-  "function balanceOf(address) view returns (uint256)",
-];
 const BODY_LIMIT = 64 * 1024;
 const SYNC_PAGE = 500;
 const STORAGE_LAYOUT = "Daily minified JSON block files: <dir>/YYYY/YYYY-MM-DD.jsonl (one block per line)";
@@ -25,16 +22,6 @@ const STORAGE_LAYOUT = "Daily minified JSON block files: <dir>/YYYY/YYYY-MM-DD.j
 // Kept for game services: every wallet's FTH$ account is its address left-padded to bytes32.
 const walletGameAccountId = walletAccountId;
 
-function bridgeAbi() {
-  const artifactPaths = [
-    path.join(ROOT, "sites", "shared", "abi", "FthgGameBridge.json"),
-    path.join(ROOT, "artifacts", "contracts", "FthgGameBridge.sol", "FthgGameBridge.json"),
-  ];
-  for (const artifactPath of artifactPaths) {
-    if (fs.existsSync(artifactPath)) return JSON.parse(fs.readFileSync(artifactPath, "utf8")).abi;
-  }
-  throw new Error("FthgGameBridge ABI is missing. Run `npm run abi` before starting the API.");
-}
 
 function json(res, status, value, headers = {}) {
   const body = JSON.stringify(value);
@@ -86,7 +73,7 @@ function serviceRequestHeaders(serviceId, privateKey, method, requestPath, body 
   };
 }
 
-function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: suppliedProvider, logger = console } = {}) {
+function createDollarApi({ env = process.env, ledger: suppliedLedger, provider: suppliedProvider, gold: suppliedGold, logger = console, beforeLedgerMutation = () => {} } = {}) {
   // FTH_LEDGER_* names are canonical; TOKEN_LEDGER_* names are still accepted for existing deployments.
   const setting = (name) => env[`FTH_LEDGER_${name}`] ?? env[`TOKEN_LEDGER_${name}`] ?? "";
   const nodeId = setting("NODE_ID") || "local-node";
@@ -101,25 +88,33 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     signingKey: setting("SIGNING_PRIVATE_KEY") || null,
     writerPublicKey: setting("WRITER_PUBLIC_KEY") || null,
     blockIntervalMs: setting("BLOCK_INTERVAL_MS") === "" ? 1000 : Number(setting("BLOCK_INTERVAL_MS")),
-    genesis: { fthg: TOKEN_ADDRESS, sourceWallet: SOURCE_ADDRESS, reserveWallet: RESERVE_ADDRESS, openingRate: "1 FTHG = 1000 FTH$" },
+    genesis: { fthg: TOKEN_ADDRESS, sourceWallet: SOURCE_ADDRESS, reserveWallet: RESERVE_ADDRESS, openingRate: "1 FTHG = 1000 FTH$", ...(env.FTH_GAME_PUBLIC_KEY ? { gamePublicKey: env.FTH_GAME_PUBLIC_KEY } : {}),
+      ...(env.FTH_GOLD_PUBLIC_KEY ? { goldPublicKey: env.FTH_GOLD_PUBLIC_KEY, goldMarkets: require("./funds").liquidityTargets() } : {}) },
   }).open();
   const trustedServices = readTrustedServices(env.TOKEN_API_SERVICES_JSON || "");
   const authenticator = new ServiceAuthenticator(trustedServices);
-  const rpcUrl = env.TOKEN_API_RPC_URL || "https://ethereum-rpc.publicnode.com";
-  if (env.TOKEN_API_BRIDGE_ADDRESS && !ethers.isAddress(env.TOKEN_API_BRIDGE_ADDRESS)) throw new Error("TOKEN_API_BRIDGE_ADDRESS is not a valid Ethereum address.");
-  const bridgeAddress = env.TOKEN_API_BRIDGE_ADDRESS ? ethers.getAddress(env.TOKEN_API_BRIDGE_ADDRESS) : "";
-  if (env.TOKEN_API_GAME_SERVICE_ADDRESS && !ethers.isAddress(env.TOKEN_API_GAME_SERVICE_ADDRESS)) throw new Error("TOKEN_API_GAME_SERVICE_ADDRESS is not a valid Ethereum address.");
-  const gameServiceAddress = env.TOKEN_API_GAME_SERVICE_ADDRESS ? ethers.getAddress(env.TOKEN_API_GAME_SERVICE_ADDRESS) : "";
-  const bridgeInterface = new ethers.Interface(bridgeAbi());
-  const readProvider = suppliedProvider || new ethers.JsonRpcProvider(rpcUrl, CHAIN_ID, { staticNetwork: true });
-  const tokenContract = new ethers.Contract(TOKEN_ADDRESS, TOKEN_ABI, readProvider);
-  const bridgeContract = bridgeAddress ? new ethers.Contract(bridgeAddress, bridgeAbi(), readProvider) : null;
-  const confirmations = Math.max(1, Math.min(256, Number(env.TOKEN_API_CONFIRMATIONS) || 12));
+  const gold = suppliedGold || createGoldApi({ env, provider: suppliedProvider, logger });
+  const confirmations = gold.confirmations;
   const redemptionCancelGraceMs = Math.max(60_000, Number(env.TOKEN_API_REDEMPTION_CANCEL_GRACE_MS) || 1_800_000);
   const corsOrigins = new Set((env.TOKEN_API_CORS_ORIGINS || "").split(",").map((origin) => origin.trim()).filter(Boolean));
   let syncing = false;
   let syncTimer;
   const counters = { syncErrors: 0, lastSyncAt: "", lastSyncError: "", lastSettlementAt: "" };
+  function submitTransaction(transaction, options) {
+    beforeLedgerMutation();
+    if (transaction.kind === "CREDIT" && !ledger.hasId(transaction.id)) {
+      throw Object.assign(new Error("FTH$ issuance is closed. Bridge conversion and staking rewards cannot create new FTH$; use existing balances only."), { status: 409 });
+    }
+    return ledger.submit(transaction, options);
+  }
+  function circulationPolicy() {
+    return { issuanceEnabled: false, bridgeCreditsEnabled: false, stakingRewardsEnabled: false,
+      finiteInitialAllocationEnabled: Boolean(ledger.genesis.goldPublicKey),
+      gameplayPayments: "system-treasury", treasuryAccount: SYSTEM_TREASURY_ACCOUNT,
+      treasuryAvailable: ledger.balance(SYSTEM_TREASURY_ACCOUNT).available,
+      liquidityFunding: ledger.genesis.goldPublicKey ? "finite-origin-allocation-treasury-first" : "existing-balances-only",
+      goldReserve: gold.reserveStatus?.() || { enabled: false } };
+  }
   const writeBuckets = new Map();
 
   function rateLimit(req, bucket, perMinute) {
@@ -157,7 +152,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     rateLimit(req, "profile", 10);
     const profile = verifySignedProfile(body);
     const address = profile.address.toLowerCase();
-    const receipt = await ledger.submit({
+    const receipt = await submitTransaction({
       id: `profile:${address}:${profile.issuedAt}`,
       kind: "PROFILE",
       account: walletAccountId(profile.address),
@@ -171,7 +166,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     if (mode === "reader") return forwardToWriter(req, res, "/api/v1/fth/transfers");
     rateLimit(req, "transfer", 30);
     const transfer = verifyTransfer(body);
-    const receipt = await ledger.submit({
+    const receipt = await submitTransaction({
       id: `transfer:${transfer.from}:${transfer.nonce}`,
       kind: "TRANSFER",
       account: transfer.from,
@@ -206,48 +201,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
   }
 
   function requireBridge() {
-    if (!bridgeContract) throw Object.assign(new Error("Dynamic bridge is not configured. Set TOKEN_API_BRIDGE_ADDRESS after deployment."), { status: 503 });
-  }
-
-  async function getPoolState() {
-    if (!bridgeContract) return { configured: false, deployed: false, initialized: false };
-    const code = await readProvider.getCode(bridgeAddress);
-    if (code === "0x") return { configured: true, deployed: false, address: bridgeAddress, initialized: false };
-    const initialized = await bridgeContract.poolInitialized();
-    const [poolFthg, poolFthDollar, apr, gameYear, gameClockInitialized, staked, paused, actualFthgBalance] = await Promise.all([
-      bridgeContract.reserveFthg(),
-      bridgeContract.reserveFthDollar(),
-      bridgeContract.baseAprBps(),
-      bridgeContract.currentGameYear(),
-      bridgeContract.gameClockInitialized(),
-      bridgeContract.totalStakedFthg(),
-      bridgeContract.paused(),
-      tokenContract.balanceOf(bridgeAddress),
-    ]);
-    const [sourceAdmin, reserveAdmin, gameServiceAuthorized] = await Promise.all([
-      bridgeContract.hasRole(ethers.ZeroHash, SOURCE_ADDRESS),
-      bridgeContract.hasRole(ethers.ZeroHash, RESERVE_ADDRESS),
-      gameServiceAddress ? bridgeContract.hasRole(ethers.id("GAME_SERVICE_ROLE"), gameServiceAddress) : Promise.resolve(false),
-    ]);
-    return {
-      configured: true,
-      deployed: true,
-      address: bridgeAddress,
-      initialized,
-      reserveFthg: poolFthg.toString(),
-      actualFthgBalance: actualFthgBalance.toString(),
-      reserveFthDollar: poolFthDollar.toString(),
-      spotRateFthDollarPerFthg: initialized && poolFthg > 0n ? (poolFthDollar * 10n ** 18n / poolFthg).toString() : "0",
-      baseAprBps: Number(apr),
-      currentGameYear: Number(gameYear),
-      gameClockInitialized,
-      totalStakedFthg: staked.toString(),
-      paused,
-      sourceAdmin,
-      reserveAdmin,
-      gameServiceAddress,
-      gameServiceAuthorized,
-    };
+    if (!gold.bridgeAddress) throw Object.assign(new Error("Dynamic bridge is not configured. Set GOLD_API_BRIDGE_ADDRESS after deployment."), { status: 503 });
   }
 
   function nodeInfo() {
@@ -263,20 +217,10 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
   }
 
   async function getPublicStats() {
-    let network, totalSupply, sourceBalance, reserveBalance, pool, latestBlock;
-    try {
-      [network, totalSupply, sourceBalance, reserveBalance, pool, latestBlock] = await Promise.all([
-        readProvider.getNetwork(),
-        tokenContract.totalSupply(),
-        tokenContract.balanceOf(SOURCE_ADDRESS),
-        tokenContract.balanceOf(RESERVE_ADDRESS),
-        getPoolState(),
-        readProvider.getBlockNumber(),
-      ]);
-    } catch (error) {
-      throw Object.assign(new Error(`Public Mainnet data is unavailable: ${error.message}`), { status: 503 });
-    }
-    const chainMatches = Number(network.chainId) === CHAIN_ID;
+    const goldStats = await gold.stats();
+    const { chain, bridge: pool } = goldStats;
+    const latestBlock = chain.latestBlock;
+    const chainMatches = chain.id === CHAIN_ID;
     const fthDollar = ledger.summary();
     const hasGameService = Object.values(trustedServices).some((service) => service.role === "game");
     const ready = [
@@ -284,7 +228,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
       { key: "bridge", ready: pool.deployed, detail: pool.deployed ? `Bridge deployed at ${pool.address}.` : "Dynamic bridge is not configured or deployed." },
       { key: "pool", ready: Boolean(pool.initialized && pool.reserveFthg !== "0" && pool.reserveFthDollar !== "0" && !pool.paused), detail: pool.initialized ? `${pool.paused ? "Pool is paused. " : ""}FTHG is from actual deposits; FTH$ is the configured L3 budget.` : "Pool disabled until actual FTHG is deposited and matching FTH$ budget is configured." },
       { key: "game-clock", ready: Boolean(pool.gameClockInitialized), detail: pool.gameClockInitialized ? `Game clock is at year ${pool.currentGameYear}.` : "Staking remains unavailable until a signed game-service year update is confirmed on-chain." },
-      { key: "chain", ready: chainMatches, detail: chainMatches ? `Connected to Ethereum Mainnet at block ${latestBlock}.` : `Configured RPC returned chain ${network.chainId}, expected 1.` },
+      { key: "chain", ready: chainMatches, detail: chainMatches ? `Connected to Ethereum Mainnet at block ${latestBlock}.` : `Configured RPC returned chain ${chain.id}, expected 1.` },
       { key: "game-service-auth", ready: hasGameService, detail: hasGameService ? "At least one game service signing key is registered." : "No game-service signing keys are configured." },
       { key: "admin-roles", ready: Boolean(pool.sourceAdmin && pool.reserveAdmin), detail: pool.deployed ? `Source admin: ${pool.sourceAdmin ? "confirmed" : "missing"}; reserve admin: ${pool.reserveAdmin ? "confirmed" : "missing"}.` : "Bridge admin roles will be checked after deployment." },
       { key: "game-service-role", ready: Boolean(pool.gameServiceAuthorized), detail: pool.gameServiceAuthorized ? `Game-service wallet ${pool.gameServiceAddress} is authorized on-chain.` : "Configure TOKEN_API_GAME_SERVICE_ADDRESS and grant GAME_SERVICE_ROLE on the bridge." },
@@ -293,34 +237,16 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     ];
     return {
       node: nodeInfo(),
-      chain: { id: Number(network.chainId), latestBlock, tokenAddress: TOKEN_ADDRESS, totalSupply: totalSupply.toString(), sourceWallet: SOURCE_ADDRESS, sourceBalance: sourceBalance.toString(), reserveWallet: RESERVE_ADDRESS, reserveWalletBalance: reserveBalance.toString() },
+      chain,
       bridge: pool,
       staking: { baseAprBps: pool.baseAprBps ?? 600, termsGameYears: [1, 2, 5, 10, 20, 30], interest: "simple", priceLock: "spot quote at stake time" },
       fthDollar,
+      monetaryPolicy: circulationPolicy(),
       ready: ready.map((item) => ({ ...item, ready: Boolean(item.ready) })),
       checkedAt: new Date().toISOString(),
     };
   }
 
-  async function verifiedEvents(txHash) {
-    if (!/^0x[0-9a-fA-F]{64}$/.test(txHash || "")) throw Object.assign(new Error("txHash must be a 32-byte transaction hash."), { status: 400 });
-    requireBridge();
-    const receipt = await readProvider.getTransactionReceipt(txHash);
-    if (!receipt) return { pending: true, events: [] };
-    if (Number(receipt.status) !== 1) throw Object.assign(new Error("Transaction reverted; no ledger entry was created."), { status: 409 });
-    const [latest, network] = await Promise.all([readProvider.getBlockNumber(), readProvider.getNetwork()]);
-    if (Number(network.chainId) !== CHAIN_ID) throw Object.assign(new Error("RPC is not connected to Ethereum Mainnet."), { status: 503 });
-    if (latest - receipt.blockNumber + 1 < confirmations) return { pending: true, confirmations: latest - receipt.blockNumber + 1, events: [] };
-    const events = [];
-    for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== bridgeAddress.toLowerCase()) continue;
-      let parsed;
-      try { parsed = bridgeInterface.parseLog({ topics: log.topics, data: log.data }); } catch { continue; }
-      if (!parsed) continue;
-      events.push({ parsed, logIndex: log.index, txHash: receipt.hash, blockNumber: receipt.blockNumber });
-    }
-    return { pending: false, events };
-  }
 
   // Only FTH$ effects are recorded on the L3 ledger. FTHG custody, staking principal, and the game
   // clock stay on Ethereum, which is their single source of truth.
@@ -331,9 +257,10 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     if (parsed.name === "FthgConverted" || parsed.name === "StakeClaimed") {
       const account = String(parsed.args.gameAccountId).toLowerCase();
       const amount = (parsed.name === "FthgConverted" ? parsed.args.fthDollarOut : parsed.args.rewardFthDollar).toString();
+      if (amount === "0") return null;
       const data = { src: parsed.name, tx: txHash, log: logIndex, blk: blockNumber };
       if (parsed.name === "FthgConverted") data.w = ethers.getAddress(String(parsed.args.account));
-      const receipt = await ledger.submit({ id, kind: "CREDIT", account, amount, data });
+      const receipt = await submitTransaction({ id, kind: "CREDIT", account, amount, data });
       return { ...receipt, id, kind: "CREDIT", accountId: account, amount };
     }
     if (parsed.name === "FthDollarRedeemed") {
@@ -347,7 +274,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
         || redemption.amount !== parsed.args.fthDollarIn.toString()) {
         throw Object.assign(new Error("Confirmed redemption does not match the reserved account, amount, or recipient."), { status: 409 });
       }
-      const receipt = await ledger.submit({ id, kind: "SETTLE", account: redemption.accountId, amount: redemption.amount, data: { r: redemptionId, tx: txHash } });
+      const receipt = await submitTransaction({ id, kind: "SETTLE", account: redemption.accountId, amount: redemption.amount, data: { r: redemptionId, tx: txHash } });
       return { ...receipt, id, kind: "SETTLE", accountId: redemption.accountId, amount: redemption.amount };
     }
     return null;
@@ -359,13 +286,17 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     try { return JSON.parse(req.rawBody); } catch { throw Object.assign(new Error("Request body must be valid JSON."), { status: 400 }); }
   }
 
-  async function settleTransaction(req, res) {
+  async function settleTransaction(req, res, publicRequest = false) {
     const body = await readJsonBody(req);
-    authenticate(req, "game");
-    requireWriter();
-    const result = await verifiedEvents(body.txHash);
+    if (publicRequest && mode === "reader") return forwardToWriter(req, res, req.url);
+    if (publicRequest) { rateLimit(req, "bridge-settlement", 12); requireLedgerWriter(); }
+    else { authenticate(req, "game"); requireWriter(); }
+    const result = await gold.verifiedEvents(body.txHash);
     if (result.pending) return json(res, 202, { status: "confirming", confirmations: result.confirmations || 0, requiredConfirmations: confirmations });
     if (!result.events.length) return json(res, 422, { error: "No recognized bridge event was found in the confirmed transaction." });
+    if (publicRequest && result.events.some(event => event.blockTime < Date.parse(ledger.summary().genesisTime))) {
+      return json(res, 409, { error: "This bridge receipt predates the Dollar journal. Historical settlement requires an authorized recovery service." });
+    }
     const settled = [];
     for (const event of result.events) {
       const entry = await settleEvent(event);
@@ -391,7 +322,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     if (!ethers.isAddress(body.recipient)) throw Object.assign(new Error("recipient must be a valid Ethereum address."), { status: 400 });
     const recipient = ethers.getAddress(body.recipient);
     if (recipient === ethers.ZeroAddress) throw Object.assign(new Error("recipient cannot be the zero address."), { status: 400 });
-    const fthgOut = await bridgeContract.quoteFthgOut(amount);
+    const fthgOut = await gold.quote("fthdollar-to-fthg", amount.toString());
     if (fthgOut === 0n) throw Object.assign(new Error("Redemption amount is too small to return any FTHG at the current quote."), { status: 400 });
     const minFthgOut = body.minFthgOut === undefined ? fthgOut : asPositiveInteger(body.minFthgOut, "minFthgOut");
     const previous = ledger.redemption(redemptionId);
@@ -403,7 +334,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
       throw Object.assign(new Error("Redemption quote has expired; cancel it before creating a new redemption ID."), { status: 409 });
     }
     const expiresAt = previous ? previous.expiresAt : Date.now() + 120_000;
-    const receipt = await ledger.submit({
+    const receipt = await submitTransaction({
       id: `redemption:reserve:${redemptionId}`,
       kind: "RESERVE",
       account: accountId,
@@ -434,7 +365,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
     if (Date.now() < current.expiresAt + redemptionCancelGraceMs) {
       return json(res, 409, { error: "Redemption cannot be released until its on-chain deadline and confirmation grace period have passed." });
     }
-    const receipt = await ledger.submit({
+    const receipt = await submitTransaction({
       id: `redemption:release:${redemptionId}`,
       kind: "RELEASE",
       account: current.accountId,
@@ -547,8 +478,16 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
       res.end();
       return true;
     }
-    const url = new URL(req.url, "http://localhost");
+    const url = new URL(req.url.replace(/^\/api\/v1\/dollar\//, "/api/v1/"), "http://localhost");
     try {
+      if (req.url.startsWith("/api/v1/dollar/") && url.pathname === "/api/v1/stats" && req.method === "GET") {
+        const summary = ledger.summary();
+        return json(res, 200, { fthDollar: summary, ledger: summary, node: nodeInfo(), monetaryPolicy: circulationPolicy(), ready: [
+          { key: "writer", ready: mode === "writer", detail: `Dollar node mode: ${mode}.` },
+          { key: "block-signing", ready: summary.signedBlocks, detail: "Production replicas require signed writer blocks." },
+          { key: "game-funds", ready: Boolean(ledger.genesis.gamePublicKey), detail: "Gameplay entries require the genesis-authorized Ed25519 game key." },
+        ], checkedAt: new Date().toISOString() });
+      }
       if (url.pathname === "/api/v1/fth" || url.pathname.startsWith("/api/v1/fth/")) {
         await handleFth(req, res, url);
         return true;
@@ -566,6 +505,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
           height: ledger.height,
           tipHash: ledger.tipHash,
           configured: mode !== "unconfigured",
+          monetaryPolicy: circulationPolicy(),
           checkedAt: new Date().toISOString(),
         });
       }
@@ -574,13 +514,14 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
         return json(res, stats.ready.find((item) => item.key === "chain" && !item.ready) ? 503 : 200, stats);
       }
       if (req.method === "GET" && url.pathname === "/api/v1/quote") {
+        if (url.searchParams.get("direction") === "fthg-to-fthdollar") {
+          throw Object.assign(new Error("FTH$ issuance is closed; FTHG conversion cannot credit new FTH$."), { status: 409 });
+        }
         requireBridge();
         const amount = asPositiveInteger(url.searchParams.get("amount"), "amount");
         const direction = url.searchParams.get("direction");
         let output;
-        if (direction === "fthg-to-fthdollar") output = await bridgeContract.quoteFthDollarOut(amount);
-        else if (direction === "fthdollar-to-fthg") output = await bridgeContract.quoteFthgOut(amount);
-        else throw Object.assign(new Error("direction must be fthg-to-fthdollar or fthdollar-to-fthg."), { status: 400 });
+        output = await gold.quote(direction, amount.toString());
         return json(res, 200, { direction, amountIn: amount.toString(), amountOut: output.toString(), unit: "18-decimal base units", quoteIsIndicative: true });
       }
       const walletMatch = url.pathname.match(/^\/api\/v1\/wallets\/(0x[0-9a-fA-F]{40})$/);
@@ -596,7 +537,7 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
         return true;
       }
       if (req.method === "POST" && url.pathname === "/api/v1/settlements") {
-        await settleTransaction(req, res);
+        await settleTransaction(req, res, req.url.startsWith("/api/v1/dollar/"));
         return true;
       }
       if (req.method === "POST" && url.pathname === "/api/v1/redemptions/reserve") {
@@ -670,9 +611,10 @@ function createTokenApi({ env = process.env, ledger: suppliedLedger, provider: s
   function close() {
     clearInterval(syncTimer);
     ledger.close();
+    if (!suppliedGold) gold.close();
   }
 
   return { handle, start, close, ledger, mode, nodeId, syncFromUpstream };
 }
 
-module.exports = { createTokenApi, serviceRequestHeaders, walletGameAccountId };
+module.exports = { createDollarApi, serviceRequestHeaders, walletGameAccountId };

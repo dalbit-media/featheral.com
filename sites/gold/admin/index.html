@@ -4,368 +4,59 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>FTHG Admin · Featheral Gold</title>
+<title>Reserve admin | Featheral Gold</title>
 <link rel="icon" href="/shared/logo.svg">
-<link rel="stylesheet" href="styles.css">
-<link rel="stylesheet" href="/shared/admin.css">
+<link rel="stylesheet" href="/shared/featheral.css">
 <link rel="stylesheet" href="/shared/wallet-profile.css">
+<link rel="stylesheet" href="/reserve.css">
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="/shared/site-links.js" defer></script>
+<script src="/shared/wallet-profile.js" defer></script>
+<script src="/reserve-view.js" defer></script>
+<script src="./app.js" defer></script>
 </head>
-<body class="site-gold admin-page">
+<body class="site-gold">
 <nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
-<header class="top">
-  <a class="brand" href="/"><img src="/shared/logo.svg" alt="Golden feather" width="36" height="36"><div><b>FTHG Admin</b> <span class="muted">Featheral Gold · Ethereum Mainnet</span> <span id="adminBadge" class="admin-badge" hidden title="This wallet holds DEFAULT_ADMIN_ROLE on the FTHG contract">Admin</span></div></a>
-  <nav class="hdr-right">
-    <span class="network-badge" title="This console always operates on Ethereum Mainnet">Ethereum Mainnet</span>
-    <button id="connect" class="wallet-icon" type="button" title="Connect wallet" aria-label="Connect wallet">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
-    </button>
+<header class="top gold-header">
+  <a class="brand" href="/"><img src="/shared/logo.svg" alt="" width="34" height="34"><b>Featheral Gold</b></a>
+  <nav aria-label="Gold navigation">
+    <a href="/">Overview</a><a href="/conversion/">Conversion</a><a href="/admin/" aria-current="page">Admin</a><a href="/docs/">Docs</a>
+    <button id="wallet" class="wallet-icon" type="button" aria-label="Connect wallet"></button>
   </nav>
 </header>
-<nav id="tabs" class="admin-tabs" data-admin-tabs>
-  <button data-tab="dashboard" class="active">Dashboard</button>
-  <button data-tab="analytics">Token analytics</button>
-  <button data-tab="token" class="admin-only">Token</button>
-  <button data-tab="ledger">Bridge status</button>
-  <button data-tab="roles" class="admin-only">Roles &amp; Compliance</button>
-  <button data-tab="game" class="admin-only">Legacy exchange</button>
-  <button data-tab="dex" class="admin-only">Uniswap V2</button>
-  <button data-tab="listings" class="admin-only">Listings &amp; planning</button>
-  <button data-tab="settings" class="admin-only">Settings</button>
-</nav>
-<main>
-<section id="dashboard" class="tab active">
-  <h2>Overview</h2>
-  <div class="grid" id="stats"></div>
-  <button id="refreshPublicStats" class="primary">Refresh public stats</button>
-  <div class="card">
-    <h3>Reserve wallets in FTH$</h3>
-    <p class="muted">Live on-chain FTHG balances at the fixed source and FTH$ reserve wallets, shown in FTH$ at the current bridge rate (opening rate 1 FTHG = 1,000 FTH$). USD values use the <b>$0.01 per FTHG</b> reference estimate; this is not a market price. No wallet connection is required.</p>
-    <div id="liquiditySummary" class="liquidity-grid"></div>
-    <p id="liquidityFlow" class="liquidity-flow"></p>
-    <button id="refreshLiquidity">Refresh balances</button>
-  </div>
-  <div class="card">
-    <div class="listing-status-heading">
-      <div><h3>Game API, dynamic bridge &amp; ledger</h3><p id="dashboardLedgerStatus" class="muted" aria-live="polite">Checking local API and ledger status…</p></div>
-      <button id="refreshLedgerDashboard">Refresh service status</button>
+<main class="reserve-main">
+  <div class="reserve-toolbar"><div><h1>Reserve operations</h1><p id="reserve-mode" class="muted">Loading reserve policy...</p></div><span id="sync-state" class="reserve-badge pending">Checking sync status</span></div>
+  <aside class="reserve-warning"><strong>Off-chain allocations are not Ethereum transfers.</strong>FTHG stays in the origin wallet until manually transferred. Confirmed receipts settle pooled obligations; unconfirmed backing cannot redeem. This console never sends sync transactions.</aside>
+  <p id="admin-status" class="status" role="status">Loading reserve journal...</p>
+  <section class="reserve-panel" aria-labelledby="flow-title">
+    <div class="reserve-toolbar"><h2 id="flow-title">Origin ↔ FTH$ backing wallet</h2><div><button id="refresh" class="btn" type="button">Refresh journal</button> <button id="verify-balances" class="btn primary" type="button">Verify actual balances</button></div></div>
+    <p class="muted">These are FTHG wallet flows since reserve initialization. The FTH$ backing wallet holds Ethereum FTHG, not an on-chain FTH$ token. OFF-SYNC amounts are ledger obligations awaiting Ethereum settlement.</p>
+    <div class="wallet-flow-grid"><article id="origin-flow" class="wallet-flow"></article><article id="reserve-flow" class="wallet-flow"></article></div>
+    <div id="reserve-metrics" class="reserve-metrics"></div>
+    <a class="btn" href="/conversion/#manual-sync">Review conversion &amp; manual sync</a>
+  </section>
+  <section class="reserve-panel" aria-labelledby="history-title">
+    <h2 id="history-title">Reserve transactions</h2>
+    <p id="history-status" class="status" role="status">Loading transactions...</p>
+    <div class="reserve-table-wrap" tabindex="0" role="region" aria-label="Reserve transaction history">
+      <table class="reserve-table"><thead><tr><th scope="col">Recorded</th><th scope="col">Operation</th><th scope="col">FTHG direction</th><th scope="col">FTHG amount</th><th scope="col">FTH$ movement</th><th scope="col">Record type</th><th scope="col">Evidence</th></tr></thead><tbody id="reserve-transactions"></tbody></table>
     </div>
-    <div id="dashboardLedgerSummary" class="listing-check-grid"></div>
-    <button data-tab="ledger">View bridge status</button>
-    <a data-site="dollar" data-path="/admin/#liquidity">Manage liquidity in Dollar admin</a>
-  </div>
-  <div class="listing-status-heading">
-    <div><h3>Public token visibility checks</h3><p class="muted">Read-only checks by contract address; these do not connect your wallet or submit applications.</p></div>
-    <button id="refreshListingStatus" class="primary">Refresh listing checks</button>
-  </div>
-  <p id="listingCheckedAt" class="muted" aria-live="polite">Checking public listing sources…</p>
-  <div id="dashboardListingStatus" class="listing-check-grid"></div>
-  <button data-tab="listings" class="admin-only">View listing readiness &amp; improvements</button>
-  <div class="admin-only">
-  <h3>Activity log</h3>
-  <pre id="log"></pre>
-  </div>
-</section>
-
-<section id="token" class="tab">
-  <h2>Token</h2>
-  <div class="card">
-    <h3>Existing Featheral Gold contract</h3>
-    <p class="muted">This admin manages the existing FTHG contract on Ethereum Mainnet. Contract deployment and address changes are not available here.</p>
-    <p><a href="https://etherscan.io/address/0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665" target="_blank" rel="noopener noreferrer">0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665</a></p>
-    <table><tbody>
-      <tr><td>Name / symbol</td><td>Featheral Gold / FTHG</td></tr>
-      <tr><td>Decimals</td><td>18</td></tr>
-      <tr><td>Total supply (fixed)</td><td>216,265,000 FTHG = 216,265,000 kg (216,265 t world above-ground gold, WGC end-2024)</td></tr>
-      <tr><td>Mint / burn / cap change</td><td>Not possible</td></tr>
-    </tbody></table>
-  </div>
-  <div class="card">
-    <h3>Metadata &amp; transfers</h3>
-    <label>Metadata URI (token logo/info JSON)<input id="uriNew" placeholder="ipfs://…"></label>
-    <button id="setUri">Set metadata URI</button>
-    <div class="row"><button id="pause" class="danger">Pause transfers</button><button id="unpause">Unpause</button></div>
-  </div>
-  <div class="card" id="tokenProfileEditor">
-    <h3>Canonical token profile &amp; branding</h3>
-    <p class="muted">Maintain one consistent project profile and generate copy-ready metadata for explorers, trackers, wallets, and token lists. Saving here stores a local working profile; it does not change the immutable on-chain name/symbol or update external websites. Use the metadata URI control above to publish a URI on-chain.</p>
-    <div class="metadata-profile-grid">
-      <label>Token name (on-chain, fixed)<input value="Featheral Gold" readonly></label>
-      <label>Symbol (on-chain, fixed)<input value="FTHG" readonly></label>
-      <label>Website<input id="profileWebsite" readonly></label>
-      <label>Public logo URL (HTTPS or IPFS)<input id="profileLogo" placeholder="https://… or ipfs://…"></label>
+    <button id="history-more" class="btn" type="button" hidden>Load older transactions</button>
+  </section>
+  <section class="reserve-panel" aria-labelledby="safety-title">
+    <h2 id="safety-title">Essential token safety</h2>
+    <p class="muted">The token has a fixed supply. Metadata, pause and compliance controls affect the deployed Ethereum contract, not the reserve conversion rate. Every write checks its actual on-chain role, simulates, and requires wallet confirmation.</p>
+    <p><a href="https://etherscan.io/address/0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665" target="_blank" rel="noopener noreferrer">View canonical token contract ↗</a></p>
+    <p id="safety-status" class="status" role="status">Connect a wallet to check token safety permissions.</p>
+    <div class="safety-grid">
+      <form id="metadata-form"><h3>Metadata</h3><label>Public metadata URI<input id="metadata-uri" type="text" placeholder="https://… or ipfs://…" required maxlength="2048"></label><button id="metadata-save" class="btn" disabled>Review metadata update</button></form>
+      <div><h3>Transfer safety</h3><p id="token-paused" class="muted">Pause state not checked.</p><button id="token-pause" class="btn" disabled>Pause transfers</button> <button id="token-unpause" class="btn" disabled>Resume transfers</button></div>
+      <form id="compliance-form"><h3>Compliance</h3><label>Wallet address<input id="compliance-address" type="text" required pattern="0x[0-9a-fA-F]{40}"></label><label>Action<select id="compliance-action"><option value="check">Check restriction</option><option value="restrict">Restrict transfers</option><option value="release">Remove restriction</option></select></label><button id="compliance-submit" class="btn" disabled>Review action</button></form>
+      <form id="role-form"><h3>Safety roles</h3><label>Wallet address<input id="role-address" type="text" required pattern="0x[0-9a-fA-F]{40}"></label><label>Role<select id="role-name"><option value="pause">Pauser</option><option value="compliance">Compliance</option><option value="metadata">Default administrator</option></select></label><label>Action<select id="role-action"><option value="check">Check role</option><option value="grant">Grant role</option><option value="revoke">Revoke role</option></select></label><button id="role-submit" class="btn" disabled>Review role action</button></form>
     </div>
-    <div class="row metadata-logo-tools">
-      <label class="file">Preview local logo<input id="profileLogoFile" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
-      <img id="profileLogoPreview" class="metadata-logo-preview" alt="FTHG logo preview" hidden>
-      <small id="profileLogoStatus" class="muted">For public listings, use a durable HTTPS or IPFS URL.</small>
-    </div>
-    <label>Public description<textarea id="profileDescription" rows="5" maxlength="2000"></textarea></label>
-    <div class="metadata-profile-grid">
-      <label>Documentation / whitepaper URL<input id="profileDocs" placeholder="https://…"></label>
-      <label>Contact email<input id="profileContact" type="email" placeholder="team@example.com"></label>
-      <label>Telegram URL<input id="profileTelegram" placeholder="https://t.me/…"></label>
-      <label>X URL<input id="profileX" placeholder="https://x.com/…"></label>
-      <label>Discord URL<input id="profileDiscord" placeholder="https://discord.gg/…"></label>
-    </div>
-    <div class="row">
-      <button id="saveTokenProfile" class="primary">Save profile locally</button>
-      <button id="copyTokenDescription">Copy description</button>
-      <button id="copyMetadataJson">Copy metadata JSON</button>
-      <button id="downloadMetadataJson">Download metadata JSON</button>
-      <button id="downloadMetadataBundle">Download metadata &amp; token-list bundle</button>
-    </div>
-    <label>ERC-1046-style metadata JSON preview<textarea id="metadataJsonPreview" rows="12" readonly></textarea></label>
-    <p id="metadataProfileStatus" class="muted" aria-live="polite"></p>
-  </div>
-  <div class="card">
-    <h3>External profile update shortcuts</h3>
-    <p class="muted">Open the platform’s official page and paste the canonical profile or metadata bundle. Authentication and final changes happen on each platform.</p>
-    <div id="metadataPlatformLinks" class="listing-link-grid"></div>
-  </div>
-  <div class="card">
-    <h3>Transfer</h3>
-    <label>To<input id="tTo"></label>
-    <label>Amount (FTHG)<input id="tAmt"></label>
-    <button id="transfer">Send</button>
-  </div>
-</section>
-
-<section id="analytics" class="tab">
-  <h2>FTHG on-chain analytics &amp; exploration</h2>
-  <p class="muted">Data is read from Ethereum and the Blockscout public index. Explorer indexing can lag or be incomplete; this is not an audited holder ledger or market-price feed.</p>
-  <div class="listing-status-heading">
-    <div><h3>Supply, distribution &amp; activity</h3><p id="analyticsCheckedAt" class="muted" aria-live="polite">Not loaded yet.</p></div>
-    <button id="refreshAnalytics" class="primary">Refresh analytics</button>
-  </div>
-  <div id="tokenMetrics" class="grid token-metrics"></div>
-  <div class="card">
-    <div class="listing-status-heading">
-      <div><h3>Rich list · largest indexed holders</h3><p id="holderListStatus" class="muted">Load explorer-indexed holder balances.</p></div>
-      <div><input id="holderFilter" aria-label="Filter holder addresses" placeholder="Filter address / ENS" class="analytics-filter"><button id="exportHolders">Export loaded holders CSV</button><button id="loadMoreHolders">Load more</button></div>
-    </div>
-    <div class="table-wrap"><table id="holdersTable"><thead><tr><th>Rank*</th><th>Holder</th><th>Balance</th><th>Share of total supply</th><th>Explorer labels</th></tr></thead><tbody></tbody></table></div>
-    <small class="muted">*Rank is based on the Blockscout holder index order. Labels are explorer-provided and may be incomplete.</small>
-  </div>
-  <div class="card">
-    <div class="listing-status-heading">
-      <div><h3>Transfer &amp; transaction explorer</h3><p id="transferListStatus" class="muted">Load the most recent indexed ERC-20 transfer events.</p></div>
-      <div><input id="transferFilter" aria-label="Filter transfers" placeholder="Filter address / tx hash / event" class="analytics-filter"><button id="exportTransfers">Export loaded transfers CSV</button><button id="loadMoreTransfers">Load more</button></div>
-    </div>
-    <div class="table-wrap"><table id="transfersTable"><thead><tr><th>Time</th><th>Block</th><th>Type</th><th>From</th><th>To</th><th>Amount</th><th>Transaction</th></tr></thead><tbody></tbody></table></div>
-  </div>
-  <div class="card">
-    <h3>Additional public token explorers</h3>
-    <div id="analyticsExplorerLinks" class="listing-link-grid"></div>
-  </div>
-</section>
-
-<section id="ledger" class="tab">
-  <h2>Dynamic bridge status</h2>
-  <p class="muted">Read-only FTHG custody and FTH$ layer-3 ledger status. Liquidity and reward administration are now in Dollar admin; this page does not duplicate those transaction controls.</p>
-  <p><a class="primary" data-site="dollar" data-path="/admin/#liquidity">Open Dollar liquidity admin</a> · <a data-site="dollar" data-path="/wallet/#staking">Open staking wallet</a></p>
-  <div class="listing-status-heading">
-    <div><h3>Live service and pool status</h3><p id="ledgerCheckedAt" class="muted" aria-live="polite">Not checked yet.</p></div>
-    <button id="refreshLedger" class="primary">Refresh service stats</button>
-  </div>
-  <div id="ledgerMetrics" class="grid token-metrics"></div>
-  <div class="card">
-    <h3>Readiness checks</h3>
-    <div id="ledgerReadiness" class="listing-check-grid"></div>
-  </div>
-  <div class="card">
-    <h3>Exchange and staking policy</h3>
-    <ul class="ledger-policy-list">
-      <li>Separate dynamic bridge contract; the existing FTHG contract remains unchanged and its fixed-rate bridge is legacy.</li>
-      <li>Opening spot rate is 1 FTHG : 1,000 FTH$. A constant-product curve changes quotes with funded pool balances; quotes fail closed until the bridge is deployed, real FTHG is deposited, and a matching FTH$ game-ledger budget is configured.</li>
-      <li>FTH$ is an off-chain game balance, not an on-chain token or a USD redemption promise. Each credit is posted only after its bridge event is confirmed and verified.</li>
-      <li>Staking locks FTHG principal. The initial base is 6% simple interest per game-year; the market spot quote is locked at stake time. Supported terms are 1, 2, 5, 10, 20, and 30 game-years. The signed game-service clock must be initialized on-chain before staking.</li>
-      <li>FTH$ staking rewards consume the configured game-ledger budget. They are credited only after a confirmed maturity claim; no server-held wallet keys are used.</li>
-    </ul>
-  </div>
-  <div class="card">
-    <h3>Ledger operations</h3>
-    <p class="muted">FTH$ uses signed, append-only daily JSON block files. The SQL console is a derived read-only index, not the canonical ledger. Configuration and service authentication are managed outside this browser.</p>
-    <a data-site="dollar" data-path="/admin/#ledger">View ledger node, files and queries</a>
-  </div>
-</section>
-
-<section id="roles" class="tab">
-  <h2>Roles &amp; compliance</h2>
-  <div class="card">
-    <h3>Administrator access</h3>
-    <p id="walletAccessStatus" class="muted">Connect an authorized wallet to manage roles.</p>
-    <p id="adminSourceStatus" class="muted">Source wallet admin role: loading…</p>
-    <p id="adminReserveStatus" class="muted">Reserve wallet admin role: loading…</p>
-    <p class="muted">Only a connected wallet with on-chain <code>DEFAULT_ADMIN_ROLE</code> can assign or revoke roles. To make the fixed source or reserve wallet an administrator, an existing administrator must grant it <code>DEFAULT_ADMIN_ROLE</code> first. Once granted, either wallet can grant that role to another address.</p>
-  </div>
-  <div class="card">
-    <h3>Assign contract role</h3>
-    <label>Account<input id="rAcct"></label>
-    <label>Role<select id="rRole"><option>DEFAULT_ADMIN_ROLE</option><option>PAUSER_ROLE</option><option>COMPLIANCE_ROLE</option><option>TREASURY_ROLE</option></select></label>
-    <div class="row"><button id="grant">Grant</button><button id="revoke" class="danger">Revoke</button><button id="hasRole">Check</button></div>
-    <p class="muted">Select <code>DEFAULT_ADMIN_ROLE</code> to assign another administrator. Role changes are enforced by the deployed contract.</p>
-  </div>
-  <div class="card">
-    <h3>Blacklist</h3>
-    <label>Address<input id="bl"></label>
-    <div class="row"><button id="blAdd" class="danger">Blacklist</button><button id="blDel">Remove</button><button id="blChk">Check</button></div>
-  </div>
-</section>
-
-<section id="game" class="tab">
-  <h2>Legacy fixed-rate exchange</h2>
-  <p class="muted">These controls manage the legacy exchange still present in the FTHG contract. Its events are not settled by the current dynamic-bridge ledger. Do not enable it as a substitute for the funded pool. Use Dollar admin for current liquidity and rewards.</p>
-  <div class="bridge-flow">
-    <div class="bridge-step"><span>01 · ON-CHAIN</span><b>Holder sends FTHG</b><small>FTHG is moved to the configured reserve wallet.</small></div>
-    <div class="bridge-arrow" aria-hidden="true">→</div>
-    <div class="bridge-step"><span>02 · EVENT</span><b>Contract emits exchange</b><small>Amount and game account ID are recorded on Ethereum.</small></div>
-    <div class="bridge-arrow" aria-hidden="true">→</div>
-    <div class="bridge-step"><span>03 · LEGACY</span><b>Credit request only</b><small>The current FTH$ ledger does not settle this legacy event; it is not a credited balance.</small></div>
-  </div>
-  <div class="grid bridge-status">
-    <div class="stat"><span>Bridge status</span><b id="bridgeEnabled">Loading public Mainnet stats…</b></div>
-    <div class="stat"><span>Configured rate</span><b id="bridgeRate">—</b></div>
-    <div class="stat"><span>Current reserve</span><b id="bridgeTreasury">—</b></div>
-  </div>
-  <div class="card">
-    <h3>Reserve configuration</h3>
-    <p id="treasuryCurrent" class="muted">Loading current contract treasury…</p>
-    <p class="muted">Fixed source wallet: <code id="treasurySource"></code>. Changing the reserve changes future exchange destinations only; it does not migrate balances.</p>
-    <p>Target FTH$ reserve: <code id="treasuryTarget"></code></p>
-    <button id="setTreasury" class="primary" hidden>Set fixed FTH$ reserve</button>
-  </div>
-  <div class="card">
-    <h3>Exchange controls</h3>
-    <div class="row"><label class="bridge-rate-input">Legacy FTH$ credit request per 1 FTHG<input id="rate" inputmode="decimal" placeholder="Set a positive rate"></label><button id="setRate">Update legacy rate</button></div>
-    <p class="muted">Rate changes are on-chain and require <code>TREASURY_ROLE</code>. The contract converts the FTHG amount using this rate and emits the requested FTH$ amount.</p>
-    <div class="row"><button id="exOn">Enable legacy exchange</button><button id="exOff" class="danger">Disable legacy exchange</button></div>
-  </div>
-  <div class="card">
-    <div class="bridge-history-head">
-      <div><h3>On-chain exchange activity</h3><p class="muted">Reads <code>ExchangedForFthDollar</code> events from the latest 5,000 blocks. FTH$ values are event amounts requested for backend credit, not proof of settlement.</p></div>
-      <div><button id="loadEx" class="primary">Load recent events</button><button id="csvEx">Export CSV</button></div>
-    </div>
-    <div class="grid bridge-event-stats">
-      <div class="stat"><span>Events in range</span><b id="exCount">—</b></div>
-      <div class="stat"><span>FTHG sent to reserve</span><b id="exTotalFthg">—</b></div>
-      <div class="stat"><span>FTH$ credit requested</span><b id="exTotalDollar">—</b></div>
-    </div>
-    <p id="exStatus" class="muted">Load recent events to view on-chain transactions.</p>
-    <div class="table-wrap"><table id="exTable"><thead><tr><th>Block</th><th>Transaction</th><th>Holder</th><th>Game account ID</th><th>FTHG sent</th><th>FTH$ credit event</th></tr></thead><tbody></tbody></table></div>
-  </div>
-</section>
-
-<section id="dex" class="tab">
-  <h2>DEX discovery &amp; Uniswap V2 liquidity</h2>
-  <p class="muted">Public pool checks work without a wallet. Pool creation, approvals, liquidity changes, and swaps are on-chain actions that require review and a connected authorized token holder. Creating a pool does not guarantee tracker or exchange visibility.</p>
-  <div class="card">
-    <div class="listing-status-heading"><div><h3>Ethereum pool visibility</h3><p id="dexCheckedAt" class="muted" aria-live="polite">Checking public pool data…</p></div><button id="refreshDexStatus" class="primary">Refresh pool checks</button></div>
-    <div id="dexPoolStatus" class="listing-check-grid"></div>
-    <div id="dexServiceLinks" class="listing-link-grid"></div>
-  </div>
-  <div class="card">
-    <h3>Pair</h3>
-    <label>Quote token<select id="quote"><option value="WETH">WETH</option><option value="USDC">USDC</option><option value="USDT">USDT</option></select></label>
-    <button id="pairInfo">Load pair / reserves</button>
-    <button id="createPair">Create pair</button>
-    <pre id="pairOut"></pre>
-  </div>
-  <div class="card">
-    <h3>Add liquidity</h3>
-    <label>FTHG amount<input id="lFthg"></label>
-    <label>Quote amount<input id="lQuote"></label>
-    <label>Slippage %<input id="lSlip" value="1"></label>
-    <button id="addLiq" class="primary">Approve &amp; add</button>
-  </div>
-  <div class="card">
-    <h3>Remove liquidity</h3>
-    <label>% of your LP position<input id="rPct" value="100"></label>
-    <button id="remLiq" class="danger">Approve &amp; remove</button>
-  </div>
-  <div class="card">
-    <h3>Trade</h3>
-    <label>Side<select id="side"><option value="buy">Buy FTHG with quote</option><option value="sell">Sell FTHG for quote</option></select></label>
-    <label>Amount in<input id="sAmt"></label>
-    <label>Slippage %<input id="sSlip" value="1"></label>
-    <div class="row"><button id="quoteBtn">Get quote</button><button id="swap" class="primary">Swap</button></div>
-    <pre id="swapOut"></pre>
-  </div>
-  <div class="card">
-    <h3>LP custody</h3>
-    <p class="muted">LP tokens remain in the wallet that adds liquidity. An ERC-20 transfer to an address does not establish a timed liquidity lock. Use a separately verified lock service and its own deposit workflow if required.</p>
-  </div>
-</section>
-
-<section id="listings" class="tab">
-  <h2>Listings, visibility &amp; readiness</h2>
-  <p class="muted">Public status checks are separate from preparation tasks. A completed checkbox only records your local work; it never means an exchange or tracker accepted a listing.</p>
-  <div class="card">
-    <h3>Platform preparation estimates</h3>
-    <p class="muted">Planning only; not platform fees, application status, or transaction costs.</p>
-    <div class="platform-estimate-controls">
-      <label>Internal labor rate (USD/hour)<input id="platformLaborRate" type="number" min="0" max="10000" step="5"></label>
-      <label>Sort services<select id="platformSort"><option value="fastest">Fastest preparation first</option><option value="cheapest">Lowest estimated labor cost</option><option value="name">Platform name</option></select></label>
-      <button id="savePlatformEstimateSettings" class="primary">Apply estimates</button>
-      <p class="muted">Estimates cover hands-on preparation only. They exclude legal/audit work, market making, gas, liquidity capital, and platform review time.</p>
-    </div>
-    <div id="dashboardListingLinks"></div>
-  </div>
-  <div class="listing-status-heading">
-    <div><h3>Live public status</h3><p id="listingCheckedAtFull" class="muted" aria-live="polite">Checking public listing sources…</p></div>
-    <button data-refresh-listings class="primary">Refresh checks</button>
-  </div>
-  <div id="listingChecks" class="listing-check-grid"></div>
-  <div class="card">
-    <h3>Copy-ready token dossier</h3>
-    <p class="muted">Prefilled from the fixed contract and saved Settings. Review every field before sharing; missing project facts are marked clearly, not invented.</p>
-    <textarea id="listingDossier" rows="16" readonly></textarea>
-    <div class="row"><button id="copyDossier" class="primary">Copy dossier</button><button id="downloadDossier">Download JSON</button></div>
-  </div>
-  <div class="card">
-    <h3>DEX, tracker &amp; explorer preparation</h3>
-    <p class="muted">Task completion is stored in this browser only. External platforms determine their own indexing and review outcomes.</p>
-    <div id="dexListingTasks" class="listing-task-list"></div>
-      <button id="exportListingPrep">Export preparation checklist</button>
-    </div>
-  <div class="card">
-    <h3>Centralized exchange (CEX) preparation</h3>
-    <p class="muted">CEX listing requires due diligence and a platform-specific application. Use only official portals; never send tokens, keys, or fees to an unsolicited listing agent.</p>
-    <div id="cexListingTasks" class="listing-task-list"></div>
-  </div>
-  <div class="card">
-    <h3>Live improvement priorities</h3>
-    <p class="muted">Generated from the live discovery checks, contract metadata, and the project links configured in Settings.</p>
-    <div id="listingRecommendations"></div>
-  </div>
-  <div class="card">
-    <h3>Platform portals &amp; token visibility</h3>
-    <p class="muted">Public APIs are read-only here. Use platform login and official forms to manage profiles or applications; this admin does not retain platform credentials or API keys.</p>
-    <div id="listingPlatformLinks" class="listing-link-grid"></div>
-  </div>
-</section>
-
-<section id="settings" class="tab">
-  <h2>Settings</h2>
-  <div class="card">
-    <label>FTHG contract address (fixed on Ethereum Mainnet)<input id="sAddr" readonly></label>
-    <label>Management ABI (auto-loaded, read-only)<textarea id="sBuild" rows="4" readonly></textarea></label>
-    <label>Website (fixed)<input id="sSite" readonly></label>
-    <label>Whitepaper / docs URL<input id="sDocs"></label>
-    <label>Logo URL (fixed)<input id="sLogo" readonly></label>
-    <label>Description (fixed)<textarea id="sDesc" rows="4" readonly></textarea></label>
-    <label>Telegram<input id="sTg"></label>
-    <label>X / Twitter<input id="sX"></label>
-    <label>Discord<input id="sDc"></label>
-    <label>Contact email<input id="sMail"></label>
-    <button id="saveS" class="primary">Save</button>
-  </div>
-  <p class="muted">Settings and listing-preparation checkboxes are stored only in this browser (localStorage). Public service checks require no platform login. No platform API keys or private keys are stored; contract transactions are signed in your connected wallet.</p>
-</section>
+    <button id="safety-refresh" class="btn" type="button">Check token safety</button>
+    <p class="muted">Role grants/revocations require DEFAULT_ADMIN_ROLE and deserve independent review, especially removing administrators. Legacy exchange, staking, DEX trading and listing-planning tools are no longer part of this reserve console.</p>
+  </section>
 </main>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
-<script src="/shared/site-links.js"></script>
-<script src="/shared/wallet-profile.js"></script>
-<script src="/shared/admin-kit.js"></script>
-<script src="app.js"></script>
 </body>
 </html>

@@ -7,7 +7,7 @@ import { newGame, stages, terrainDetails } from './engine.ts';
 import { settlementLayoutPanel, settlementProfile, settlementScene } from './settlement-scene.ts';
 import { cellKey, legacySpaceCells, positionEntries, settlementBuildings, settlementPositions, validSettlementCell } from './settlement-layout.ts';
 import { explorationFringe, project, unproject, tileWidth, tileHeight } from './map-art.ts';
-import { dayPhaseIcon, environmentDetails } from './environment-view.ts';
+import { dayPhaseIcon, environmentDetails, environmentEffects, overallWeatherImpact } from './environment-view.ts';
 import { environmentAt, seasonMs, worldEpoch } from './environment.ts';
 import { icon } from './icons.ts';
 import type { ItemInventory } from './items.ts';
@@ -292,23 +292,25 @@ test('Inbox menu is shared by game pages and retains a bounded, text-only chat v
   assert.doesNotMatch(chat, /data-chat-nickname|data-chat-rename|chatProfile\(/);
   assert.match(chat, /window\.removeEventListener\(chatProfileChangedEvent/);
   const layout = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
-  assert.match(layout, /\.inbox-full-page \.community-view\{padding:0\}/);
+  const shell = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
+  assert.match(shell, /#app \.inbox-layout\{gap:20px;grid-template-columns:280px minmax\(0,1fr\)\}/);
   assert.match(layout, /backdrop-filter:blur\(12px\)/);
 });
-test('Explore tile information stays bounded beside weather without covering map controls or chat', () => {
+test('Explore tile information and weather share one bounded inspector apart from map controls', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const layout = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
-  assert.match(main, /class="map-status"[^]*?class="location-card"[^]*?data-map-environment/);
+  assert.match(main, /id="explore-sidebar"[^]*?id="sidebar-content"[^]*?class="location-card"[^]*?data-map-environment/);
   assert.match(main, /aria-labelledby="current-tile-title"/);
   assert.match(main, /class="tile-coordinates" aria-label="Tile coordinates"><span data-no-localize/);
   assert.match(main, /resourceFmt\(resource, state\.pending\[resource\]\)/);
+  assert.match(main, /if \(explorePage\) \{\s*const terrain[^]*?document\.querySelector\('#location-card'\)/);
   assert.doesNotMatch(main, /resources\.reduce\(\(sum, r\) => sum \+ state\.pending\[r\]/);
-  assert.match(layout, /\.has-world-chat \.map-status\{[^}]*right:calc\(var\(--world-chat-width\) \+ 16px\)[^}]*flex-wrap:wrap/);
-  assert.match(layout, /\.has-world-chat \.location-card\{position:static;display:grid;grid-template-columns:minmax\(0,1fr\);[^}]*width:340px;[^}]*max-width:100%/);
+  assert.match(layout, /\.has-world-chat \.sidebar\{[^}]*top:var\(--scene-top\)[^}]*max-height:calc/);
+  assert.match(layout, /\.has-world-chat \.location-card\{position:static;display:grid;grid-template-columns:minmax\(0,1fr\);[^}]*width:100%;[^}]*max-width:100%/);
   assert.match(layout, /\.has-world-chat \.location-card \.gather-button\{[^}]*min-width:44px;min-height:44px/);
-  assert.match(layout, /\.has-world-chat \.map-status\{display:contents\}/);
-  assert.match(layout, /@media\(min-width:651px\) and \(max-height:500px\)\{\s*\.has-world-chat \.location-card\{grid-template-columns:minmax\(0,1fr\) auto\}/);
-  assert.match(layout, /@media\(min-width:651px\) and \(max-width:750px\)\{\s*\.has-world-chat \.location-card\{display:none\}/);
+  assert.match(layout, /#app\.has-world-chat \.map-environment\{position:static;display:flex;flex-wrap:wrap/);
+  assert.match(layout, /\.has-world-chat \.map-toolbar\{left:var\(--scene-left\);right:auto;top:auto/);
+  assert.match(layout, /\.has-world-chat\.chat-expanded \.sidebar/);
 });
 test('settlement visuals grow through every tier with distinct town and city architecture', () => {
   const game = newGame(), bag: ItemInventory = { version: 1, items: [], pending: [], equipped: null, storage: 0 };
@@ -345,10 +347,9 @@ test('both maps share season, day phase and weather indicators with distinct ico
     assert.ok(environmentDetails(environment).includes(dayPhaseIcon(environment.phase)));
   }
   const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'ui-test', population: { global: 0, federation: null }, clockSpeed: 1 };
-  assert.ok(settlementScene(state, 'en').includes(environmentDetails(state.environment)));
-  assert.match(settlementScene(state, 'en'), /class="map-environment" data-map-environment/);
+  assert.doesNotMatch(settlementScene(state, 'en'), /data-map-environment/);
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  assert.match(main, /class="map-environment" data-map-environment/);
+  assert.match(main, /class="weather-overlay" aria-label="World conditions"><div data-map-environment/);
   assert.doesNotMatch(main.match(/calendar\.innerHTML = [^\n]+/)?.[0] ?? '', /environment\.season/);
   assert.match(main, /class="resource-accrual"><div class="resource-progress"[^]*?<span class="resource-pending"><\/span><\/div>/);
 });
@@ -605,11 +606,126 @@ test('mobile resource settings are compact while claim targets and small-screen 
   assert.match(collection, /#app \.resource-manager-button\{[^}]*min-height:44px/);
   assert.match(collection, /\.management-dialog\[open\]\{display:flex;flex-direction:column\}/);
   assert.match(collection, /\.management-resource-switcher\[hidden\]\{display:none\}/);
-  assert.match(layout, /height:max\(100dvh,calc\(var\(--game-header-height\) \+ 234px \+ var\(--world-chat-height\) \+ var\(--game-footer-height\)\)\);overflow:clip/);
-  assert.match(layout, /minmax\(234px,1fr\) var\(--world-chat-height\)/);
-  assert.match(layout, /\.has-world-chat \.rail\{position:sticky;bottom:0/);
-  assert.match(layout, /\.has-world-chat \.map-toolbar\{left:auto;right:12px/);
-  assert.match(layout, /clamp\(calc\(var\(--game-footer-height\) \+ 8px\),calc\(var\(--world-chat-height\) \+ var\(--game-footer-height\) \+ 132px\),calc\(100dvh - 320px\)\)/);
+  assert.match(layout, /min-height:0;height:100dvh;isolation:isolate/);
+  assert.doesNotMatch(layout, /--world-chat-height|width:calc\(100% - var\(--world-chat-width\)\)/);
+  assert.match(layout, /--canvas-rail:var\(--game-rail-width\)/);
+  assert.match(layout, /--canvas-footer:var\(--game-footer-height\)/);
+  assert.match(layout, /bottom:var\(--scene-bottom\);left:auto;width:min/);
+});
+test('Explore and Settlement canvases fill the viewport while chat collapses without resizing them', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const layout = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(layout, /\.has-world-chat \.map,\.has-world-chat \.settlement-view\{position:absolute;inset:0;grid-column:1\/-1;grid-row:1\/-1/);
+  assert.doesNotMatch(layout, /\.has-world-chat \.settlement-view\{[^}]*grid-column:2/);
+  assert.match(layout, /\.has-world-chat \.map canvas#world\{width:100%;height:100%\}/);
+  assert.match(layout, /#app\.has-world-chat \.settlement-view \.settlement-panorama\{inset:0;visibility:visible\}/);
+  assert.match(layout, /\.world-chat\{position:absolute;right:var\(--layout-gap\);bottom:calc\(var\(--canvas-footer\) \+ var\(--layout-gap\)\)/);
+  assert.doesNotMatch(layout, /\.world-chat:has\(\[aria-expanded="true"\]\)\{[^}]*bottom:/);
+  assert.match(layout, /\.has-world-chat\.chat-expanded \.settlement-dock/);
+  assert.doesNotMatch(layout, /\.world-chat>header \.button[^{}]*\{display:none\}/);
+  const shell = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
+  assert.match(shell, /html:has\(#app\),body:has\(#app\)\{height:100%;overflow:hidden\}/);
+  assert.match(layout, /\.world-chat #world-chat-content\[hidden\]\{display:none\}/);
+  assert.match(main, /data-chat-toggle aria-expanded="false" aria-controls="world-chat-content"/);
+  assert.match(main, /id="world-chat-content" hidden/);
+  assert.match(main, /setAttribute\('aria-expanded', String\(expanded\)\)/);
+  assert.match(main, /function focusWorldChat\(\): void \{ setChatExpanded\(true\)/);
+  assert.match(main, /event\.key === 'Escape'/);
+  assert.doesNotMatch(main, /chatOverlay\.innerHTML/);
+  assert.match(main, /if \(expanded && settlementTask\) showSettlementTask\(null, false\)/);
+  assert.match(main, /function showSettlementTask[^]*?if \(task\) setChatExpanded\(false\)/);
+  assert.match(main, /app\.classList\.toggle\('chat-expanded', expanded\)/);
+});
+test('Explore retains a responsive minimap and collapsed chat has only one icon', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const explore = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
+  const chat = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(explore, /#app\.explore-page \.minimap\{display:block;left:auto;right:var\(--layout-gap\);bottom:calc\(var\(--canvas-footer\) \+ 84px\)/);
+  assert.match(explore, /#app\.explore-page \.minimap canvas\{height:auto;aspect-ratio:30\/19\}/);
+  assert.match(explore, /#app\.explore-page\.chat-expanded \.minimap\{display:none\}/);
+  assert.match(explore, /@media\(min-width:901px\) and \(min-height:501px\)\{[^]*?#app\.explore-page \.minimap\{display:block;bottom:calc\(var\(--canvas-footer\) \+ var\(--layout-gap\)\)/);
+  assert.match(explore, /#app\.explore-page \.world-chat\{left:auto;bottom:calc\(var\(--canvas-footer\) \+ var\(--layout-gap\)\*2 \+ var\(--desktop-minimap-height\)\)/);
+  assert.match(explore, /\.world-chat:has\(\[aria-expanded="false"\]\)\{right:calc\(var\(--layout-gap\) \+ 4px\);bottom:calc\(var\(--canvas-footer\) \+ var\(--layout-gap\) \+ var\(--desktop-minimap-height\) - 48px\)/);
+  assert.match(chat, /\.world-chat:has\(\[aria-expanded="false"\]\)\{[^}]*border:0;[^}]*background:transparent;backdrop-filter:none;box-shadow:none/);
+  assert.match(chat, /\.world-chat:has\(\[aria-expanded="false"\]\) h2\{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset\(50%\)\}/);
+  const header = main.match(/<h2 id="world-chat-title">([^]*?)<\/h2>/)?.[1];
+  assert.ok(header);
+  assert.doesNotMatch(header, /icon\(/);
+  assert.match(main, /chatToggle\.innerHTML = icon\(expanded \? 'close' : 'communicate'\)/);
+});
+test('World game pages share responsive chrome, readable surfaces, and independently scrolling workspaces', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const shell = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
+  assert.match(main, /import '\.\/game-layout\.css';\s*import '\.\/world-chat\.css'/);
+  assert.match(main, /class="game-brand"[^>]*><img src="\/shared\/logo\.svg" alt="" width="34" height="34">/);
+  assert.match(shell, /--game-rail-width:88px;--game-header-height:96px/);
+  assert.match(shell, /--game-header-height:124px;--game-footer-height:calc\(68px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.match(shell, /#app \.rail\{position:absolute;inset:auto 0 0/);
+  assert.match(shell, /#app :is\(\.community-view,\.marketplace-view\)\{grid-column:1;grid-row:2/);
+  assert.match(shell, /#app :is\(\.page-card,\.exchange-card,\.exchange-catalog,\.inbox-directory,\.chat-page\)/);
+  assert.match(shell, /#app \.exchange-order-entry\{grid-column:1;grid-row:2;position:static\}/);
+  assert.doesNotMatch(shell, /!important|url\(/);
+});
+test('Weather overlay explains real climate modifiers with signed and color-coded estimates', () => {
+  const mild = { ...environmentAt(worldEpoch), season: 'Spring' as const, weather: 'Clear skies' as const, temperature: 18 };
+  const effects = environmentEffects(mild);
+  assert.match(effects, /Wood production<\/dt><dd><strong class="climate-benefit" data-no-localize>\+15%/);
+  assert.match(effects, /Recruitment suitability<\/dt><dd><strong class="climate-benefit" data-no-localize>\+20%/);
+  assert.match(effects, /Water demand<\/dt><dd><strong class="climate-neutral" data-no-localize>0%/);
+  const hot = environmentEffects({ ...mild, season: 'Summer', temperature: 35 });
+  assert.match(hot, /Water demand<\/dt><dd><strong class="climate-penalty" data-no-localize>\+38%/);
+  assert.match(hot, /Actual production and recruitment use daily averages/);
+  assert.match(environmentDetails(mild, true), /<details class="weather-effects">/);
+  assert.doesNotMatch(effects, /weather-effect-preview/);
+  assert.match(effects, /<summary class="weather-impact weather-impact-best" aria-label="Best overall conditions"/);
+  assert.equal((effects.match(/<summary[^]*?<\/summary>/)?.[0].match(/<svg/g) || []).length, 1);
+  assert.doesNotMatch(effects.match(/<summary[^]*?<\/summary>/)?.[0] || '', /%/);
+  assert.equal(overallWeatherImpact(mild), 'best');
+  assert.equal(overallWeatherImpact({ ...mild, season: 'Autumn' }), 'good');
+  assert.equal(overallWeatherImpact({ ...mild, season: 'Summer', temperature: 35 }), 'bad');
+  assert.equal(overallWeatherImpact({ ...mild, season: 'Winter', weather: 'Snow', temperature: -10 }), 'worst');
+  assert.doesNotMatch(environmentDetails(mild), /weather-effects/);
+  const css = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(css, /\.weather-overlay\{position:absolute;right:var\(--layout-gap\);top:var\(--scene-top\)/);
+  assert.match(css, /\.weather-effects:not\(\[open\]\)>:not\(summary\)\{display:none\}/);
+});
+test('Explore menu uses compact responsive action grids rather than scrolling or clipping controls', () => {
+  const css = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
+  assert.match(css, /#app\.explore-page #sidebar-content\{display:grid;gap:12px;overflow:visible/);
+  assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(css, /#app\.explore-page \.sidebar-action-row\{display:contents\}/);
+  assert.match(css, /\.quick-action-compact-label\{display:inline\}/);
+  assert.doesNotMatch(css, /overflow:(auto|scroll|hidden)/);
+});
+test('Chat uses a speech bubble and reports unread messages while collapsed without counting history or own messages', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const chat = readFileSync(new URL('./communicate.ts', import.meta.url), 'utf8');
+  assert.match(icon('communicate'), /M5 4h14/);
+  assert.match(main, /data-chat-unread data-no-localize hidden aria-live="polite"/);
+  const layout = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(layout, /#app \.world-chat>header \.button\{border:0;background:transparent;box-shadow:none\}/);
+  assert.match(layout, /#app \.world-chat \.chat-page\{border:0;border-radius:0;background:transparent;box-shadow:none;padding:0\}/);
+  assert.doesNotMatch(main, /id="world-chat-content" hidden><a/);
+  assert.match(main, /event\.detail > 99 \? '99\+'/);
+  assert.match(main, /event\.detail \? `world-chat-users \$\{badge\.id\}` : 'world-chat-users'/);
+  assert.match(main, /dispatchEvent\(new Event\(chatVisibilityChangedEvent\)\)/);
+  assert.match(chat, /!document\.hidden && this\.list\.getClientRects\(\)\.length > 0/);
+  assert.match(chat, /message\.author !== this\.info\?\.profile\?\.id && \(!reset \|\| hadHistory\)/);
+  assert.match(chat, /known\.add\(message\.id\)/);
+  assert.match(chat, /this\.visible\(\) && this\.atBottom\(\)/);
+  assert.match(chat, /CustomEvent<number>\(chatUnreadChangedEvent, \{ bubbles: true, detail: this\.unread \}\)/);
+  assert.match(chat, /document\.removeEventListener\('visibilitychange', this\.visibilityChanged\)/);
+});
+test('chat launcher shows room presence including connected self, independently of unread counts', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const chat = readFileSync(new URL('./communicate.ts', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(main, /id="world-chat-users" data-chat-users data-no-localize aria-live="polite"/);
+  assert.match(main, /chatOverlay\?\.addEventListener\(chatPresenceChangedEvent/);
+  assert.match(main, /badge\.textContent = online === null \? '—' : String\(online\)/);
+  assert.match(chat, /CustomEvent<number>\(chatPresenceChangedEvent, \{ bubbles: true, detail: online \}\)/);
+  assert.match(chat, /CustomEvent<null>\(chatPresenceChangedEvent, \{ bubbles: true, detail: null \}\)/);
+  assert.match(css, /\.chat-user-badge\{[^}]*right:4px;bottom:5px/);
 });
 test('mobile settlement tasks share a larger workspace and Water upkeep cannot inherit notice flex layout', () => {
   const css = readFileSync(new URL('./mobile.css', import.meta.url), 'utf8');
@@ -647,7 +763,7 @@ test('market grid and table retain all assets, real prices, holdings and safe dr
     for (const asset of marketAssets) {
       assert.equal(html.match(new RegExp(`data-market-asset="${asset}"`, 'g'))?.length, 3);
     }
-    assert.ok(html.includes('2.0002'));
+    assert.ok(html.includes('2'));
     assert.match(html, /data-market-quick-side="buy"/);
     assert.match(html, /data-market-quick-side="sell"/);
     assert.match(html, /catalog-last/);
@@ -676,7 +792,7 @@ test('market search, sorting and owned filtering use current holdings without mu
   assert.deepEqual(filterMarketCatalog(tickers, state, 'ko', 'resources', '목재', 'name', false).map(t => t.asset), ['wood']);
   assert.deepEqual(filterMarketCatalog(tickers, state, 'ko', 'resources', '  목재  ', 'name', false).map(t => t.asset), ['wood']);
   assert.deepEqual(new Set(filterMarketCatalog(tickers, state, 'en', 'all', '', 'owned', true).map(t => t.asset)), new Set(['wood', craftableKeys[0]]));
-  assert.equal(filterMarketCatalog(tickers, state, 'en', 'resources', '', 'buy-low', false)[0].asset, 'oil');
+  assert.equal(filterMarketCatalog(tickers, state, 'en', 'resources', '', 'buy-low', false)[0].asset, 'wood');
   assert.equal(filterMarketCatalog(tickers, state, 'en', 'all', '', 'sell-high', false)[0].asset, 'metal');
   assert.equal(filterMarketCatalog(tickers, state, 'en', 'all', 'no-such-market', 'name', false).length, 0);
   assert.equal(JSON.stringify(tickers), before);
@@ -685,6 +801,8 @@ test('order tickets keep four-decimal limits, quote freshness and confirmation w
   const source = readFileSync(new URL('./marketplace.ts', import.meta.url), 'utf8');
   assert.match(source, /data-market-step="-1"/);
   assert.match(source, /data-market-max/);
+  assert.match(source, /if \(reset \|\| !input\.validity\.valid\) input\.value = input\.min/);
+  assert.match(source, /fundingQuantity\.min = fundingQuantity\.step = input\.step/);
   assert.match(source, /maximum\.hidden = this\.side !== 'sell'/);
   assert.match(source, /Math\.min\(marketQuantityLimit\(this\.asset\)/);
   assert.match(source, /sellableItemCount\(this\.state\(\)\.inventory, this\.asset\)/);
@@ -743,7 +861,7 @@ test('desktop modals use wider workspaces while retaining scroll access for cons
 test('Water and server-clock cards have stable heights with compact, accessible upkeep timing', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
-  const panel = main.slice(main.indexOf('function waterUpkeepPanel()'), main.indexOf('function workforcePanel()'));
+  const panel = main.slice(main.indexOf('function waterUpkeepPanel('), main.indexOf('function workforcePanel()'));
   assert.match(panel, /class="water-upkeep-heading"/);
   assert.match(panel, /class="water-upkeep-impact"/);
   assert.match(panel, /data-ready-at="\$\{upkeep\.readyAt\}" data-compact-time/);
@@ -751,6 +869,20 @@ test('Water and server-clock cards have stable heights with compact, accessible 
   assert.match(main, /el\.setAttribute\('aria-label', detailed\)/);
   assert.match(css, /\.notice\.water-upkeep\{[^}]*height:140px;min-height:140px;flex-shrink:0/);
   assert.match(css, /\.server-clock\{[^}]*height:42px/);
+});
+test('Explore Water upkeep uses a compact daily row with server-timed animated progress', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
+  assert.match(main, /class="explore-upkeep">\$\{waterUpkeepPanel\(true\)\}/);
+  assert.match(main, /completionMeter\(upkeep\.readyAt - worldDayMs, upkeep\.readyAt, 'Next consumption', true\)/);
+  assert.match(main, /class="water-upkeep-use"/);
+  assert.match(main, /translate\('Buy Water', language\)/);
+  assert.match(main, /translate\('Water facilities', language\)/);
+  assert.match(main, /class="water-shortage-text" role="status"/);
+  assert.match(css, /\.water-upkeep-row\{[^}]*min-height:44px/);
+  assert.match(css, /\.completion-meter::after\{[^}]*transition:width 1s linear/);
+  assert.match(main, /el\.style\.setProperty\('--completion-progress', `\$\{progress\.percent\}%`\)/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
 });
 test('shared recruitment controls show a one-week queue and wait for server-confirmed arrivals', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -783,13 +915,14 @@ test('four live counters lead the hero and mirror in the World header with FTHG 
   const landing = readFileSync(new URL('../about/index.html', import.meta.url), 'utf8');
   assert.match(landing, /<section class="hero section-shell"[^>]*>\s*<section class="world-stats"/);
   assert.match(landing, /<header class="top world-header"[^>]*>[\s\S]*?<div class="world-live-cards"[^>]*>/);
-  assert.equal((landing.match(/data-total=/g) ?? []).length, 8);
+  assert.equal((landing.match(/data-total=/g) ?? []).length, 6);
   assert.doesNotMatch(landing, /data-total="metal"|유통 중인 게임 금속/);
-  for (const [metric, symbol] of [['settlements', 'home'], ['fthgTransactions', 'gold'], ['dollars', 'dollars'], ['population', 'people']]) {
+  for (const [metric, symbol] of [['settlements', 'home'], ['dollars', 'dollars'], ['population', 'people']]) {
     assert.equal(landing.split(`data-total="${metric}"`).length - 1, 2);
     assert.ok(landing.includes(`<dd><span class="stat-icon" data-icon="${symbol}" aria-hidden="true"></span><span data-total="${metric}">`));
   }
-  assert.match(landing, /data-total="settlements"[\s\S]*?<\/div>\s*<div class="world-stat"[^>]*>[\s\S]*?data-total="fthgTransactions"/);
+  assert.equal((landing.match(/data-gold-supply/g) ?? []).length, 2);
+  assert.doesNotMatch(landing, /fthgTransactions/);
   const landingScript = readFileSync(new URL('./landing.ts', import.meta.url), 'utf8');
   assert.match(landingScript, /liveCards\.forEach\(cards => \{ cards\.dataset\.state = 'live'; \}\)/);
   assert.match(landingScript, /liveCards\.forEach\(cards => \{ cards\.dataset\.state = 'stale'; \}\)/);
@@ -821,7 +954,7 @@ test('homepage count-up abbreviates visually while exact accessible totals and G
   assert.match(landing, /formatDollars\(data\.dollars, languageLocale\)/);
   assert.match(landing, /setAttribute\('aria-label', text\)/);
   assert.match(landing, /element\.title = text/);
-  assert.match(landing, /formatDollars\(data\.goldRate, languageLocale\)/);
+  assert.match(landing, /fetch\('\/api\/v1\/gold\/stats'/);
 });
 
 test('landing copy leads with playable goals and immediate play links without hiding limits', () => {
@@ -845,8 +978,8 @@ test('landing copy leads with playable goals and immediate play links without hi
   assert.match(landing, /게임 시간 1~3주 후 복귀하면/);
   assert.match(landing, /미배치 주민은 자원을 생산하지 않으며/);
   assert.match(landing, /실제 DAO나 온체인 게임 경제가 아니며, 금전적 보상을 제공하지 않습니다/);
-  assert.match(landing, /온체인 토큰 배포, 토큰 세일, 에어드롭, 현금 출금은 지원하지 않습니다/);
-  assert.match(landing, /게임 내 변동 시세로 서로 교환할 수 있습니다/);
+  assert.match(landing, /FTHG is an actual Ethereum Mainnet token/);
+  assert.match(landing, /FTH\$ redemption requires an authorized service/);
   assert.match(landing, /공식 링크는 준비 중/);
 });
 

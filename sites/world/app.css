@@ -99,3 +99,39 @@
   .rail{box-shadow:0 -8px 24px #2023370a}
   .rail-nav a{font-size:0}
 }
+.getting-started{padding:20px 20px 36px}
+.getting-started[hidden]{display:none}
+.welcome-hero{padding:8px 4px 20px}
+.welcome-eyebrow{color:var(--gold);font-size:12px;font-weight:700;letter-spacing:.05em;margin:0 0 10px}
+.welcome-hero h2{font-size:clamp(32px,5vw,48px);line-height:1.15;letter-spacing:-.04em;margin:8px 0 16px}
+.welcome-hero p,.welcome-card p{color:var(--mut);line-height:1.65}
+.welcome-island{display:block;width:100%;height:auto;max-height:260px;object-fit:contain;margin:12px 0}
+.welcome-actions{display:flex;gap:10px;flex-wrap:wrap}
+.welcome-card{margin:18px 0;padding:20px;border:1px solid var(--line);border-radius:18px;background:var(--bg)}
+.welcome-card h2{font-size:21px;margin:0 0 10px}
+.welcome-card .btn{margin-top:6px}
+.welcome-steps{padding-left:22px;margin:16px 0}
+.welcome-steps li{padding:8px 0}
+.welcome-steps p{margin:6px 0}
+.welcome-skip{display:inline-block;margin-top:18px;font-size:13px}
+#profileSetup{scroll-margin-top:calc(var(--world-header-height) + 64px)}
+.inline-profile button{padding:10px 14px;min-height:44px;border:1px solid var(--line);border-radius:10px;background:var(--btn);color:var(--txt);font:inherit;cursor:pointer}
+.inline-profile button:disabled{opacity:.55;cursor:wait}
+.inline-profile .wp-primary{display:block;width:100%;margin-top:14px;background:var(--gold);color:var(--on-accent);font-weight:700}
+.inline-profile .wp-link{background:transparent;border:0;color:var(--gold)}
+.inline-profile .wp-field input{min-width:0;width:100%;min-height:44px}
+.inline-profile .wp-hint{display:block;margin-top:6px}
+.inline-profile .wp-status[data-kind=error]{color:var(--bad)}
+.world-app .world-header{flex-wrap:wrap;gap:10px}
+.world-app .world-header nav{flex-wrap:wrap}
+@media(max-width:640px){
+  .getting-started{padding:18px 12px 32px}
+  .welcome-card{padding:16px}
+  .welcome-island{max-height:190px}
+  .rail-nav{width:100%;justify-content:space-around}
+  .rail-nav a{padding:10px 6px;border-radius:10px;min-width:44px;justify-content:center}
+  .inline-profile .wp-avatar-row{align-items:flex-start;flex-wrap:wrap}
+  .world-app .top{padding:10px 12px}
+  .world-app .world-header nav{gap:8px}
+  .world-app .world-header nav a{font-size:12px}
+}

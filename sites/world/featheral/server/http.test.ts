@@ -122,10 +122,9 @@ test('public statistics are anonymous, cacheable, read-only and use the exact ga
     assert.equal(empty.headers.get('cache-control'), 'public, max-age=15, s-maxage=15');
     assert.equal(empty.headers.get('vary'), 'Origin, Sec-Fetch-Site');
     const data = await empty.json();
-    assert.deepEqual(Object.keys(data).sort(), ['dollars', 'fthg', 'fthgTransactions', 'goldRate', 'metal', 'population', 'settlements', 'updatedAt']);
-    assert.equal(data.fthgTransactions, 0);
+    assert.deepEqual(Object.keys(data).sort(), ['dollars', 'metal', 'population', 'settlements', 'updatedAt']);
     assert.deepEqual({ ...data, updatedAt: 0 }, { ...store.publicTotals(), updatedAt: 0 });
-    assert.ok(data.fthg > 0);
+    assert.equal(data.dollars, 0);
     assert.ok(Math.abs(Date.now() - data.updatedAt) < 5000);
     const session = store.create();
     store.transaction(session.token, (record, now) => apply(record.account,

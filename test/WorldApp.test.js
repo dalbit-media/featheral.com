@@ -39,7 +39,7 @@ function fixture({ posts = [], failFeed = false } = {}) {
   let action = async () => ({ post: posts[0] });
   const window = {};
   vm.runInNewContext(`${source.slice(0, source.indexOf('  $("searchForm").addEventListener'))}
-    window.test = { state, drafts, composer, showHome, loadFeed, emptyHome, focusComposer, setAction: (work) => { act = work; } };
+    window.test = { state, drafts, composer, showHome, showGettingStarted, loadFeed, emptyHome, focusComposer, setAction: (work) => { act = work; } };
   })();`, {
     window, ethers: require("ethers"), location: { hash: "", origin: "http://world.localhost" },
     document: { getElementById: node, createElement: (tag) => new Node(tag), querySelector: () => null, body: new Node("body") },
@@ -63,6 +63,34 @@ function fixture({ posts = [], failFeed = false } = {}) {
 }
 
 describe("World posting experience", () => {
+  it("omits repeated sidebar titles while retaining community feed tabs", async () => {
+    const ui = fixture();
+    ui.showGettingStarted();
+    expect(ui.node("colHead").hidden).to.equal(true);
+    expect(ui.node("colHead").children).to.deep.equal([]);
+    await ui.showHome("all");
+    expect(ui.node("colHead").hidden).to.equal(false);
+    expect(ui.find(ui.node("colHead"), node => node.tag === "h1")).to.have.length(0);
+    expect(ui.find(ui.node("colHead"), node => node.role === "tab")).to.have.length(2);
+  });
+  it("welcomes visitors without requiring a wallet or requesting gameplay funds", () => {
+    const ui = fixture();
+    ui.showGettingStarted();
+    expect(ui.node("gettingStarted").hidden).to.equal(false);
+    expect(ui.node("composerHost").children).to.have.length(0);
+    expect(ui.calls).to.have.length(0);
+    ui.showGettingStarted(true);
+  });
+  it("keeps About compatibility, feed navigation, docs and the inline optional profile on the main site", () => {
+    const home = fs.readFileSync(path.join(__dirname, "..", "sites", "world", "index.html"), "utf8");
+    expect(home).to.include('data-nav="start"').and.include('href="#/feed"').and.include('data-nav="guide"');
+    expect(home).to.include('id="profileEditor"').and.include('Skip for now');
+    expect(home).to.include('aria-label="Docs"');
+    expect(source).to.include('profileRoot: $("profileEditor")');
+    expect(source).to.include('if (!name || name === "setup") showGettingStarted');
+    const about = fs.readFileSync(path.join(__dirname, "..", "sites", "world", "featheral", "about", "index.html"), "utf8");
+    expect(about).to.include("window.location.replace('/' + window.location.search + '#/')");
+  });
   it("shows three labeled examples only on an empty Home feed, with no fake interaction controls", async () => {
     const ui = fixture();
     await ui.showHome("all");

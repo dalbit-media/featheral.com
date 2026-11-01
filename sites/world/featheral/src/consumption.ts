@@ -100,6 +100,11 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
 }
 export function marketConsumption(command: MarketCommand): ConsumptionQuote | null {
   if (command.type === 'cancel') return null;
+  if (command.type === 'fund-pool') return {
+    title: 'Fund market liquidity', subject: 'Marketplace', weeks: 0,
+    costs: [{ asset: command.asset, amount: command.quantity }, { asset: 'dollars', amount: command.dollars }],
+    notes: ['This permanently donates owned assets and existing FTH$ to the selected market. Donations cannot be withdrawn. No currency is issued.'],
+  };
   if (command.type === 'sell-half') return {
     title: 'Sell half of all resources', subject: 'Settlement', weeks: 0,
     costs: command.sales.map(sale => ({ asset: sale.asset, amount: sale.quantity })),

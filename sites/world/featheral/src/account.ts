@@ -1,6 +1,6 @@
 import './account.css';
-import { maximumWithdrawal, withdrawalError } from './account-model.ts';
 import { accountPageKeys, gamePages } from './game-pages.ts';
+import { formatDollars } from './dollars.ts';
 import { formatFthg } from './fthg.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -9,7 +9,9 @@ import { icon } from './icons.ts';
 import type { ApiState } from './api-types.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { downloadSnapshot, renderJournalEntries } from './journal.ts';
-import { linkWorldProfile, readChatProfile } from './api.ts';
+import { linkFundWallet, linkWorldProfile, readChatProfile, revokeFundWallet } from './api.ts';
+import { walletLinkMessage } from './funds.ts';
+import { formatUnits, hexlify, toUtf8Bytes } from 'ethers';
 import { chatProfileChangedEvent, chatProfileSettingsEvent } from './chat.ts';
 import { worldProfileLinkMessage } from './world-profile.ts';
 import type { WorldProfile } from './world-profile.ts';
@@ -19,8 +21,8 @@ type AccountView = 'account' | typeof accountPageKeys[number];
 declare global {
   interface Window {
     FeatheralProfile: {
-      mount(button: HTMLButtonElement, options: { panelRoot: HTMLElement; walletUrl: string; primaryCurrency: string }): Promise<void>;
-      snapshot(): { account: string; profile: WorldProfile | null };
+      mount(button: HTMLButtonElement, options: { panelRoot: HTMLElement; walletUrl: string; primaryCurrency: string; profileUrl: string }): Promise<void>;
+      snapshot(): { account: string; profile: WorldProfile | null; balances?: { fthg: bigint | null } };
       getProvider(): { request(args: { method: string; params: string[] }): Promise<unknown> } | null;
     };
   }
@@ -33,38 +35,49 @@ export class AccountPane {
   private readonly language: Language;
   private view: AccountView = 'account';
   private accountScroll = 0;
-  private balance: number;
+  private readonly update: (state: ApiState) => void;
   private profileAttempt = 0;
   private profileSaving = false;
+  private revokingFunds = false;
   private profileKey = '';
   private readonly walletReady: Promise<void>;
   private readonly t: (text: string) => string;
 
-  constructor(trigger: HTMLButtonElement, language: Language, snapshot: () => ApiState) {
+  constructor(trigger: HTMLButtonElement, language: Language, snapshot: () => ApiState, update: (state: ApiState) => void) {
     this.trigger = trigger;
     this.snapshot = snapshot;
     this.language = language;
     const balance = snapshot().fthg;
-    this.balance = balance;
+    this.update = update;
     this.t = text => translate(text, language);
     this.dialog.id = 'account-pane';
     this.dialog.className = 'account-pane';
     this.dialog.setAttribute('aria-labelledby', 'account-title');
     this.dialog.innerHTML = `<header class="account-heading"><button type="button" class="button account-back" aria-label="Back to account" hidden>${icon('chevron')}</button><div><small>YOUR PIONEER</small><h2 id="account-title" tabindex="-1">Account</h2></div><button type="button" class="button account-close" aria-label="Close account">${icon('close')}</button></header>
       <div class="account-content">
-        <section class="account-profile" aria-labelledby="account-profile-title"><h3 id="account-profile-title">World profile</h3><div class="account-world-profile"><button type="button" class="wallet-icon" data-world-profile-button aria-label="Connect wallet and edit World profile"></button><strong data-world-profile-name data-no-localize></strong><a class="button" href="/#/me">Open World profile</a></div><p>Your World username and avatar are shared with Play. Edit them in the wallet profile menu.</p><button type="button" class="button primary wide" data-world-profile-link>Use World profile in Play</button><p data-account-profile-status role="status"></p><button type="button" class="button" data-account-profile-retry hidden>Reconnect</button></section>
-        <section class="account-section account-wallet-section" aria-labelledby="account-wallet-title"><h3 id="account-wallet-title">Wallet and withdrawals</h3><p>Wallet connection is optional. Never share your recovery phrase or private key.</p><p class="account-note">Using your World profile does not move or replace your game save.</p><p data-wallet-status role="status"></p>
-        <section class="account-withdrawal"><h3>Withdraw FTHG</h3><p class="account-unavailable">Withdrawals are not available yet. No tokens are sent and no FTHG is deducted.</p><p>Withdrawals require multiples of 1,000 FTHG. A payout network, token and service must be configured first.</p><form data-withdrawal-form><label class="account-amount"><span>Withdrawal amount · FTHG</span><input type="number" min="1000" step="1000" inputmode="numeric" required data-withdrawal-amount aria-describedby="withdrawal-rule withdrawal-error"></label><small id="withdrawal-rule"><span>Maximum eligible amount</span>: <strong data-withdrawal-maximum></strong> FTHG</small><p id="withdrawal-error" role="status"></p><button type="submit" class="button wide" disabled>Withdrawals unavailable</button></form></section>
+        <section class="account-profile" aria-labelledby="account-profile-title"><h3 id="account-profile-title">World profile</h3><div class="account-world-profile"><button type="button" class="wallet-icon" data-world-profile-button aria-label="Connect wallet and view World profile"></button><strong data-world-profile-name data-no-localize></strong><a class="button" href="/#/setup" target="_blank" rel="noopener">Edit avatar &amp; profile</a></div><p>Your World username and avatar are shared with Play. Edit them on the World Getting started page.</p><button type="button" class="button primary wide" data-world-profile-link>Use World profile in Play</button><p data-account-profile-status role="status"></p><button type="button" class="button" data-account-profile-retry hidden>Reconnect</button></section>
+        <section class="account-section account-wallet-section" aria-labelledby="account-wallet-title"><h3 id="account-wallet-title">Wallet and gameplay funds</h3><p>Connect and authorize your wallet to spend real FTH$ on gameplay. Signing is free; gameplay fees are permanent ledger debits. Never share your recovery phrase or private key.</p><button type="button" class="button primary wide" data-fund-wallet-link>Use wallet for gameplay</button><p data-wallet-status role="status"></p>
+        <button type="button" class="button wide" data-fund-wallet-revoke>Stop wallet gameplay access</button>
+        <a class="button wide" href="/play/bank/">Open wallet, conversion and staking</a>
         </section>
         <div class="account-balances"><section class="account-balance"><span>${icon('dollars')}<span>Featheral Dollar</span></span><strong data-account-dollars></strong><a href="/play/market/">Open marketplace ${icon('chevron')}</a></section>
-        <section class="account-balance account-gold"><span>${icon('fthg')}<span>Available FTHG</span></span><strong data-account-balance></strong><a href="/play/bank/" data-account-bank>Open Featheral Bank ${icon('chevron')}</a><small>Exchange · Staking · Council rates</small></section></div>
+        <section class="account-balance account-gold"><span>${icon('fthg')}<span>FTHG on Ethereum</span></span><strong data-account-balance></strong><a href="/play/bank/" data-account-bank>Open wallet and staking ${icon('chevron')}</a><small>Ethereum Mainnet · confirmed bridge credits only</small></section></div>
         <nav class="account-links" aria-label="Account resources"><a class="button" href="/play/contacts/">${icon('people')}<span>Contacts</span>${icon('chevron')}</a>${accountPageKeys.map(key => `<button type="button" data-account-view="${key}">${icon(key)}<span>${gamePages[key].label}</span>${icon('chevron')}</button>`).join('')}</nav>
         <details class="account-section" open><summary>Settings</summary><label class="account-setting"><span>Language</span><select data-language aria-label="Language"><option value="ko" lang="ko">한국어</option><option value="en" lang="en">English</option></select></label><label class="account-setting"><span>Show world conditions</span><input type="checkbox" data-account-weather></label></details>
       </div><div class="account-subview" data-account-journal hidden></div><div class="account-subview" data-account-help hidden></div>`;
     document.body.append(this.dialog);
     this.walletReady = window.FeatheralProfile.mount(this.dialog.querySelector<HTMLButtonElement>('[data-world-profile-button]')!,
-      { panelRoot: this.dialog, primaryCurrency: 'fthDollar', walletUrl: '/wallet/' });
-    window.addEventListener('featheral:wallet', () => { void this.loadProfile(false); });
+      { panelRoot: this.dialog, primaryCurrency: 'fthDollar', walletUrl: '/wallet/', profileUrl: '/#/setup' });
+    window.addEventListener('featheral:wallet', () => {
+      this.updateBalance(0, locale(language)); void this.loadProfile(false);
+      const linked = this.snapshot().fundWallet;
+      if (linked && window.FeatheralProfile.snapshot().account.toLowerCase() !== linked) void this.stopFundAccess();
+    });
+    window.addEventListener('featheral:embedded-wallet', event => {
+      if (event instanceof CustomEvent && typeof event.detail === 'string'
+        && this.snapshot().fundWallet && event.detail.toLowerCase() !== this.snapshot().fundWallet) void this.stopFundAccess();
+    });
+    this.dialog.querySelector('[data-fund-wallet-revoke]')!.addEventListener('click', () => { void this.stopFundAccess(); });
     localize(this.dialog);
     wireLanguageControls(this.dialog);
     const weather = this.dialog.querySelector<HTMLInputElement>('[data-account-weather]')!;
@@ -113,12 +126,7 @@ export class AccountPane {
       this.trigger.setAttribute('aria-expanded', 'false');
       if (this.trigger.isConnected) this.trigger.focus({ preventScroll: true });
     });
-    this.dialog.querySelector('[data-withdrawal-amount]')!.addEventListener('input', () => this.validateWithdrawal());
-    this.dialog.querySelector('[data-withdrawal-form]')!.addEventListener('submit', event => {
-      event.preventDefault();
-      this.validateWithdrawal();
-      this.status('Withdrawals are not available yet. No tokens are sent and no FTHG is deducted.', true);
-    });
+    this.dialog.querySelector('[data-fund-wallet-link]')!.addEventListener('click', () => { void this.useFundWallet(); });
     window.addEventListener('pagehide', () => {
       this.profileAttempt++;
       if (this.dialog.open) this.dialog.close();
@@ -181,6 +189,19 @@ export class AccountPane {
       if (attempt === this.profileAttempt) { this.profileStatus(error instanceof Error ? error.message : 'Connection failed.', true); retry.hidden = false; }
     }
   }
+  private async stopFundAccess(): Promise<void> {
+    if (this.revokingFunds || !this.snapshot().fundWallet) return;
+    this.revokingFunds = true;
+    const target = this.dialog.querySelector<HTMLElement>('[data-wallet-status]')!;
+    try {
+      this.update(await revokeFundWallet(this.snapshot().csrf));
+      target.textContent = this.t('Wallet gameplay access revoked. Sign again to restore your settlement.');
+    } catch (error) {
+      console.error('Gameplay wallet revocation failed.', error);
+      target.textContent = this.t('Wallet gameplay access could not be revoked. Retry before leaving this browser.');
+      if (!this.dialog.open) this.dialog.showModal();
+    } finally { this.revokingFunds = false; }
+  }
   private async useWorldProfile(): Promise<void> {
     if (this.profileSaving) return;
     this.profileSaving = true;
@@ -212,11 +233,10 @@ export class AccountPane {
     }
   }
   updateBalance(balance: number, numberLocale: string): void {
-    this.balance = balance;
-    this.dialog.querySelector('[data-account-dollars]')!.textContent = `FTH$${formatFthg(this.snapshot().dollars, numberLocale)}`;
-    this.dialog.querySelector('[data-account-balance]')!.textContent = `${formatFthg(balance, numberLocale)} FTHG`;
-    this.dialog.querySelector('[data-withdrawal-maximum]')!.textContent = formatFthg(maximumWithdrawal(balance), numberLocale);
-    this.validateWithdrawal();
+    this.dialog.querySelector('[data-account-dollars]')!.textContent = `FTH$${formatDollars(this.snapshot().dollars, numberLocale)}`;
+    const raw = window.FeatheralProfile.snapshot().balances?.fthg;
+    this.dialog.querySelector('[data-account-balance]')!.textContent = typeof raw === 'bigint' ? `${formatFthg(Number(formatUnits(raw, 18)), numberLocale)} FTHG` : 'Unavailable';
+    this.dialog.querySelector<HTMLButtonElement>('[data-fund-wallet-link]')!.disabled = !window.FeatheralProfile.snapshot().account;
     if (this.dialog.querySelector('[data-account-journal]')!.childElementCount) this.renderActivity();
   }
   private showView(view: AccountView, focus = true): void {
@@ -274,12 +294,22 @@ export class AccountPane {
     renderJournalEntries(root.querySelector<HTMLElement>('[data-journal-list]')!, root.querySelector('[data-journal-count]')!, this.snapshot().game.log, query, this.language);
     root.scrollTop = scroll;
   }
-  private validateWithdrawal(): void {
-    const input = this.dialog.querySelector<HTMLInputElement>('[data-withdrawal-amount]')!;
-    const error = input.validity.badInput ? 'Enter a positive multiple of 1,000 FTHG.' : input.value ? withdrawalError(input.value, this.balance) : null;
-    input.setCustomValidity(error ? this.t(error) : '');
-    input.setAttribute('aria-invalid', String(!!error));
-    this.dialog.querySelector('#withdrawal-error')!.textContent = error ? this.t(error) : '';
+  private async useFundWallet(): Promise<void> {
+    const button = this.dialog.querySelector<HTMLButtonElement>('[data-fund-wallet-link]')!;
+    button.disabled = true;
+    try {
+      await this.walletReady;
+      const address = window.FeatheralProfile.snapshot().account;
+      const provider = window.FeatheralProfile.getProvider();
+      if (!address || !provider) throw new Error('Connect a wallet first.');
+      const csrf = this.snapshot().csrf, issuedAt = new Date().toISOString();
+      const signature = await provider.request({ method: 'personal_sign', params: [hexlify(toUtf8Bytes(walletLinkMessage(address, csrf, issuedAt, location.origin))), address] });
+      if (typeof signature !== 'string') throw new Error('Wallet returned an invalid signature.');
+      if (window.FeatheralProfile.snapshot().account !== address) throw new Error('Wallet changed. Try again.');
+      this.update(await linkFundWallet(csrf, address, issuedAt, signature));
+      this.status('Dollar wallet authorized for gameplay.');
+    } catch (error) { this.status(error instanceof Error ? error.message : 'Wallet authorization failed.', true); }
+    finally { button.disabled = !window.FeatheralProfile.snapshot().account; }
   }
   private status(message: string, error = false): void {
     const node = this.dialog.querySelector<HTMLElement>('[data-wallet-status]')!;

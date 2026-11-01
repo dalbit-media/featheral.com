@@ -12,12 +12,14 @@ import { worldWeekMs } from '../src/environment.ts';
 import { marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketCommand } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
+import { seedFixturePools } from './test-support.ts';
 
 const command = (quote: HalfSaleQuote): MarketCommand => ({ type: 'sell-half', sales: quote.sales.map(sale =>
   ({ asset: sale.asset, quantity: sale.quantity, limitDollars: dollarsSlippage(sale.dollars, 'sell') })) });
 function setup() {
   let now = 1000000;
   const store = new SqliteStore(':memory:', () => now), identity = store.create();
+  seedFixturePools(store);
   store.transaction(identity.token, session => {
     session.account.game.stage = 0; session.account.game.home = { x: 0, y: 0 };
     session.account.game.population = 0; session.account.game.stock = { wood: 5, water: 7, metal: 1, oil: 4 };
@@ -156,6 +158,7 @@ test('half-sales transfer player buy escrow and accept large payment limits', ()
 test('a zero-grant founder funds recruitment and weekly collection by selling starter resources', () => {
   let now = 1000000;
   const store = new SqliteStore(':memory:', () => now), identity = store.create();
+  seedFixturePools(store);
   const act = (worldCommand: Command) => {
     now += 1000;
     return store.transaction(identity.token, (session, time) =>
