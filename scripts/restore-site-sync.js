@@ -1,0 +1,211 @@
+"use strict";
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const { DatabaseSync } = require("node:sqlite");
+const { hash, safeName, excludedName } = require("../services/operations/site-sync-snapshot");
+const { MARKER } = require("../services/operations/replica");
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+function within(base, name) {
+  assert(safeName(name), "Invalid snapshot path.");
+  let current = base;
+  for (const part of name.split("/")) {
+    current = path.join(current, part);
+    if (fs.existsSync(current)) assert(!fs.lstatSync(current).isSymbolicLink(), "Linked target storage is not supported.");
+  }
+  return current;
+}
+function targetRoots(root) {
+  return Object.fromEntries([["data", path.join(root, "data")], ["cms", path.join(root, "services", "cms", "data")]]
+    .map(([key, directory]) => { assert(fs.existsSync(directory), "Deploy the target installation first."); return [key, fs.realpathSync(directory)]; }));
+}
+function destination(roots, name) {
+  const [kind, ...parts] = name.split("/");
+  assert(roots[kind] && parts.length, "Invalid storage root.");
+  return within(roots[kind], parts.join("/"));
+}
+function verifySnapshot(directory) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8"));
+  assert(manifest.version === 1 && Array.isArray(manifest.entries) && manifest.entries.length, "Invalid snapshot manifest.");
+  const names = new Set();
+  for (const entry of manifest.entries) {
+    assert(safeName(entry.name) && /^(?:data|cms)\//.test(entry.name) && !names.has(entry.name)
+      && !excludedName(entry.name) && !/(?:-wal|-shm|-journal)$/i.test(entry.name),
+    "Unsupported or secret snapshot entry.");
+    const file = within(directory, entry.name), stat = fs.lstatSync(file);
+    assert(stat.isFile() && stat.nlink === 1 && stat.size === entry.bytes && hash(file) === entry.hash, "Snapshot checksum mismatch.");
+    if (/\.(?:sqlite3?|db)$/i.test(entry.name)) {
+      const database = new DatabaseSync(file, { readOnly: true });
+      try { assert(database.prepare("PRAGMA quick_check").get().quick_check === "ok", "Snapshot database integrity check failed."); }
+      finally { database.close(); }
+    }
+    names.add(entry.name);
+  }
+  assert(manifest.sourceCMS && ["\\", "/"].includes(manifest.sourceCMS.separator)
+    && typeof manifest.sourceCMS.directory === "string", "Missing CMS namespace identity.");
+  assert(manifest.runtime && Object.values(manifest.runtime).every(value => safeName(value) && value.startsWith("data/")), "Invalid replica storage configuration.");
+  return manifest;
+}
+function copyVerified(source, target) {
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(source, target);
+  fs.chmodSync(target, 0o600);
+  assert(hash(source) === hash(target), "Storage copy verification failed.");
+  const fd = fs.openSync(target, "r+");
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+function journalFiles(directory, relative = "") {
+  if (!fs.existsSync(directory)) return [];
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const name = relative ? `${relative}/${entry.name}` : entry.name;
+    if (excludedName(name) || /(?:^|\/)(?:internal|system)(?:\/|$)/i.test(name)) continue;
+    assert(!entry.isSymbolicLink(), "Linked journal storage is not supported.");
+    if (entry.isDirectory()) files.push(...journalFiles(path.join(directory, entry.name), name));
+    else if (/\/\d{4}-\d{2}-\d{2}\.jsonl$|\/\d{16}\.json$/.test(name)) files.push(name);
+  }
+  return files;
+}
+function prepareBackup(root, snapshotDirectory, backupDirectory) {
+  const manifest = verifySnapshot(snapshotDirectory), roots = targetRoots(root), touched = new Set(manifest.entries.map(entry => entry.name));
+  for (const key of ["FTH_LEDGER_DIR", "WORLD_LEDGER_DIR", "DB_LEDGER_DIR"]) {
+    const name = manifest.runtime[key];
+    assert(name && name.startsWith("data/"), "Missing journal root.");
+    for (const file of journalFiles(destination(roots, name))) touched.add(`${name}/${file}`);
+  }
+  const cmsDaily = new Set(manifest.entries.map(entry => /^(cms\/.*?\/daily-files)\//.exec(entry.name)?.[1]).filter(Boolean));
+  for (const directory of cmsDaily) for (const file of journalFiles(destination(roots, directory))) touched.add(`${directory}/${file}`);
+  for (const entry of manifest.entries) if (/\.(?:db|sqlite3?)$/i.test(entry.name))
+    for (const suffix of ["-wal", "-shm", "-journal"]) touched.add(entry.name + suffix);
+  touched.add(`data/${MARKER}`);
+  fs.mkdirSync(backupDirectory, { recursive: false, mode: 0o700 });
+  const records = [];
+  for (const name of touched) {
+    const file = destination(roots, name);
+    if (fs.existsSync(file)) {
+      const stat = fs.lstatSync(file);
+      assert(stat.isFile() && stat.nlink === 1, "Target storage contains an unsupported file.");
+      const backup = path.join(backupDirectory, ...name.split("/"));
+      copyVerified(file, backup);
+      records.push({ name, existed: true, hash: hash(backup) });
+    } else records.push({ name, existed: false });
+  }
+  const state = { version: 1, phase: "backed-up", records };
+  fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(state), { flag: "wx", mode: 0o600, flush: true });
+  return { manifest, roots, state };
+}
+function restoreBackup(roots, backupDirectory, state) {
+  for (const record of state.records) if (record.existed)
+    assert(hash(within(backupDirectory, record.name)) === record.hash, "Backup checksum mismatch. Keep the target stopped.");
+  for (const record of state.records) {
+    const target = destination(roots, record.name);
+    if (record.existed) copyVerified(within(backupDirectory, record.name), target);
+    else if (fs.existsSync(target)) fs.unlinkSync(target);
+  }
+}
+function installSnapshot(root, snapshotDirectory, backupDirectory, prepared) {
+  const { manifest, roots, state } = prepared || prepareBackup(root, snapshotDirectory, backupDirectory);
+  for (const entry of manifest.entries) assert(hash(within(snapshotDirectory, entry.name)) === entry.hash, "Snapshot changed after backup; target was not changed.");
+  state.phase = "installing";
+  fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(state), { mode: 0o600, flush: true });
+  for (const record of state.records) {
+    if (record.name === `data/${MARKER}` || manifest.entries.some(entry => entry.name === record.name)) continue;
+    const target = destination(roots, record.name);
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+  }
+  for (const entry of manifest.entries) copyVerified(within(snapshotDirectory, entry.name), destination(roots, entry.name));
+  const marker = { version: 1, readOnly: true, syncedAt: manifest.createdAt, runtime: manifest.runtime,
+    publicKeys: manifest.publicKeys, sourceCMS: manifest.sourceCMS };
+  fs.writeFileSync(path.join(roots.data, MARKER), JSON.stringify(marker), { mode: 0o600, flush: true });
+  return { manifest, roots, state };
+}
+async function run(root, snapshotDirectory, backupDirectory, sourceId) {
+  assert(process.platform === "linux", "The sync receiver requires the Linux deployment layout.");
+  const release = fs.realpathSync(path.join(root, "current"));
+  const roots = targetRoots(release);
+  const identity = path.join(roots.data, "site-sync", "source-id");
+  assert(!fs.existsSync(identity) || fs.readFileSync(identity, "utf8") !== sourceId, "Refusing to overwrite the running source installation.");
+  const pm2 = path.join(root, "shared", "tools", "node_modules", ".bin", "pm2");
+  const command = (...args) => {
+    const result = spawnSync(pm2, args, { encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"] });
+    assert(!result.error && result.status === 0, "PM2 operation failed. Inspect the target before retrying.");
+    return result.stdout;
+  };
+  for (const file of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
+    assert(fs.readFileSync(path.join(release, file), "utf8").includes("replica"), "Deploy the sync-capable release to the target first.");
+  verifySnapshot(snapshotDirectory);
+  const apps = JSON.parse(command("jlist")).filter(app => app.name === "featheral");
+  assert(apps.length === 1 && apps[0].pm2_env.status === "online", "The target Featheral application must be online before sync.");
+  assert(fs.realpathSync(apps[0].pm2_env.pm_cwd) === release, "PM2 is not running this target's current release. Deploy or repair it before syncing.");
+  process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
+  const { OperationsSettings } = require("../services/operations/settings");
+  const port = Number(new OperationsSettings({ root: release }).environment().PORT || 8080);
+  assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid target HTTP port.");
+  const lock = path.join(root, "shared", "site-sync.lock");
+  fs.writeFileSync(lock, backupDirectory, { flag: "wx", mode: 0o600 });
+  let prepared, stopped = false, started = false, rollbackConfirmed = false;
+  try {
+    command("stop", "featheral"); stopped = true;
+    prepared = prepareBackup(release, snapshotDirectory, backupDirectory);
+    installSnapshot(release, snapshotDirectory, backupDirectory, prepared);
+    command("restart", "featheral"); started = true;
+    let healthy = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(2000) });
+        if (response.ok && response.headers.get("x-featheral-replica") === "read-only") { healthy = true; break; }
+      } catch (error) {
+        if (attempt === 29) console.error("Replica health probe failed:", error.name);
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    assert(healthy, "Read-only replica did not pass health verification.");
+    prepared.state.phase = "complete";
+    fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
+    console.log("Snapshot installed; read-only health confirmed. Verified backup:", backupDirectory);
+  } catch (error) {
+    console.error("Sync failed:", error.message);
+    if (stopped) {
+      if (started) command("stop", "featheral");
+      if (prepared) restoreBackup(prepared.roots, backupDirectory, prepared.state);
+      command("restart", "featheral");
+      rollbackConfirmed = true;
+      if (prepared) {
+        prepared.state.phase = "rolled-back";
+        fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
+      }
+    }
+    throw error;
+  } finally {
+    if (!stopped || prepared?.state.phase === "complete" || rollbackConfirmed) fs.unlinkSync(lock);
+  }
+}
+async function recover(root, backupDirectory) {
+  assert(process.platform === "linux", "The sync receiver requires the Linux deployment layout.");
+  const release = fs.realpathSync(path.join(root, "current")), roots = targetRoots(release);
+  const expected = path.join(root, "shared", "sync-backups");
+  assert(path.dirname(path.resolve(backupDirectory)) === path.resolve(expected), "Choose a specific backup under shared/sync-backups.");
+  const state = JSON.parse(fs.readFileSync(path.join(backupDirectory, "state.json"), "utf8"));
+  assert(state.version === 1 && Array.isArray(state.records), "Invalid backup state.");
+  const active = spawnSync("systemctl", ["is-active", "--quiet", "featheral-site-sync.service"]);
+  assert(!active.error && active.status !== 0, "Wait for or stop the active sync job before offline recovery.");
+  const lock = path.join(root, "shared", "site-sync.lock");
+  assert(!fs.existsSync(lock) || fs.readFileSync(lock, "utf8") === backupDirectory, "A different sync owns the target lock.");
+  const pm2 = path.join(root, "shared", "tools", "node_modules", ".bin", "pm2");
+  const command = (...args) => {
+    const result = spawnSync(pm2, args, { stdio: "inherit", timeout: 60000 });
+    assert(!result.error && result.status === 0, "PM2 recovery operation failed. Keep the target stopped.");
+  };
+  command("stop", "featheral");
+  restoreBackup(roots, backupDirectory, state);
+  command("restart", "featheral");
+  state.phase = "rolled-back";
+  fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(state), { mode: 0o600, flush: true });
+  if (fs.existsSync(lock)) fs.unlinkSync(lock);
+  console.log("Verified backup restored. Check application health before enabling writes.");
+}
+if (require.main === module) {
+  const operation = process.argv[2] === "--recover" ? recover(...process.argv.slice(3)) : run(...process.argv.slice(2));
+  operation.catch(error => { console.error(error.message); process.exitCode = 1; });
+}
+module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, targetRoots, run };

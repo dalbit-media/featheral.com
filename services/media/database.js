@@ -17,8 +17,10 @@ class FeedDatabase {
     this.comments = comments;
     this.closed = false;
     try {
-      this.db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON");
-      this.transaction(() => this.db.exec(schema));
+      this.db.exec(this.db.readOnlyReplica ? "PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON"
+        : "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON");
+      if (this.db.readOnlyReplica) this.db.exec(schema);
+      else this.transaction(() => this.db.exec(schema));
     } catch (error) {
       this.close();
       throw error;

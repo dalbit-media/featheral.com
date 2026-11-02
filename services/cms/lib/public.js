@@ -1067,7 +1067,7 @@ class Curation {
     if (notesFile) {
       const { Notes, migrate } = require('../../notes/ledger');
       const notes = new Notes(notesFile);
-      try { migrate(this.db, notes.db, siteKey); }
+      try { if (!this.db.readOnlyReplica) migrate(this.db, notes.db, siteKey); }
       catch (error) { this.db.close(); throw error; }
       finally { notes.close(); }
       this.db.prepare('ATTACH DATABASE ? AS notes').run(notesFile);
@@ -1076,6 +1076,7 @@ class Curation {
   }
 
   addView(postId) {
+    if (this.db.readOnlyReplica) return this.db.prepare('SELECT n FROM views WHERE post_id=?').get(postId)?.n || 0;
     const at = Date.now();
     this.db.prepare('INSERT INTO views (post_id, n, at) VALUES (?, 1, ?) ON CONFLICT (post_id) DO UPDATE SET n = n + 1, at = excluded.at').run(postId, at);
     return this.db.prepare('SELECT n FROM views WHERE post_id = ?').get(postId).n;

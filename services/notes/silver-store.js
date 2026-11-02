@@ -19,7 +19,6 @@ class SilverStore {
     this.key = env.SILVER_CODE_KEY ? Buffer.from(env.SILVER_CODE_KEY, "hex") : null;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS silver_settings(id INTEGER PRIMARY KEY CHECK(id=1),treasury TEXT NOT NULL,enabled INTEGER NOT NULL,terms TEXT NOT NULL,revision INTEGER NOT NULL);
-      INSERT OR IGNORE INTO silver_settings VALUES(1,'',0,'Digital codes only. No physical shipping. Read each product regional restrictions and redemption terms before paying.',0);
       CREATE TABLE IF NOT EXISTS silver_products(id TEXT PRIMARY KEY,data TEXT NOT NULL,revision INTEGER NOT NULL,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS silver_codes(id TEXT PRIMARY KEY,product TEXT NOT NULL,digest TEXT NOT NULL UNIQUE,sealed TEXT NOT NULL,state TEXT NOT NULL,expires INTEGER NOT NULL,at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS silver_stock ON silver_codes(product,state,expires);
@@ -30,6 +29,7 @@ class SilverStore {
       CREATE TABLE IF NOT EXISTS silver_sessions(token TEXT PRIMARY KEY,owner TEXT NOT NULL,expires INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS silver_audit(id INTEGER PRIMARY KEY,actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL,at INTEGER NOT NULL);
     `);
+    if (!this.db.readOnlyReplica) this.db.exec("INSERT OR IGNORE INTO silver_settings VALUES(1,'',0,'Digital codes only. No physical shipping. Read each product regional restrictions and redemption terms before paying.',0)");
   }
   audit(actor, action, target) {
     this.db.prepare("INSERT INTO silver_audit(actor,action,target,at) VALUES(?,?,?,?)").run(actor, action, target, this.now());

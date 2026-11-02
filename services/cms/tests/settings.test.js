@@ -133,7 +133,10 @@ test("a fresh encrypted installation boots the gateway and wallet-only Admin wit
     }
     fs.rmSync(directory, { recursive: true, force: true });
   });
-  for (const relative of require("../lib/deployment").releaseFiles(source)) {
+  const releaseFiles = [...new Set([...require("../lib/deployment").releaseFiles(source),
+    "services/operations/replica.js", "services/operations/site-sync-snapshot.js", "services/cms/lib/site-sync.js",
+    "scripts/restore-site-sync.js", "shared/gold-pricing.js"])];
+  for (const relative of releaseFiles) {
     const target = path.join(repository, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(path.join(source, relative), target);
@@ -189,6 +192,42 @@ test("a fresh encrypted installation boots the gateway and wallet-only Admin wit
   const importedPage = await request("/api/public/texts/by-slug/home", "x.featheral.com");
   assert.equal(importedPage.status, 200);
   assert.match(importedPage.body, /Preserved shared site content/);
+  const sourceExit = once(child, "exit"); child.kill(); await sourceExit;
+  const replica = path.join(directory, "replica"), replicaBootstrap = path.join(directory, "replica-bootstrap", "bootstrap.json");
+  for (const relative of releaseFiles) {
+    const target = path.join(replica, relative);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(source, relative), target);
+  }
+  fs.symlinkSync(path.join(source, "node_modules"), path.join(replica, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+  fs.mkdirSync(path.join(replica, "services", "cms", "data"), { recursive: true });
+  fs.mkdirSync(path.join(replica, "data"), { recursive: true });
+  const replicaSettings = initializeNewInstallation(replica, replicaBootstrap);
+  replicaSettings.persist({ ...replicaSettings.value, revision: 2, runtime: { ...replicaSettings.value.runtime, PORT: String(port) } });
+  const snapshotDirectory = path.join(directory, "snapshot");
+  require("../../operations/site-sync-snapshot").snapshot(repository, snapshotDirectory, settings.environment());
+  require("../../../scripts/restore-site-sync").installSnapshot(replica, snapshotDirectory, path.join(directory, "replica-backup"));
+  const replicaProfile = path.join(replica, "data", "wallet-profiles.sqlite");
+  const originalProfileHash = require("../../operations/site-sync-snapshot").hash(replicaProfile);
+  output = "";
+  child = spawn(process.execPath, [path.join(replica, "scripts", "serve.js")],
+    { cwd: replica, env: { ...process.env, FEATHERAL_BOOTSTRAP_FILE: replicaBootstrap }, stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout.on("data", chunk => { output += chunk; }); child.stderr.on("data", chunk => { output += chunk; });
+  health = undefined;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (child.exitCode !== null) assert.fail("Read-only replica failed to start: " + output);
+    try { health = await request("/healthz", "featheral.com"); if (health.status === 200) break; }
+    catch (error) { if (error.code !== "ECONNREFUSED") throw error; }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(health?.status, 200, output);
+  const replicaPage = await request("/api/public/texts/by-slug/home", "x.featheral.com");
+  assert.equal(replicaPage.status, 200, replicaPage.body);
+  assert.match(replicaPage.body, /Preserved shared site content/);
+  const writeResult = await fetch(`http://127.0.0.1:${port}/api/settings`, { method: "POST", headers: { Host: "admin.localhost" } });
+  assert.equal(writeResult.status, 403);
+  assert.match(await writeResult.text(), /read-only/);
+  assert.equal(require("../../operations/site-sync-snapshot").hash(replicaProfile), originalProfileHash);
 });
 test("credential syntax supports username:password, root fallback and colon-containing passwords", () => {
   assert.deepEqual(parseCredential("secret"), { username: "root", password: "secret" });

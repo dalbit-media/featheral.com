@@ -7,6 +7,7 @@ const { createDomainApi } = require("./domain");
 const sqlite = require("./sqlite");
 const { createWalletProfiles } = require("./wallet-profiles");
 const path = require("node:path");
+const fs = require("node:fs");
 function createDatabase({ directory, repository, env = require("../operations/runtime").environment(), sites = () => [], verifyCredential, approvals, credentialVault }) {
   const journals = new FileJournals(directory);
   const profiles = createWalletProfiles(sqlite, env.DB_WALLET_PROFILES_FILE || path.join(path.dirname(directory), "wallet-profiles.sqlite"));
@@ -100,8 +101,10 @@ function createSiteServer({ root, settings, hosts = ["db.featheral.com"] }) {
   const http = require("node:http");
   const env = settings.environment();
   const { requestPolicy, configureServer } = require("../operations/http");
+  const directory = env.DB_LEDGER_DIR || path.join(root, "data", "file-ledgers");
+  fs.mkdirSync(directory, { recursive: true });
   const database = createDatabase({
-    directory: env.DB_LEDGER_DIR || path.join(root, "data", "file-ledgers"), repository: root, env, credentialVault: settings,
+    directory: fs.realpathSync(directory), repository: root, env, credentialVault: settings,
   });
   const app = express();
   app.use((req, res, next) => {

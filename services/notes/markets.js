@@ -30,7 +30,7 @@ class Markets {
       CREATE TABLE IF NOT EXISTS note_positions(symbol TEXT NOT NULL,owner TEXT NOT NULL,shares INTEGER NOT NULL CHECK(shares>=0),PRIMARY KEY(symbol,owner));
       CREATE TABLE IF NOT EXISTS note_liquidity(owner TEXT NOT NULL,request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(owner,request_id));
     `);
-    this.atomic(() => {
+    if (!this.db.readOnlyReplica) this.atomic(() => {
       const insert = this.db.prepare("INSERT OR IGNORE INTO note_markets(symbol,placeholder) VALUES (?,1)");
       const definitions = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='note_currencies'").get()
         ? new Set(this.db.prepare("SELECT symbol FROM note_currencies").all().map(row => row.symbol)) : new Set();

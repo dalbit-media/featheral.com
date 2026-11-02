@@ -173,7 +173,7 @@ class Deployment {
   validate(input) {
     if (!(this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true')) throw error(403, 'Deployment is disabled. Review and enable deployment in Admin Settings.');
     if (this.settings?.busy) throw error(409, 'Wait for the Settings operation.');
-    if (this.running) throw error(409, 'Another deployment is running');
+    if (this.running || this.siteSync?.running) throw error(409, 'Another deployment or site sync is running');
     const plan = this.plans.get(input?.planId);
     if (!plan || Date.now() - plan.createdAt > 10 * 60_000) throw error(400, 'Deployment plan expired or unavailable. Review a new plan.');
     if (input?.approval !== `DEPLOY ${plan.digest} ${plan.contentDigest}`) throw error(400, 'Enter the exact approval phrase from the reviewed deployment plan.');
@@ -342,6 +342,7 @@ class Deployment {
     }
   }
   async deployTarget(config, credential, archive, bootstrap, releaseId) {
+    if (this.siteSync?.running) throw error(409, 'Wait for the current site sync.');
     let client;
     try {
       this.log(`${config.host}: connecting to SSH with the saved credential and pinned server key.`);

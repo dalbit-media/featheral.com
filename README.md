@@ -29,6 +29,15 @@ Public pages without their own skip link receive a keyboard-accessible skip-to-c
 
 The core sites use the main `shared/logo.svg` feather emblem. Foundation uses it unchanged; the other sites add small symbol badges (including Silver ingots, the App phone and Ledger's account book), each colored for its site theme. Headers, favicons, Admin cards and traffic legends use these variants. The shared palette in `shared/site-colors.json` also colors chart lines. After editing the main SVG, palette or badge paths, run `npm run build:logos` to regenerate shared variants and legacy X/World favicon aliases, then `npm run build:world` to refresh the game build.
 
+Each site's **Server & settings** also offers a separately reviewed, wallet-signed
+one-time **Sync databases & uploads** to its saved target. This snapshots the
+whole installation, not only the selected site: verified target backup first,
+source databases/journals replace matching target state, uploads overlay without
+deleting target-only files, and target server credentials/keys stay private.
+The target restarts as a persistent read-only replica; the source remains the
+writer. Code deployment never performs this data copy automatically. See
+[sync prerequisites and recovery](services/cms/README.md#one-time-server-data-sync).
+
 ### Foundation App and Silver
 
 `app.featheral.com` is a mobile-first, installable insider workspace. Connect the

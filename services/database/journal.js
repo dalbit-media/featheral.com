@@ -129,6 +129,8 @@ class FileJournals {
     return entry ? structuredClone(entry) : { revision: 0, deleted: true };
   }
   transact(name, { requestId, changes }) {
+    if (require("../operations/replica").readReplica(path.resolve(__dirname, "..", "..")))
+      throw fail(403, "This installation is a read-only snapshot replica.");
     namespace(name); validateChanges(changes, name.startsWith("tokens/"));
     if (typeof requestId !== "string" || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw fail(400, "A unique transaction request ID is required.");
     const directory = this.safe(path.join(this.directory, ...name.split("/")));

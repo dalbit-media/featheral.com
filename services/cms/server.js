@@ -41,7 +41,7 @@ const telemetry = new Telemetry(path.join(DATA_DIR, 'telemetry.sqlite'));
 const { Notes } = require('../notes/ledger');
 const notes = new Notes(path.join(DATA_DIR, 'notes.sqlite'));
 const siteManager = CONFIG.siteManagement ? new SiteManager({
-  cmsHost: CONFIG.cmsHost, defaultHost: CONFIG.publicHost, defaultKey: CONFIG.siteKey,
+  cmsHost: CONFIG.cmsHost, defaultHost: CONFIG.publicHost, defaultKey: operationsSettings.replica ? null : CONFIG.siteKey,
 }) : null;
 const { Creation } = require('../notes/creation');
 const creation = siteManager ? new Creation(notes, siteManager) : null;
@@ -60,14 +60,14 @@ const deployment = new Deployment({ root: path.resolve(__dirname, '..', '..'), s
     return [...sitePages.catalog().filter(site => !managed.some(record => record.hostname === site.hostname && !record.path)), ...managed];
   },
 });
-if (siteManager && CONFIG.sampleSites) Templates.provision(siteManager);
+if (siteManager && CONFIG.sampleSites && !operationsSettings.replica) Templates.provision(siteManager);
 const fthxSite = siteManager?.records.find((record) => record.hostname === 'x.featheral.com');
-if (fthxSite) {
+if (fthxSite && !operationsSettings.replica) {
   const cms = new CmsStore(path.join(DATA_DIR, fthxSite.key, 'cms.sqlite'));
   try { FthxPages.installNotes(cms); } finally { cms.close(); }
 }
 const sitesBase = siteManager?.records.find(record => record.hostname === 'sites.featheral.com' && !record.path);
-if (sitesBase) {
+if (sitesBase && !operationsSettings.replica) {
   const cms = new CmsStore(path.join(DATA_DIR, sitesBase.key, 'cms.sqlite'));
   try { Templates.upgradeSitesCreation(cms); } finally { cms.close(); }
 }
@@ -152,6 +152,11 @@ app.use((req, res, next) => hostName(req) === String(CONFIG.cmsHost).toLowerCase
   ? adminAuth.gate(req, res, () => { injectTelemetry(res); next(); }) : next());
 const { ServerUsers } = require('./lib/server-users');
 const serverUsers = new ServerUsers({ deployment, settings: operationsSettings });
+const siteSync = new (require('./lib/site-sync').SiteSync)({
+  root: path.resolve(__dirname, '..', '..'), settings: operationsSettings, deployment,
+  command: serverUsers.command.bind(serverUsers),
+  busy: () => serverUsers.changing || operationsSettings.busy,
+});
 const ledgerDirectory = path.resolve(env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers'));
 fs.mkdirSync(ledgerDirectory, { recursive: true });
 const database = require('../database/server').createDatabase({
@@ -160,7 +165,8 @@ const database = require('../database/server').createDatabase({
   repository: path.resolve(__dirname, '..', '..'), sites: () => sitePages.hosts,
   credentialVault: operationsSettings,
 });
-operationsSettings.isBusy = () => deployment.running;
+operationsSettings.isBusy = () => deployment.running || siteSync.running;
+deployment.siteSync = siteSync;
 operationsSettings.verifyCredential = async config => {
   const client = await serverUsers.connect(config);
   try {
@@ -182,7 +188,7 @@ app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
   service: serverUsers, cmsAuth, passwordConfigured: () => true, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 app.use('/api/settings', require('../operations/api').settingsApi({
-  settings: operationsSettings, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  settings: operationsSettings, siteSync, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
   sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
 }));
 app.operationsSettings = operationsSettings;

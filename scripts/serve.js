@@ -12,7 +12,8 @@ if (deploymentManifest?.hosts.length === 1 && deploymentManifest.hosts[0] === "d
   const settings = require("node:fs").existsSync(require("node:path").join(root, "data", "system-database"))
     ? require("../services/operations/runtime") : {
       value: { uploadLimitMiB: deploymentManifest.uploadLimitMiB || 16, requestTimeoutSeconds: deploymentManifest.requestTimeoutSeconds || 90 },
-      listeners: new Set(), environment: () => ({ HOST: "127.0.0.1", PORT: "8080" }),
+      replica: require("../services/operations/replica").readReplica(root),
+      listeners: new Set(), environment: () => require("../services/operations/replica").replicaEnvironment(root, { HOST: "127.0.0.1", PORT: "8080" }),
     };
   const env = settings.environment();
   require("../services/operations/configuration").assertDatabaseConfiguration(root);
@@ -109,7 +110,7 @@ const gold = createGoldApi({ env });
 const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
   FTH_GOLD_PUBLIC_KEY: reserveMode === "isolated" ? goldKeys?.publicKey : undefined }, beforeLedgerMutation: () => store?.recoverFunds(), exchangeSigningKey: keys?.privateKey });
 if (reserveMode === "live") activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets());
-if (api.ledger.genesis.goldPublicKey && !goldKeys) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
+if (api.ledger.genesis.goldPublicKey && !goldKeys && !runtimeSettings.replica) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
 const reserveEngine = goldKeys ? gold.enableReserve(api.ledger, goldKeys.privateKey, () => store?.recoverFunds()) : null;
 const world = createWorldApi({ env, fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {
   const original = req.url;

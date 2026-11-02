@@ -1,11 +1,15 @@
 "use strict";
 const { DatabaseSync } = require("node:sqlite");
+const path = require("node:path");
 
 const connections = new Set();
 
 function open(file, options) {
   if (typeof file !== "string" || !file.length) throw new TypeError("A database file path is required.");
-  const connection = options === undefined ? new DatabaseSync(file) : new DatabaseSync(file, options);
+  const replica = file !== ":memory:" && require("../operations/replica").readReplica(path.resolve(__dirname, "..", ".."));
+  const connection = new DatabaseSync(file, replica ? { ...options, readOnly: true } : options === undefined ? {} : options);
+  connection.readOnlyReplica = Boolean(replica);
+  if (replica) connection.exec("PRAGMA query_only=ON");
   connections.add(connection);
   const close = connection.close.bind(connection);
   let closed = false;

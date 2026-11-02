@@ -69,6 +69,79 @@ Settings. Saves bind the exact site, values and shared settings revision.
 Unknown sites and cross-site service fields are rejected. Site credentials
 share the encrypted system database; status responses never return them.
 
+### One-time server data sync
+
+Open a site's **Server & settings > Sync databases & uploads**. The saved site
+assignment chooses the target server (including a shared target), not a
+site-only subset of data. Deploy the current sync-capable release to an already
+running target first, then prepare a review, confirm database replacement and sign
+with the Admin wallet. Reviewing never connects to or changes the target.
+
+The fixed, ten-minute snapshot includes installation SQLite databases, native
+Dollar/World and database/CMS journals, site registries, upload indexes and uploads
+under `data/` and `services/cms/data/`. SQLite snapshots consolidate committed WAL
+contents with `VACUUM INTO` and pass `quick_check`. Synchronous capture pauses this
+Node process's writers; a before/after inventory and checksums reject concurrent
+external changes. Use one application writer and a quiet period. External/custom
+storage outside the supported installation layout is rejected, not silently
+omitted. Backups, test storage, operational state, external bootstrap, encrypted
+server Settings/vault credentials, signing keys and secret files are excluded.
+CMS journal identities are retained across different installation paths and OSes.
+
+Approval binds the snapshot SHA256, site/target, pinned SSH key, Settings revision,
+Admin origin, wallet and session. The source sends the frozen ZIP with SFTP;
+credentials go only to SSH and sudo stdin. The Linux target verifies ZIP paths,
+checksums and databases before stopping its exact PM2 application. A verified,
+retained backup precedes database replacement and removal of superseded journal
+records/WAL files. Uploads are overlaid: matching files use the source version;
+target-only uploads, credentials, signing keys and unrelated files stay. This is
+not a deletion mirror, DB merge, continuous replication or writer failover.
+
+Sync archives bypass Nginx over SSH/SFTP, so HTTP upload size and proxy timeouts
+do not limit sync transfers. Managed Nginx configurations stream HTTP request
+bodies (`proxy_request_buffering off`) rather than spooling entire uploads to
+disk, while retaining the configured upload size and request timeout limits.
+New and existing managed hosts receive this setting on the next reviewed deployment.
+
+`data/site-sync-replica.json` persistently forces native readers, disables upstream
+polling and Gold execution, removes financial private keys from the runtime, opens
+persistent SQLite read-only and rejects journal transactions and HTTP mutations.
+Replica startup skips seeding/upgrades and public page views do not increment
+stored counters. Target server Settings and encryption keys remain its own.
+The source remains the writer; purchasing, login and other mutations belong there.
+Health must explicitly return `X-Featheral-Replica: read-only` before success.
+Code deployments preserve this marker; removing it is **not** a supported promotion
+procedure. Never enable a second financial writer.
+
+The target job runs as `featheral-site-sync.service`, independently of the SSH
+connection. Backups and recovery receipts remain under
+`<deployment-root>/shared/sync-backups/<sync-id>/`. Normal apply/health failures
+restore the verified backup; abrupt interruption leaves a lock and requires
+inspection. New deployments and syncs refuse an unresolved target lock. Source
+restart or transport loss reports **uncertain**, never success. **Sign & recheck
+target status** reads the original target receipt/process status without copying
+data, and clears uncertainty only for a completed/rolled-back receipt or an online,
+untouched target with no receipt, active job or lock.
+
+For an interrupted install, inspect `journalctl -u featheral-site-sync.service`.
+After the job has stopped, an operator on that target can restore a specific
+verified backup using the same account that owns PM2:
+
+```sh
+node <deployment-root>/current/scripts/restore-site-sync.js --recover \
+  <deployment-root> <deployment-root>/shared/sync-backups/<sync-id>
+```
+
+Recovery stops PM2, verifies every backup checksum before restoring, restores
+previous replica/writer state, restarts PM2 and retains the backup. Check health
+before resuming writes. A missing `state.json` means backup was interrupted
+before installation; inspect the job and original data rather than attempting an
+unverified restore or deleting files. Do not remove locks while a job is active.
+
+The Settings API is `GET /api/settings/sites/:key/sync`, with signed mutation
+routes `/sync/plan`, `/sync/challenge`, `/sync/start`, `/sync/check/challenge` and
+`/sync/check`. Deployment/Settings and sync cannot run concurrently.
+
 The workspace and privileged APIs require a wallet-signed Admin session from the origin wallet (`0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c`) or Dollar reserve wallet (`0x706CCb6109046a6a4A08dbAD4444A46408703ccb`). Connecting an address alone is insufficient: sign the five-minute single-use, browser/origin-bound challenge. Admin passwords, HTTP Basic and localhost bypasses are not accepted. Host-only HttpOnly/SameSite=Strict session cookies expire after eight hours; sign-out, wallet changes and server restarts require sign-in again. Production requires HTTPS. Frontend assets contain no authority. The main gateway dispatches authenticated API requests to the original Gold, Dollar and World services; signing, moderator/on-chain roles and wallet confirmations still apply. Writes must come from the admin origin. The standalone CMS service explicitly reports that operational APIs require the main `npm start` server. Backend modules and private datasets remain under `services/cms/`; an existing old CMS-host page database is reused to preserve its content/themes.
 
 CMS and Notes use Node's built-in SQLite with connections created and managed

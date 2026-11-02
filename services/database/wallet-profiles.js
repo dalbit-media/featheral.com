@@ -9,7 +9,7 @@ function profileError(message, status = 409) {
 function createWalletProfiles(sqlite, file) {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
   const db = sqlite.open(file);
-  db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
+  db.exec(db.readOnlyReplica ? "PRAGMA busy_timeout = 5000;" : "PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS wallet_profiles (
       address TEXT PRIMARY KEY COLLATE NOCASE,

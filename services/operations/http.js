@@ -1,6 +1,7 @@
 "use strict";
 const applied = Symbol("operationsHttpPolicy");
 function requestPolicy(req, res, settings) {
+  if (!require("./replica").allowReplicaRequest(req, res, settings)) return false;
   if (req[applied]) return true;
   req[applied] = true;
   const { uploadLimitMiB, requestTimeoutSeconds } = settings.value;

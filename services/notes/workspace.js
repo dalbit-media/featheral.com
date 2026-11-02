@@ -49,7 +49,7 @@ class Workspace {
       CREATE INDEX IF NOT EXISTS work_signals_call ON work_signals(call,id);
       CREATE TABLE IF NOT EXISTS work_push(endpoint TEXT PRIMARY KEY,address TEXT NOT NULL,subscription TEXT NOT NULL,at INTEGER NOT NULL);
     `);
-    this.atomic(() => {
+    if (!this.db.readOnlyReplica) this.atomic(() => {
       for (const [key, name] of [["operations", "Foundation operations"], ["engineering", "Engineering & infrastructure"],
         ["community", "Community & support"], ["research", "Research & ecosystem"], ["learning", "Learning & mentorship"]]) {
         this.db.prepare("INSERT OR IGNORE INTO work_divisions VALUES (?,?)").run(key, name);

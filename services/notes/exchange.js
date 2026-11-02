@@ -18,7 +18,6 @@ class Exchange {
     this.creation = creation; this.markets = creation.markets; this.db = creation.db; this.busy = false;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS dollar_note_pool(id INTEGER PRIMARY KEY CHECK(id=1),dollars TEXT NOT NULL,fthx INTEGER NOT NULL,version INTEGER NOT NULL);
-      INSERT OR IGNORE INTO dollar_note_pool VALUES (1,'0',0,0);
       CREATE TABLE IF NOT EXISTS dollar_note_requests(id TEXT PRIMARY KEY,owner TEXT NOT NULL,request_id TEXT NOT NULL,
         payload TEXT NOT NULL,payment TEXT,signature TEXT,status TEXT NOT NULL,settlement TEXT,error TEXT,at INTEGER NOT NULL,UNIQUE(owner,request_id));
       CREATE TABLE IF NOT EXISTS dollar_note_trades(id TEXT PRIMARY KEY,owner TEXT NOT NULL,from_symbol TEXT NOT NULL,to_symbol TEXT NOT NULL,
@@ -27,6 +26,7 @@ class Exchange {
       CREATE TABLE IF NOT EXISTS wallet_note_swaps(id TEXT PRIMARY KEY,owner TEXT NOT NULL,request_id TEXT NOT NULL,
         parameters TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL,at INTEGER NOT NULL,UNIQUE(owner,request_id));
     `);
+    if (!this.db.readOnlyReplica) this.db.exec("INSERT OR IGNORE INTO dollar_note_pool VALUES (1,'0',0,0)");
   }
   setDollar(adapter) { this.dollar = adapter; }
   swapQuote(input) {

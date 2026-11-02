@@ -66,6 +66,7 @@ class Economy {
     catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
   seed() {
+    if (this.db.readOnlyReplica) return;
     const settings = this.cms.siteSettings();
     const needed = (feature) => settings[feature] && !this.db.prepare('SELECT value FROM demo_meta WHERE key=?').get(`${feature}-seed-v1`);
     if (!needed('exchange') && !needed('commerce')) return;

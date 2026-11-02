@@ -28,6 +28,7 @@ for host in $hostnames; do [[ "$host" =~ ^([a-z0-9][a-z0-9-]*\.)+[a-z]{2,}$ ]]; 
 [[ "$release_id" =~ ^release-[0-9]+-[a-f0-9]{12}$ ]]
 release="$root/releases/$release_id"
 shared="$root/shared"
+[[ ! -e "$shared/site-sync.lock" ]] || { echo "A site sync needs completion or recovery before deployment."; exit 1; }
 mkdir -p "$shared/logs"
 exec 3>&1
 phase() { printf 'FEATHERAL_PHASE:%s\n' "$1" >&3; }
@@ -156,6 +157,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_buffering off;
+        proxy_request_buffering off;
         proxy_read_timeout DEPLOY_TIMEOUTs;
         proxy_send_timeout DEPLOY_TIMEOUTs;
         client_body_timeout DEPLOY_TIMEOUTs;
@@ -217,6 +219,7 @@ else
   if ! as_root grep -q 'proxy_send_timeout' "$nginx_file"; then
     as_root sed -i "/proxy_read_timeout/a\\        proxy_send_timeout ${request_timeout}s;\\n        client_body_timeout ${request_timeout}s;" "$nginx_file"
   fi
+  as_root sed -i -E '/^[[:space:]]*proxy_request_buffering[[:space:]]/d; /proxy_pass http:/a\        proxy_request_buffering off;' "$nginx_file"
 fi
 as_root nginx -t
 # Resolve every assigned hostname before activation; Certbot subsequently verifies public reachability.

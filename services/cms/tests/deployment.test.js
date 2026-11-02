@@ -329,6 +329,52 @@ echo "health ready"`], { encoding: 'utf8', timeout: 10000 });
   assert.equal(failed.status, 1);
   assert.doesNotMatch(failed.stdout, /health ready/);
 });
+test('managed Nginx streams uploads on fresh and existing TLS hosts without removing upload limits', t => {
+  const { spawnSync } = require('node:child_process');
+  const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const candidate = script.slice(script.indexOf("cat >\"$candidate\" <<'NGINX'"), script.indexOf('\nprevious='));
+  const update = script.slice(script.indexOf('# Do not overwrite other virtual hosts.'), script.indexOf('\nas_root nginx -t\n# Resolve'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nginx-streaming-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const run = (name, content, fresh = false) => {
+    fs.writeFileSync(path.join(directory, name), content);
+    const result = spawnSync(process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
+      ['-c', `set -Eeuo pipefail
+as_root() { "$@"; }
+candidate=candidate.conf
+hostnames=example.com
+upload_mib=512
+request_timeout=600
+gateway=127.0.0.1:8080
+${candidate}
+nginx_file=${name}
+had_nginx=true
+${fresh ? 'cp "$candidate" "$nginx_file"' : ''}
+${update}
+${update}
+cat "$nginx_file"`], { cwd: directory, encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal((result.stdout.match(/proxy_request_buffering off;/g) || []).length, 1);
+    assert.match(result.stdout, /client_max_body_size 512m;/);
+    assert.match(result.stdout, /proxy_send_timeout 600s;/);
+    return result.stdout;
+  };
+  const fresh = run('fresh.conf', '', true);
+  assert.match(fresh, /proxy_request_buffering off;/);
+  const tls = run('tls.conf', `server {
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/example.com/fullchain.pem;
+    client_max_body_size 10m;
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_request_buffering on;
+        proxy_read_timeout 30s;
+    }
+}
+`);
+  assert.match(tls, /listen 443 ssl;/);
+  assert.match(tls, /ssl_certificate \/etc\/letsencrypt\/live\/example.com\/fullchain.pem;/);
+});
 test('remote script preserves private state and singleton PM2, validates Nginx, and rolls back only code', () => {
   const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
   assert.match(script, /consistent offline backup/);
@@ -364,6 +410,7 @@ test('deployment startup selects DB-only mode before loading CMS or financial se
         readFileSync: () => JSON.stringify(manifest),
       };
       if (name === '../services/operations/configuration') return { assertDatabaseConfiguration() {} };
+      if (name === '../services/operations/replica') return { readReplica: () => null, replicaEnvironment: (_root, env) => env };
       if (name === '../services/database/server') return { createSiteServer(config) {
         options = config;
         return { listen(port, host, callback) { listening = { port, host }; callback(); } };
