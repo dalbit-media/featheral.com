@@ -911,21 +911,23 @@ test('sidebar spending is labeled with resource names and remains readable on di
   assert.match(css, /\.sidebar-action-row \[data-invite-cost\]\[hidden\]\{display:none\}/);
 });
 
-test('four live counters lead the hero and mirror in the World header with FTHG trades next to settlements', () => {
+test('four live counters lead the hero without duplicate statistics in the World header', () => {
   const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(landing, /<section class="hero section-shell"[^>]*>\s*<section class="world-stats"/);
-  assert.match(landing, /<header class="top world-header"[^>]*>[\s\S]*?<div class="world-live-cards"[^>]*>/);
-  assert.equal((landing.match(/data-total=/g) ?? []).length, 6);
+  const header = landing.match(/<header class="top world-header"[^>]*>[\s\S]*?<\/header>/)?.[0];
+  assert.ok(header);
+  assert.doesNotMatch(header, /world-live-card|data-total|data-gold-supply/);
+  assert.equal((landing.match(/data-total=/g) ?? []).length, 3);
   assert.doesNotMatch(landing, /data-total="metal"|유통 중인 게임 금속/);
   for (const [metric, symbol] of [['settlements', 'home'], ['dollars', 'dollars'], ['population', 'people']]) {
-    assert.equal(landing.split(`data-total="${metric}"`).length - 1, 2);
+    assert.equal(landing.split(`data-total="${metric}"`).length - 1, 1);
     assert.ok(landing.includes(`<dd><span class="stat-icon" data-icon="${symbol}" aria-hidden="true"></span><span data-total="${metric}">`));
   }
-  assert.equal((landing.match(/data-gold-supply/g) ?? []).length, 2);
+  assert.equal((landing.match(/data-gold-supply/g) ?? []).length, 1);
   assert.doesNotMatch(landing, /fthgTransactions/);
   const landingScript = readFileSync(new URL('./landing.ts', import.meta.url), 'utf8');
-  assert.match(landingScript, /liveCards\.forEach\(cards => \{ cards\.dataset\.state = 'live'; \}\)/);
-  assert.match(landingScript, /liveCards\.forEach\(cards => \{ cards\.dataset\.state = 'stale'; \}\)/);
+  assert.match(landingScript, /statsPanel\.dataset\.state = 'live'/);
+  assert.match(landingScript, /statsPanel\.dataset\.state = 'stale'/);
 });
 test('homepage totals abbreviate at 10,000 using Korean and English units while small totals stay exact', () => {
   for (const locale of ['ko-KR', 'en-US']) {

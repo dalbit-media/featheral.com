@@ -411,6 +411,18 @@ test('embedded themes accept only bounded colors from the configured parent and 
   assert.equal(ui.calls.length, reads);
   assert.deepEqual(ui.errors, []);
 });
+test('standalone wallet defaults to gold with visible connection state while embeds keep their host accent', async () => {
+  const disconnected = await fixture('wallet', { noSession: true, noProvider: true });
+  assert.equal(disconnected.document.body.style['--brand'], '#e2b13c');
+  assert.equal(disconnected.nodes['wallet-connect-label'].textContent, 'Connect wallet');
+  const connected = await fixture('wallet');
+  assert.equal(connected.nodes['wallet-connect-label'].textContent, 'Disconnect');
+  const readOnly = await fixture('wallet', { publicAddress: '0x' + '22'.repeat(20) });
+  assert.equal(readOnly.nodes['wallet-connect-label'].textContent, 'Read-only');
+  assert.equal(readOnly.nodes['wallet-connect'].disabled, true);
+  const embedded = await fixture('notes', { embedded: true });
+  assert.equal(embedded.document.body.style['--brand'], require('../../../shared/site-colors.json')['notes.featheral.com'].color);
+});
 test('asset list hides zeros and shows icons for every positive internal and native ETH holding', async () => {
   const ui = await fixture('dollar', { walletData: { ethereum: { balance: '0' }, dollar: { balance: { available: '0' }, transactions: [] },
     holdings: [{ symbol: 'FTHX', balance: 7 }, { symbol: 'FTHA', balance: 3 }, { symbol: 'FTHB', balance: 0 }],
@@ -503,7 +515,7 @@ test('Gold and Dollar retain actual balances and value FTHX and held notes when 
         activeAddress: '0x' + '11'.repeat(20), marketError: true, walletData: {
           holdings: assets, ethereum, dollar: { balance: { available: '0' }, transactions: [] }, portfolio: value } });
       assert.deepEqual(ui.errors, ['Market server offline']);
-      assert.equal(ui.nodes.balance.textContent, host === 'gold' ? '0 FTHG' : '0 FTH$');
+      assert.equal(ui.nodes.balance.textContent, host === 'gold' ? '0.000 FTHG' : '0.00 FTH$');
       assert.equal(ui.nodes['portfolio-usd'].textContent, `$2.0000${unpriced ? ' (partial)' : ''}`);
       assert.equal(ui.nodes['portfolio-primary'].textContent,
         '≈ ' + (host === 'gold' ? '1 FTHG' : '10,000 FTH$') + `${unpriced ? ' (partial)' : ''}`);
@@ -576,7 +588,7 @@ test('Gold estimates remain visible at four decimal precision independently of t
       fthg: raw, pricedFthDollar: '0', unpriced: [], source: 'Test',
     } } });
     assert.deepEqual(ui.errors, []);
-    assert.equal(ui.nodes.balance.textContent, '0 FTHG');
+    assert.equal(ui.nodes.balance.textContent, '0.000 FTHG');
     assert.equal(ui.nodes['portfolio-usd'].textContent, usd);
     assert.equal(ui.nodes['portfolio-primary'].textContent, `≈ ${gold}`);
   }
@@ -725,6 +737,15 @@ test('all sites lead with actual primary holdings even when combined estimates d
     assert.equal(unpriced.nodes['portfolio-usd'].textContent, 'USD unavailable', host);
   }
 });
+test('empty wallets display currency-specific zero precision before connection and for confirmed zero balances', async () => {
+  for (const [host, expected] of [['wallet', '0.00 FTHX'], ['dollar', '0.00 FTH$'], ['gold', '0.000 FTHG'], ['silver', '0.000 FTHS']]) {
+    const empty = await fixture(host, { noSession: true, noProvider: true });
+    assert.equal(empty.nodes.balance.textContent, expected);
+    const connected = await fixture(host, { walletData: { ethereum: { balance: '0' },
+      dollar: { balance: { available: '0' }, transactions: [] }, holdings: [] } });
+    assert.equal(connected.nodes.balance.textContent, expected);
+  }
+});
 test('Gold and Foundation never replace an unavailable or zero FTHG balance with portfolio estimates', async () => {
   for (const host of ['gold', 'featheral']) {
     for (const balance of [null, undefined, '0']) {
@@ -732,7 +753,7 @@ test('Gold and Foundation never replace an unavailable or zero FTHG balance with
         totals: { FTHG: { value: '9000000000000000000', unpriced: [] } }, usd: null, fthg: null,
         pricedFthDollar: '0', unpriced: [], source: 'Test' } } });
       assert.deepEqual(ui.errors, []);
-      assert.equal(ui.nodes.balance.textContent, balance == null ? '— FTHG' : '0 FTHG');
+      assert.equal(ui.nodes.balance.textContent, balance == null ? '— FTHG' : '0.000 FTHG');
       assert.equal(ui.nodes['portfolio-primary'].textContent, '≈ 9 FTHG');
       assert.equal(ui.nodes['available-balance'].textContent, balance == null ? 'FTHG balance unavailable' : 'Available to spend: 0 FTHG');
     }

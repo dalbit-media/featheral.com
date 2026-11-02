@@ -1,6 +1,69 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { Telemetry, injectTelemetry } = require('../lib/telemetry');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+test('Stats renders traffic directly without the X media app or CMS homepage feature settings', async () => {
+  const root = path.resolve(__dirname, '..', '..', '..');
+  const html = fs.readFileSync(path.join(root, 'sites', 'stats.featheral.com', 'index.html'), 'utf8');
+  assert.match(html, /Featheral ecosystem statistics/);
+  assert.match(html, /id="traffic-charts"/);
+  assert.doesNotMatch(html, /<h1>|Aggregate page views across Featheral sites/, 'Stats opens directly onto chart controls without an introductory header card');
+  assert.match(html, /#refresh-traffic\{[^}]*min-height:44px;[^}]*background:var\(--panel\);color:var\(--text\)/,
+    'refresh must have readable theme colors and an accessible touch target');
+  assert.match(html, /#refresh-traffic:focus-visible\{/);
+  assert.match(html, /src="\/site\/stats.js"/);
+  assert.match(html, /href="\/shared\/featheral.css"/);
+  assert.doesNotMatch(html, /\/site\/site.css|class="tabs"/,
+    'Stats must not inherit X fixed headers or mobile media tabs');
+  assert.match(html, /class="traffic-tools">\s*<div id="traffic-interval"/,
+    'interval and refresh controls belong together above the charts');
+  assert.match(html, /class="brand logo"[^>]*>.*<b>Featheral Stats<\/b>/,
+    'the Stats name stays visible on mobile alongside its icon');
+  assert.match(html, /body\[data-site-brand="stats\.featheral\.com"\]>#view\{height:auto;/,
+    'Stats must grow with all charts instead of overlapping its footer');
+  assert.match(html, /\.skip-link\{position:absolute;/, 'the skip link must not offset the family bar');
+  assert.doesNotMatch(html, /\/site\/site.js|\/site\/demos.js|id="gate"|id="fab"/);
+  const refresh = { addEventListener(_name, listener) { this.click = listener; } };
+  const charts = {}, header = {}, calls = [];
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'sites', 'stats.featheral.com', 'stats.js'), 'utf8'), {
+    document: { querySelector: selector => ({ '#traffic-charts': charts, '#refresh-traffic': refresh, '#traffic-interval': header })[selector] },
+    window: { FeatheralTraffic: { load: (...args) => { calls.push(args); return pending; } } },
+  });
+  assert.equal(refresh.disabled, true);
+  assert.deepEqual(calls[0], [charts, '/api/telemetry/public', undefined, header]);
+  finish();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refresh.disabled, false);
+  await refresh.click();
+  assert.equal(calls.length, 2);
+});
+
+test('Stats public aggregate report ignores legacy media settings but other sites retain feature gating', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const route = source.slice(source.indexOf("telemetryRouter.get('/api/telemetry/public'"), source.indexOf("telemetryRouter.use('/api/telemetry'"));
+  let handler;
+  const report = { sites: [] };
+  const context = {
+    telemetryRouter: { get(_path, _auth, callback) { handler = callback; } },
+    cmsAuth() {}, trafficHost: req => req.host, trafficHosts: () => ['stats.featheral.com'],
+    telemetry: { report: () => report }, siteManager: { records: [] },
+    CmsStore: class { constructor() { throw new Error('Stats must not open a CMS media database'); } },
+  };
+  vm.runInNewContext(route, context);
+  let result;
+  const res = { json: value => { result = value; }, sendStatus: status => { result = status; } };
+  handler({ host: 'stats.featheral.com', query: {} }, res);
+  assert.equal(result, report);
+  handler({ host: 'x.featheral.com', query: {} }, res);
+  assert.equal(result, 404);
+  handler({ host: 'stats.featheral.com', query: { site: 'other' }, cmsAuthorized: true }, res);
+  assert.equal(result, 404, 'authenticated previews still use the selected site feature settings');
+});
 
 test('minute counts have 60 UTC buckets, isolate hosts and preserve hourly history', () => {
   const traffic = new Telemetry(':memory:');

@@ -48,7 +48,9 @@
       metric("Confirmed redeemable backing", `${units(state.redeemableBacking)} FTHG`, "Unconfirmed allocations cannot be redeemed."),
       metric("Locked redeemed currency", `${dollars(state.lockedRedemptionDollars)} FTH$`, "Cannot be spent on markets; reconversion unlocks the same currency."),
     );
-    root.querySelector("#reserve-mode").textContent = `${state.mode === "live" ? "Live off-chain economy" : "Isolated test economy"} · 1 FTHG = ${Number(state.rate).toLocaleString("en-US")} FTH$`;
+    const rate = state.pricingPolicy === "origin-linear-v1"
+      ? dollars(state.spotRateFthDollarPerFthg) : Number(state.rate).toLocaleString("en-US");
+    root.querySelector("#reserve-mode").textContent = `${state.mode === "live" ? "Live off-chain economy" : "Isolated test economy"} · 1 FTHG = ${rate} FTH$${state.pricingPolicy ? " · demand-based spot; trade quotes vary by size" : " · legacy fixed rate"}`;
   }
   function row(item) {
     const tr = node("tr");

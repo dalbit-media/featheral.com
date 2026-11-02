@@ -137,6 +137,11 @@ phase "$step"
 mkdir -p "$shared/tools"
 [[ -x "$shared/tools/node_modules/.bin/pm2" ]] || npm install --prefix "$shared/tools" --no-save pm2@6
 pm2="$shared/tools/node_modules/.bin/pm2"
+start_release() {
+  # PM2 restart can retain the old npm working directory across release paths.
+  if "$pm2" describe featheral >/dev/null 2>&1; then "$pm2" delete featheral; fi
+  "$pm2" start "$1/ecosystem.config.cjs"
+}
 candidate="$release/nginx-featheral.conf"
 cat >"$candidate" <<'NGINX'
 # Featheral managed gateway
@@ -189,7 +194,7 @@ rollback() {
     if [[ -n "$previous" ]]; then
       ln -sfn "$previous" "$root/current.next"
       mv -Tf "$root/current.next" "$root/current"
-      "$pm2" startOrRestart "$previous/ecosystem.config.cjs" --update-env
+      start_release "$previous"
       "$pm2" save
     else
       "$pm2" delete featheral
@@ -232,7 +237,7 @@ mv -Tf "$root/current.next" "$root/current"
 activated=true
 step=pm2-start
 phase "$step"
-"$pm2" startOrRestart "$release/ecosystem.config.cjs" --update-env
+start_release "$release"
 step=pm2-startup
 phase "$step"
 "$pm2" save

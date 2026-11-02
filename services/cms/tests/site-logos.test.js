@@ -10,7 +10,7 @@ const colors = require('../../../shared/site-colors.json');
 const root = path.resolve(__dirname, '..', '..', '..');
 test('all core badges preserve the main SVG and have distinct symbols', () => {
   const base = fs.readFileSync(path.join(root, 'shared', 'logo.svg'), 'utf8');
-  assert.equal(new Set(Object.values(badges)).size, 13);
+  assert.equal(new Set(Object.values(badges)).size, 14);
   for (const name of Object.keys(badges)) {
     const generated = fs.readFileSync(path.join(root, 'shared', `logo-${name}.svg`), 'utf8');
     assert.equal(generated, logo(base, name));

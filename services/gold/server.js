@@ -3,7 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { ethers } = require("ethers");
-const { createReserveEngine, RATE } = require("./reserve");
+const { createReserveEngine } = require("./reserve");
 const { assertFreshSignature } = require("../identity/profile");
 
 function reconciliationMessage({ txHash, logIndex, issuedAt }, genesisHash) {
@@ -120,15 +120,7 @@ function createGoldApi({ env = require("../operations/runtime").environment(), p
     if (typeof rawAmount !== "string" || !/^[1-9]\d*$/.test(rawAmount) || BigInt(rawAmount) > ethers.MaxUint256) throw fail("amount must be a positive uint256 base-unit string.");
     const amount = BigInt(rawAmount);
     if (reserveEngine) {
-      if (direction === "fthg-to-fthdollar") {
-        if (amount > ethers.MaxUint256 / RATE) throw fail("Conversion exceeds uint256 accounting limits.");
-        return amount * RATE;
-      }
-      if (direction === "fthdollar-to-fthg") {
-        if (amount % RATE) throw fail("FTH$ conversion must map to whole FTHG base units.");
-        return amount / RATE;
-      }
-      throw fail("direction must be fthg-to-fthdollar or fthdollar-to-fthg.");
+      return BigInt(reserveEngine.quote(direction, amount).amountOut);
     }
     requireBridge();
     if (direction === "fthg-to-fthdollar") return bridge.quoteFthDollarOut(amount);
@@ -197,6 +189,12 @@ function createGoldApi({ env = require("../operations/runtime").environment(), p
       if (req.method === "OPTIONS") return reply(204, null);
       const url = new URL(req.url, "http://localhost");
       const route = url.pathname.slice("/api/v1/gold".length);
+      if (route === "/reserve/quote" && req.method === "GET") {
+        if (!reserveEngine) throw fail("Finite-reserve engine is not enabled.", 503);
+        const amount = url.searchParams.get("amount");
+        if (typeof amount !== "string" || !/^[1-9]\d{0,77}$/.test(amount) || BigInt(amount) > ethers.MaxUint256) throw fail("Invalid Gold quote amount.", 400);
+        return reply(200, reserveEngine.quote(url.searchParams.get("direction"), amount));
+      }
       if (route === "/reserve" && req.method === "GET") return reply(200, reserveEngine?.status() || {
         enabled: false, initialized: false, warning: "Finite-reserve testing is disabled on this ledger.",
       });
@@ -221,7 +219,7 @@ function createGoldApi({ env = require("../operations/runtime").environment(), p
         let body;
         try { body = JSON.parse(text); } catch { throw fail("Reserve request must be JSON."); }
         const fields = route === "/reserve/reconcile" ? "issuedAt,logIndex,signature,txHash" : route === "/reserve/convert"
-          ? "amount,issuedAt,nonce,signature" : "amount,issuedAt,memo,nonce,signature,to,wallet";
+          ? (body?.pricing === undefined ? "amount,issuedAt,nonce,signature" : "amount,issuedAt,nonce,pricing,signature") : "amount,issuedAt,memo,nonce,signature,to,wallet";
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join() !== fields) throw fail("Invalid reserve request fields.");
         if (route === "/reserve/reconcile") {
           if (!ethers.isHexString(body.txHash, 32) || !Number.isSafeInteger(body.logIndex) || body.logIndex < 0

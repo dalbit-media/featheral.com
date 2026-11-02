@@ -77,11 +77,12 @@
     for (const [input, output, incoming] of [["fthg", "convert-preview", true], ["dollars", "redeem-preview", false]]) {
       if (!$(input).value.trim()) { $(output).textContent = "Enter an amount to preview."; continue; }
       try {
-        const value = amount(input), rate = BigInt(reserve?.rate || "1000");
-        if (!incoming && value % rate) throw new Error("Amount must map exactly to FTHG base units.");
-        $(output).title = `Exact FTH$ base units: ${incoming ? value * rate : value}. Display rounds to at most two decimals.`;
-        $(output).textContent = incoming ? `${fmt(value)} FTHG → ${fmtDollars(value * rate)} FTH$ (no new issuance)`
-          : `${fmtDollars(value)} FTH$ → ${fmt(value / rate)} FTHG (pending manual sync)`;
+        if (!reserve?.initialized) throw new Error("Reserve pricing is unavailable.");
+        const value = amount(input), result = window.FeatheralGoldPricing.quote(reserve,
+          incoming ? "fthg-to-fthdollar" : "fthdollar-to-fthg", value);
+        $(output).title = `Indicative output base units: ${result}. Refreshes before signing.`;
+        $(output).textContent = incoming ? `${fmt(value)} FTHG → ${fmtDollars(result)} FTH$ (no new issuance)`
+          : `${fmtDollars(value)} FTH$ → ${fmt(result)} FTHG (pending manual sync)`;
       } catch (error) { $(output).textContent = error.message; }
     }
   }
@@ -128,12 +129,15 @@
     event.preventDefault();
     operation(async () => {
       const value = amount("fthg"), current = await api("");
+      const quote = await api(`/quote?direction=fthg-to-fthdollar&amount=${value}`);
       if (value > BigInt(current.settledOut) - BigInt(current.recycledIn)) throw new Error("Amount exceeds confirmed returned FTHG available for reconversion.");
-      if (!confirm(`Record ${fmt(value)} returned FTHG → ${fmtDollars(value * BigInt(current.rate))} existing FTH$ in this ${current.mode === "live" ? "live" : "test"} ledger?\nExact FTH$ base units: ${value * BigInt(current.rate)}.\nReal FTHG stays in its wallet until manual sync.`)) return;
-      const request = { amount: value.toString(), nonce: current.conversionNonce + 1, issuedAt: new Date().toISOString() };
+      if (!confirm(`Record ${fmt(value)} returned FTHG → ${fmtDollars(quote.amountOut)} existing FTH$ in this ${current.mode === "live" ? "live" : "test"} ledger?\nExact FTH$ base units: ${quote.amountOut}.\nReal FTHG stays in its wallet until manual sync.`)) return;
+      const request = { amount: value.toString(), nonce: current.conversionNonce + 1, issuedAt: new Date().toISOString(),
+        ...(quote.authorization ? { pricing: quote.authorization } : {}) };
       const message = ["Featheral Gold off-chain reserve conversion", `Ledger: ${current.genesisHash}`, "Chain ID: 1",
         `From: ${current.sourceWallet}`, `To: ${current.reserveWallet}`, `FTHG base units: ${request.amount}`,
-        `Rate: ${current.rate} FTH$ per FTHG`, `Nonce: ${request.nonce}`, `Issued at: ${request.issuedAt}`,
+        ...(request.pricing ? [`Pricing: ${quote.pricingPolicy}`, `Quote commitment: ${request.pricing}`] : [`Rate: ${current.rate} FTH$ per FTHG`]),
+        `Nonce: ${request.nonce}`, `Issued at: ${request.issuedAt}`,
         "This reserves an off-chain obligation. It does not transfer Ethereum tokens."].join("\n");
       request.signature = await (await signer(current.sourceWallet)).signMessage(message);
       await api("/convert", request);
@@ -143,15 +147,15 @@
     event.preventDefault();
     operation(async () => {
       const value = amount("dollars"), current = await api("");
-      if (value % BigInt(current.rate)) throw new Error("Amount cannot be converted to exact FTHG base units.");
+      const quote = await api(`/quote?direction=fthdollar-to-fthg&amount=${value}`);
       const response = await fetch(`/api/v1/notes/wallets/${account()}`, { cache: "no-store" });
       const wallet = await response.json();
       if (!response.ok) throw new Error(wallet.error || "Dollar wallet read failed.");
       if (value > BigInt(wallet.fthDollar.available)) throw new Error("Amount exceeds the available FTH$ wallet balance.");
-      if (value / BigInt(current.rate) > BigInt(current.redeemableBacking)) throw new Error("Amount exceeds confirmed, uncommitted backing.");
-      if (!confirm(`Record ${fmtDollars(value)} FTH$ → ${fmt(value / BigInt(current.rate))} FTHG obligation from reserve to origin in this ${current.mode === "live" ? "live" : "test"} ledger?\nExact FTH$ base units: ${value}.\nNo Ethereum tokens will move yet.`)) return;
+      if (BigInt(quote.amountOut) > BigInt(current.redeemableBacking)) throw new Error("Amount exceeds confirmed, uncommitted backing.");
+      if (!confirm(`Record ${fmtDollars(value)} FTH$ → ${fmt(quote.amountOut)} FTHG obligation from reserve to origin in this ${current.mode === "live" ? "live" : "test"} ledger?\nExact FTH$ base units: ${value}.\nNo Ethereum tokens will move yet.`)) return;
       const transfer = { wallet: account(), to: current.redemptionEscrow, amount: value.toString(),
-        nonce: wallet.nonce + 1, memo: `Gold:${current.genesisHash.slice(2, 58)}`, issuedAt: new Date().toISOString() };
+        nonce: wallet.nonce + 1, memo: quote.authorization || `Gold:${current.genesisHash.slice(2, 58)}`, issuedAt: new Date().toISOString() };
       const message = window.FeatheralDollarTransferMessage(transfer);
       transfer.signature = await (await signer(transfer.wallet)).signMessage(message);
       await api("/redeem", transfer);

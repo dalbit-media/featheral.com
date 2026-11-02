@@ -26,7 +26,18 @@ function goldReference(gold, now = Date.now()) {
     && amount(reserve.allocated) && amount(reserve.remaining) && BigInt(reserve.cap) === BigInt(reserve.allocated) + BigInt(reserve.remaining)
     && /^0x[0-9a-f]{64}$/i.test(reserve.genesisHash || "")
     && Number.isSafeInteger(reserve.evidence?.block) && reserve.evidence.block >= 0 && /^0x[0-9a-f]{64}$/i.test(reserve.evidence?.hash || ""))
+  {
+    if (reserve.pricingPolicy !== undefined) {
+      if (reserve.pricingPolicy !== "origin-linear-v1" || !amount(reserve.recycledIn) || !amount(reserve.released)
+        || !amount(reserve.spotRateFthDollarPerFthg)) return null;
+      const net = BigInt(reserve.allocated) + BigInt(reserve.recycledIn) - BigInt(reserve.released);
+      if (net < 0n || net > BigInt(reserve.cap)) return null;
+      const spot = require("../../shared/gold-pricing").spot(reserve);
+      if (spot !== BigInt(reserve.spotRateFthDollarPerFthg)) return null;
+      return { fthg: UNIT, dollars: spot, source: "native-reserve" };
+    }
     return { fthg: UNIT, dollars: BigInt(reserve.rate) * UNIT, source: "native-reserve" };
+  }
   if (gold?.error || gold?.priceError || gold?.pendingSettlement || bridge?.error || bridge?.priceError || bridge?.pendingSettlement
     || gold?.chain?.id !== 1 || !(time >= now - 60000 && time <= now + 30000)
     || bridge?.configured === false || bridge?.deployed !== true || bridge?.paused !== false

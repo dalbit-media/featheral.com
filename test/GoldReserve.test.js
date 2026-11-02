@@ -12,6 +12,7 @@ const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
 const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/notes/game-funds");
 const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold/reserve");
+const pricing = require("../shared/gold-pricing");
 const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
 const { createDollarApi } = require("../services/notes/dollar");
 const { activateLiveReserve } = require("../services/gold/activation");
@@ -86,6 +87,107 @@ describe("Isolated finite Gold reserve", () => {
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
+  it("uses the exact gradual origin curve, including trade-size movement and conservative rounding", () => {
+    const cap = ethers.parseEther("100");
+    const state = net => ({ cap: cap.toString(), allocated: ethers.parseEther(String(net)).toString(),
+      recycledIn: "0", released: "0", pricingPolicy: pricing.POLICY });
+    for (const [net, expected] of [[0, "10000"], [10, "11000"], [50, "15000"], [90, "19000"], [100, "20000"]])
+      assert.equal(pricing.spot(state(net)), ethers.parseEther(expected));
+    const dollars = pricing.quote(state(0), "fthg-to-fthdollar", ethers.parseEther("10"));
+    assert.equal(dollars, ethers.parseEther("105000"));
+    assert.equal(pricing.quote(state(10), "fthdollar-to-fthg", dollars), ethers.parseEther("10"));
+    const split = pricing.quote(state(0), "fthg-to-fthdollar", ethers.parseEther("5"))
+      + pricing.quote(state(5), "fthg-to-fthdollar", ethers.parseEther("5"));
+    assert.equal(split, dollars, "splitting a trade cannot bypass curve movement");
+    assert.throws(() => pricing.quote(state(90), "fthg-to-fthdollar", ethers.parseEther("11")), /remaining origin/);
+    assert.throws(() => pricing.quote(state(0), "fthdollar-to-fthg", 1n), /net allocated/);
+    assert.throws(() => pricing.position({ ...state(0), cap: "0" }), /positive origin cap/);
+    assert.throws(() => pricing.quote({ ...state(50), recycledIn: "1" }, "fthdollar-to-fthg",
+      pricing.quote(state(50), "fthg-to-fthdollar", 1n)), /too small/);
+    for (const amount of [123456789n, ethers.parseEther("0.001")]) {
+      const start = state(50), output = pricing.quote(start, "fthg-to-fthdollar", amount);
+      const end = { ...start, recycledIn: amount.toString() };
+      assert.ok(pricing.quote(end, "fthdollar-to-fthg", output) <= amount, "rounding never creates Gold");
+    }
+  });
+  it("activates dynamic quotes without rewriting old entries, rejects stale authorizations and replays after restart", async () => {
+    await engine.initialize();
+    await fund("wood");
+    const oldTip = ledger.tipHash, oldHistory = engine.activity().items;
+    const dollars = total("wood"), allocated = dollars / RATE;
+    move(pool("wood"), walletAccountId(source.address), dollars);
+    await reconcile(allocated);
+    const supply = ledger.summary().supply;
+    await engine.activatePricing();
+    assert.notEqual(ledger.tipHash, oldTip);
+    assert.equal(ledger.summary().supply, supply);
+    const policyTip = ledger.tipHash;
+    await engine.activatePricing();
+    assert.equal(ledger.tipHash, policyTip, "policy activation is idempotent");
+    assert.ok(BigInt(engine.status().spotRateFthDollarPerFthg) >= ethers.parseEther("10000"));
+    assert.equal(engine.activity().items.at(-1).dollars, oldHistory[0].dollars);
+    const quote = engine.quote("fthdollar-to-fthg", dollars);
+    const transfer = await redemption(dollars);
+    await assert.rejects(engine.redeem(transfer), /restricted/);
+    transfer.memo = quote.authorization;
+    transfer.signature = await source.signMessage(transferMessage(transfer));
+    const previousSpot = BigInt(engine.status().spotRateFthDollarPerFthg);
+    await engine.redeem(transfer);
+    assert.ok(BigInt(engine.status().spotRateFthDollarPerFthg) < previousSpot);
+    await engine.redeem(transfer);
+    const returned = BigInt(quote.amountOut);
+    await reconcile(returned, false);
+    const reconversion = engine.quote("fthg-to-fthdollar", returned);
+    const request = { amount: returned.toString(), nonce: 1, issuedAt: new Date().toISOString(), pricing: reconversion.authorization };
+    request.signature = await source.signMessage(conversionMessage(request, ledger.headers[0].H, source.address, reserve.address));
+    const stale = { ...request, pricing: "G2:stale" };
+    stale.signature = await source.signMessage(conversionMessage(stale, ledger.headers[0].H, source.address, reserve.address));
+    await assert.rejects(engine.convert(stale), /quote changed/);
+    await engine.convert(request);
+    await engine.convert(request);
+    assert.ok(BigInt(engine.status().spotRateFthDollarPerFthg) > ethers.parseEther("10000"));
+    const snapshot = engine.status(), history = engine.activity().items;
+    ledger.close(); open();
+    assert.deepEqual(engine.status(), snapshot);
+    assert.deepEqual(engine.activity().items, history);
+    assert.equal(history[0].dollars, reconversion.amountOut);
+    assert.equal([...ledger.balances.values()].reduce((sum, entry) => sum + entry.balance, 0n), BigInt(ledger.summary().supply));
+  });
+  it("serves executable committed quotes and uses the same verified spot for wallet estimates", async () => {
+    const gold = createGoldApi({ provider, logger: { error() {} } });
+    const reserveApi = gold.enableReserve(ledger, goldKeys.privateKey);
+    await reserveApi.initialize();
+    await fund("wood");
+    const dollars = total("wood");
+    move(pool("wood"), walletAccountId(source.address), dollars);
+    await reconcile(dollars / RATE);
+    await reserveApi.activatePricing();
+    const server = http.createServer((req, res) => gold.handle(req, res));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/api/v1/gold/reserve`;
+      const response = await fetch(`${base}/quote?direction=fthdollar-to-fthg&amount=${dollars}`);
+      assert.equal(response.status, 200);
+      const quote = await response.json();
+      assert.equal(quote.amountOut, (await gold.quote("fthdollar-to-fthg", dollars.toString())).toString());
+      const transfer = await redemption(dollars);
+      transfer.memo = quote.authorization;
+      transfer.signature = await source.signMessage(transferMessage(transfer));
+      const executed = await fetch(`${base}/redeem`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(transfer) });
+      assert.equal(executed.status, 200, await executed.text());
+      const bad = await fetch(`${base}/quote?direction=fthg-to-fthdollar&amount=-1`);
+      assert.equal(bad.status, 400);
+      const state = reserveApi.status();
+      const snapshot = { goldReserve: state, chain: { id: 1, tokenAddress: TOKEN_ADDRESS }, checkedAt: new Date().toISOString() };
+      const { goldReference } = require("../services/notes/exchange-price");
+      assert.equal(goldReference(snapshot).dollars.toString(), state.spotRateFthDollarPerFthg);
+      assert.equal(goldReference({ ...snapshot, goldReserve: { ...state, spotRateFthDollarPerFthg: "1" } }), null);
+      const browser = {};
+      vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../shared/gold-pricing.js"), "utf8"), browser);
+      assert.equal(browser.FeatheralGoldPricing.spot(state), pricing.spot(state));
+      assert.equal(browser.FeatheralGoldPricing.quote(state, "fthg-to-fthdollar", 123456n), pricing.quote(state, "fthg-to-fthdollar", 123456n));
+    } finally { await new Promise(resolve => server.close(resolve)); }
+  });
   it("freezes finalized origin holdings once, including zero; rejects wrong chains and forged authority", async () => {
     provider.chain = 2n;
     await assert.rejects(engine.initialize(), /Mainnet/);

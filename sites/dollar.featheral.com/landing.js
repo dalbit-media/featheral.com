@@ -8,7 +8,9 @@
 
   function renderRate() {
     $("rateValue").textContent = `1 FTHG = ${state.rate.toLocaleString("en-US", { maximumFractionDigits: 2 })} FTH$`;
-    $("rateNote").textContent = state.rateLive
+    $("rateNote").textContent = state.pricingPolicy === "origin-linear-v1"
+      ? "Origin demand curve: starts at 10,000 FTH$; net Gold allocation raises the spot price gradually and returns lower it. Trade quotes include price movement."
+      : state.rateLive
       ? "Live spot rate from the bridge's constant-product curve; each conversion moves the price."
       : "Opening rate. A constant-product bridge curve sets the price once the pool is funded.";
   }

@@ -80,3 +80,45 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke
 [data-primary][data-embedded=true] .tabs{margin:8px 0}
 @media(max-width:320px){[data-primary] .tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.tabs svg{width:16px;height:16px}[data-primary][data-embedded=true] main{padding:0 12px}}
 @media(prefers-reduced-motion:reduce){button{transition:none}}
+.wallet-intro{display:none}
+#wallet-connect-label{display:none}
+body[data-primary]:not([data-embedded=true]){--wallet-bg:#100f0d;--panel:#1b1915;--line:#39342a;--muted:#bcb4a4;--btn:#29251d;background:radial-gradient(ellipse at 50% 0,#30271566,transparent 600px),var(--wallet-bg);min-height:100dvh}
+body[data-primary]:not([data-embedded=true]) header{max-width:1120px;padding:24px;gap:12px 20px}
+body[data-primary]:not([data-embedded=true]) header>a:not(.brand){display:inline-flex;align-items:center;min-height:44px;font-size:12px;color:var(--muted)}
+body[data-primary]:not([data-embedded=true]) header>a:hover{color:var(--txt)}
+body[data-primary]:not([data-embedded=true]) .brand{color:var(--txt);text-decoration:none}
+body[data-primary]:not([data-embedded=true]) main{max-width:680px;margin:12px auto 28px;padding:0 24px}
+body[data-primary]:not([data-embedded=true]) .wallet-intro{display:block;margin-bottom:24px}
+.wallet-intro p{margin:4px 0;font-size:14px}
+.wallet-intro .wallet-eyebrow{font-size:12px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:var(--brand)}
+body[data-primary]:not([data-embedded=true]) .wallet-hero,body[data-primary]:not([data-embedded=true]) .wallet-panel{padding:24px;border-radius:18px}
+body[data-primary]:not([data-embedded=true]) main>.wallet-hero{background:linear-gradient(135deg,#352b1766,transparent 65%),var(--panel);box-shadow:0 12px 40px #0002}
+body[data-primary]:not([data-embedded=true]) #balance{font-size:clamp(34px,6vw,48px);margin:14px 0 10px}
+body[data-primary]:not([data-embedded=true]) .wallet-heading>span{font-size:13px}
+body[data-primary]:not([data-embedded=true]) .icon-button{width:44px;height:44px;min-height:44px;border-radius:10px}
+body[data-primary]:not([data-embedded=true]) #wallet-connect{width:auto;gap:8px;padding:0 12px;background:var(--brand);color:var(--on-accent);font-size:12px;font-weight:650}
+body[data-primary]:not([data-embedded=true]) #wallet-connect-label{display:inline}
+body[data-primary]:not([data-embedded=true]) #wallet-connect .connection-dot{display:none}
+body[data-primary]:not([data-embedded=true]) .wallet-address{margin-top:16px}
+body[data-primary]:not([data-embedded=true]) .wallet-address #address{height:44px;padding:10px 52px 10px 12px;background:var(--wallet-bg);border-radius:10px;font-size:12px}
+body[data-primary]:not([data-embedded=true]) .wallet-address .icon-button{top:0;right:0}
+body[data-primary]:not([data-embedded=true]) .tabs{margin:16px 0;border-radius:14px;padding:5px}
+body[data-primary]:not([data-embedded=true]) .tabs [role=tab]{min-height:56px;gap:5px;border-radius:9px;font-size:12px}
+body[data-primary]:not([data-embedded=true]) .tabs [role=tab] svg{width:18px;height:18px}
+body[data-primary]:not([data-embedded=true]) .wallet-panel>p,body[data-primary]:not([data-embedded=true]) .wallet-panel label{font-size:13px}
+body[data-primary]:not([data-embedded=true]) .recent-heading button{min-height:44px;padding:8px 12px}
+body[data-primary]:not([data-embedded=true]) .wallet-safety{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;max-width:680px;margin:0 auto 36px;padding:0 24px;text-align:left;font-size:12px;line-height:1.6}
+.wallet-safety strong{color:var(--txt);font-size:12px}
+.wallet-safety p{margin:6px 0 0}
+.wallet-account-link{grid-column:1/-1;justify-self:start;display:inline-flex;align-items:center;min-height:44px;text-decoration:underline;text-underline-offset:3px}
+[data-embedded=true] .wallet-intro{display:none}
+@media(max-width:600px){
+  body[data-primary]:not([data-embedded=true]) header{padding:16px;gap:4px 16px}
+  body[data-primary]:not([data-embedded=true]) .brand{flex-basis:100%;margin-bottom:6px}
+  body[data-primary]:not([data-embedded=true]) main{padding:0 16px}
+  body[data-primary]:not([data-embedded=true]) .wallet-intro{margin-bottom:16px}
+  body[data-primary]:not([data-embedded=true]) .wallet-hero,body[data-primary]:not([data-embedded=true]) .wallet-panel{padding:18px}
+  body[data-primary]:not([data-embedded=true]) .wallet-safety{grid-template-columns:1fr;padding:0 18px;gap:16px}
+  body[data-primary]:not([data-embedded=true]) .tabs [role=tab]{font-size:11px}
+}
+@media(max-width:360px){body[data-primary]:not([data-embedded=true]) .wallet-heading{align-items:flex-start;flex-direction:column}body[data-primary]:not([data-embedded=true]) .wallet-tools{width:100%;justify-content:space-between}body[data-primary]:not([data-embedded=true]) .tabs{grid-template-columns:repeat(3,minmax(0,1fr))}}

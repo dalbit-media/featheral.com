@@ -12,8 +12,8 @@
     "table-1": "<table>\n        <thead><tr><th>Block</th><th>Hash</th><th class=\"num\">Txs</th><th>Age</th></tr></thead>\n        <tbody id=\"blockRows\"><tr><td colspan=\"4\" class=\"muted\">Loading…</td></tr></tbody>\n      </table>",
     "table-2": "<table>\n        <thead><tr><th>Type</th><th>Hash</th><th class=\"num\">Amount</th><th>Age</th></tr></thead>\n        <tbody id=\"txRows\"><tr><td colspan=\"4\" class=\"muted\">Loading…</td></tr></tbody>\n      </table>",
     "table-3": "<table>\n    <thead><tr><th>#</th><th>Account</th><th class=\"num\">Balance</th><th class=\"num\">USD est.</th><th class=\"num\">Share</th></tr></thead>\n    <tbody id=\"holderRows\"><tr><td colspan=\"5\" class=\"muted\">Loading…</td></tr></tbody>\n  </table>",
-    "rateValue": "<b id=\"rateValue\">1 FTHG = 1,000 FTH$</b>",
-    "rateNote": "<small id=\"rateNote\">Opening rate. A constant-product bridge curve sets the price once the pool is funded.</small>",
+    "rateValue": "<b id=\"rateValue\">Loading FTHG / FTH$ rate...</b>",
+    "rateNote": "<small id=\"rateNote\">Reading the authoritative reserve price.</small>",
     "signingInfo": "<dd id=\"signingInfo\">Ed25519 writer signature <code>S</code> over each block hash</dd>",
     "fileStats": "<div class=\"stat-grid\" id=\"fileStats\"></div>"
   },

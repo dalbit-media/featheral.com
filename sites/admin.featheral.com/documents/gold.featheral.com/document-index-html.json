@@ -9,7 +9,7 @@
     "primaryStats": "<div class=\"stat-grid\" id=\"primaryStats\"></div>",
     "supplyBar": "<div class=\"supply-bar\" id=\"supplyBar\" role=\"img\" aria-label=\"Supply distribution\"></div>",
     "supplyLegend": "<ul class=\"supply-legend\" id=\"supplyLegend\"></ul>",
-    "rateValue": "<b id=\"rateValue\">1 FTHG = 1,000 FTH$</b>",
+    "rateValue": "<b id=\"rateValue\">Loading FTHG / FTH$ rate...</b>",
     "rateNote": "<small id=\"rateNote\">Off-chain reserve obligations; Ethereum settlement is separate. Review conversion →</small>",
     "economyStats": "<div class=\"stat-grid\" id=\"economyStats\"></div>",
     "table-1": "<table>\n      <thead><tr><th>Time</th><th>From</th><th>To</th><th class=\"num\">Amount</th><th>Tx</th></tr></thead>\n      <tbody id=\"transferRows\"><tr><td colspan=\"5\" class=\"muted\">Loading…</td></tr></tbody>\n    </table>",

@@ -49,7 +49,6 @@ for (const tab of tabs) {
 
 const statsStatus = document.querySelector<HTMLElement>('#stats-status')!;
 const statsPanel = document.querySelector<HTMLElement>('.world-stats')!;
-const liveCards = document.querySelectorAll<HTMLElement>('.world-live-cards');
 const totalElements = document.querySelectorAll<HTMLElement>('[data-total]');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const counters = [...totalElements].map(element => {
@@ -105,7 +104,6 @@ async function refreshStats(): Promise<void> {
     if (statsStatus.textContent !== message) statsStatus.textContent = message;
     statsStatus.dataset.state = 'live';
     statsPanel.dataset.state = 'live';
-    liveCards.forEach(cards => { cards.dataset.state = 'live'; });
     statsStatus.title = translate(`Server snapshot: ${new Date(data.updatedAt).toLocaleString(languageLocale)}`, language);
   } catch (error) {
     console.error('Unable to refresh public statistics', error);
@@ -114,7 +112,6 @@ async function refreshStats(): Promise<void> {
     if (statsStatus.textContent !== message) statsStatus.textContent = message;
     statsStatus.dataset.state = 'stale';
     statsPanel.dataset.state = 'stale';
-    liveCards.forEach(cards => { cards.dataset.state = 'stale'; });
   } finally {
     statsLoading = false;
     nextStatsRefresh = performance.now() + 30000 + Math.random() * 5000;
@@ -127,9 +124,10 @@ async function refreshStats(): Promise<void> {
       if (!response.ok || data.chain?.id !== 1 || !/^\d+$/.test(data.chain?.totalSupply)) throw new Error(data.error || 'Gold API returned invalid Ethereum statistics.');
       const supply = Number(BigInt(data.chain.totalSupply) / 10n ** 18n);
       document.querySelectorAll<HTMLElement>('[data-gold-supply]').forEach(element => { element.textContent = formatPublicTotal(supply, languageLocale); element.title = supply.toLocaleString(languageLocale); });
-      const rate = data.bridge?.spotRateFthDollarPerFthg;
+      const dynamic = data.goldReserve?.pricingPolicy === 'origin-linear-v1';
+      const rate = dynamic ? data.goldReserve.spotRateFthDollarPerFthg : data.bridge?.spotRateFthDollarPerFthg;
       document.querySelectorAll<HTMLElement>('[data-public-gold-rate]').forEach(element => {
-        element.textContent = data.bridge?.initialized && typeof rate === 'string' && /^\d+$/.test(rate)
+        element.textContent = (dynamic || data.bridge?.initialized) && typeof rate === 'string' && /^\d+$/.test(rate)
           ? formatDollars(Number(BigInt(rate) / 10n ** 12n) / 1e6, languageLocale) : translate('Pool not initialized', language);
       });
     } catch (error) {

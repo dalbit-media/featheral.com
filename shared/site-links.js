@@ -7,7 +7,8 @@
   const publicSites = [["foundation", "Foundation"], ["gold", "Gold · FTHG"], ["dollar", "Dollar · FTH$"],
     ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["x", "X"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"], ["admin", "Admin"]];
   const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$",
-    app: "FTHX", media: "FTHX", x: "FTHX", notes: "FTHX", sites: "FTHX" };
+    app: "FTHX", media: "FTHX", x: "FTHX", ex: "FTHX", notes: "FTHX", sites: "FTHX", wallet: "FTHX" };
+  const familySites = ["foundation", "gold", "dollar", "silver", "stats", "world", "media"];
   const { protocol, hostname, port } = window.location;
   const labels = hostname.split(".");
   const isIp = /^[\d.]+$/.test(hostname) || hostname.includes(":");
@@ -26,7 +27,23 @@
   }
 
   function apply(root = document) {
+    const embedded = document.body.dataset.embedded === "true"
+      || current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1";
+    const main = root.querySelector?.("main");
+    if (main && current !== "admin" && !embedded && !document.querySelector(".skip-link, .eco-skip-link")) {
+      if (!main.id) main.id = "eco-main";
+      if (!main.hasAttribute("tabindex")) main.tabIndex = -1;
+      const skip = document.createElement("a");
+      skip.className = "eco-skip-link"; skip.href = `#${main.id}`; skip.textContent = "Skip to content";
+      skip.addEventListener("click", event => {
+        event.preventDefault();
+        main.focus({ preventScroll: true });
+        main.scrollIntoView({ block: "start" });
+      });
+      document.body.prepend(skip);
+    }
     const header = root.querySelector?.("body > header, #app > header, header.topbar, #app header.topbar");
+    if (familySites.includes(current)) document.body.dataset.familyLayout = "true";
     if (!document.querySelector('link[data-site-navigation], link[href="/shared/site-links.css"]')) {
       const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/shared/site-links.css";
       style.dataset.siteNavigation = "true"; document.head.append(style);
@@ -40,16 +57,21 @@
       else header.before(bar);
     }
     for (const bar of root.querySelectorAll(".eco-bar")) {
-      const related = publicSites.filter(([site]) => site === current || currencies[current] && currencies[site] === currencies[current]);
-      for (const link of bar.querySelectorAll("a")) if (!related.some(([site]) => link.dataset.site === site)) link.remove();
-      bar.setAttribute("aria-label", currencies[current] ? `${currencies[current]} sites` : "Current site");
-      for (const [site, label] of related) {
-        if (bar.querySelector(`a[data-site="${site}"]`)) continue;
+      const related = familySites.includes(current)
+        ? familySites.map(site => publicSites.find(([key]) => key === site))
+        : publicSites.filter(([site]) => familySites.includes(site)
+          || site === current || currencies[current] && currencies[site] === currencies[current]);
+      bar.setAttribute("aria-label", "Featheral family sites");
+      const links = related.map(([site, label]) => {
         const link = document.createElement("a");
         link.dataset.site = site;
         link.textContent = label;
-        bar.append(link);
-      }
+        return link;
+      });
+      const existing = [...bar.querySelectorAll("a")];
+      if (existing.length !== related.length || existing.some((link, index) =>
+        link.dataset.site !== related[index][0] || link.textContent !== related[index][1]))
+        bar.replaceChildren(...links);
       if (header && window.getComputedStyle?.(header).position === "fixed" && !bar.dataset.fixedLayout) {
         bar.dataset.fixedLayout = "true";
         document.body.classList.add("eco-fixed-header");
@@ -99,7 +121,7 @@
       document.body.append(footer);
     }
     {
-      for (const link of root.querySelectorAll('header nav a, .eco-bar a')) {
+      for (const link of root.querySelectorAll('header nav a')) {
         const target = link.dataset.site ? new URL(url(link.dataset.site, link.dataset.path || "/"))
           : new URL(link.getAttribute("href") || "/", window.location.href);
         const site = link.dataset.site || publicSites.find(([key]) => target.origin === new URL(url(key)).origin)?.[0];
@@ -112,6 +134,7 @@
       link.href = url(link.dataset.site, link.dataset.path || "/");
       if (link.dataset.site === current && (link.dataset.path || "/") === "/") link.setAttribute("aria-current", "page");
     }
+    for (const bar of root.querySelectorAll(".eco-bar")) bar.dataset.familyReady = "true";
   }
 
   if (current === "world" && /^#\/(?:feed|following|post|user|me|setup|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {

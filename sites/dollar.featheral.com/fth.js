@@ -143,14 +143,16 @@
     return state.reference;
   }
 
-  // Legacy reserve obligations and bridge execution keep their authoritative rate; USD uses only the central live reference.
+  // USD valuation and displayed rates follow the authoritative central reserve reference.
   async function loadRate() {
     const reference = refreshRate();
     try {
       const stats = await goldApi("/stats");
       if (stats.goldReserve?.enabled) {
-        state.rate = Number(stats.goldReserve.rate);
-        state.rateLive = false;
+        state.pricingPolicy = stats.goldReserve.pricingPolicy;
+        state.rate = state.pricingPolicy === "origin-linear-v1"
+          ? toNumber(stats.goldReserve.spotRateFthDollarPerFthg) : Number(stats.goldReserve.rate);
+        state.rateLive = state.pricingPolicy === "origin-linear-v1";
         state.bridge = null;
         window.FeatheralProfile?.setRate(state.rate);
         return stats;

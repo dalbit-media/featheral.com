@@ -5,6 +5,7 @@ const { ethers } = require("ethers");
 const { canonical } = require("../fth-ledger/codec");
 const { verifyTransfer, walletAccountId } = require("../fth-ledger/transfer");
 const { assertFreshSignature } = require("../identity/profile");
+const pricing = require("../../shared/gold-pricing");
 
 const TOKEN_ADDRESS = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
 const SOURCE_ADDRESS = "0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c";
@@ -29,10 +30,11 @@ function evidence(value) {
     throw fail("Reserve operation requires confirmed block evidence.");
   }
 }
-function conversionMessage({ amount, nonce, issuedAt }, genesisHash, sourceWallet = SOURCE_ADDRESS, reserveWallet = RESERVE_ADDRESS) {
+function conversionMessage({ amount, nonce, issuedAt, pricing: authorization }, genesisHash, sourceWallet = SOURCE_ADDRESS, reserveWallet = RESERVE_ADDRESS) {
   return ["Featheral Gold off-chain reserve conversion", `Ledger: ${genesisHash}`, "Chain ID: 1",
     `From: ${sourceWallet}`, `To: ${reserveWallet}`, `FTHG base units: ${amount}`,
-    `Rate: ${RATE} FTH$ per FTHG`, `Nonce: ${nonce}`, `Issued at: ${issuedAt}`,
+    ...(authorization ? [`Pricing: ${pricing.POLICY}`, `Quote commitment: ${authorization}`] : [`Rate: ${RATE} FTH$ per FTHG`]),
+    `Nonce: ${nonce}`, `Issued at: ${issuedAt}`,
     "This reserves an off-chain obligation. It does not transfer Ethereum tokens."].join("\n");
 }
 function goldEntries(ledger, data) {
@@ -45,7 +47,7 @@ function goldEntries(ledger, data) {
     { account: REDEMPTION_ESCROW, delta: data.transfer.amount },
   ];
   if (data.op === "convert") {
-    const dollars = BigInt(data.request.amount) * RATE;
+    const dollars = data.dollars === undefined ? BigInt(data.request.amount) * RATE : BigInt(data.dollars);
     return [
       { account: walletAccountId(ledger.genesis.sourceWallet || SOURCE_ADDRESS), delta: dollars.toString() },
       { account: REDEMPTION_ESCROW, delta: (-dollars).toString() },
@@ -75,6 +77,11 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
     }; };
   }
   if (!state) throw fail("Finite Gold reserve is not initialized.");
+  if (data.op === "pricing-policy") {
+    if (state.pricingPolicy || data.policy !== pricing.POLICY || BigInt(state.cap) <= 0n) throw fail("Invalid or already activated Gold pricing policy.");
+    pricing.position(state);
+    return () => { state.pricingPolicy = data.policy; };
+  }
   if (data.op === "fund-market") {
     const target = Object.hasOwn(ledger.genesis.goldMarkets || {}, data.asset) ? ledger.genesis.goldMarkets[data.asset] : null;
     if (!target || state.pools[data.asset] || !Number.isSafeInteger(data.quantity) || data.quantity < 2 || data.quantity > target.quantity) {
@@ -103,12 +110,14 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
     const transfer = verifyTransfer(data.transfer);
     if (![sourceWallet.toLowerCase(), reserveWallet.toLowerCase()].includes(transfer.wallet.toLowerCase())
       || transfer.to !== REDEMPTION_ESCROW || transfer.from !== walletAccountId(transfer.wallet)
-      || transfer.memo !== `Gold:${ledger.headers[0].H.slice(2, 58)}`) {
+      || transfer.memo !== (state.pricingPolicy
+        ? quoteMemo(ledger.headers[0].H, state, "fthdollar-to-fthg", transfer.amount)
+        : `Gold:${ledger.headers[0].H.slice(2, 58)}`)) {
       throw fail("Reserve conversion is restricted to the two configured wallets and redemption escrow.");
     }
     if (fresh) assertFreshSignature(transfer.issuedAtMs, now, "Reserve conversion");
     const fthg = integer(data.fthg, true), dollars = BigInt(transfer.amount);
-    if (dollars !== fthg * RATE || fthg > BigInt(state.settledIn) - BigInt(state.released)) {
+    if (fthg !== pricing.quote(state, "fthdollar-to-fthg", dollars) || fthg > BigInt(state.settledIn) - BigInt(state.released)) {
       throw fail("Redemption requires sufficient confirmed, uncommitted FTHG backing.");
     }
     if (transfer.nonce !== ledger.nonce(transfer.from) + 1 || BigInt(ledger.balance(transfer.from).available) < dollars) {
@@ -123,6 +132,11 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
   }
   if (data.op === "convert") {
     const amount = integer(data.request?.amount, true), request = data.request;
+    const dollars = pricing.quote(state, "fthg-to-fthdollar", amount);
+    if (state.pricingPolicy ? request.pricing !== quoteMemo(ledger.headers[0].H, state, "fthg-to-fthdollar", amount)
+      || data.dollars !== dollars.toString() : request.pricing !== undefined || data.dollars !== undefined) {
+      throw fail("Gold quote changed. Refresh and authorize a new conversion.");
+    }
     const issuedAt = Date.parse(request.issuedAt);
     if (!Number.isSafeInteger(request.nonce) || request.nonce !== state.conversionNonce + 1
       || typeof request.issuedAt !== "string" || !Number.isFinite(issuedAt) || new Date(issuedAt).toISOString() !== request.issuedAt
@@ -134,7 +148,6 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
     catch { throw fail("Origin conversion signature is malformed."); }
     if (signer.toLowerCase() !== sourceWallet.toLowerCase()) throw fail("Origin conversion signature does not match the configured wallet.");
     if (fresh) assertFreshSignature(issuedAt, now, "Origin conversion");
-    const dollars = amount * RATE;
     if (BigInt(state.recycledIn) + amount > BigInt(state.settledOut)
       || BigInt(ledger.balance(REDEMPTION_ESCROW).available) < dollars) {
       throw fail("Conversion requires returned FTHG and locked redemption FTH$; no new supply is permitted.");
@@ -218,7 +231,10 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
       sourceWallet, reserveWallet, treasuryAccount: TREASURY, redemptionEscrow: REDEMPTION_ESCROW,
       lockedRedemptionDollars: ledger.balance(REDEMPTION_ESCROW).balance,
       genesisHash: ledger.headers[0].H, mode: ledger.genesis.reserveMode || "isolated", ethereumSyncEnabled: false,
-      ...(state ? { ...state, remaining: (BigInt(state.cap) - BigInt(state.allocated)).toString(),
+      ...(state ? { ...state, ...(state.pricingPolicy ? {
+        spotRateFthDollarPerFthg: pricing.spot(state).toString(),
+        netAllocated: pricing.position(state).net.toString(), baseTradingRate: "10000",
+      } : {}), remaining: (BigInt(state.cap) - BigInt(state.allocated)).toString(),
         pendingIn: (BigInt(state.allocated) + BigInt(state.recycledIn) - BigInt(state.settledIn)).toString(),
         pendingOut: (BigInt(state.released) - BigInt(state.settledOut)).toString(),
         redeemableBacking: (BigInt(state.settledIn) - BigInt(state.released)).toString(),
@@ -228,6 +244,20 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
   }
   return {
     status,
+    activatePricing: () => serialize(async () => {
+      if (!ledger.goldReserve) throw fail("Initialize the origin reserve before activating pricing.");
+      if (!ledger.goldReserve.pricingPolicy) commit("gold:pricing:origin-linear-v1", { op: "pricing-policy", policy: pricing.POLICY });
+      return status();
+    }),
+    quote(direction, amount) {
+      const state = ledger.goldReserve;
+      if (!state) throw fail("Finite Gold reserve is not initialized.", 503);
+      const output = pricing.quote(state, direction, amount);
+      if (output > ethers.MaxUint256) throw fail("Conversion exceeds uint256 accounting limits.");
+      return { direction, amountIn: String(amount), amountOut: output.toString(),
+        pricingPolicy: state.pricingPolicy || "fixed-v1",
+        authorization: state.pricingPolicy ? quoteMemo(ledger.headers[0].H, state, direction, amount) : null };
+    },
     activity({ limit = 20, cursor } = {}) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100
         || cursor !== undefined && (typeof cursor !== "string" || !/^\d+:\d+$/.test(cursor))) throw fail("Invalid reserve history query.", 400);
@@ -255,7 +285,7 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
             from: data.op === "fund-market" && BigInt(fthg) === 0n ? TREASURY : incoming ? sourceWallet : reserveWallet,
             to: data.op === "fund-market" && BigInt(fthg) === 0n ? data.account : incoming ? reserveWallet : sourceWallet,
             fthg, dollars: data.op === "sync" ? "0" : data.op === "redeem" ? data.transfer.amount
-              : data.op === "convert" ? (BigInt(fthg) * RATE).toString() : data.dollars,
+              : data.op === "convert" ? data.dollars ?? (BigInt(fthg) * RATE).toString() : data.dollars,
             treasuryDollars: data.op === "fund-market" ? (BigInt(data.dollars) - BigInt(fthg) * RATE).toString() : "0",
             asset: data.asset || null, quantity: data.quantity || null,
             recordType: data.op === "sync" ? "ethereum-confirmed" : BigInt(fthg) ? "off-chain-obligation" : "treasury-circulation",
@@ -270,9 +300,10 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
         note: "Off-chain entries record obligations, not Ethereum transfers. Settlement receipts are separate; pending totals are pooled." };
     },
     initialize: () => serialize(async () => {
-      if (ledger.goldReserve) return status();
-      const balance = await holdings();
-      commit("gold:initialize", { op: "initialize", cap: balance.origin.toString(), rate: RATE.toString(), evidence: balance.evidence });
+      if (!ledger.goldReserve) {
+        const balance = await holdings();
+        commit("gold:initialize", { op: "initialize", cap: balance.origin.toString(), rate: RATE.toString(), evidence: balance.evidence });
+      }
       return status();
     }),
     fundMarket: (asset, quantity, dollars) => serialize(async () => {
@@ -322,9 +353,15 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
     }),
     redeem: transfer => serialize(async () => {
       const amount = integer(transfer?.amount, true);
-      if (amount % RATE) throw fail("FTH$ conversion must map to whole FTHG base units.");
       const id = `gold:redeem:${String(transfer.wallet).toLowerCase()}:${transfer.nonce}`;
-      const data = { op: "redeem", transfer, fthg: (amount / RATE).toString() };
+      const prior = ledger.ids.get(id);
+      if (prior) {
+        const data = ledger.findTx(prior).tx.d;
+        if (canonical(data.transfer) !== canonical(transfer)) throw fail("Reserve request conflicts with an existing transaction.");
+        ledger.commitAuthorized(ledger.findTx(prior).tx);
+        return status();
+      }
+      const data = { op: "redeem", transfer, fthg: pricing.quote(ledger.goldReserve, "fthdollar-to-fthg", amount).toString() };
       if (recover(id, data)) return status();
       const balance = await holdings();
       const state = ledger.goldReserve;
@@ -336,7 +373,15 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
     }),
     convert: request => serialize(async () => {
       const amount = integer(request?.amount, true);
-      const id = `gold:convert:${request.nonce}`, data = { op: "convert", request };
+      const id = `gold:convert:${request.nonce}`;
+      const prior = ledger.ids.get(id);
+      if (prior) {
+        if (canonical(ledger.findTx(prior).tx.d.request) !== canonical(request)) throw fail("Reserve request conflicts with an existing transaction.");
+        ledger.commitAuthorized(ledger.findTx(prior).tx);
+        return status();
+      }
+      const data = { op: "convert", request, ...(ledger.goldReserve?.pricingPolicy
+        ? { dollars: pricing.quote(ledger.goldReserve, "fthg-to-fthdollar", amount).toString() } : {}) };
       if (recover(id, data)) return status();
       const balance = await holdings(), state = ledger.goldReserve;
       if (!state || balance.origin < BigInt(state.allocated) + BigInt(state.recycledIn) - BigInt(state.settledIn) + amount) {
@@ -372,6 +417,10 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
       return status();
     }),
   };
+}
+
+function quoteMemo(genesis, state, direction, amount) {
+  return `G2:${ethers.id(pricing.commitment(genesis, state, direction, amount, pricing.quote(state, direction, amount))).slice(2, 62)}`;
 }
 
 module.exports = { createReserveEngine, validateGoldTransaction, conversionMessage, goldEntries, RATE, TREASURY, REDEMPTION_ESCROW, SOURCE_ADDRESS, RESERVE_ADDRESS };

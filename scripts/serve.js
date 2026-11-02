@@ -480,7 +480,10 @@ const server = http.createServer(async (req, res) => {
 
 
 async function start() {
-  if (reserveEngine) await reserveEngine.initialize();
+  if (reserveEngine) {
+    await reserveEngine.initialize();
+    if (BigInt(reserveEngine.status().cap) > 0n) await reserveEngine.activatePricing();
+  }
   api.start();
   world.start();
   configureServer(server, cms.operationsSettings);

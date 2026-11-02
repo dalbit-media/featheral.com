@@ -150,8 +150,12 @@ function renderSupply(chain) {
 function renderEconomy(api) {
   if (api?.goldReserve?.enabled) {
     const reserve = api.goldReserve;
-    $("rateValue").textContent = `1 FTHG = ${Number(reserve.rate).toLocaleString("en-US")} FTH$`;
-    $("rateNote").textContent = `Fixed-rate ${reserve.mode === "live" ? "live off-chain reserve" : "isolated reserve test"}. Market prices still respond to demand. No Mainnet transfers are submitted.`;
+    const dynamic = reserve.pricingPolicy === "origin-linear-v1";
+    const rate = dynamic ? tokens(reserve.spotRateFthDollarPerFthg) : Number(reserve.rate).toLocaleString("en-US");
+    $("rateValue").textContent = `1 FTHG = ${rate} FTH$`;
+    $("rateNote").textContent = dynamic
+      ? "Demand-based origin curve: starts at 10,000 FTH$ and rises gradually with net Gold allocation; returns lower the price. Trade quotes include movement across the curve. No Mainnet transfers are submitted."
+      : `Legacy fixed-rate ${reserve.mode === "live" ? "live off-chain reserve" : "isolated reserve test"}. No Mainnet transfers are submitted.`;
     $("economyStats").replaceChildren(
       stat("Reserve mode", reserve.initialized ? "Initialized" : "Not initialized", reserve.mode === "live" ? "Live off-chain allocation" : "Separate test journal"),
       stat("Remaining initial allocation", `${compact(reserve.remaining || "0")} FTHG`, "Immutable verified origin cap; no automatic increases"),
@@ -161,7 +165,7 @@ function renderEconomy(api) {
     return;
   }
   const ledger = api?.fthDollar;
-  $("rateValue").textContent = "1 FTHG = 1,000 FTH$";
+  $("rateValue").textContent = "FTHG / FTH$ rate unavailable";
   $("rateNote").textContent = api ? "Finite reserve engine is not enabled. Existing FTH$ circulates; no automatic issuance." : "Reserve service unavailable. Conversion eligibility cannot be verified.";
   $("economyStats").replaceChildren(
     stat("Reserve engine", api ? "Not enabled" : "Unavailable", "Check reserve admin before any conversion or transfer"),

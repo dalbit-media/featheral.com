@@ -6,30 +6,41 @@
   <title>Featheral Stats</title>
   <meta name="description" content="Aggregate traffic across Featheral sites.">
   <link rel="icon" href="/shared/logo-stats.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/site/site.css">
-  <link rel="stylesheet" href="/site/demos.css">
+  <link rel="stylesheet" href="/shared/featheral.css">
   <link rel="stylesheet" href="/shared/traffic-charts.css">
   <link rel="stylesheet" href="/shared/site-colors.css">
+  <link rel="stylesheet" href="/shared/site-links.css">
+  <script src="/shared/site-links.js" defer></script>
+  <script src="/shared/traffic-charts.js" defer></script>
+  <script src="/site/stats.js" defer></script>
+  <style>
+    body.site-stats{color-scheme:dark;--bg:#0b0b10;--panel:#16161f;--line:#262633;--txt:#f4f4f7;--text:var(--txt);--mut:#9a9aad;--btn:#262633;--glow:#11182c;--gold:var(--brand,#305fe8)}
+    body[data-site-brand="stats.featheral.com"]>#view{height:auto;min-height:60dvh}
+    .skip-link{position:absolute;left:12px;top:-100px;z-index:30}
+    .skip-link:focus{top:12px;background:var(--panel);padding:8px}
+    #traffic{margin:auto;padding:24px 0;border-top:0}
+    .traffic-tools{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+    #traffic-interval select{min-height:44px;max-width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font:inherit}
+    #refresh-traffic{min-height:44px;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text);font-weight:600}
+    #refresh-traffic:hover:not(:disabled){border-color:var(--brand)}
+    #refresh-traffic:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+    #refresh-traffic:disabled{opacity:.6;cursor:wait}
+  </style>
 </head>
-<body data-site-brand="stats.featheral.com">
+<body class="site-stats" data-site-brand="stats.featheral.com">
   <a class="skip-link" href="#view">Skip to content</a>
   <header class="top">
-    <a class="logo" href="#/"><img class="mark" src="/shared/logo-stats.svg" alt="" width="34" height="34"><span class="names"><span id="brand"></span><span class="sub" id="tagline"></span></span></a>
-    <nav class="tabs">
-      <a href="#/" data-tab="home">Home</a>
-      <a href="#/read" data-tab="read">Pages</a>
-      <a href="#/shop" data-tab="shop" data-feature="commerce" hidden>Shop</a>
-      <a href="#/exchange" data-tab="exchange" data-feature="exchange" hidden>Exchange</a>
-    </nav>
-    <div id="traffic-interval"></div>
-    <button class="wallet" id="wallet" type="button">Connect wallet</button>
+    <a class="brand logo" href="/"><img src="/shared/logo-stats.svg" alt="" width="34" height="34"><b>Featheral Stats</b></a>
+    <button class="wallet" type="button" data-central-wallet>Wallet</button>
   </header>
-  <main id="view" tabindex="-1"></main>
-  <a id="fab" class="fab" href="#/post" hidden>New post</a>
-  <div id="gate" hidden></div>
-  <div id="toast"></div>
-  <script src="/site/site.js"></script>
-  <script src="/shared/traffic-charts.js"></script>
-  <script src="/site/demos.js"></script>
+  <main id="view" tabindex="-1">
+    <section id="traffic" aria-label="Featheral ecosystem statistics">
+      <div class="traffic-tools">
+        <div id="traffic-interval"></div>
+        <button id="refresh-traffic" type="button">Refresh statistics</button>
+      </div>
+      <div id="traffic-charts" aria-live="polite">Loading traffic...</div>
+    </section>
+  </main>
 </body>
 </html>

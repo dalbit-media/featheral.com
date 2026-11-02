@@ -119,6 +119,8 @@ telemetryRouter.post('/api/telemetry/hit', express.json({ limit: '1kb' }), (req,
 telemetryRouter.get('/api/telemetry/report', cmsAuth, (req, res) => res.json(telemetry.report(trafficHosts())));
 telemetryRouter.get('/api/telemetry/public', (req, res, next) => req.query.site ? cmsAuth(req, res, next) : next(), (req, res) => {
   const host = trafficHost(req);
+  if (!req.query.site && host === 'stats.featheral.com')
+    return res.json(telemetry.report(trafficHosts()));
   const record = siteManager?.records.find(site => req.cmsAuthorized && req.query.site ? site.key === req.query.site : site.hostname + (site.path || '') === host);
   if (!record) return res.sendStatus(404);
   const store = new CmsStore(path.join(DATA_DIR, record.key, 'cms.sqlite'));
@@ -311,6 +313,7 @@ app.get('/js/reserve-view.js', (req, res) => res.sendFile(path.join(sitesRoot, '
 app.get('/reserve.css', (req, res) => res.sendFile(path.join(sitesRoot, 'gold.featheral.com', 'reserve.css')));
 app.use('/operations', (req, res) => res.sendStatus(404));
 // Preserve /site asset URLs for public hosts and authenticated CMS previews.
+app.get('/site/stats.js', (req, res) => res.sendFile(path.join(sitesRoot, 'stats.featheral.com', 'stats.js')));
 app.use('/site', (req, res, next) => {
   if (!['notes.featheral.com', 'ex.featheral.com'].includes(hostName(req))) return next();
   express.static(path.join(sitesRoot, 'notes.featheral.com'), { index: false })(req, res, next);

@@ -11,7 +11,8 @@
     throw new Error("Wallet embedding origin does not match.");
   document.body.dataset.embedded = String(config.embedded); document.body.dataset.compact = String(config.compact);
   document.body.dataset.primary = config.primary;
-  document.body.style.setProperty("--brand", config.theme.accent);
+  const defaultStandaloneTheme = !config.embedded && !config.parentOrigin && !new URLSearchParams(location.search).has("theme");
+  document.body.style.setProperty("--brand", defaultStandaloneTheme ? "#e2b13c" : config.theme.accent);
   const themeProperties = { accent: "--brand", background: "--wallet-bg", panel: "--panel", text: "--txt",
     muted: "--muted", line: "--line", button: "--btn", onAccent: "--on-accent" };
   function applyTheme(theme) {
@@ -24,7 +25,9 @@
     if (["light", "dark"].includes(theme.scheme)) document.body.style.colorScheme = theme.scheme;
   }
   const primarySymbol = config.primary, fthxFirst = primarySymbol === "FTHX";
+  const emptyBalance = `${["FTHG", "FTHS"].includes(primarySymbol) ? "0.000" : "0.00"} ${primarySymbol}`;
   function renderBalance(text) {
+    if (text === `0 ${primarySymbol}`) text = emptyBalance;
     $("balance").replaceChildren(el("span", text.endsWith(` ${primarySymbol}`) ? text.slice(0, -primarySymbol.length - 1) : text), el("span", ` ${primarySymbol}`, "balance-currency"));
   }
   const goldAmount = raw => {
@@ -140,7 +143,7 @@
   $("wallet-title").textContent = "Featheral Wallet";
   $("wallet-icon").src = `/shared/logo-${primarySymbol === "FTHG" ? "gold" : primarySymbol === "FTHS" ? "silver" : fthxFirst ? "ex" : "dollar"}.svg`;
   $("account-label").textContent = `${primarySymbol} balance`;
-  renderBalance(`— ${primarySymbol}`);
+  renderBalance(emptyBalance);
   if (fthxFirst) {
     $("send-symbol").value = "FTHX";
   }
@@ -189,6 +192,7 @@
     const button = $("wallet-connect");
     button.title = label; button.setAttribute("aria-label", label); button.dataset.tooltip = label;
     button.dataset.state = token ? "authorized" : publicAddress() ? "selected" : "disconnected";
+    $("wallet-connect-label").textContent = !interactive ? "Read-only" : token ? "Disconnect" : publicAddress() ? "Authorize wallet" : "Connect wallet";
     button.disabled = !interactive;
   }
   let worldAccount = storage.getItem("featheral-world-account") || "";
@@ -266,7 +270,7 @@
     $("swap-status").textContent = "";
     clearPortfolio();
     if (clearStoredSession) storage.removeItem("featheral-creation-token");
-    renderBalance(`— ${primarySymbol}`); $("address").value = ""; $("address").placeholder = "Not connected";
+    renderBalance(emptyBalance); $("address").value = ""; $("address").placeholder = "Not connected";
     $("address").title = ""; $("copy-wallet-address").disabled = true;
     connectionLabel();
     $("account-label").textContent = `Available ${primarySymbol}`;

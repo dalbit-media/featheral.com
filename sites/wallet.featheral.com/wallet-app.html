@@ -4,14 +4,16 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Featheral Wallet</title><meta name="description" content="One non-custodial wallet for Ethereum FTHG, FTH$, FTHX, network notes and World funds.">
   <link rel="icon" href="/shared/logo-dollar.svg"><link rel="stylesheet" href="/wallet-app.css">
+  <link rel="stylesheet" href="/shared/site-links.css">
 </head>
 <body>
   <nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
   <header><a class="brand" href="/"><img id="wallet-icon" src="/shared/logo-dollar.svg" alt="" width="34" height="34"><span id="wallet-title">Featheral Wallet</span></a><a href="/">Home</a><a id="explorer-link" href="/explorer/">Explorer</a><a id="docs-link" href="/docs/">Docs</a><a id="exchange-link" href="https://ex.featheral.com/">Exchange</a><a href="/ethereum/" target="_blank" rel="noopener">Ethereum / Staking</a><button id="connect" type="button">Connect wallet</button></header>
-  <main>
+  <main id="wallet-main">
+    <div class="wallet-intro"><p class="wallet-eyebrow">Your Featheral account</p><p>One place for your balances, transfers and activity.</p></div>
     <section class="wallet-hero">
-      <div class="wallet-heading"><span id="account-label">Available balance</span><div class="wallet-tools"><button id="refresh" class="icon-button" type="button" aria-label="Refresh balances" title="Refresh balances" data-tooltip="Refresh balances"><svg aria-hidden="true"><use href="/shared/wallet-icons.svg#refresh"></use></svg></button><span id="wallet-connect-action"><button id="wallet-connect" class="icon-button" type="button" aria-label="Connect / create wallet" title="Connect / create wallet" data-tooltip="Connect / create wallet" data-state="disconnected"><svg aria-hidden="true"><use href="/shared/wallet-icons.svg#assets"></use></svg><span class="connection-dot" aria-hidden="true"></span></button></span></div></div>
-      <h1 id="balance">—</h1><p id="available-balance" class="sr-only">Connect to view spendable funds</p><div class="portfolio-total"><span id="portfolio-usd" title="Estimated portfolio USD total">USD unavailable</span><span id="portfolio-primary" title="Estimated portfolio total; linked, World and Exchange funds remain separate">Total unavailable</span></div>
+      <div class="wallet-heading"><span id="account-label">Available balance</span><div class="wallet-tools"><button id="refresh" class="icon-button" type="button" aria-label="Refresh balances" title="Refresh balances" data-tooltip="Refresh balances"><svg aria-hidden="true"><use href="/shared/wallet-icons.svg#refresh"></use></svg></button><span id="wallet-connect-action"><button id="wallet-connect" class="icon-button" type="button" aria-label="Connect / create wallet" title="Connect / create wallet" data-tooltip="Connect / create wallet" data-state="disconnected"><svg aria-hidden="true"><use href="/shared/wallet-icons.svg#assets"></use></svg><span id="wallet-connect-label">Connect wallet</span><span class="connection-dot" aria-hidden="true"></span></button></span></div></div>
+      <h1 id="balance">0.00 <span class="balance-currency">FTHX</span></h1><p id="available-balance" class="sr-only">Connect to view spendable funds</p><div class="portfolio-total"><span id="portfolio-usd" title="Estimated portfolio USD total">USD unavailable</span><span id="portfolio-primary" title="Estimated portfolio total; linked, World and Exchange funds remain separate">Total unavailable</span></div>
       <div class="wallet-address"><input id="address" type="text" readonly aria-label="Wallet address" placeholder="Not connected" spellcheck="false"><button id="copy-wallet-address" class="icon-button" type="button" aria-label="Copy wallet address" title="Copy wallet address" data-tooltip="Copy wallet address" disabled><svg aria-hidden="true"><use href="/shared/wallet-icons.svg#copy"></use></svg></button></div>
       <p id="status" role="status"></p>
     </section>
@@ -49,7 +51,11 @@
     <section id="activity" class="wallet-panel" role="tabpanel" aria-labelledby="tab-activity" tabindex="0" hidden><h2>Activity</h2><div id="history"></div><a id="ethereum-activity" href="https://etherscan.io/" target="_blank" rel="noopener" title="FTHG transfers on Ethereum Mainnet">Ethereum ↗</a> · <a id="activity-explorer" href="https://dollar.featheral.com/explorer/" target="_blank" rel="noopener" title="Native Featheral ledger transactions">Featheral ↗</a></section>
   </main>
   <dialog id="wallet-review" aria-label="Review wallet operation"><p id="wallet-review-message"></p><button id="wallet-review-confirm" type="button">Confirm</button><button id="wallet-review-cancel" type="button">Cancel</button></dialog>
-  <footer>No gas for ledger transfers. Self-custody keys stay on your device. Encrypted recovery backups only.</footer>
+  <footer class="wallet-safety" aria-label="Wallet safety">
+    <div><strong>Your keys, your wallet</strong><p>Self-custody keys stay on this device. Save your encrypted recovery backup and keep its password safe.</p></div>
+    <div><strong>Check the network</strong><p>Native ledger transfers need no ETH. Ethereum transactions require gas. Always review the asset, network and recipient.</p></div>
+    <a href="#account" class="wallet-account-link">Account &amp; recovery</a>
+  </footer>
   <script src="/shared/site-links.js" defer></script><script src="/ethers.js" defer></script><script src="/vault.js" defer></script><script src="/portfolio-view.js" defer></script><script src="/site-sign-in.js" defer></script><script src="/wallet-app.js" defer></script>
 </body>
 </html>
