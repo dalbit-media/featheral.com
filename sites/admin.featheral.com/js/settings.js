@@ -153,17 +153,17 @@ VIEWS["site-server"] = async (key, _q, token) => {
     <div class="card-head"><h2>Sync databases &amp; uploads</h2><span class="muted small">One-time source &rarr; target</span></div>
     <p>Selecting this site chooses its saved server, but sync includes the <b>entire installation's databases, journals and uploads</b>. Deploy the current sync-capable release to the target first.</p>
     <p class="note">The target is stopped briefly. A checksum-verified backup is required before replacing its databases and journal history. Source files overwrite matching uploads; target-only uploads and unrelated data remain. Server Settings, Admin/SSH credentials and signing keys are not copied. The target restarts as a read-only snapshot; the source remains the writer.</p>
-    <p class="muted small">Preparing a consistent snapshot can briefly pause source requests. No transfer starts until you review the snapshot and approve it with the Admin wallet. Custom storage outside this installation's data directories is not supported.</p>
+    <p class="muted small">Preparing a consistent snapshot can briefly pause source requests. Shared-server sync starts in one click using the saved connection, without a separate review or wallet approval. Separate servers require snapshot review and Admin-wallet approval. Custom storage outside this installation's data directories is not supported.</p>
     <div class="row"><button id="site-sync-review" type="button" class="btn">Prepare sync review</button><button id="site-sync-refresh" type="button" class="btn">Refresh status</button><button id="site-sync-check" type="button" class="btn" hidden>Sign &amp; recheck target status</button></div>
     <div id="site-sync-plan" class="form-grid" hidden></div>
-    <label><input id="site-sync-confirm" type="checkbox" disabled> Replace target databases after backup and make the target read-only.</label>
+    <label id="site-sync-confirmation"><input id="site-sync-confirm" type="checkbox" disabled> Replace target databases after backup and make the target read-only.</label>
     <button id="site-sync-start" type="button" class="btn primary" disabled>Sign &amp; sync to target</button>
     <p id="site-sync-status" role="status" aria-live="polite"></p>
   </section>`, token);
   const form = $("#site-server-form"), button = $("#site-server-save"), feedback = $("#site-server-feedback");
   const controller = new AbortController(), hash = location.hash, endpoint = `/api/settings/sites/${encodeURIComponent(key)}`;
   const active = () => token === state.seq && !controller.signal.aborted && location.hash === hash;
-  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncPlan = null, syncTimer, loaded = false, fields = [], saved = "";
+  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncPlan = null, syncTimer, loaded = false, sharedSync = false, fields = [], saved = "";
   const snapshot = () => JSON.stringify(Object.fromEntries(new FormData(form)));
   const dirty = () => loaded && snapshot() !== saved;
   const beforeUnload = event => { if (dirty()) { event.preventDefault(); event.returnValue = ""; } };
@@ -171,11 +171,19 @@ VIEWS["site-server"] = async (key, _q, token) => {
   viewCleanup = () => { controller.abort(); clearTimeout(syncTimer); window.removeEventListener("beforeunload", beforeUnload); form.reset(); };
   leaveView = () => !saving && !syncing && (!dirty() || confirm("Discard unsaved site settings?"));
   const syncStatus = $("#site-sync-status"), syncReview = $("#site-sync-review"), syncStart = $("#site-sync-start"), syncConfirm = $("#site-sync-confirm");
+  function updateSyncControls() {
+    syncReview.hidden = sharedSync;
+    syncReview.disabled = !loaded || syncing || saving || syncBlocked;
+    $("#site-sync-confirmation").hidden = sharedSync;
+    syncStart.textContent = sharedSync ? "Sync to shared server" : "Sign & sync to target";
+    syncStart.disabled = !loaded || syncing || saving || syncBlocked || dirty() || (!sharedSync && (!syncPlan || !syncConfirm.checked));
+  }
   function clearSyncPlan() {
     syncPlan = null; $("#site-sync-plan").hidden = true; syncConfirm.checked = false; syncConfirm.disabled = true; syncStart.disabled = true;
+    updateSyncControls();
   }
   form.addEventListener("input", clearSyncPlan);
-  syncConfirm.addEventListener("change", () => { syncStart.disabled = !syncPlan || !syncConfirm.checked || syncing; });
+  syncConfirm.addEventListener("change", updateSyncControls);
   async function refreshSync() {
     clearTimeout(syncTimer);
     try {
@@ -183,7 +191,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
       if (!active()) return;
       syncStatus.textContent = `${result.host ? `${result.host}: ` : ""}${result.phase}${result.message ? ` - ${result.message}` : ""}`;
       syncBlocked = result.running || result.phase === "uncertain";
-      syncReview.disabled = syncBlocked || syncing;
+      updateSyncControls();
       $("#site-sync-check").hidden = result.phase !== "uncertain" || result.site !== key;
       if (result.running) syncTimer = setTimeout(refreshSync, 2000);
     } catch (error) { if (active()) syncStatus.textContent = `Sync status unavailable: ${error.message}`; }
@@ -200,7 +208,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
       await api(`${endpoint}/sync/check`, { json: approval });
       if (active()) await refreshSync();
     } catch (error) { if (active()) syncStatus.textContent = `Target status not confirmed: ${error.message}`; }
-    finally { syncing = false; if (active()) syncReview.disabled = syncBlocked; }
+    finally { syncing = false; if (active()) updateSyncControls(); }
   });
   syncReview.addEventListener("click", async () => {
     if (!active() || saving || syncing) return;
@@ -220,14 +228,22 @@ VIEWS["site-server"] = async (key, _q, token) => {
       panel.hidden = false; syncConfirm.disabled = false;
       syncStatus.textContent = "Review the target and replacement scope, then confirm and sign.";
     } catch (error) { if (active()) syncStatus.textContent = `Sync review failed: ${error.message}`; }
-    finally { syncing = false; if (active()) { syncReview.disabled = syncBlocked; form.inert = false; } }
+    finally { syncing = false; if (active()) { updateSyncControls(); form.inert = false; } }
   });
   syncStart.addEventListener("click", async () => {
-    if (!active() || syncing || saving || !syncPlan || !syncConfirm.checked) return;
+    if (!active() || !loaded || syncing || saving || syncBlocked || (!sharedSync && (!syncPlan || !syncConfirm.checked))) return;
     if (dirty()) { clearSyncPlan(); syncStatus.textContent = "Settings changed. Save them and prepare a new review."; return; }
     syncing = true; syncStart.disabled = true; syncReview.disabled = true; form.inert = true;
     let submitted = false;
     try {
+      if (sharedSync) {
+        syncStatus.textContent = "Preparing the snapshot and starting sync to the saved shared server...";
+        submitted = true;
+        await api(`${endpoint}/sync/shared/start`, { json: { revision } });
+        if (active()) { clearSyncPlan(); await refreshSync(); }
+        else toast("Sync submitted. Check Settings for confirmed status.");
+        return;
+      }
       const payload = { plan: syncPlan.id };
       syncStatus.textContent = "Review the Admin-wallet sync approval...";
       const challenge = await api(`${endpoint}/sync/challenge`, { json: payload, signal: controller.signal });
@@ -240,7 +256,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
     } catch (error) {
       if (active()) syncStatus.textContent = `${submitted ? "Sync submission not confirmed; refresh status before retrying." : "Sync not started."} ${error.message}`;
       else toast(error.message);
-    } finally { syncing = false; if (active()) { form.inert = false; syncReview.disabled = syncBlocked; syncStart.disabled = !syncPlan || !syncConfirm.checked; } }
+    } finally { syncing = false; if (active()) { form.inert = false; updateSyncControls(); } }
   });
   function showConnection() {
     const shared = form.elements.useShared.value === "true";
@@ -251,6 +267,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
   }
   function display(data) {
     revision = data.revision;
+    sharedSync = data.useShared;
     for (const name of ["url", "host", "port"]) form.elements[name].value = data[name];
     form.elements.useShared.value = String(data.useShared);
     form.elements.credential.value = "";
@@ -264,10 +281,12 @@ VIEWS["site-server"] = async (key, _q, token) => {
     loaded = true;
     showConnection();
     saved = snapshot();
+    clearSyncPlan();
   }
   async function load() {
     loaded = false;
     button.disabled = true;
+    updateSyncControls();
     try {
       const data = await api(endpoint, { signal: controller.signal, cache: "no-store" });
       if (!active()) return;
@@ -313,7 +332,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
       delete settings.credential;
       for (const name of Object.keys(runtime)) delete runtime[name];
       saving = false;
-      if (active()) form.inert = false;
+      if (active()) { form.inert = false; updateSyncControls(); }
     }
   });
   await Promise.all([load(), refreshSync()]);

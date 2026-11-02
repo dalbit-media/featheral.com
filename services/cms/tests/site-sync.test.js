@@ -166,11 +166,56 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
   assert.match(commands[1].command, /sha256sum --check/); assert.match(commands[1].command, /systemd-run/);
   assert.match(commands[1].command, /restore-site-sync/);
 });
+test("shared sync captures and launches in one request without separate wallet approval", async t => {
+  const f = fixture(t);
+  const target = { id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral",
+    fingerprint: "SHA256:shared", hosts: ["gold.featheral.com"], password: "ssh-secret" };
+  const settings = { value: { revision: 1 }, environment: () => ({}),
+    deploymentTargets: (_sites, passwords) => [{ ...target, password: passwords ? target.password : "" }],
+    approvals: { consume() { assert.fail("Shared sync must not request separate approval"); } } };
+  const deployment = { running: false, sites: () => [{ key: "gold", status: "ready" }] };
+  const service = new SiteSync({ root: f.root, settings, deployment });
+  let launched = 0;
+  service.execute = async (plan, connection) => {
+    launched++;
+    assert.equal(plan.binding.target, "shared");
+    assert.equal(hash(plan.archive), plan.binding.digest);
+    assert.equal(connection.password, "ssh-secret");
+    service.finish("complete", "Shared target confirmed.");
+  };
+  const context = { session: "admin", origin: "https://admin.example" };
+  await assert.rejects(service.startShared({ site: "gold", revision: 0 }, context), /Settings changed/);
+  assert.equal(launched, 0); assert.equal(service.plans.size, 0);
+  await service.startShared({ site: "gold", revision: 1 }, context);
+  assert.equal(launched, 1); assert.equal(service.status().phase, "complete");
+  assert.equal(service.plans.size, 0);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fs.readdirSync(service.directory).filter(name => fs.statSync(path.join(service.directory, name)).isDirectory()).length, 0);
+  settings.value.siteServers = { gold: { useShared: false } };
+  target.id = "gold";
+  await assert.rejects(service.startShared({ site: "gold", revision: 1 }, context), /requires snapshot review/);
+  assert.equal(launched, 1);
+});
+test("shared sync preserves operation locks and rejects Settings changes during capture", async t => {
+  const f = fixture(t);
+  const settings = { value: { revision: 1 }, environment: () => { settings.value.revision++; return {}; },
+    deploymentTargets: () => [{ id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral", fingerprint: "SHA256:shared" }] };
+  const deployment = { running: true, sites: () => [{ key: "gold", status: "ready" }] };
+  const service = new SiteSync({ root: f.root, settings, deployment });
+  service.execute = async () => assert.fail("Changed or busy target must not receive data");
+  const context = { session: "admin", origin: "https://admin.example" };
+  await assert.rejects(service.startShared({ site: "gold", revision: 1 }, context), /current server operation/);
+  deployment.running = false;
+  await assert.rejects(service.startShared({ site: "gold", revision: 1 }, context), /Settings changed/);
+  service.finish("uncertain", "Previous transfer unconfirmed.");
+  await assert.rejects(service.startShared({ site: "gold", revision: 2 }, context), /previous sync is unconfirmed/);
+});
 test("Settings sync API requires the Admin host, authentication, same origin and a managed site", async t => {
   const express = require("express"), http = require("node:http"), { once } = require("node:events");
   const calls = [];
   const service = { status: () => ({ phase: "idle", running: false }),
-    plan: async (input, context) => { calls.push({ input, context }); return { id: "snapshot" }; } };
+    plan: async (input, context) => { calls.push({ input, context }); return { id: "snapshot" }; },
+    startShared: async (input, context) => { calls.push({ input, context }); return { phase: "transferring", running: true }; } };
   const app = express();
   app.use("/api/settings", require("../../operations/api").settingsApi({
     settings: {}, siteSync: service, sites: () => [{ key: "gold", status: "ready" }],
@@ -181,11 +226,11 @@ test("Settings sync API requires the Admin host, authentication, same origin and
   t.after(() => new Promise(resolve => server.close(resolve)));
   const request = (pathname, options = {}) => new Promise((resolve, reject) => {
     const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: `/api/settings${pathname}`,
-      method: options.method || "GET", headers: { Host: options.host || "admin.localhost", Authorization: "fixture-admin", ...options.headers } }, res => {
+      method: options.method || "GET", headers: { Host: options.host || "admin.localhost", Authorization: "fixture-admin", "Content-Type": "application/json", ...options.headers } }, res => {
       let body = ""; res.on("data", chunk => { body += chunk; });
       res.on("end", () => resolve({ status: res.statusCode, json: async () => JSON.parse(body) }));
     });
-    req.on("error", reject); req.end();
+    req.on("error", reject); req.end(options.json ? JSON.stringify(options.json) : undefined);
   });
   assert.equal((await request("/sites/gold/sync")).status, 200); assert.equal(calls.length, 0);
   assert.equal((await request("/sites/gold/sync", { headers: { Authorization: "" } })).status, 401);
@@ -196,8 +241,18 @@ test("Settings sync API requires the Admin host, authentication, same origin and
   assert.equal(reviewed.status, 200); assert.equal((await reviewed.json()).id, "snapshot");
   assert.equal(calls.length, 1); assert.equal(calls[0].input.site, "gold");
   assert.equal(calls[0].context.origin, "http://admin.localhost");
+  const sharedPath = "/sites/gold/sync/shared/start";
+  assert.equal((await request(sharedPath, { method: "POST" })).status, 403);
+  assert.equal((await request(sharedPath, { method: "POST", headers: { Authorization: "" } })).status, 401);
+  assert.equal((await request(sharedPath, { method: "POST", host: "gold.localhost" })).status, 404);
+  assert.equal((await request("/sites/unknown/sync/shared/start", { method: "POST", headers: { Origin: "http://admin.localhost" } })).status, 404);
+  assert.equal(calls.length, 1);
+  const shared = await request(sharedPath, { method: "POST", headers: { Origin: "http://admin.localhost" }, json: { revision: 7, site: "other" } });
+  assert.equal(shared.status, 200); assert.equal((await shared.json()).phase, "transferring");
+  assert.equal(calls[1].input.site, "gold"); assert.equal(calls[1].input.revision, 7);
+  assert.equal(calls[1].context.origin, "http://admin.localhost");
 });
-async function uiFixture() {
+async function uiFixture({ shared = false, initialStatus = { phase: "idle", running: false } } = {}) {
   const vm = require("node:vm"), elements = new Map(), calls = [];
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, { value: "", checked: false, hidden: false, disabled: false, textContent: "", listeners: {},
@@ -206,7 +261,7 @@ async function uiFixture() {
   };
   const form = element("#site-server-form");
   form.elements = Object.fromEntries(["url", "host", "port", "useShared", "credential", "applyRuntime"].map(name => [name, element(name)]));
-  let signs = 0, failure, status = { phase: "idle", running: false };
+  let signs = 0, failure, status = initialStatus;
   const context = vm.createContext({
     VIEWS: {}, state: { seq: 1 }, location: { hash: "#/site-server/gold" }, viewCleanup: null, leaveView: null,
     AbortController, setTimeout, clearTimeout, esc: value => String(value), $: element, renderSidebar() {}, setCrumbs() {}, setView() {}, toast() {},
@@ -216,7 +271,7 @@ async function uiFixture() {
     api: async (url, options) => {
       calls.push({ url, input: options?.json });
       if (url === "/api/sites") return [{ key: "gold", hostname: "gold.featheral.com" }];
-      if (url.endsWith("/sites/gold")) return { revision: 1, useShared: false, host: "replica.example", url: "https://gold.example", port: 22, controls: [] };
+      if (url.endsWith("/sites/gold")) return { revision: 1, useShared: shared, host: "replica.example", url: "https://gold.example", port: 22, controls: [] };
       if (url.endsWith("/sync")) return status;
       if (url.endsWith("/plan")) {
         if (failure) throw failure;
@@ -224,7 +279,10 @@ async function uiFixture() {
           createdAt: "snapshot-time", expiresAt: "expiry-time", hosts: ["gold.example"], exclusions: ["Keep target credentials"] };
       }
       if (url.endsWith("/challenge")) return { message: "review" };
-      if (url.endsWith("/start")) { status = { running: false, phase: "complete", message: "confirmed" }; return status; }
+      if (url.endsWith("/start")) {
+        if (failure) throw failure;
+        status = { running: false, phase: "complete", message: "confirmed" }; return status;
+      }
       throw new Error("Unexpected UI request: " + url);
     },
   });
@@ -261,4 +319,39 @@ test("unsaved Settings and snapshot failures cannot start sync; errors remain vi
   assert.match(f.element("#site-sync-status").textContent, /Snapshot source changed/);
   assert.equal(f.element("#site-sync-start").disabled, true);
   assert.equal(f.signs, 0); f.context.viewCleanup();
+});
+test("shared site Settings starts in one click with no review, confirmation or wallet prompt", async () => {
+  const f = await uiFixture({ shared: true });
+  assert.equal(f.element("#site-sync-review").hidden, true);
+  assert.equal(f.element("#site-sync-confirmation").hidden, true);
+  assert.equal(f.element("#site-sync-start").disabled, false);
+  assert(!f.calls.some(call => call.input));
+  await f.click("#site-sync-start");
+  assert.equal(f.signs, 0);
+  const mutations = f.calls.filter(call => call.input);
+  assert.equal(mutations.length, 1);
+  assert.equal(mutations[0].url, "/api/settings/sites/gold/sync/shared/start");
+  assert.equal(mutations[0].input.revision, 1);
+  assert.match(f.element("#site-sync-status").textContent, /confirmed/);
+  f.context.viewCleanup();
+});
+test("shared sync blocks unsaved or uncertain state and displays start failures", async () => {
+  const f = await uiFixture({ shared: true });
+  f.form.elements.useShared.value = "false";
+  f.form.listeners.input();
+  assert.equal(f.element("#site-sync-start").disabled, true);
+  await f.click("#site-sync-start");
+  assert(!f.calls.some(call => call.input));
+  f.form.elements.useShared.value = "true";
+  f.form.listeners.input();
+  assert.equal(f.element("#site-sync-start").disabled, false);
+  f.fail(new Error("Shared target unavailable"));
+  await f.click("#site-sync-start");
+  assert.match(f.element("#site-sync-status").textContent, /Shared target unavailable/);
+  assert.equal(f.signs, 0); f.context.viewCleanup();
+  const blocked = await uiFixture({ shared: true, initialStatus: { phase: "uncertain", running: false } });
+  assert.equal(blocked.element("#site-sync-start").disabled, true);
+  await blocked.click("#site-sync-start");
+  assert(!blocked.calls.some(call => call.input));
+  blocked.context.viewCleanup();
 });

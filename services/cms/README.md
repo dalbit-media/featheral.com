@@ -74,8 +74,11 @@ share the encrypted system database; status responses never return them.
 Open a site's **Server & settings > Sync databases & uploads**. The saved site
 assignment chooses the target server (including a shared target), not a
 site-only subset of data. Deploy the current sync-capable release to an already
-running target first, then prepare a review, confirm database replacement and sign
-with the Admin wallet. Reviewing never connects to or changes the target.
+running target first. For a shared target, click **Sync to shared server** to
+prepare the snapshot and start transfer immediately using the saved connection;
+there is no separate review, replacement checkbox or wallet approval. For a
+separate server, prepare a review, confirm database replacement and sign with
+the Admin wallet. Reviewing never connects to or changes the target.
 
 The fixed, ten-minute snapshot includes installation SQLite databases, native
 Dollar/World and database/CMS journals, site registries, upload indexes and uploads
@@ -88,8 +91,10 @@ omitted. Backups, test storage, operational state, external bootstrap, encrypted
 server Settings/vault credentials, signing keys and secret files are excluded.
 CMS journal identities are retained across different installation paths and OSes.
 
-Approval binds the snapshot SHA256, site/target, pinned SSH key, Settings revision,
-Admin origin, wallet and session. The source sends the frozen ZIP with SFTP;
+Separate-server approval binds the snapshot SHA256, site/target, pinned SSH key,
+Settings revision, Admin origin, wallet and session. Shared-server sync checks the
+saved shared assignment and Settings revision before capture and revalidates the
+snapshot binding before transfer. The source sends the frozen ZIP with SFTP;
 credentials go only to SSH and sudo stdin. The Linux target verifies ZIP paths,
 checksums and databases before stopping its exact PM2 application. A verified,
 retained backup precedes database replacement and removal of superseded journal
@@ -138,7 +143,9 @@ before resuming writes. A missing `state.json` means backup was interrupted
 before installation; inspect the job and original data rather than attempting an
 unverified restore or deleting files. Do not remove locks while a job is active.
 
-The Settings API is `GET /api/settings/sites/:key/sync`, with signed mutation
+The Settings API is `GET /api/settings/sites/:key/sync`. Authenticated, same-origin
+`POST /api/settings/sites/:key/sync/shared/start` accepts the current Settings
+`revision` and starts only a saved shared target. Separate review and signed mutation
 routes `/sync/plan`, `/sync/challenge`, `/sync/start`, `/sync/check/challenge` and
 `/sync/check`. Deployment/Settings and sync cannot run concurrently.
 

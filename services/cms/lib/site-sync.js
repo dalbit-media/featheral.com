@@ -111,11 +111,22 @@ class SiteSync {
   start(input, context) {
     const plan = this.reviewed(input, context);
     this.settings.approvals.consume(action, plan.binding, context, input);
+    return this.launch(plan);
+  }
+  async startShared(input, context) {
+    this.available();
+    if (input.revision !== this.settings.value.revision) throw fail(409, "Settings changed. Reload before starting sync.");
+    if (this.target(input.site).id !== "shared") throw fail(400, "Separate server sync requires snapshot review and wallet approval.");
+    const review = await this.plan(input, context);
+    const plan = this.reviewed({ site: input.site, plan: review.id }, context);
+    return this.launch(plan);
+  }
+  launch(plan) {
     const target = this.target(plan.binding.site, true);
     this.plans.delete(plan.binding.id); this.running = true;
     this.result = { running: true, phase: "transferring", site: plan.binding.site, host: target.host, id: plan.binding.id,
       binding: plan.binding,
-      startedAt: new Date(this.now()).toISOString(), message: "Transferring the approved snapshot; target data is not changed until verification and backup." };
+      startedAt: new Date(this.now()).toISOString(), message: "Transferring the snapshot; target data is not changed until verification and backup." };
     this.persist();
     this.execute(plan, target).catch(error => {
       console.error("Site sync failed:", error.status || error.code || 500);
