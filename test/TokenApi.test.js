@@ -64,18 +64,36 @@ describe("Token API routing", () => {
     expect(res.statusCode).to.equal(404);
     expect(JSON.parse(res.body).error).to.equal("API route not found.");
   });
+  it("serves canonical Note chain reads identically to Dollar aliases without accessing Ethereum", async () => {
+    for (const route of ["health", "stats", "fth/stats", `wallets/0x${"11".repeat(20)}`]) {
+      const read = async prefix => {
+        const res = response();
+        await api.handle({ method: "GET", url: `/api/v1/${prefix}/${route}`, headers: {} }, res);
+        return { status: res.statusCode, body: JSON.parse(res.body) };
+      };
+      const notes = await read("notes"), dollar = await read("dollar");
+      delete notes.body.checkedAt; delete dollar.body.checkedAt;
+      expect(notes).to.deep.equal(dollar);
+      expect(notes.status).to.equal(200);
+    }
+  });
+  it("does not claim Gold-owned Ethereum routes", async () => {
+    const res = response();
+    expect(await api.handle({ method: "POST", url: "/api/v1/gold/rpc", headers: {} }, res)).to.equal(false);
+    expect(res.headersSent).to.equal(false);
+  });
   it("blocks wallet issuance operations when Dollar policy is closed or unavailable", async () => {
     let failed = false;
     const sandbox = { window: {}, fetch: async () => {
       if (failed) throw new Error("Dollar unavailable");
       return { ok: true, json: async () => ({ monetaryPolicy: { issuanceEnabled: false } }) };
     } };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../sites/dollar/fth.js"), "utf8"), sandbox);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../sites/dollar.featheral.com/fth.js"), "utf8"), sandbox);
     await expect(sandbox.window.FTH.requireIssuance()).to.be.rejectedWith("issuance is closed");
     failed = true;
     await expect(sandbox.window.FTH.requireIssuance()).to.be.rejectedWith("Dollar unavailable");
     for (const file of ["wallet.js", "staking.js"]) {
-      const source = fs.readFileSync(path.join(__dirname, "../sites/dollar/wallet", file), "utf8");
+      const source = fs.readFileSync(path.join(__dirname, "../sites/wallet.featheral.com/ethereum", file), "utf8");
       expect(source).to.include("await ").and.include("requireIssuance()");
     }
   });
@@ -138,7 +156,7 @@ describe("Token API routing", () => {
       return { status: res.statusCode, body: JSON.parse(res.body) };
     }
 
-    it("saves a wallet-signed username and avatar to the ledger and serves it publicly", async () => {
+    it("saves a wallet-signed username and avatar through the database and serves it publicly", async () => {
       const wallet = ethers.Wallet.createRandom();
       expect((await get(wallet.address)).body.profile).to.equal(null);
 
@@ -149,8 +167,16 @@ describe("Token API routing", () => {
       const fetched = await get(wallet.address.toLowerCase());
       expect(fetched.status).to.equal(200);
       expect(fetched.body.profile.username).to.equal("feather_fan");
-      expect(api.ledger.blocksFrom(0).flatMap((block) => block.x.map((tx) => tx.k))).to.deep.equal(["GENESIS", "PROFILE"]);
-      expect(saved.body.ledgerHeight).to.equal(1);
+      expect(api.ledger.blocksFrom(0).flatMap((block) => block.x.map((tx) => tx.k))).to.deep.equal(["GENESIS"]);
+      expect(saved.body).not.to.have.property("ledgerHeight");
+      let ledgerProfileError;
+      try {
+        await api.ledger.submit({ id: "new-ledger-profile", kind: "PROFILE", account: ethers.zeroPadValue(wallet.address, 32).toLowerCase(), data: {} });
+      } catch (error) {
+        ledgerProfileError = error;
+      }
+      expect(ledgerProfileError).to.have.property("status", 410);
+      expect(ledgerProfileError.message).to.include("managed by the database service");
     });
 
     it("rejects signatures from another wallet, stale updates, and duplicate usernames", async () => {
@@ -182,13 +208,17 @@ describe("Token API routing", () => {
       expect((await post(await signedProfile(wallet, { avatar: "" }))).status).to.equal(200);
     });
 
-    it("replicas re-verify profile signatures when importing ledger blocks", async () => {
+    it("legacy ledger replicas re-verify profile signatures when importing blocks", async () => {
       const wallet = ethers.Wallet.createRandom();
-      expect((await post(await signedProfile(wallet))).status).to.equal(200);
+      const profile = await signedProfile(wallet);
       const replicaDir = fs.mkdtempSync(path.join(os.tmpdir(), "fth-replica-"));
       const replica = new FthLedger({ directory: replicaDir, mode: "reader" }).open();
       try {
-        const [genesis, profileBlock] = api.ledger.blocksFrom(0);
+        const [genesis] = api.ledger.blocksFrom(0);
+        const tx = { i: "legacy-profile", k: "PROFILE", a: ethers.zeroPadValue(wallet.address, 32).toLowerCase(), v: "0",
+          d: { address: wallet.address.toLowerCase(), username: profile.username, avatar: profile.avatar, issuedAt: profile.issuedAt, signature: profile.signature }, t: Date.now() };
+        const profileBlock = { h: 1, t: Math.max(Date.now(), genesis.t), p: genesis.H, x: [tx] };
+        profileBlock.H = blockHash(profileBlock);
         replica.importBlock(genesis);
         const forged = structuredClone(profileBlock);
         forged.x[0].d.username = "someone_else";
@@ -222,6 +252,22 @@ describe("Token API routing", () => {
       transfer.signature = await wallet.signMessage(transferMessage({ ...transfer, to }));
       return transfer;
     }
+
+    it("shares signed transfers and supply across canonical Note and legacy Dollar namespaces", async () => {
+      const alice = ethers.Wallet.createRandom(), bob = ethers.Wallet.createRandom();
+      await fund(alice, "100");
+      const supply = api.ledger.summary().supply;
+      const sent = await call("POST", "/api/v1/notes/fth/transfers", await signedTransfer(alice, { to: bob.address }));
+      expect(sent.status).to.equal(200);
+      expect(sent.body.balance.available).to.equal(ethers.parseUnits("90", 18).toString());
+      const legacy = await call("GET", `/api/v1/dollar/wallets/${bob.address}`);
+      expect(legacy.body.fthDollar.available).to.equal(ethers.parseUnits("10", 18).toString());
+      const second = await call("POST", "/api/v1/dollar/fth/transfers", await signedTransfer(alice, { to: bob.address, nonce: 2 }));
+      expect(second.status).to.equal(200);
+      const canonical = await call("GET", `/api/v1/notes/wallets/${bob.address}`);
+      expect(canonical.body.fthDollar.available).to.equal(ethers.parseUnits("20", 18).toString());
+      expect(api.ledger.summary().supply).to.equal(supply);
+    });
 
     it("accepts a wallet-signed transfer and exposes it through stats, tx, account, and search routes", async () => {
       const alice = ethers.Wallet.createRandom();

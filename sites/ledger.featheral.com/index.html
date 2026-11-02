@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Featheral Ledger</title>
+<meta name="description" content="Explore the FTH$ block ledger and database-backed activity for FTHX, FTHS and community notes.">
+<meta name="theme-color" content="#07100c">
+<link rel="icon" href="/shared/logo-dollar.svg">
+<link rel="stylesheet" href="/shared/featheral.css">
+<style>
+.ledger-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));align-items:end;gap:12px}
+.ledger-filters label{display:grid;gap:6px;color:var(--mut)}
+.ledger-filters input,.ledger-filters select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--txt);font:inherit}
+.ledger-filters button{min-height:42px}
+#notesEntries{overflow-x:auto}
+#notesEntries table{min-width:800px}
+</style>
+</head>
+<body class="site-dollar">
+<nav class="eco-bar" aria-label="Featheral sites"></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo-dollar.svg" alt="" width="34" height="34"><b>Featheral Ledger</b></a>
+  <nav aria-label="Ledger navigation"><a href="#currency">Currency ledgers</a><a href="#notes">Notes activity</a><a href="#storage">Storage</a></nav>
+</header>
+<main>
+  <section class="hero">
+    <h1>Currency, <span>auditable by design</span></h1>
+    <p class="muted">Explore the native FTH$ block ledger and browse database-backed activity for FTHX, FTHS and community notes.</p>
+    <div class="hero-actions"><a class="btn primary" href="/explorer/">Explore FTH$ blocks</a><a class="btn" href="#notes">Browse Notes activity</a><a class="btn" data-site="world" data-path="/ledger/" href="https://world.featheral.com/ledger/">Browse World feed data</a></div>
+  </section>
+  <section id="currency">
+    <h2>FTH$ currency ledger</h2>
+    <div class="cards">
+      <a class="card accent-dollar" href="/explorer/">
+        <span class="kicker">Native file ledger</span>
+        <h3>Featheral Dollar · FTH$</h3>
+        <p>Inspect blocks, transfers, accounts, daily files and read-only SQL views of the hash-chained currency history.</p>
+        <span class="card-stat">Open the FTH$ block explorer →</span>
+      </a>
+      <a class="card" href="#notes">
+        <span class="kicker">Notes database journal</span>
+        <h3>FTHX, FTHS and community notes</h3>
+        <p>Browse bounded, newest-first activity records with stable cursor pagination. These records are not hash-chained blocks.</p>
+        <span class="card-stat">Open the Notes activity explorer →</span>
+      </a>
+      <a class="card" data-site="world" data-path="/ledger/" href="https://world.featheral.com/ledger/">
+        <span class="kicker">Application database</span>
+        <h3>World feed</h3>
+        <p>Signed posts and social actions are database records, not currency transactions or ledger blocks.</p>
+        <span class="card-stat">Browse World feed data →</span>
+      </a>
+    </div>
+  </section>
+  <section id="notes">
+    <h2>Notes activity explorer</h2>
+    <p class="muted">These are records from the Notes database, not cryptographic ledger blocks. Pages are fetched newest-first with stable cursors and a bounded result size.</p>
+    <form id="notesFilterForm" class="panel ledger-filters">
+      <label for="notesCurrency">Currency</label>
+      <select id="notesCurrency" name="currency" required></select>
+      <label for="notesAddress">Wallet address (optional)</label>
+      <input id="notesAddress" name="address" placeholder="0x…" autocomplete="off" spellcheck="false">
+      <button class="btn primary" type="submit">Browse activity</button>
+    </form>
+    <p id="notesStatus" class="muted" role="status" aria-live="polite">Loading Notes currencies…</p>
+    <div id="notesEntries"></div>
+    <div id="notesPager" class="pager"></div>
+  </section>
+  <section id="storage">
+    <h2>Separate data, separate purpose</h2>
+    <div class="panel">
+      <p><strong>FTH$</strong> remains in append-only, UTC daily JSONL files. Each block links to its predecessor and can be verified independently. SQLite is used only for a derived query index; the files remain authoritative.</p>
+      <p><strong>World feeds and wallet profile metadata</strong> are managed by the in-process DB API with Node's built-in SQLite. They are not written to the FTH$ currency ledger.</p>
+      <p class="muted fine">Old profile entries in existing FTH$ blocks remain part of the immutable historical record. New profile updates are stored in the database service.</p>
+    </div>
+  </section>
+</main>
+<footer><p>Featheral Ledger · <a href="https://featheral.com">Featheral Foundation</a></p></footer>
+<script src="/shared/site-links.js"></script>
+<script src="/notes-explorer.js"></script>
+</body>
+</html>

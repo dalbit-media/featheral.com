@@ -8,8 +8,8 @@ const SYSTEM_TREASURY_ACCOUNT = `0x${crypto.createHash("sha256").update("feather
 const { REDEMPTION_ESCROW } = require("../gold-api/reserve");
 
 function liquidityTargets() {
-  const { marketAssets, isLiquidAsset, marketBasePrice, marketQuantityLimit } = require("../../sites/world/featheral/src/market.ts");
-  const { dollarsUnits } = require("../../sites/world/featheral/src/dollars.ts");
+  const { marketAssets, isLiquidAsset, marketBasePrice, marketQuantityLimit } = require("../../sites/world.featheral.com/play/src/market.ts");
+  const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
     quantity: marketQuantityLimit(asset), pricePerLot: (BigInt(dollarsUnits(marketBasePrice(asset))) * 10n ** 14n).toString(),
   }]));
@@ -31,6 +31,27 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
   if (ledger.genesis.gamePublicKey !== publicKey) throw new Error("Dollar ledger genesis does not authorize this game key. Use the zero-start economy or restore its original key.");
   return {
     available: (account) => ledger.balance(account).available,
+    nonce: account => ledger.nonce(account),
+    depositMessage(payment) { return require("../fth-ledger/transfer").transferMessage(payment); },
+    depositState(payment) {
+      const { walletAccountId } = require("../fth-ledger/transfer");
+      const hash = ledger.ids.get(`transfer:${walletAccountId(payment.wallet)}:${payment.nonce}`);
+      const record = hash && ledger.findTx(hash), tx = record?.tx;
+      if (!tx) return "missing";
+      if (tx.d.m !== payment.memo || tx.d.to !== payment.to || tx.v !== payment.amount) return "conflict";
+      return record.location ? "accepted" : "missing";
+    },
+    async transfer(input) {
+      const { verifyTransfer } = require("../fth-ledger/transfer");
+      const transfer = verifyTransfer(input);
+      const receipt = ledger.submit({
+        id: `transfer:${transfer.from}:${transfer.nonce}`, kind: "TRANSFER", account: transfer.from, amount: transfer.amount,
+        data: { w: transfer.wallet, to: transfer.to, n: transfer.nonce, m: transfer.memo, ts: transfer.issuedAt, sig: transfer.signature },
+      });
+      // Do not expose an unsealed World deposit to synchronous gameplay journals.
+      while (ledger.pending.length) ledger.seal();
+      return receipt;
+    },
     supply: () => ledger.summary().supply,
     ...(reserveEngine ? {
       ensureLiquidity: (asset, quantity, dollars) => reserveEngine.fundMarket(asset, quantity, BigInt(dollars)),

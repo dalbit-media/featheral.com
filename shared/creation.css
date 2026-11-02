@@ -1,0 +1,16 @@
+.creation-panel{padding:20px;border:1px solid var(--line,#e4e7ef);border-radius:12px;margin:16px 0;background:var(--panel,#fff);color:var(--text,#1d2433)}
+.creation-panel h2{margin:0 0 10px}.creation-panel p{overflow-wrap:anywhere}
+.creation-panel form{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.creation-panel label{display:flex;flex-direction:column;gap:5px}.creation-panel input,.creation-panel select,.creation-panel textarea,.creation-panel button{font:inherit;padding:10px;max-width:100%;box-sizing:border-box;border:1px solid var(--line,#ccd);border-radius:6px;background:var(--bg,#fff);color:inherit}
+.creation-panel label[hidden]{display:none}
+.creation-panel button{cursor:pointer}.creation-panel button:disabled{opacity:.5;cursor:wait}
+.creation-panel textarea{width:100%;min-height:180px}.creation-panel .wide{grid-column:1/-1}
+.creation-panel button[type=submit]{background:var(--brand,#a855d7);color:white}
+.creation-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
+.note-trending{border:1px solid var(--line,#e4e7ef);border-radius:10px;padding:16px}.note-trending h3{display:flex;align-items:center;gap:8px}
+.note-feather{width:32px;height:32px;flex-shrink:0}
+#trending-notes{grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:20px}#trending-notes .note-trending{padding:24px;min-width:0}.notes-chart-header{display:flex;align-items:center;flex-wrap:wrap;gap:16px}.notes-chart-header h2{flex:1;margin:0}.notes-chart-header label{min-width:140px}
+.note-price-trend{margin:16px 0}.note-price-trend figcaption{font-weight:600;overflow-wrap:anywhere;display:flex;align-items:center;flex-wrap:wrap;gap:8px}.note-price-trend svg{display:block;width:100%;height:auto;margin-top:8px}.note-price-trend .mock-grid{stroke:var(--line,#e4e7ef);stroke-width:1}.note-price-trend text{fill:var(--text,#1d2433);font-size:10px}.note-chart-empty{min-height:140px;display:flex;align-items:center;justify-content:center;color:#667085;border-bottom:1px solid var(--line,#e4e7ef)}
+.note-trending .note-supply{font-size:clamp(1.5rem,4vw,2.4rem);font-weight:700;overflow-wrap:anywhere}
+.note-trade{display:grid;gap:10px;margin-top:12px}.note-trade label{display:grid;gap:5px}.note-trade input,.note-trade select{width:100%;box-sizing:border-box;padding:10px}.note-trending button{padding:10px;border:1px solid var(--line,#ccd);border-radius:6px;cursor:pointer}.note-trending button:disabled{opacity:.5;cursor:not-allowed}
+.creation-status{position:sticky;bottom:0;padding:12px;background:var(--panel,#fff);color:var(--text,#1d2433);overflow-wrap:anywhere;z-index:2}

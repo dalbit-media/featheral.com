@@ -3,13 +3,13 @@ const fs = require("fs");
 const path = require("path");
 const { Readable, pipeline } = require("node:stream");
 const { createGoldApi } = require("../services/gold-api/server");
-const { createDollarApi } = require("../services/dollar-api/server");
+const { createDollarApi } = require("../services/notes-api/dollar");
 const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/dollar-api/funds");
 const { activateLiveReserve } = require("../services/gold-api/activation");
 const { createWorldApi } = require("../services/social-ledger/api");
-const { SqliteStore } = require("../sites/world/featheral/server/store.ts");
-const { createApi } = require("../sites/world/featheral/server/http.ts");
-const { worldProfileReader } = require("../sites/world/featheral/server/world-profile.ts");
+const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
+const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
+const { worldProfileReader } = require("../sites/world.featheral.com/play/server/world-profile.ts");
 
 const root = path.resolve(__dirname, "..");
 const localEnvFile = path.join(root, ".env");
@@ -64,8 +64,10 @@ if (reserveMode === "isolated") {
 }
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json" };
 const sitesRoot = path.join(root, "sites");
-// One process serves all four sites by host name; only files under sites/ are ever served.
-const SITES = ["foundation", "gold", "dollar", "world"];
+// Static sites and the private-data-backed CMS share one hostname gateway.
+const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats"];
+const cms = require("../services/cms/server");
+const { injectTelemetry } = require("../services/cms/lib/telemetry");
 const gameDirectory = path.resolve(process.env.DOLLAR_GAME_DIR || path.join(root, "data", "dollar-game"));
 const reader = (process.env.FTH_LEDGER_MODE || process.env.TOKEN_LEDGER_MODE) === "reader";
 const keys = reader ? null : gameSigningKey(gameDirectory);
@@ -74,16 +76,71 @@ const goldKeys = reserveMode === "live" ? gameSigningKey(path.join(root, "data",
   : reserveDirectory ? gameSigningKey(path.join(reserveDirectory, "gold")) : null;
 let store;
 const gold = createGoldApi();
-const api = createDollarApi({ gold, env: { ...process.env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
-  FTH_GOLD_PUBLIC_KEY: reserveMode === "isolated" ? goldKeys?.publicKey : undefined }, beforeLedgerMutation: () => store?.recoverFunds() });
+const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...process.env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
+  FTH_GOLD_PUBLIC_KEY: reserveMode === "isolated" ? goldKeys?.publicKey : undefined }, beforeLedgerMutation: () => store?.recoverFunds(), exchangeSigningKey: keys?.privateKey });
 if (reserveMode === "live") activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets());
 if (api.ledger.genesis.goldPublicKey && !goldKeys) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
 const reserveEngine = goldKeys ? gold.enableReserve(api.ledger, goldKeys.privateKey, () => store?.recoverFunds()) : null;
-const world = createWorldApi({ fthLedger: api.ledger });
+const world = createWorldApi({ fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {
+  const original = req.url;
+  try { req.url = "/api/v1/notes/profiles"; return await api.handle(req, res); }
+  finally { req.url = original; }
+} });
+cms.setOperationsHandler(async (req, res) => {
+  if (await gold.handle(req, res)) return;
+  if (await world.handle(req, res)) return;
+  if (await api.handle(req, res)) return;
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Unknown administration API route" }));
+});
 const gameApiOrigin = process.env.APP_ORIGIN || `http://world.localhost:${port}`;
 if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, process.argv.includes("--dev") ? 20 : 1, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;
+cms.setCreationPayments(api.creationPayments);
+cms.setWorkspaceProfiles(address => cms.database.profiles.get(address));
+cms.setNoteSupply(api.noteSupply);
+cms.setDollarWallet(api.walletAccount, api.exchangeSettlement);
+const ethereumWalletCache = new Map();
+cms.setWalletSources(async (owner, publicWorldAccount) => {
+  let ethereum = null, ethereumError = null, worldFunds = null, worldError = null;
+  const readEthereum = async () => {
+    try {
+      const cached = ethereumWalletCache.get(owner);
+      if (cached && Date.now() - cached.at < 30000) ethereum = cached.value;
+      else {
+        ethereum = await gold.walletBalance(owner);
+        if (ethereumWalletCache.size >= 1000) ethereumWalletCache.delete(ethereumWalletCache.keys().next().value);
+        ethereumWalletCache.set(owner, { at: Date.now(), value: ethereum });
+      }
+    } catch (error) { console.error("Wallet Ethereum FTHG unavailable:", error); ethereumError = error.message; }
+  };
+  const readWorld = async () => {
+    try {
+      if (!store) throw new Error("World fund lookup requires the Dollar writer.");
+      worldFunds = store.walletWorldView(owner);
+      if (!worldFunds && publicWorldAccount) worldFunds = { accountId: publicWorldAccount, wallet: null,
+        available: api.walletAccount(publicWorldAccount).balance.available, mode: "guest", source: "explicit-public-account" };
+      if (worldFunds) worldFunds.duplicate = worldFunds.accountId === require("../services/fth-ledger/ledger").walletAccountId(owner);
+    } catch (error) { console.error("Wallet World funds unavailable:", error); worldError = error.message; }
+  };
+  const [native] = await Promise.all([gold.nativeBalance(owner), readEthereum(), readWorld()]);
+  return { ethereum, ethereumError, native, world: worldFunds, worldError };
+});
+let portfolioGoldCache, portfolioGoldAt = 0;
+cms.setPortfolioGold(async () => {
+  if (Date.now() - portfolioGoldAt < 30000) return portfolioGoldCache;
+  const [bridge, market] = await Promise.allSettled([
+    gold.stats(), gold.marketPrice(),
+  ]);
+  if (bridge.status === "rejected") console.error("Portfolio Gold bridge unavailable:", bridge.reason);
+  if (market.status === "rejected") console.error("Portfolio FTHG/USD feed unavailable:", market.reason);
+  portfolioGoldCache = { ...(bridge.status === "fulfilled" ? bridge.value : {}),
+    usdMarket: market.status === "fulfilled" ? market.value : null,
+    error: [bridge, market].filter(result => result.status === "rejected").map(result => result.reason.message).join("; ") || null };
+  portfolioGoldAt = Date.now();
+  return portfolioGoldCache;
+});
 
 function siteFor(hostname) {
   const label = hostname.split(".")[0];
@@ -144,10 +201,173 @@ async function forwardGame(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  cms.serverProfile?.recordRequest(req, res);
   try {
+    injectTelemetry(res);
     const url = new URL(req.url, "http://x");
     const hostname = new URL(`http://${req.headers.host || "localhost"}`).hostname;
     const site = siteFor(hostname);
+    if (url.pathname.startsWith("/api/telemetry/")) return cms.telemetryRequest(req, res);
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({ status: "ok", release: path.basename(root) }));
+    }
+    if (site === "cms") return redirect(res, siteUrl(req, "admin", url.pathname + url.search), 301);
+    if (site === "db" && url.pathname.startsWith("/api/")) {
+      if (url.pathname.startsWith("/api/v1/db/")) return cms(req, res);
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Unknown database service endpoint." }));
+    }
+    if (url.pathname.startsWith("/api/intranet/") || url.pathname.startsWith("/api/silver/")) return cms(req, res);
+    if (site === "ledger" && url.pathname.startsWith("/api/notes/ledger/")) return cms(req, res);
+    if (site === "ledger" && url.pathname === "/explorer")
+      return redirect(res, siteUrl(req, "ledger", "/explorer/" + url.search), 301);
+    if (site !== "admin" && url.pathname.startsWith("/api/v1/world/profile") && await world.handle(req, res)) return;
+    if (["app", "silver", "db", "ledger"].includes(site) && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/shared/")) {
+      const directory = site === "ledger" && (url.pathname === "/fth.js" || url.pathname.startsWith("/explorer/"))
+        ? path.join(sitesRoot, "dollar.featheral.com")
+        : path.join(sitesRoot, `${site}.featheral.com`);
+      let pathname = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+      if (pathname.endsWith("/")) pathname += "index.html";
+      const file = path.resolve(directory, "." + pathname);
+      if (!file.startsWith(directory + path.sep)) {
+        res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Site resource not found.");
+      }
+      let fileStat;
+      try { fileStat = await fs.promises.stat(file); }
+      catch (error) {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") {
+          res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Site resource not found.");
+        }
+        throw error;
+      }
+      if (!fileStat.isFile()) {
+        res.writeHead(404, { "Content-Type": "text/plain" }); return res.end("Site resource not found.");
+      }
+      const content = await fs.promises.readFile(file);
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
+      res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
+      return res.end(content);
+    }
+    if (site !== "admin" && url.pathname.startsWith("/api/v1/gold/") && await gold.handle(req, res)) return;
+    if (site !== "admin" && (url.pathname.startsWith("/api/v1/notes/") || site === "notes"
+      && (url.pathname === "/api/v1/fth" || url.pathname.startsWith("/api/v1/fth/")))
+      && await api.handle(req, res)) return;
+    const walletRoot = path.join(sitesRoot, "wallet.featheral.com");
+    if (site === "gold" && ["/conversion", "/conversion/", "/conversion/index.html"].includes(url.pathname))
+      return redirect(res, siteUrl(req, "ex", "/gold-channel/") + url.search, 302);
+    if (site === "wallet" && url.pathname === "/ethereum/")
+      return redirect(res, siteUrl(req, "ex", "/ethereum/") + url.search, 302);
+    if (site === "ex") {
+      if (url.pathname.startsWith("/api/v1/gold/") && await gold.handle(req, res)) return;
+      const channels = {
+        "/ethereum/": path.join(walletRoot, "ethereum", "index.html"),
+        "/ethereum/wallet.js": path.join(walletRoot, "ethereum", "wallet.js"),
+        "/ethereum/staking.js": path.join(walletRoot, "ethereum", "staking.js"),
+        "/gold-channel/": path.join(sitesRoot, "gold.featheral.com", "conversion", "index.html"),
+        "/gold-channel/reserve.js": path.join(sitesRoot, "gold.featheral.com", "conversion", "reserve.js"),
+        "/reserve.css": path.join(sitesRoot, "gold.featheral.com", "reserve.css"),
+        "/reserve-view.js": path.join(sitesRoot, "gold.featheral.com", "reserve-view.js"),
+        "/fth.js": path.join(sitesRoot, "dollar.featheral.com", "fth.js"),
+        "/ethers.js": path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js"),
+      };
+      if (Object.hasOwn(channels, url.pathname)) {
+        const file = channels[url.pathname];
+        if (file.endsWith(".html")) res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+        res.writeHead(200, { "Content-Type": types[path.extname(file)], "Cache-Control": "no-store" });
+        const content = fs.readFileSync(file);
+        return res.end(file.endsWith(".html") ? content.toString().replace('href="/conversion/"', 'href="/gold-channel/"') : content);
+      }
+    }
+    if (["/shared/wallet-profile.js", "/shared/wallet-profile.css"].includes(url.pathname)) {
+      if (site !== "wallet") return redirect(res, siteUrl(req, "wallet", url.pathname), 302);
+      res.writeHead(200, { "Content-Type": types[path.extname(url.pathname)], "Cache-Control": "no-store" });
+      return res.end(fs.readFileSync(path.join(walletRoot, path.basename(url.pathname))));
+    }
+    if (site === "wallet") {
+      const summary = url.pathname.match(/^\/api\/wallet\/accounts\/(0x[0-9a-fA-F]{40})$/);
+      if (url.pathname.startsWith("/api/wallet/accounts/")) {
+        const origin = req.headers.origin;
+        if (origin && !require("../services/wallet-api/ui").allowedOrigin(origin)) {
+          res.writeHead(403, { "Content-Type": types[".json"] });
+          return res.end(JSON.stringify({ error: "Unsupported wallet reader origin." }));
+        }
+        if (origin) { res.setHeader("Access-Control-Allow-Origin", origin); res.setHeader("Vary", "Origin"); }
+        if (req.method !== "GET" || !summary) {
+          res.writeHead(400, { "Content-Type": types[".json"] });
+          return res.end(JSON.stringify({ error: "Use GET with a valid Ethereum wallet address." }));
+        }
+        const result = await cms.walletSummary(summary[1], url.searchParams.get("worldAccount"));
+        res.writeHead(200, { "Content-Type": types[".json"], "Cache-Control": "no-store" });
+        return res.end(JSON.stringify(result));
+      }
+      if (url.pathname === "/api/wallet/ui") {
+        const config = require("../services/wallet-api/ui").walletUi(url.searchParams);
+        res.writeHead(200, { "Content-Type": types[".json"], "Cache-Control": "no-store" });
+        return res.end(JSON.stringify(config));
+      }
+      if (url.pathname.startsWith("/api/creation/")) return cms(req, res);
+      if (url.pathname.startsWith("/api/v1/dollar/") && await api.handle(req, res)) return;
+      if (url.pathname.startsWith("/api/v1/gold/") && await gold.handle(req, res)) return;
+      const assets = { "/": "wallet-app.html", "/wallet/": "wallet-app.html", "/wallet": "wallet-app.html",
+        "/wallet-app.js": "wallet-app.js", "/wallet-app.css": "wallet-app.css", "/embed.js": "embed.js",
+        "/vault.js": "vault.js", "/portfolio-view.js": "portfolio-view.js", "/site-sign-in.js": "site-sign-in.js",
+        "/exchange-auth.html": "exchange-auth.html", "/exchange-auth.js": "exchange-auth.js",
+        "/ethereum/": path.join("ethereum", "index.html"), "/ethereum/wallet.js": path.join("ethereum", "wallet.js"),
+        "/ethereum/staking.js": path.join("ethereum", "staking.js") };
+      if (Object.hasOwn(assets, url.pathname)) {
+        if (assets[url.pathname].endsWith(".html")) {
+          require("../services/wallet-api/ui").walletUi(url.searchParams);
+          res.setHeader("Content-Security-Policy", url.pathname.startsWith("/ethereum/") || url.pathname === "/exchange-auth.html" ? "frame-ancestors 'none'"
+            : "frame-ancestors 'self' https://featheral.com https://*.featheral.com http://localhost:* http://*.localhost:*");
+        }
+        res.writeHead(200, { "Content-Type": types[path.extname(assets[url.pathname])], "Cache-Control": "no-store" });
+        return res.end(fs.readFileSync(path.join(walletRoot, assets[url.pathname])));
+      }
+      if (site === "wallet" && url.pathname === "/fth.js") {
+        res.writeHead(200, { "Content-Type": types[".js"], "Cache-Control": "no-store" });
+        return res.end(fs.readFileSync(path.join(sitesRoot, "dollar.featheral.com", "fth.js")));
+      }
+      if (site === "wallet" && url.pathname === "/ethers.js") {
+        res.writeHead(200, { "Content-Type": types[".js"], "Cache-Control": "public, max-age=86400" });
+        return res.end(fs.readFileSync(path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js")));
+      }
+      if (site === "wallet" && url.pathname.startsWith("/shared/")) {
+        const file = path.resolve(root, "." + url.pathname);
+        if (!file.startsWith(path.join(root, "shared") + path.sep)) { res.writeHead(404); return res.end("Not found"); }
+        res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
+        return res.end(fs.readFileSync(file));
+      }
+      if (["/wallet/wallet.js", "/wallet/staking.js"].includes(url.pathname))
+        return redirect(res, siteUrl(req, "wallet", url.pathname.replace("/wallet/", "/ethereum/")), 301);
+    }
+    if (!["wallet", "admin"].includes(site)) {
+      if (["/wallet", "/wallet/"].includes(url.pathname)) {
+        res.writeHead(200, { "Content-Type": types[".html"], "Cache-Control": "no-store" });
+        return res.end(fs.readFileSync(path.join(walletRoot, "host.html"), "utf8"));
+      }
+      if (url.pathname === "/wallet-host.js") {
+        res.writeHead(200, { "Content-Type": types[path.extname(url.pathname)], "Cache-Control": "no-store" });
+        return res.end(fs.readFileSync(path.join(walletRoot, "wallet-host.js")));
+      }
+      if (["/wallet-app.js", "/wallet-app.css"].includes(url.pathname)) {
+        return redirect(res, siteUrl(req, "wallet", url.pathname), 301);
+      }
+    }
+    if (["dollar", "ex", "notes"].includes(site)) {
+      if (url.pathname.startsWith("/api/v1/dollar/") && await api.handle(req, res)) return;
+    }
+    if (site === "dollar" && url.pathname.startsWith("/api/creation/")) return cms(req, res);
+    if (["foundation", "gold", "dollar", "world"].includes(site)
+        && (url.pathname === "/admin" || url.pathname.startsWith("/admin/"))) {
+      return redirect(res, siteUrl(req, "admin", `/#/operations/${site}`), 301);
+    }
+    if (!["foundation", "gold", "dollar", "world", "ledger"].includes(site) ||
+        (site === "foundation" && cms.resolveHostname(hostname))) {
+      cms(req, res);
+      return;
+    }
     if (url.pathname.startsWith("/api/dollar/game/")) {
       if (dollarGameApi) dollarGameApi.emit("request", req, res);
       else await forwardGame(req, res);
@@ -161,30 +381,43 @@ const server = http.createServer(async (req, res) => {
       else await forwardGame(req, res);
       return;
     }
+    if (site === "dollar" && url.pathname.startsWith("/explorer/"))
+      return redirect(res, siteUrl(req, "ledger", url.pathname + url.search), 301);
     let p = decodeURIComponent(url.pathname);
     if (!["dollar", "world"].includes(site) && (p === "/wallet" || p.startsWith("/wallet/"))) return redirect(res, siteUrl(req, "world", "/play/bank/") + url.search);
     if (["/wallet", "/admin", "/explorer", "/ledger", "/play"].includes(p)) return redirect(res, p + "/" + url.search, 301);
     if (site === "world" && p === "/about") return redirect(res, "/about/" + url.search, 301);
-    let base = path.join(sitesRoot, site);
-    if (site === "world" && (p.startsWith("/wallet/") || p === "/fth.js")) base = path.join(sitesRoot, "dollar");
+    let base = path.join(sitesRoot, site === "foundation" ? "featheral.com" : `${site}.featheral.com`);
+    if (site === "world" && (p.startsWith("/wallet/") || p === "/fth.js")) base = path.join(sitesRoot, "dollar.featheral.com");
     if (site === "world" && p === "/about/") {
-      base = path.join(sitesRoot, "world", "featheral", "dist");
+      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
       p = "/about/";
     }
     if (site === "world" && p.startsWith("/play/")) {
-      base = path.join(sitesRoot, "world", "featheral", "dist");
+      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
       p = p.slice("/play".length);
     }
     if (site === "world" && ["/robots.txt", "/sitemap.xml"].includes(p)) {
-      base = path.join(sitesRoot, "world", "featheral", "dist");
+      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
     }
     if (p.startsWith("/shared/")) {
-      base = path.join(sitesRoot, "shared");
+      base = path.join(root, "shared");
       p = p.slice("/shared".length);
     }
     if (p.endsWith("/")) p += "index.html";
     const file = path.resolve(base, "." + p);
     if (!file.startsWith(base + path.sep)) { res.writeHead(404); return res.end("Not found"); }
+    const contentHost = site === "foundation" ? "featheral.com" : `${site}.featheral.com`;
+    if (path.extname(file) === ".html" && base === path.join(sitesRoot, contentHost)
+        && (p === "/index.html" || /^\/(docs|governance)\/index\.html$/.test(p))) {
+      if (!cms.hasSitePage(contentHost, p.slice(1))) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        return res.end("Not found");
+      }
+      const html = cms.renderSitePage(contentHost, p.slice(1));
+      res.writeHead(200, { "Content-Type": types[".html"], "Cache-Control": "no-store" });
+      return res.end(html);
+    }
     fs.readFile(file, (err, data) => {
       if (err) {
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
@@ -197,6 +430,10 @@ const server = http.createServer(async (req, res) => {
     console.error("Request handler failed:", error);
     if (res.writableEnded) return;
     if (!res.headersSent) {
+      if (error.status === 400) {
+        res.writeHead(400, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        return res.end(JSON.stringify({ error: error.message }));
+      }
       res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Internal server error");
       return;
@@ -215,20 +452,26 @@ async function start() {
   console.log(`Featheral sites (${api.mode} FTH$ ledger node ${api.nodeId}):`);
   console.log(`  Foundation  ${local("foundation")}  ·  admin ${local("foundation")}admin/`);
   console.log(`  Gold        ${local("gold")}  ·  admin ${local("gold")}admin/`);
-  console.log(`  Dollar      ${local("dollar")}  ·  wallet ${local("dollar")}wallet/  ·  explorer ${local("dollar")}explorer/  ·  admin ${local("dollar")}admin/`);
+  console.log(`  Dollar      ${local("dollar")}  ·  wallet ${local("dollar")}wallet/  ·  explorer redirect ${local("dollar")}explorer/  ·  admin ${local("dollar")}admin/`);
+  console.log(`  Ledger      ${local("ledger")}  ·  FTH$ explorer ${local("ledger")}explorer/`);
   console.log(`  World       ${local("world")}  ·  ledger ${local("world")}ledger/  ·  admin ${local("world")}admin/`);
+  console.log(`  Admin       ${local("admin")}`);
+  console.log(`  X           ${local("x")}`);
+  console.log(`  Exchange    ${local("ex")}  (local demo; no real funds)`);
   if (reserveEngine) console.warn(`${reserveMode === "live" ? "LIVE OFF-CHAIN RESERVE" : "ISOLATED RESERVE TEST"}: pending allocations are not Ethereum transfers. Ethereum submission remains disabled.`);
   });
 }
 start().catch(error => { console.error("Server initialization failed:", error); shutdown(1); });
 
 function shutdown(exitCode = 0) {
+  cms.close();
   gameApi?.emit("close");
   dollarGameApi?.emit("close");
   store?.close();
   world.close();
   api.close();
   gold.close();
+  cms.database?.sqlite.closeAll();
   server.close(() => process.exit(exitCode));
 }
 process.on("SIGINT", () => shutdown());

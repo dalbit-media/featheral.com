@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const { ethers } = require("ethers");
 
-const USERNAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{2,23}$/;
+const USERNAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.\-]{2,23}$/;
 const MAX_AVATAR_BYTES = 40 * 1024;
 const SIGNATURE_WINDOW_MS = 10 * 60 * 1000;
 const AVATAR_TYPES = {
@@ -21,13 +21,14 @@ function avatarDigest(avatar) {
 }
 
 // The browser builds the identical text, so wallets show users exactly what they authorize.
-function profileMessage({ address, username, avatar, issuedAt }) {
+function profileMessage({ address, username, avatar, bio, issuedAt }) {
   return [
     "Featheral profile update",
     "",
     `Address: ${address}`,
     `Username: ${username}`,
     `Avatar: ${avatarDigest(avatar)}`,
+    ...(bio === undefined ? [] : [`Bio: ${avatarDigest(bio)}`]),
     `Issued at: ${issuedAt}`,
     "Chain ID: 1",
     "",
@@ -44,6 +45,10 @@ function validateAvatar(avatar) {
   if (!bytes.length || bytes.length > MAX_AVATAR_BYTES) throw profileError(`avatar must be at most ${MAX_AVATAR_BYTES / 1024} KiB.`);
   if (!AVATAR_TYPES[match[1]](bytes)) throw profileError("avatar content does not match its declared image type.");
 }
+function validateBio(bio) {
+  if (typeof bio !== "string" || bio.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(bio))
+    throw profileError("bio must be text of at most 1,000 characters, without control characters.");
+}
 
 // Verifies everything that must hold on every node, including replicas importing the event later.
 function verifySignedProfile(input) {
@@ -57,12 +62,13 @@ function verifySignedProfile(input) {
   }
   const avatar = input.avatar ?? "";
   validateAvatar(avatar);
+  if (input.bio !== undefined) validateBio(input.bio);
   const issuedAtMs = Date.parse(input.issuedAt);
   if (typeof input.issuedAt !== "string" || !Number.isFinite(issuedAtMs) || new Date(issuedAtMs).toISOString() !== input.issuedAt) {
     throw profileError("issuedAt must be an ISO-8601 UTC timestamp.");
   }
   if (typeof input.signature !== "string" || !ethers.isHexString(input.signature)) throw profileError("signature must be a hex string.");
-  const profile = { address, username: input.username, avatar, issuedAt: input.issuedAt };
+  const profile = { address, username: input.username, avatar, ...(input.bio === undefined ? {} : { bio: input.bio }), issuedAt: input.issuedAt };
   let signer;
   try {
     signer = ethers.verifyMessage(profileMessage({ ...profile, address: signedAddress }), input.signature);
@@ -77,4 +83,4 @@ function assertFreshSignature(issuedAtMs, now = Date.now(), label = "Profile") {
   if (Math.abs(now - issuedAtMs) > SIGNATURE_WINDOW_MS) throw profileError(`${label} signature expired. Sign again.`, 401);
 }
 
-module.exports = { profileMessage, avatarDigest, verifySignedProfile, assertFreshSignature, USERNAME_PATTERN, MAX_AVATAR_BYTES };
+module.exports = { profileMessage, avatarDigest, verifySignedProfile, assertFreshSignature, validateAvatar, validateBio, USERNAME_PATTERN, MAX_AVATAR_BYTES };

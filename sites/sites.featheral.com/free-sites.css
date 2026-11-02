@@ -1,0 +1,6 @@
+.top { flex-wrap: wrap; }
+.top .names { min-width: 0; }
+.top .sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; }
+.website-directory { max-width: 860px; margin: 24px auto; padding: 24px; }
+.website-directory article { border: 1px solid var(--line,#ccc); border-radius: 12px; margin: 12px 0; padding: 18px; }
+.website-directory p { overflow-wrap: anywhere; }

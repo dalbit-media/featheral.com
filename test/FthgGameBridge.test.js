@@ -27,7 +27,7 @@ describe("FthgGameBridge", () => {
   it("keeps the published bridge ABI synchronized with the Solidity source", async () => {
     const fs = require("node:fs");
     const crypto = require("node:crypto");
-    const artifact = JSON.parse(fs.readFileSync("sites/shared/abi/FthgGameBridge.json", "utf8"));
+    const artifact = JSON.parse(fs.readFileSync("shared/abi/FthgGameBridge.json", "utf8"));
     const source = fs.readFileSync("contracts/FthgGameBridge.sol");
     const compiled = await require("hardhat").artifacts.readArtifact("FthgGameBridge");
     expect(artifact.sourceSha256).to.equal(crypto.createHash("sha256").update(source).digest("hex"));

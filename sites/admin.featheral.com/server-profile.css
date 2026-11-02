@@ -1,0 +1,33 @@
+.server-profile-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.server-profile-heading p { margin: 0; }
+.server-profile-heading .row { align-items: center; flex-wrap: wrap; }
+.server-profile-grid { margin-bottom: 16px; }
+.server-profile-risks { display: grid; gap: 8px; }
+.server-risk { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
+.server-risk > span { font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.server-risk p { margin: 0; color: var(--muted); }
+.server-risk.healthy > span { color: var(--ok); }
+.server-risk.warning { background: #fffbeb; border-color: #fcd34d; }
+.server-risk.warning > span { color: var(--warn); }
+.server-risk.critical { background: #fef2f2; border-color: #fca5a5; }
+.server-risk.critical > span { color: var(--bad); }
+.server-risk.unknown > span { color: var(--muted); }
+.server-profile-storage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.server-storage-item { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; border-bottom: 1px solid var(--line); padding: 7px 0; }
+.server-storage-item small { color: var(--muted); grid-column: 1 / -1; }
+.server-profile-chart-card { margin-bottom: 16px; }
+.server-profile-chart { width: 100%; overflow: hidden; }
+.server-profile-chart svg { display: block; width: 100%; height: auto; min-height: 250px; }
+.server-chart-label, .server-chart-value { fill: var(--muted); font: 12px system-ui, sans-serif; }
+.server-chart-value { fill: var(--ink); font-weight: 600; }
+.server-chart-grid { stroke: var(--line); stroke-width: 1; }
+.server-chart-line { fill: none; stroke: var(--brand); stroke-width: 2; vector-effect: non-scaling-stroke; }
+@media(max-width:850px) {
+  .server-profile-grid { grid-template-columns: 1fr; }
+  .server-profile-heading { flex-direction: column; }
+}
+@media(max-width:560px) {
+  .server-profile-storage { grid-template-columns: 1fr; }
+  .server-profile-chart svg { min-height: 220px; }
+  .server-chart-label, .server-chart-value { font-size: 10px; }
+}

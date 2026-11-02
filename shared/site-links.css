@@ -1,0 +1,59 @@
+.eco-bar{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px;padding:6px 12px;border-bottom:1px solid var(--line,#dce2e8);background:var(--panel,#fff);font:12px/1.5 system-ui,sans-serif}
+.eco-bar a{display:inline-block;padding:4px 10px;color:var(--mut,#526172);text-decoration:none;border-radius:20px}
+.eco-bar a:hover,.eco-bar a:focus-visible{color:var(--txt,#202631);background:var(--btn,#edf2f7)}
+.eco-bar a[aria-current=page]{font-weight:700}
+.eco-footer{display:none}
+body:has(header.top[data-wallet-header=FTHX]){--top:64px}
+header[data-wallet-header]{box-sizing:border-box;min-width:0;gap:12px;padding:10px clamp(12px,2vw,24px)}
+header[data-wallet-header]>nav{min-width:0}
+header[data-wallet-header] .brand{min-width:0}
+header[data-wallet-header] .brand img{flex:none}
+header[data-wallet-header] .brand b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header[data-wallet-header=FTHX]{display:flex;align-items:center;flex-wrap:nowrap;height:64px}
+header[data-wallet-header=FTHX] .logo{display:flex;align-items:center;gap:10px;flex:1;min-width:0;font:700 18px/1.2 system-ui,sans-serif;text-decoration:none;color:inherit}
+header[data-wallet-header=FTHX] .logo img{flex:none;width:34px;height:34px}
+header[data-wallet-header=FTHX] .logo>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header[data-wallet-header=FTHX] .tabs{display:flex;gap:4px;align-items:center;flex:0 1 auto;min-width:0;margin:0;overflow-x:auto;scrollbar-width:thin}
+header[data-wallet-header=FTHX] .tabs a{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 8px;box-sizing:border-box;white-space:nowrap;font-size:12px;font-weight:500;text-decoration:none;border-radius:5px}
+header[data-wallet-header] .central-wallet-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:0;width:auto;min-height:32px;height:32px;margin:0;padding:0 8px;box-sizing:border-box;border:1px solid var(--line,#3c3740);border-radius:6px;background:transparent;color:inherit;box-shadow:none;opacity:1;font:500 12px/1 system-ui,sans-serif;cursor:pointer;vertical-align:middle}
+header .central-wallet-icon{display:inline-flex;flex:none;width:16px;height:16px;color:var(--muted,var(--mut,currentColor))}
+header .central-wallet-icon svg{width:100%;height:100%;visibility:visible}
+header .central-wallet-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:20px;height:20px;border-radius:50%;overflow:hidden;background:var(--btn,#2b2b38)}
+header .central-wallet-avatar img,header .central-wallet-avatar svg{display:block;width:20px;height:20px;object-fit:cover;visibility:visible}
+header .central-wallet-label{display:inline;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:20px}
+header .central-wallet-button[data-wallet-state=selected] .central-wallet-label{padding-left:6px;border-left:1px solid var(--line,#3c3740);font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.02em}
+header .central-wallet-button[data-wallet-state=selected] .central-wallet-icon{color:var(--brand,var(--gold,currentColor))}
+header .central-wallet-button:hover{background:var(--btn,#2b2b38);border-color:var(--brand,var(--gold,#f6c453))}
+header .central-wallet-button:focus-visible,header[data-wallet-header=FTHX] :focus-visible{outline:2px solid var(--brand,var(--gold,#c78d26));outline-offset:3px}
+body.eco-fixed-header>header.top{top:var(--eco-height)}
+body.eco-fixed-header>#view{height:calc(100dvh - var(--eco-height))}
+@media(max-width:700px){
+  header[data-wallet-header]{padding:8px 12px;gap:8px}
+  header[data-wallet-header]:not([data-wallet-header=FTHX]){flex-wrap:nowrap}
+  header[data-wallet-header]:not([data-wallet-header=FTHX]) .brand{flex:1}
+  header[data-wallet-header]:not([data-wallet-header=FTHX])>nav{flex:none}
+  body:has(header.top[data-wallet-header=FTHX]){--top:84px}
+  header[data-wallet-header=FTHX]{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:32px 32px;gap:4px 10px;padding:8px 12px;max-width:100%;height:auto}
+  header.top[data-wallet-header=FTHX]{height:84px}
+  header[data-wallet-header=FTHX] .logo{grid-column:1;grid-row:1;font-size:16px}
+  header[data-wallet-header=FTHX] .logo .sub{display:none}
+  header[data-wallet-header=FTHX] .central-wallet-button{grid-column:2;grid-row:1}
+  header[data-wallet-header=FTHX] .tabs{grid-column:1/-1;grid-row:2;max-width:100%;width:100%;height:32px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  header[data-wallet-header=FTHX] .tabs::-webkit-scrollbar{display:none}
+  header[data-wallet-header=FTHX] .tabs a{flex:none;font-size:12px;padding:0 8px}
+  header[data-wallet-header=FTHX] .tabs a span{display:inline}
+  header[data-wallet-header=FTHX]:not(:has(.tabs)){display:flex;height:52px}
+  header[data-wallet-header=FTHX]:not(:has(.tabs)) .brand{flex:1}
+  .eco-bar{display:none!important}
+  body.eco-fixed-header>header.top{top:0}
+  body.eco-fixed-header>#view{height:auto;min-height:100dvh}
+  footer.eco-footer{display:block;position:relative;clear:both;box-sizing:border-box;width:100%;max-width:none;margin:24px 0 0;padding:20px 16px max(20px,env(safe-area-inset-bottom));border-top:1px solid var(--line,#dce2e8);background:var(--panel,#fff);color:var(--txt,var(--text,#202631));text-align:left;font:13px/1.5 system-ui,sans-serif}
+  .eco-footer nav{display:block;max-width:520px;margin:0}
+  .eco-footer ul{display:block;list-style:none;margin:0;padding:0}
+  .eco-footer li{display:block;margin:0;padding:0}
+  .eco-footer li>ul{margin:4px 0 8px 10px;padding-left:12px;border-left:1px solid var(--line,#dce2e8)}
+  .eco-footer li>span{display:block;padding:8px 0 2px;color:var(--muted,var(--mut,#526172));font-size:11px;font-weight:600}
+  .eco-footer a{display:flex;align-items:center;min-height:32px;width:fit-content;padding:4px 0;color:inherit;text-decoration:none}
+  .eco-footer a:hover,.eco-footer a:focus-visible{color:var(--brand,var(--gold,#655000));text-decoration:underline}
+  .eco-footer a[aria-current=page]{color:var(--brand,var(--gold,inherit));font-weight:700}
+}

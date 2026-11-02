@@ -1,10 +1,9 @@
 "use strict";
 
 const { ethers } = require("ethers");
-const { FthLedger, walletAccountId } = require("../fth-ledger/ledger");
-const { txHash, canonical } = require("../fth-ledger/codec");
+const { randomBytes } = require("node:crypto");
 const { assertFreshSignature } = require("../token-api/profile");
-const { LedgerDb } = require("../ledger-sql/ledgerDb");
+const { FeedDatabase } = require("./database");
 
 const MAX_TEXT = 280;
 const MAX_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -53,8 +52,9 @@ function checksummed(value, name) {
   return value;
 }
 
-// Structure and signature checks that hold on every node, including replicas re-validating blocks.
+// The legacy signing domain is retained for existing signed-in browser sessions.
 function verifyAction(kind, d) {
+  if (!Object.hasOwn(ACTION_FIELDS, kind)) throw socialError("Unknown action kind.");
   if (!d || typeof d !== "object" || Array.isArray(d)) throw socialError("Action data must be an object.");
   const allowed = new Set([...COMMON_FIELDS, ...ACTION_FIELDS[kind]]);
   for (const key of Object.keys(d)) if (!allowed.has(key)) throw socialError(`Unexpected field ${key}.`);
@@ -99,120 +99,90 @@ function verifyAction(kind, d) {
 }
 
 const SCHEMA = `
-CREATE TABLE blocks (
-  height INTEGER PRIMARY KEY, hash TEXT NOT NULL, prev_hash TEXT NOT NULL,
-  time TEXT NOT NULL, time_ms INTEGER NOT NULL, tx_count INTEGER NOT NULL, file TEXT NOT NULL, signed INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS actions (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL, author TEXT NOT NULL, signer TEXT NOT NULL,
+  nonce TEXT NOT NULL, issued_at TEXT NOT NULL, time TEXT NOT NULL, time_ms INTEGER NOT NULL,
+  target TEXT NOT NULL, data TEXT NOT NULL, UNIQUE(author, nonce)
 );
-CREATE TABLE transactions (
-  hash TEXT PRIMARY KEY, id TEXT NOT NULL, kind TEXT NOT NULL, height INTEGER NOT NULL, idx INTEGER NOT NULL,
-  time TEXT NOT NULL, time_ms INTEGER NOT NULL, author TEXT NOT NULL, signer TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL
-);
-CREATE INDEX transactions_height ON transactions(height, idx);
-CREATE INDEX transactions_author ON transactions(author);
-CREATE INDEX transactions_kind ON transactions(kind);
-CREATE TABLE posts (
+CREATE INDEX IF NOT EXISTS actions_author ON actions(author);
+CREATE INDEX IF NOT EXISTS actions_kind ON actions(kind);
+CREATE TABLE IF NOT EXISTS posts (
   id TEXT PRIMARY KEY, author TEXT NOT NULL, text TEXT NOT NULL, reply_to TEXT NOT NULL,
-  height INTEGER NOT NULL, time TEXT NOT NULL, time_ms INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0
+  time TEXT NOT NULL, time_ms INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, hidden INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX posts_author ON posts(author, time_ms);
-CREATE INDEX posts_reply ON posts(reply_to);
-CREATE INDEX posts_time ON posts(time_ms);
-CREATE TABLE likes (post_id TEXT NOT NULL, author TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (post_id, author));
-CREATE INDEX likes_author ON likes(author, time_ms);
-CREATE TABLE reposts (post_id TEXT NOT NULL, author TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (post_id, author));
-CREATE INDEX reposts_author ON reposts(author, time_ms);
-CREATE TABLE follows (follower TEXT NOT NULL, followee TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (follower, followee));
-CREATE INDEX follows_followee ON follows(followee);
-CREATE TABLE sessions (wallet TEXT PRIMARY KEY, session_key TEXT NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE moderation (tx_hash TEXT PRIMARY KEY, moderator TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, time_ms INTEGER NOT NULL, applied INTEGER NOT NULL);
-CREATE TABLE suspended (wallet TEXT PRIMARY KEY);
+CREATE INDEX IF NOT EXISTS posts_author ON posts(author, time_ms);
+CREATE INDEX IF NOT EXISTS posts_reply ON posts(reply_to);
+CREATE INDEX IF NOT EXISTS posts_time ON posts(time_ms);
+CREATE TABLE IF NOT EXISTS likes (post_id TEXT NOT NULL REFERENCES posts(id), author TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (post_id, author));
+CREATE INDEX IF NOT EXISTS likes_author ON likes(author, time_ms);
+CREATE TABLE IF NOT EXISTS reposts (post_id TEXT NOT NULL REFERENCES posts(id), author TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (post_id, author));
+CREATE INDEX IF NOT EXISTS reposts_author ON reposts(author, time_ms);
+CREATE TABLE IF NOT EXISTS follows (follower TEXT NOT NULL, followee TEXT NOT NULL, time_ms INTEGER NOT NULL, PRIMARY KEY (follower, followee));
+CREATE INDEX IF NOT EXISTS follows_followee ON follows(followee);
+CREATE TABLE IF NOT EXISTS sessions (wallet TEXT PRIMARY KEY, session_key TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS moderation (action_id TEXT PRIMARY KEY REFERENCES actions(id), moderator TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, time_ms INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS suspended (wallet TEXT PRIMARY KEY);
 `;
 
 const COMMENTS = {
-  blocks: "One row per sealed block of the World communication ledger.",
-  transactions: "Every signed social action. author is the wallet; signer is the wallet or its delegated session key; data is the canonical action JSON.",
-  posts: "Posts and replies. id is the transaction hash. deleted is set by the author; hidden by a configured moderator.",
+  actions: "Persisted signed offchain database writes. Author/nonce is unique; data includes the original signature. IDs are opaque, not transaction hashes.",
+  posts: "Posts and replies. id is an opaque post identifier. deleted is set by the author; hidden by a configured moderator.",
   likes: "Current likes (an UNLIKE removes the row).",
   reposts: "Current reposts.",
   follows: "Current follow edges, wallet to wallet.",
   sessions: "Latest session-key delegation per wallet (lets the browser sign without a wallet popup).",
-  moderation: "Moderator actions; applied is 1 only when the signer is a moderator configured on this node.",
+  moderation: "Actions authorized by configured moderators.",
   suspended: "Wallets currently suspended by a configured moderator.",
 };
 
-// Featheral World communication ledger. It reuses the FTH$ ledger engine unchanged (hash-chained daily
-// block files, writer signatures, replication, receipts) but records signed social actions instead of
-// balances, and indexes them into a SQLite database that serves the timelines.
-class SocialLedger extends FthLedger {
+class SocialDatabase {
   constructor(options = {}) {
-    super({ ...options, genesis: { ...options.genesis } });
     this.moderators = new Set((options.moderators || []).map((address) => String(address).toLowerCase()));
+    this.sql = new FeedDatabase({ ...options, schema: SCHEMA, comments: COMMENTS });
   }
 
-  buildSql() {
-    return new LedgerDb({ schema: SCHEMA, comments: COMMENTS });
-  }
-
-  reset() {
-    super.reset();
-    this.posts = new Map();
-    this.likes = new Set();
-    this.reposts = new Set();
-    this.follows = new Set();
-    this.sessions = new Map();
-  }
-
-  createGenesis() {
-    const t = Date.now();
-    const tx = { i: "genesis", k: "GENESIS", a: "", v: "0", d: { name: "Featheral World Ledger", kind: "communication", layer: 3, ...this.genesisData }, t };
-    this.applyTx(tx, { height: 0 });
-    this.writeBlock([tx], t);
-  }
-
-  applyTx(tx, { height = null, fresh = false, now = Date.now() } = {}) {
-    if (!tx || typeof tx !== "object") throw socialError("Transaction must be an object.");
-    if (typeof tx.i !== "string" || !tx.i || tx.i.length > 200) throw socialError("Transaction id must be 1-200 characters.");
-    if (tx.k !== "GENESIS" && !ACTION_FIELDS[tx.k]) throw socialError(`Unknown transaction kind ${tx.k}.`);
-    if (typeof tx.a !== "string" || (tx.a !== "" && !BYTES32.test(tx.a))) throw socialError("Transaction account must be a lowercase bytes32 id.");
-    if (tx.v !== "0") throw socialError("Social transactions carry no amount.");
-    if (!tx.d || typeof tx.d !== "object" || Array.isArray(tx.d)) throw socialError("Transaction data must be an object.");
-    if (!Number.isSafeInteger(tx.t) || tx.t <= 0) throw socialError("Transaction time must be epoch milliseconds.");
-    if (this.ids.has(tx.i)) throw socialError("Transaction id was already used.", 409);
-    const hash = txHash(tx);
-    let commit;
-    if (tx.k === "GENESIS") {
-      if (height !== 0 || this.height !== -1) throw socialError("Genesis is only valid as the first transaction of block 0.", 409);
-      commit = () => { this.genesis = { ...tx.d, createdAt: new Date(tx.t).toISOString() }; };
-    } else {
-      const d = tx.d;
-      const { author, signer, issuedAtMs } = verifyAction(tx.k, d);
-      const who = author.toLowerCase();
-      if (tx.a !== walletAccountId(author)) throw socialError("Action account does not match its author.");
-      if (tx.i !== `soc:${who}:${d.n}`) throw socialError("Transaction id must be soc:<author>:<nonce>.");
-      if (fresh) assertFreshSignature(issuedAtMs, now, "Action");
+  submit({ kind, data: d }) {
+    const { author, signer, issuedAtMs } = verifyAction(kind, d);
+    // Lock before inspecting authorization, nonce and relationship state. No async work
+    // occurs between BEGIN IMMEDIATE and COMMIT, including on separate API connections.
+    return this.sql.transaction(() => {
+      const now = Date.now();
+      assertFreshSignature(issuedAtMs, now, "Action");
+      const payload = JSON.stringify(Object.fromEntries(Object.keys(d).sort().map((key) => [key, d[key]])));
+      const previous = this.sql.get("SELECT id, kind, data FROM actions WHERE author = ? AND nonce = ?", author, d.n);
+      if (previous) {
+        if (previous.kind !== kind || previous.data !== payload) throw socialError("Nonce was already used for a different action.", 409);
+        return { id: previous.id, status: "committed", replayed: true };
+      }
+      if (this.isSuspended(author) && kind !== "MOD") throw socialError("This wallet is suspended from Featheral World.", 403);
+      if (kind === "MOD" && !this.isModerator(author)) throw socialError("Only configured moderators can moderate.", 403);
       if (signer !== author) {
-        if (tx.k === "SESSION" || tx.k === "MOD") throw socialError("This action must be signed by the wallet itself.", 401);
-        const session = this.sessions.get(who);
-        if (!session || session.key !== signer.toLowerCase() || tx.t > session.exp) throw socialError("Session key is missing, replaced, or expired. Sign in again.", 401);
+        if (kind === "SESSION" || kind === "MOD") throw socialError("This action must be signed by the wallet itself.", 401);
+        const session = this.session(author);
+        if (!session || session.key !== signer || now >= session.exp) throw socialError("Session key is missing, replaced, or expired. Sign in again.", 401);
       }
       const live = (id) => {
-        const post = this.posts.get(id);
-        if (!post || post.deleted) throw socialError("Post was not found.", 404);
+        const post = this.sql.get("SELECT author, deleted, hidden FROM posts WHERE id = ?", id);
+        if (!post || post.deleted || post.hidden || this.isSuspended(post.author)) throw socialError("Post was not found.", 404);
         return post;
       };
-      switch (tx.k) {
+      const id = `0x${randomBytes(32).toString("hex")}`;
+      const time = new Date(now).toISOString();
+      this.sql.run("INSERT INTO actions VALUES (?,?,?,?,?,?,?,?,?,?)", id, kind, author, signer, d.n, d.ts, time, now, d.p || d.u || d.tg || d.rp || d.k || "", payload);
+      switch (kind) {
         case "SESSION":
-          if (d.exp <= tx.t || d.exp > tx.t + MAX_SESSION_MS) throw socialError("Session must expire within 7 days.");
-          commit = () => this.sessions.set(who, { key: d.k.toLowerCase(), exp: d.exp });
+          if (d.exp <= now || d.exp > now + MAX_SESSION_MS) throw socialError("Session must expire within 7 days.");
+          this.sql.run("INSERT INTO sessions VALUES (?,?,?) ON CONFLICT(wallet) DO UPDATE SET session_key = excluded.session_key, expires_at = excluded.expires_at", author, d.k, d.exp);
           break;
         case "POST":
           if (d.rp) live(d.rp);
-          commit = () => this.posts.set(hash, { author: who, deleted: false });
+          this.sql.run("INSERT INTO posts (id, author, text, reply_to, time, time_ms) VALUES (?,?,?,?,?,?)", id, author, d.text, d.rp, time, now);
           break;
         case "DELETE": {
-          const post = live(d.p);
-          if (post.author !== who) throw socialError("Only the author can delete a post.", 403);
-          commit = () => { post.deleted = true; };
+          const post = this.sql.get("SELECT author, deleted FROM posts WHERE id = ?", d.p);
+          if (!post || post.deleted) throw socialError("Post was not found.", 404);
+          if (post.author !== author) throw socialError("Only the author can delete a post.", 403);
+          this.sql.run("UPDATE posts SET deleted = 1 WHERE id = ?", d.p);
           break;
         }
         case "LIKE":
@@ -220,89 +190,46 @@ class SocialLedger extends FthLedger {
         case "REPOST":
         case "UNREPOST": {
           live(d.p);
-          const set = tx.k.endsWith("LIKE") ? this.likes : this.reposts;
-          const key = `${who}|${d.p}`;
-          const adding = tx.k === "LIKE" || tx.k === "REPOST";
-          if (adding === set.has(key)) throw socialError(adding ? "Already done." : "Nothing to undo.", 409);
-          commit = () => (adding ? set.add(key) : set.delete(key));
+          const table = kind.endsWith("LIKE") ? "likes" : "reposts";
+          const exists = Boolean(this.sql.get(`SELECT 1 FROM ${table} WHERE post_id = ? AND author = ?`, d.p, author));
+          const adding = kind === "LIKE" || kind === "REPOST";
+          if (adding === exists) throw socialError(adding ? "Already done." : "Nothing to undo.", 409);
+          if (adding) this.sql.run(`INSERT INTO ${table} VALUES (?,?,?)`, d.p, author, now);
+          else this.sql.run(`DELETE FROM ${table} WHERE post_id = ? AND author = ?`, d.p, author);
           break;
         }
         case "FOLLOW":
         case "UNFOLLOW": {
           if (d.u === author) throw socialError("You cannot follow yourself.");
-          const key = `${who}|${d.u.toLowerCase()}`;
-          const adding = tx.k === "FOLLOW";
-          if (adding === this.follows.has(key)) throw socialError(adding ? "Already following." : "Not following.", 409);
-          commit = () => (adding ? this.follows.add(key) : this.follows.delete(key));
+          const exists = Boolean(this.sql.get("SELECT 1 FROM follows WHERE follower = ? AND followee = ?", author, d.u));
+          const adding = kind === "FOLLOW";
+          if (adding === exists) throw socialError(adding ? "Already following." : "Not following.", 409);
+          if (adding) this.sql.run("INSERT INTO follows VALUES (?,?,?)", author, d.u, now);
+          else this.sql.run("DELETE FROM follows WHERE follower = ? AND followee = ?", author, d.u);
           break;
         }
         case "MOD":
           if (d.act === "HIDE" || d.act === "UNHIDE") {
-            if (!this.posts.has(d.tg)) throw socialError("Post was not found.", 404);
+            if (!this.sql.get("SELECT 1 FROM posts WHERE id = ?", d.tg)) throw socialError("Post was not found.", 404);
+            this.sql.run("UPDATE posts SET hidden = ? WHERE id = ?", d.act === "HIDE" ? 1 : 0, d.tg);
+          } else if (d.act === "SUSPEND") {
+            this.sql.run("INSERT OR IGNORE INTO suspended VALUES (?)", d.tg);
+          } else {
+            this.sql.run("DELETE FROM suspended WHERE wallet = ?", d.tg);
           }
-          commit = () => {};
+          this.sql.run("INSERT INTO moderation VALUES (?,?,?,?,?)", id, author, d.act, d.tg, now);
           break;
         default:
-          throw socialError("Unsupported transaction kind.");
+          throw socialError("Unsupported action kind.");
       }
-    }
-    commit();
-    this.ids.set(tx.i, hash);
-    return hash;
-  }
-
-  describeTx(tx, location) {
-    const d = tx.d;
-    const base = {
-      hash: txHash(tx),
-      id: tx.i,
-      kind: tx.k,
-      amount: "0",
-      time: new Date(tx.t).toISOString(),
-      status: location ? "sealed" : "pending",
-      height: location ? location.h : null,
-      index: location ? location.i : null,
-      from: tx.a,
-      to: "",
-    };
-    if (tx.k === "GENESIS") return { ...base, from: "", data: d };
-    const target = d.p || d.u || d.tg || d.rp || d.k || "";
-    return { ...base, signer: d.by, text: d.text, target };
-  }
-
-  indexSql(block, file) {
-    const db = this.sql;
-    db.transaction(() => {
-      db.run("INSERT OR REPLACE INTO blocks VALUES (?,?,?,?,?,?,?,?)", block.h, block.H, block.p, new Date(block.t).toISOString(), block.t, block.x.length, file, typeof block.S === "string" ? 1 : 0);
-      block.x.forEach((tx, index) => {
-        const d = tx.d;
-        const hash = txHash(tx);
-        const iso = new Date(tx.t).toISOString();
-        db.run("INSERT OR REPLACE INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?)", hash, tx.i, tx.k, block.h, index, iso, tx.t, d.w || "", d.by || "", d.p || d.u || d.tg || d.rp || d.k || "", canonical(d));
-        switch (tx.k) {
-          case "POST": db.run("INSERT OR REPLACE INTO posts (id, author, text, reply_to, height, time, time_ms) VALUES (?,?,?,?,?,?,?)", hash, d.w, d.text, d.rp, block.h, iso, tx.t); break;
-          case "DELETE": db.run("UPDATE posts SET deleted = 1 WHERE id = ?", d.p); break;
-          case "LIKE": db.run("INSERT OR IGNORE INTO likes VALUES (?,?,?)", d.p, d.w, tx.t); break;
-          case "UNLIKE": db.run("DELETE FROM likes WHERE post_id = ? AND author = ?", d.p, d.w); break;
-          case "REPOST": db.run("INSERT OR IGNORE INTO reposts VALUES (?,?,?)", d.p, d.w, tx.t); break;
-          case "UNREPOST": db.run("DELETE FROM reposts WHERE post_id = ? AND author = ?", d.p, d.w); break;
-          case "FOLLOW": db.run("INSERT OR IGNORE INTO follows VALUES (?,?,?)", d.w, d.u, tx.t); break;
-          case "UNFOLLOW": db.run("DELETE FROM follows WHERE follower = ? AND followee = ?", d.w, d.u); break;
-          case "SESSION": db.run("INSERT OR REPLACE INTO sessions VALUES (?,?,?)", d.w, d.k, d.exp); break;
-          case "MOD": {
-            const applied = this.moderators.has(d.w.toLowerCase());
-            db.run("INSERT OR REPLACE INTO moderation VALUES (?,?,?,?,?,?)", hash, d.w, d.act, d.tg, tx.t, applied ? 1 : 0);
-            if (!applied) break;
-            if (d.act === "HIDE" || d.act === "UNHIDE") db.run("UPDATE posts SET hidden = ? WHERE id = ?", d.act === "HIDE" ? 1 : 0, d.tg);
-            else if (d.act === "SUSPEND") db.run("INSERT OR IGNORE INTO suspended VALUES (?)", d.tg);
-            else db.run("DELETE FROM suspended WHERE wallet = ?", d.tg);
-            break;
-          }
-          default:
-        }
-      });
+      return { id, status: "committed", replayed: false };
     });
   }
+
+  session(address) { return this.sql.get("SELECT session_key AS key, expires_at AS exp FROM sessions WHERE wallet = ?", address); }
+  sqlQuery(query) { return this.sql.query(query); }
+  sqlSchema() { return this.sql.schema(); }
+  close() { this.sql.close(); }
 
   isModerator(address) {
     return this.moderators.has(String(address).toLowerCase());
@@ -316,7 +243,7 @@ class SocialLedger extends FthLedger {
 
   postRow(id, viewer = "") {
     const row = this.sql.get(
-      `SELECT p.id, p.author, p.text, p.reply_to AS replyTo, p.time, p.time_ms AS timeMs, p.height, p.deleted, p.hidden,
+      `SELECT p.id, p.author, p.text, p.reply_to AS replyTo, p.time, p.time_ms AS timeMs, p.deleted, p.hidden,
         (SELECT count(*) FROM likes l WHERE l.post_id = p.id) AS likes,
         (SELECT count(*) FROM reposts r WHERE r.post_id = p.id) AS reposts,
         (SELECT count(*) FROM posts c WHERE c.reply_to = p.id AND c.deleted = 0 AND c.hidden = 0) AS replies,
@@ -370,12 +297,12 @@ class SocialLedger extends FthLedger {
 
   thread(id, viewer = "") {
     const post = this.postRow(id, viewer);
-    if (!post || post.hidden) return null;
+    if (!post || post.hidden || this.isSuspended(post.author)) return null;
     const ancestors = [];
     let parent = post.replyTo;
     while (parent && ancestors.length < 25) {
       const row = this.postRow(parent, viewer);
-      if (!row || row.deleted || row.hidden) break;
+      if (!row || row.deleted || row.hidden || this.isSuspended(row.author)) break;
       ancestors.unshift(row);
       parent = row.replyTo;
     }
@@ -403,7 +330,7 @@ class SocialLedger extends FthLedger {
       replies: count("SELECT count(*) AS n FROM posts WHERE author = ? AND reply_to <> '' AND deleted = 0 AND hidden = 0", address),
       following: count("SELECT count(*) AS n FROM follows WHERE follower = ?", address),
       followers: count("SELECT count(*) AS n FROM follows WHERE followee = ?", address),
-      firstSeen: this.sql.get("SELECT min(time) AS t FROM transactions WHERE author = ?", address)?.t || null,
+      firstSeen: this.sql.get("SELECT min(time) AS t FROM actions WHERE author = ?", address)?.t || null,
       viewerFollows: viewer ? Boolean(this.sql.get("SELECT 1 AS y FROM follows WHERE follower = ? AND followee = ?", viewer, address)) : false,
       suspended: this.isSuspended(address),
     };
@@ -432,28 +359,23 @@ class SocialLedger extends FthLedger {
 
   summary() {
     const count = (table) => this.sql.get(`SELECT count(*) AS n FROM ${table}`).n;
-    const tip = this.headers[this.height];
     return {
-      name: "Featheral World Ledger",
-      kind: "communication",
-      layer: 3,
-      height: this.height,
-      tipHash: this.tipHash,
-      tipTime: tip ? new Date(tip.t).toISOString() : null,
-      genesisTime: this.genesis?.createdAt || null,
-      transactions: this.txCount,
-      pendingTransactions: this.pending.length,
+      name: "World Feed Database",
+      storage: "SQLite",
+      status: "ready",
+      actions: count("actions"),
+      lastWriteAt: this.sql.get("SELECT max(time) AS t FROM actions").t,
       posts: this.sql.get("SELECT count(*) AS n FROM posts WHERE deleted = 0").n,
       authors: this.sql.get("SELECT count(DISTINCT author) AS n FROM posts").n,
       likes: count("likes"),
       reposts: count("reposts"),
       follows: count("follows"),
-      kinds: { ...this.kindCounts },
+      sessions: count("sessions"),
+      moderation: count("moderation"),
+      kinds: Object.fromEntries(this.sql.all("SELECT kind, count(*) AS n FROM actions GROUP BY kind").map((row) => [row.kind, row.n])),
       moderators: [...this.moderators],
-      signedBlocks: Boolean(this.publicKey),
-      writerPublicKey: this.publicKey ? this.publicKey.export({ type: "spki", format: "pem" }) : null,
     };
   }
 }
 
-module.exports = { SocialLedger, socialMessage, verifyAction, MAX_TEXT, MAX_SESSION_MS };
+module.exports = { SocialDatabase, socialMessage, verifyAction, MAX_TEXT, MAX_SESSION_MS };

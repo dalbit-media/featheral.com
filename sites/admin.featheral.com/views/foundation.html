@@ -1,0 +1,20 @@
+<nav class="admin-tabs" data-admin-tabs>
+  <button type="button" data-tab="overview">Overview</button>
+  <button type="button" data-tab="access">Wallet access</button>
+</nav>
+<div class="native-console ">
+
+<section class="admin-intro">
+  <h1>Foundation administration</h1>
+  <p class="muted">One administration workspace for all Featheral sites. Service-specific permissions remain enforced by the corresponding ledger or on-chain role. This overview does not change funds.</p>
+  <p><span id="gate" class="admin-gate"></span></p>
+</section>
+<section id="overview" class="admin-panel">
+<h2>Ecosystem status</h2><div id="status" class="stat-grid"></div>
+<div class="card"><h3>Product consoles</h3>
+  <ul id="consoles"></ul>
+</div>
+</section>
+<section id="access" class="admin-panel" hidden><h2>Wallet access</h2><p class="notice">These are configured project wallet lists, not proof of on-chain roles. Each product checks its own contract roles or server moderator list.</p><div id="wallets" class="muted">Loading…</div></section>
+
+</div>

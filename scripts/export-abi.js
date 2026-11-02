@@ -5,7 +5,7 @@ const hre = require("hardhat");
 
 (async () => {
   await hre.run("compile", { quiet: true });
-  const abiDir = path.join(__dirname, "..", "sites", "shared", "abi");
+  const abiDir = path.join(__dirname, "..", "shared", "abi");
   fs.mkdirSync(abiDir, { recursive: true });
   const art = await hre.artifacts.readArtifact("FeatheralGold");
   const bridgeArt = await hre.artifacts.readArtifact("FthgGameBridge");
@@ -29,6 +29,6 @@ const hre = require("hardhat");
     openzeppelin: require("@openzeppelin/contracts/package.json").version,
   };
   fs.writeFileSync(path.join(abiDir, "FthgGameBridge.json"), JSON.stringify(bridgeOut, null, 2));
-  console.log(`Wrote sites/shared/abi/FeatheralGold.json (ABI only, solc ${cfg.version}, OZ ${out.openzeppelin})`);
-  console.log(`Wrote sites/shared/abi/FthgGameBridge.json (ABI only, new dynamic bridge interface)`);
+  console.log(`Wrote shared/abi/FeatheralGold.json (ABI only, solc ${cfg.version}, OZ ${out.openzeppelin})`);
+  console.log(`Wrote shared/abi/FthgGameBridge.json (ABI only, new dynamic bridge interface)`);
 })().catch((e) => { console.error(e); process.exit(1); });

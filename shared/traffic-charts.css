@@ -1,0 +1,19 @@
+.traffic-site{position:relative;padding:20px;border:1px solid var(--line,#ddd);border-radius:12px;margin:16px 0;min-width:0}
+.traffic-timeframe{max-width:100%;font-size:12px}
+.traffic-chart{position:relative;height:180px;display:flex;color:var(--text,var(--txt,#334155));min-width:0}
+.traffic-chart svg{display:block;width:calc(100% - 38px);margin-left:38px;height:100%;overflow:visible;border-left:1px solid var(--line,#ddd);border-bottom:1px solid var(--line,#ddd);background:repeating-linear-gradient(to right,transparent 0,transparent calc(25% - 1px),color-mix(in srgb,currentColor 8%,transparent) calc(25% - 1px),color-mix(in srgb,currentColor 8%,transparent) 25%),repeating-linear-gradient(to top,transparent 0,transparent calc(25% - 1px),color-mix(in srgb,currentColor 8%,transparent) calc(25% - 1px),color-mix(in srgb,currentColor 8%,transparent) 25%)}
+.traffic-y-axis{position:absolute;left:0;top:0;bottom:0;width:32px;display:flex;flex-direction:column;justify-content:space-between;text-align:right;font-size:10px;opacity:.6;pointer-events:none}
+.traffic-site h3{display:flex;align-items:center;gap:8px;font-size:14px;overflow-wrap:anywhere}
+.traffic-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px}
+.traffic-grid .traffic-site{margin:0}
+.traffic-aggregate{width:100%;box-sizing:border-box;margin-top:0}
+.traffic-aggregate .traffic-chart{height:240px}
+.traffic-total{font-size:13px;margin:6px 0}
+.traffic-aggregate .traffic-total{font-size:clamp(20px,3vw,32px);font-weight:700}
+.traffic-legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;margin:10px 0}
+.traffic-key{display:inline-flex;align-items:center;gap:5px;overflow-wrap:anywhere}
+.traffic-key::before{content:"";display:inline-block;width:12px;height:2px;background:currentColor;flex-shrink:0}
+.traffic-key img{flex-shrink:0}
+.traffic-ranges{display:flex;justify-content:space-between;gap:4px;padding-left:38px;font-size:10px}
+.traffic-labels{font-size:12px;opacity:.7;overflow-wrap:anywhere}
+@media(max-width:600px){header.top:has(#traffic-interval){gap:6px;padding:0 8px}header.top:has(#traffic-interval) .names{display:none}header.top #traffic-interval{flex-shrink:0}header.top #traffic-interval select{width:120px}.traffic-ranges{font-size:9px}.traffic-y-axis{font-size:9px}}

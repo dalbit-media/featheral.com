@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Featheral Database</title>
+  <meta name="description" content="Featheral file-ledger infrastructure. Private administration, per-token and per-site journals.">
+  <link rel="icon" href="/shared/logo-db.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/shared/site-colors.css">
+  <link rel="stylesheet" href="/shared/site-links.css">
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/shared/site-links.js"></script>
+</head>
+<body data-site-brand="db.featheral.com">
+  <header><a data-site="foundation" href="https://featheral.com/"><img src="/shared/logo-db.svg" alt="" width="32" height="32"> Featheral</a><span>Database</span></header>
+  <main>
+    <h1>File-ledger infrastructure</h1>
+    <p>Per-token journals for FTHG, FTH$, FTHX and FTHS. Separate journals for each site's records, organized by UTC year and day.</p>
+    <section><h2>Staged migration</h2><p>The SQL-free journal service is available for the migration. Existing sites still use their current storage until their adapters and cross-ledger transactions are verified. No data reset has run.</p></section>
+    <section><h2>Private by design</h2><p>Ledger inspection and encrypted server-credential management live in Featheral Admin. This host does not expose private records, credential exports, arbitrary queries or public financial writes.</p><p><a href="/api/v1/db/status">Service status</a></p></section>
+  </main>
+</body>
+</html>

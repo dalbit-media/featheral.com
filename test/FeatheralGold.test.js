@@ -13,7 +13,7 @@ describe("FeatheralGold", () => {
 
   it("admin ABI artifact is in sync with the source", async () => {
     const fs = require("fs"), crypto = require("crypto");
-    const x = JSON.parse(fs.readFileSync("sites/shared/abi/FeatheralGold.json", "utf8"));
+    const x = JSON.parse(fs.readFileSync("shared/abi/FeatheralGold.json", "utf8"));
     const src = fs.readFileSync("contracts/FeatheralGold.sol");
     const art = await require("hardhat").artifacts.readArtifact("FeatheralGold");
     expect(x.sourceSha256).to.equal(crypto.createHash("sha256").update(src).digest("hex"));

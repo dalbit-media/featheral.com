@@ -1,0 +1,46 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>World Feed Database · Featheral World</title>
+<meta name="description" content="World Feed Database status and a read-only SQL explorer for signed offchain social actions.">
+<link rel="icon" href="/shared/logo-world.svg">
+<meta name="theme-color" content="#f6f7fb">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+</head>
+<body class="site-world">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top">
+  <a class="brand" href="/"><img src="/shared/logo-world.svg" alt="" width="34" height="34"><b>World Feed Database</b></a>
+  <nav>
+    <a href="/">Feed</a>
+    <a href="/about/">About</a>
+    <a href="/docs/">Docs</a>
+    <a class="play-launch" data-play-launch href="/play/" target="_blank" rel="noopener" aria-label="Play (opens a new window)" title="Play in a new window"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Play</span></a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+<main>
+<section style="border-top:0">
+  <p class="muted">World Feed Database stores signed social actions (posts, likes, reposts, follows) as durable offchain SQLite writes. Browse status or explore public data with read-only SQL.</p>
+  <form class="search" id="searchForm" role="search"><input id="searchInput" placeholder="Post ID" spellcheck="false" aria-label="Open a World post"><button class="btn primary" type="submit">Open post</button></form>
+  <div class="stat-grid" id="summaryStats"></div>
+  <nav class="tabs" role="tablist" aria-label="Database views">
+    <button type="button" data-route="status" role="tab">Status</button>
+    <button type="button" data-route="sql" role="tab">Read-only SQL</button>
+  </nav>
+  <div id="view" aria-live="polite"><p class="muted">Loading…</p></div>
+</section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="/shared/site-links.js"></script>
+<script src="/play-launch.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script src="/shared/sql-console.js"></script>
+<script src="ledger.js"></script>
+</body>
+</html>

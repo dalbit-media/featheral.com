@@ -12,11 +12,11 @@ const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
 const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/dollar-api/funds");
 const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold-api/reserve");
-const { createGoldApi, TOKEN_ADDRESS } = require("../services/gold-api/server");
+const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold-api/server");
 const { createDollarApi } = require("../services/dollar-api/server");
 const { activateLiveReserve } = require("../services/gold-api/activation");
-const { SqliteStore } = require("../sites/world/featheral/server/store.ts");
-const { createApi } = require("../sites/world/featheral/server/http.ts");
+const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
+const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 
 describe("Isolated finite Gold reserve", () => {
   let directory, ledger, engine, adapter, provider, goldKeys, gameKeys, source, reserve, store;
@@ -322,6 +322,90 @@ describe("Isolated finite Gold reserve", () => {
     await assert.rejects(engine.reconcile(hash, 0), /configured wallets/);
     conserved();
   });
+  it("requires a fresh ledger-bound origin or backing signature before HTTP reconciliation", async () => {
+    const gold = createGoldApi({ provider, logger: { error() {} } });
+    const reserveApi = gold.enableReserve(ledger, goldKeys.privateKey);
+    await reserveApi.initialize();
+    const server = http.createServer((req, res) => gold.handle(req, res));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const post = body => fetch(`http://127.0.0.1:${server.address().port}/api/v1/gold/reserve/reconcile`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    let receiptReads = 0;
+    provider.getTransactionReceipt = async () => { receiptReads++; return null; };
+    const request = { txHash: blockHash(100), logIndex: 0, issuedAt: new Date().toISOString() };
+    const signed = async (wallet, body = request, genesis = reserveApi.status().genesisHash) =>
+      ({ ...body, signature: await wallet.signMessage(reconciliationMessage(body, genesis)) });
+    try {
+      assert.equal((await post({ txHash: request.txHash, logIndex: 0 })).status, 400);
+      assert.equal((await post({ ...request, signature: "invalid" })).status, 401);
+      assert.equal((await post(await signed(ethers.Wallet.createRandom()))).status, 403);
+      assert.equal((await post(await signed(source, request, ethers.ZeroHash))).status, 403);
+      const stale = { ...request, issuedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString() };
+      assert.equal((await post(await signed(source, stale))).status, 401);
+      const authorization = await signed(source);
+      assert.equal((await post({ ...authorization, logIndex: 1 })).status, 403);
+      assert.equal(receiptReads, 0, "unauthorized requests never read receipts or mutate the ledger");
+      for (const wallet of [source, reserve]) {
+        const result = await post(await signed(wallet));
+        assert.equal(result.status, 409);
+        assert.match((await result.json()).error, /missing or reverted/);
+      }
+      assert.equal(receiptReads, 2);
+      assert.deepEqual(reserveApi.status().receipts, {});
+      await reserveApi.fundMarket("wood", targets.wood.quantity, total("wood"));
+      const amount = BigInt(reserveApi.status().pendingIn);
+      provider.head = 200;
+      provider.origin -= amount; provider.reserve += amount;
+      const iface = new ethers.Interface(["event Transfer(address indexed from,address indexed to,uint256 value)"]);
+      const log = iface.encodeEventLog(iface.getEvent("Transfer"), [source.address, reserve.address, amount]);
+      provider.getTransactionReceipt = async () => ({ status: 1, blockNumber: 150, blockHash: blockHash(150),
+        logs: [{ index: 0, address: TOKEN_ADDRESS, ...log }] });
+      const signedReceipt = await signed(source);
+      assert.equal((await post(signedReceipt)).status, 200);
+      const height = ledger.height;
+      assert.equal((await post(signedReceipt)).status, 200);
+      assert.equal((await post(await signed(reserve))).status, 200);
+      assert.equal(ledger.height, height, "authorized receipt retries are idempotent");
+      assert.equal(reserveApi.status().settledIn, amount.toString());
+      conserved();
+    } finally { await new Promise(resolve => server.close(resolve)); gold.close(); }
+  });
+  it("signs exactly the Gold API reconciliation authorization from the reserve UI", async () => {
+    await engine.initialize();
+    const script = fs.readFileSync(path.join(__dirname, "..", "sites", "gold.featheral.com", "conversion", "reserve.js"), "utf8");
+    const nodes = new Map(), posts = [], signatures = [];
+    const element = id => {
+      if (!nodes.has(id)) nodes.set(id, { value: "", dataset: {}, listeners: {},
+        addEventListener(name, callback) { this.listeners[name] = callback; } });
+      return nodes.get(id);
+    };
+    const wallet = { getNetwork: async () => ({ chainId: 1n }), getSigner: async () => ({
+      getAddress: async () => source.address,
+      signMessage: async message => { signatures.push(message); return source.signMessage(message); },
+    }) };
+    const state = engine.status();
+    vm.runInNewContext(script, {
+      document: { getElementById: element }, confirm: () => true,
+      AbortSignal, ethers: { ...ethers, BrowserProvider: function () { return wallet; } },
+      fetch: async (url, options) => {
+        if (options.body) posts.push({ url, body: JSON.parse(options.body) });
+        return { ok: true, json: async () => state };
+      },
+      window: { FeatheralReserveView: { units: String, dollars: String, render() {}, history: () => async () => {} },
+        FeatheralProfile: { snapshot: () => ({ account: source.address }), getProvider: () => ({}), mount() {} },
+        FeatheralSites: { url: () => "" }, addEventListener() {} },
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(posts.length, 0, "automatic refresh never reconciles or submits transfers");
+    element("hash").value = blockHash(100); element("log").value = "0";
+    await element("reconcile").listeners.submit({ preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].url, "/api/v1/gold/reserve/reconcile");
+    assert.equal(signatures[0], reconciliationMessage(posts[0].body, state.genesisHash));
+    assert.equal(ethers.verifyMessage(signatures[0], posts[0].body.signature), source.address);
+  });
   it("composes Gold, Dollar funding and World HTTP with zero personal grants and one seed across SQLite restarts", async () => {
     const gold = createGoldApi({ provider, logger: { error() {} } });
     const reserveApi = gold.enableReserve(ledger, goldKeys.privateKey);
@@ -407,41 +491,47 @@ describe("Isolated finite Gold reserve", () => {
   });
   it("shares exact wallet signing text and never submits Ethereum writes from the isolated UI", () => {
     const context = { window: {}, ethers };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "sites", "shared", "dollar-transfer.js"), "utf8"), context);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "shared", "dollar-transfer.js"), "utf8"), context);
     for (const to of [REDEMPTION_ESCROW, walletAccountId(reserve.address), reserve.address]) {
       const transfer = { wallet: source.address.toLowerCase(), to, amount: "1000000000000000000", nonce: 1, memo: "", issuedAt: new Date().toISOString() };
       assert.equal(context.window.FeatheralDollarTransferMessage(transfer), transferMessage({ ...transfer, wallet: source.address, to: ethers.isAddress(to) ? walletAccountId(to) : to }));
     }
-    const ui = fs.readFileSync(path.join(__dirname, "..", "sites", "gold", "conversion", "reserve.js"), "utf8");
+    const ui = fs.readFileSync(path.join(__dirname, "..", "sites", "gold.featheral.com", "conversion", "reserve.js"), "utf8");
     assert.match(ui, /WARNING: this is an isolated test journal/);
     assert.doesNotMatch(ui, /sendTransaction|eth_sendTransaction|eth_sendRawTransaction/);
     assert.match(ui, /chainId\) !== 1/);
   });
   it("formats reserve FTH$ amounts at most two decimals and wires both focused Gold pages", () => {
     const context = { window: {}, ethers };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "sites", "gold", "reserve-view.js"), "utf8"), context);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "sites", "gold.featheral.com", "reserve-view.js"), "utf8"), context);
     assert.equal(context.window.FeatheralReserveView.units(ethers.parseUnits("216265000.123456789123456789", 18)), "216,265,000.123456789123456789");
     for (const [value, expected] of [["0", "0"], ["1.9999", "2"], ["3.9596", "3.96"], ["1000.1", "1,000.1"], ["0.009", "0.01"]]) {
       assert.equal(context.window.FeatheralReserveView.dollars(ethers.parseUnits(value, 18)), expected);
     }
     for (const page of ["admin", "conversion"]) {
-      const html = fs.readFileSync(path.join(__dirname, "..", "sites", "gold", page, "index.html"), "utf8");
+      const html = fs.readFileSync(page === "admin"
+        ? path.join(__dirname, "..", "sites", "admin.featheral.com", "views", "gold.html")
+        : path.join(__dirname, "..", "sites", "gold.featheral.com", page, "index.html"), "utf8");
       for (const id of ["sync-state", "origin-flow", "reserve-flow", "reserve-metrics", "reserve-mode", "reserve-transactions", "history-more", "history-status"]) {
         assert.ok(html.includes(`id="${id}"`), `${page}: ${id}`);
       }
-      assert.match(html, /class="top gold-header"/);
-      assert.match(html, /src="\/reserve-view.js"/);
-      assert.match(html, /href="\/reserve.css"/);
+      if (page === "conversion") {
+        assert.match(html, /class="top gold-header"/);
+        assert.match(html, /src="\/reserve-view.js"/);
+        assert.match(html, /href="\/reserve.css"/);
+      } else {
+        assert.doesNotMatch(html, /<script|<iframe|<header/);
+      }
     }
-    const admin = fs.readFileSync(path.join(__dirname, "..", "sites", "gold", "admin", "app.js"), "utf8");
+    const admin = fs.readFileSync(path.join(__dirname, "..", "sites", "admin.featheral.com", "js", "operations", "gold.js"), "utf8");
     assert.doesNotMatch(admin, /setRate|setTreasury|addLiquidity|swapExact|localStorage|setExchangeEnabled/);
     assert.match(admin, /staticCall/);
     assert.match(admin, /token\.hasRole\(roles\[role\], account\)/);
   });
   it("enforces actual roles, Mainnet, simulation and wallet revalidation before token safety writes", async () => {
     await engine.initialize();
-    const script = fs.readFileSync(path.join(__dirname, "..", "sites", "gold", "admin", "app.js"), "utf8");
-    for (const scenario of ["success", "no-role", "wrong-chain", "simulation-fails", "chain-changed", "cancelled"]) {
+    const script = fs.readFileSync(path.join(__dirname, "..", "sites", "admin.featheral.com", "js", "operations", "gold.js"), "utf8");
+    for (const scenario of ["success", "no-role", "wrong-chain", "simulation-fails", "chain-changed", "view-changed", "cancelled"]) {
       const elements = new Map(), calls = [];
       const element = id => {
         if (!elements.has(id)) elements.set(id, { value: id.endsWith("-action") ? "check" : "", dataset: {}, listeners: {},
@@ -461,16 +551,19 @@ describe("Isolated finite Gold reserve", () => {
           JsonRpcProvider: function () { return { getBlockNumber: async () => 100 }; },
           BrowserProvider: function () { return { getNetwork: async () => ({ chainId: scenario === "wrong-chain" ? 2n : 1n }),
             getSigner: async () => ({ getAddress: async () => source.address }) }; } },
-        window: { FeatheralReserveView: { api: async () => engine.status(), render() {}, history: () => async () => {} },
+        window: { FeatheralAdminControllers: {}, FeatheralReserveView: { scope: () => ({ api: async () => engine.status(), render() {}, history: () => async () => {} }) },
           FeatheralSites: { url: () => "http://dollar.localhost/wallet/" },
           FeatheralProfile: { mount() {}, snapshot: () => ({ account: source.address, chainId: 1 }), getProvider: () => wallet },
           addEventListener() {} },
       };
       vm.runInNewContext(script, context);
+      context.window.FeatheralAdminControllers.gold({ querySelector: selector => element(selector.slice(1)) }, {
+        listen() {}, assertActive() { if (scenario === "view-changed") throw new Error("Administration view changed."); },
+      });
       await new Promise(resolve => setImmediate(resolve));
       await element("token-pause").listeners.click();
       assert.deepEqual(calls, scenario === "success" ? ["simulate", "write"]
-        : ["simulation-fails", "chain-changed"].includes(scenario) ? ["simulate"] : [], scenario);
+        : ["simulation-fails", "chain-changed", "view-changed"].includes(scenario) ? ["simulate"] : [], scenario);
       if (!["success", "cancelled"].includes(scenario)) {
         assert.equal(element("safety-status").dataset.error, "true", scenario);
         assert.ok(element("safety-status").textContent, scenario);

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Featheral Stats</title>
+  <meta name="description" content="Aggregate traffic across Featheral sites.">
+  <link rel="icon" href="/shared/logo-stats.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/site/site.css">
+  <link rel="stylesheet" href="/site/demos.css">
+  <link rel="stylesheet" href="/shared/traffic-charts.css">
+  <link rel="stylesheet" href="/shared/site-colors.css">
+</head>
+<body data-site-brand="stats.featheral.com">
+  <a class="skip-link" href="#view">Skip to content</a>
+  <header class="top">
+    <a class="logo" href="#/"><img class="mark" src="/shared/logo-stats.svg" alt="" width="34" height="34"><span class="names"><span id="brand"></span><span class="sub" id="tagline"></span></span></a>
+    <nav class="tabs">
+      <a href="#/" data-tab="home">Home</a>
+      <a href="#/read" data-tab="read">Pages</a>
+      <a href="#/shop" data-tab="shop" data-feature="commerce" hidden>Shop</a>
+      <a href="#/exchange" data-tab="exchange" data-feature="exchange" hidden>Exchange</a>
+    </nav>
+    <div id="traffic-interval"></div>
+    <button class="wallet" id="wallet" type="button">Connect wallet</button>
+  </header>
+  <main id="view" tabindex="-1"></main>
+  <a id="fab" class="fab" href="#/post" hidden>New post</a>
+  <div id="gate" hidden></div>
+  <div id="toast"></div>
+  <script src="/site/site.js"></script>
+  <script src="/shared/traffic-charts.js"></script>
+  <script src="/site/demos.js"></script>
+</body>
+</html>

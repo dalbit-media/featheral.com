@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111820"><meta name="description" content="The Featheral Foundation insider workspace. Chat, call, share files and complete missions together.">
+  <title>Featheral App · Work together</title>
+  <link rel="icon" href="/shared/logo-app.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/shared/site-links.css"><link rel="stylesheet" href="/shared/world-profile.css">
+  <script src="/shared/site-links.js" defer></script><script src="/shared/world-profile.js" defer></script><script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="app-header"><a class="brand" href="/"><img src="/shared/logo-app.svg" width="32" height="32" alt=""><b>Featheral App</b></a><button type="button" data-central-wallet>Wallet</button></header>
+  <main>
+    <p id="status" role="status" hidden></p>
+    <section id="onboarding" class="welcome">
+      <div class="coins" aria-hidden="true"><img src="/shared/logo-silver.svg" alt=""><img src="/shared/logo-silver.svg" alt=""></div>
+      <p class="eyebrow">Foundation / Insider workspace</p><h1>Good work.<br>Better together.</h1>
+      <p>A home for Featheral volunteers, interns and the people guiding them.</p>
+      <ol class="steps"><li>Connect your wallet</li><li>Create your World profile</li><li>Request insider access</li></ol>
+      <button id="signin" class="primary" type="button">Connect &amp; get started</button>
+      <div id="signup" hidden><h2 id="signup-title">Your insider profile</h2><p id="signup-status"></p>
+        <div id="signup-profile"><div id="profile-editor"></div></div>
+        <button id="check-profile" type="button">Check access</button>
+        <form id="application"><label>Your introduction<textarea id="motivation" maxlength="1000" required placeholder="What would you like to help build?"></textarea></label><button class="primary">Request access</button></form>
+      </div>
+      <p class="fine">World profiles are public. Work conversations are restricted to approved insiders and authorized channels. This is not end-to-end encrypted messaging.</p>
+    </section>
+    <section id="workspace" hidden>
+      <section id="inbox" class="view">
+        <aside class="channel-directory"><div class="section-title"><h1>Inbox</h1><button id="notifications" type="button" title="Enable browser push notifications" aria-label="Enable browser push notifications">Notifications</button></div><p class="fine">Your Foundation, division, team and direct conversations.</p><div id="channels"></div></aside>
+        <section id="conversation" class="conversation" hidden>
+          <div class="conversation-heading"><button id="back-inbox" class="icon" type="button" aria-label="Back to inbox">←</button><h2 id="channel-title"></h2><button id="open-document" class="icon" type="button" title="Shared work notes" aria-label="Shared work notes">▤</button><button id="start-call" class="icon" type="button" title="Call a member" aria-label="Call a member">☎</button></div>
+          <p id="channel-scope" class="fine"></p><button id="older" type="button" hidden>Showing latest 100 messages</button>
+          <div id="messages" role="log" aria-label="Conversation messages" aria-live="polite" tabindex="0"></div>
+          <form id="composer"><label class="sr-only" for="message">Message</label><textarea id="message" rows="2" maxlength="4000" placeholder="Message your team"></textarea><div class="compose-tools"><label class="attach" title="Attach file, up to 5 MiB"><span aria-hidden="true">＋</span><span class="sr-only">Attach a file</span><input id="attachment" type="file"></label><span id="attachment-name" class="fine"></span><button class="primary" id="send">Send</button></div></form>
+        </section>
+      </section>
+      <section id="missions" class="view" hidden><div class="section-title"><h1>Missions</h1><button id="new-mission" type="button" hidden>New mission</button></div><p class="fine">Brief → Ready → In progress → Review → Done. Submit evidence; your lead approves completion.</p><div id="mission-list"></div></section>
+      <section id="people" class="view" hidden><h1>People</h1><p class="fine">Foundation → Division → Team. Roles and learning levels are assigned in Admin.</p><div id="people-list"></div></section>
+      <section id="account" class="view" hidden><h1>Your workspace</h1><div id="identity" class="card"></div><details class="card"><summary>Edit profile &amp; bio</summary><div id="account-profile"></div></details><div class="silver-card"><img src="/shared/logo-silver.svg" width="48" height="48" alt=""><div><small>Featheral Silver</small><strong id="silver-balance"></strong><small>FTHS · also known as Featheral Salary</small></div></div><p class="fine">Grants are approved by administrators. No automatic salary, USD peg, employment entitlement or guaranteed exchange liquidity.</p><div class="account-links"><a data-site="silver">About Silver</a><a data-site="ex" data-path="/?market=FTHS">Trade FTHS</a><a data-site="admin" data-path="/#/intranet">Administration</a></div><button id="signout" type="button">Sign out of App</button></section>
+      <nav class="app-tabs" aria-label="Workspace"><button data-view="inbox" aria-current="page"><span aria-hidden="true">◫</span>Inbox</button><button data-view="missions"><span aria-hidden="true">✓</span>Missions</button><button data-view="people"><span aria-hidden="true">♧</span>People</button><button data-view="account"><span aria-hidden="true">◎</span>You</button></nav>
+    </section>
+  </main>
+  <dialog id="document-dialog"><form method="dialog"><div class="section-title"><h2>Shared work notes</h2><button aria-label="Close shared notes">×</button></div></form><p class="fine">One shared document per channel. Saving checks the revision to protect other members' edits.</p><label>Notes<textarea id="document-body" rows="12" maxlength="50000"></textarea></label><p id="document-status" role="status"></p><button id="save-document" class="primary" type="button">Save</button><button id="reload-document" type="button">Load latest (replaces draft)</button></dialog>
+  <dialog id="call-picker"><form method="dialog"><div class="section-title"><h2>Call an insider</h2><button aria-label="Close call picker">×</button></div></form><p class="fine">Private one-to-one audio calls. Share your screen after the other member accepts.</p><div id="call-people"></div></dialog>
+  <dialog id="call-dialog"><h2 id="call-title">Call</h2><p id="call-status" role="status"></p><video id="remote-video" autoplay playsinline></video><video id="local-video" autoplay playsinline muted></video><audio id="remote-audio" autoplay></audio><div class="call-tools"><button id="accept-call" class="primary" type="button" hidden>Accept</button><button id="mute-call" type="button" hidden>Mute</button><button id="share-screen" type="button" hidden>Share screen</button><button id="end-call" type="button">End / decline</button></div><p class="fine">Calls require HTTPS or localhost. Screen sharing depends on your browser. External networks need configured TURN relay service. Media is not recorded by App.</p></dialog>
+  <dialog id="mission-dialog"><form id="mission-form"><div class="section-title"><h2>Mission</h2><button id="close-mission" type="button" aria-label="Close mission">×</button></div><label>Title<input id="mission-title" maxlength="160" required></label><label>Brief &amp; acceptance criteria<textarea id="mission-body" maxlength="6000" required></textarea></label><label>Division<select id="mission-division"></select></label><label>Team<select id="mission-team"></select></label><label>Assignee<select id="mission-assignee"></select></label><label>Status<select id="mission-status"></select></label><label>Evidence / handover<textarea id="mission-evidence" maxlength="6000"></textarea></label><button class="primary">Save mission</button><p id="mission-error" role="status"></p></form></dialog>
+</body>
+</html>

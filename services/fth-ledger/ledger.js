@@ -241,6 +241,7 @@ class FthLedger {
         break;
       }
       case "PROFILE": {
+        if (height === null) throw ledgerError("Wallet profiles are managed by the database service.", 410);
         if (amount !== 0n) throw ledgerError("Profile updates carry no amount.");
         const profile = verifySignedProfile(d);
         if (tx.a !== walletAccountId(profile.address)) throw ledgerError("Profile account does not match its wallet.");
@@ -254,7 +255,8 @@ class FthLedger {
         commit = () => {
           if (previous) this.usernames.delete(previous.username.toLowerCase());
           this.usernames.set(nameKey, key);
-          this.profiles.set(key, { address: profile.address, username: profile.username, avatar: profile.avatar, issuedAt: profile.issuedAt });
+          this.profiles.set(key, { address: profile.address, username: profile.username, avatar: profile.avatar,
+            ...(profile.bio === undefined && previous?.bio === undefined ? {} : { bio: profile.bio ?? previous.bio }), issuedAt: profile.issuedAt });
         };
         break;
       }

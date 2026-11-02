@@ -4,6 +4,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { ethers } = require("ethers");
 const { createReserveEngine, RATE } = require("./reserve");
+const { assertFreshSignature } = require("../token-api/profile");
+
+function reconciliationMessage({ txHash, logIndex, issuedAt }, genesisHash) {
+  return ["Featheral Gold reserve reconciliation", `Ledger: ${genesisHash}`, "Chain ID: 1",
+    `Transaction: ${txHash}`, `Log index: ${logIndex}`, `Issued at: ${issuedAt}`,
+    "Verify an existing finalized FTHG transfer only. No Ethereum transaction is submitted."].join("\n");
+}
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const TOKEN_ADDRESS = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
@@ -14,7 +21,7 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 
 function bridgeAbi() {
   for (const file of [
-    path.join(ROOT, "sites", "shared", "abi", "FthgGameBridge.json"),
+    path.join(ROOT, "shared", "abi", "FthgGameBridge.json"),
     path.join(ROOT, "artifacts", "contracts", "FthgGameBridge.sol", "FthgGameBridge.json"),
   ]) {
     if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8")).abi;
@@ -22,8 +29,10 @@ function bridgeAbi() {
   throw new Error("FthgGameBridge ABI is missing. Run `npm run abi`.");
 }
 
-function createGoldApi({ env = process.env, provider, logger = console } = {}) {
+function createGoldApi({ env = process.env, provider, nativeReader, logger = console } = {}) {
   let reserveEngine = null;
+  const nativeBalance = nativeReader || require("./native").createNativeReader({ env, logger });
+  const marketPrice = require("./prices").createMarketPriceReader({ logger });
   const rpcUrl = env.GOLD_API_RPC_URL || env.TOKEN_API_RPC_URL || "https://ethereum-rpc.publicnode.com";
   const rpcRequest = new ethers.FetchRequest(rpcUrl);
   rpcRequest.timeout = 8000;
@@ -77,6 +86,12 @@ function createGoldApi({ env = process.env, provider, logger = console } = {}) {
       totalStakedFthg: staked.toString(), paused, sourceAdmin, reserveAdmin,
       gameServiceAddress, gameServiceAuthorized: authorized,
     };
+  }
+  async function walletBalance(address) {
+    if (!ethers.isAddress(address)) throw fail("Enter a valid Ethereum wallet address.");
+    const [network, balance, block] = await Promise.all([readProvider.getNetwork(), token.balanceOf(address), readProvider.getBlockNumber()]);
+    if (Number(network.chainId) !== CHAIN_ID) throw fail("FTHG balance requires Ethereum Mainnet.", 503);
+    return { balance: balance.toString(), chainId: CHAIN_ID, token: TOKEN_ADDRESS, block, checkedAt: new Date().toISOString() };
   }
   async function stats() {
     try {
@@ -205,10 +220,22 @@ function createGoldApi({ env = process.env, provider, logger = console } = {}) {
         }
         let body;
         try { body = JSON.parse(text); } catch { throw fail("Reserve request must be JSON."); }
-        const fields = route === "/reserve/reconcile" ? "logIndex,txHash" : route === "/reserve/convert"
+        const fields = route === "/reserve/reconcile" ? "issuedAt,logIndex,signature,txHash" : route === "/reserve/convert"
           ? "amount,issuedAt,nonce,signature" : "amount,issuedAt,memo,nonce,signature,to,wallet";
         if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join() !== fields) throw fail("Invalid reserve request fields.");
-        if (route === "/reserve/reconcile") return reply(200, await reserveEngine.reconcile(body.txHash, body.logIndex));
+        if (route === "/reserve/reconcile") {
+          if (!ethers.isHexString(body.txHash, 32) || !Number.isSafeInteger(body.logIndex) || body.logIndex < 0
+            || typeof body.issuedAt !== "string" || !Number.isFinite(Date.parse(body.issuedAt))
+            || new Date(body.issuedAt).toISOString() !== body.issuedAt) throw fail("Invalid reconciliation authorization.");
+          assertFreshSignature(Date.parse(body.issuedAt), Date.now(), "Reconciliation");
+          const state = reserveEngine.status();
+          let signer;
+          try { signer = ethers.verifyMessage(reconciliationMessage(body, state.genesisHash), body.signature); }
+          catch { throw fail("Invalid reconciliation signature.", 401); }
+          if (![state.sourceWallet, state.reserveWallet].some(wallet => wallet.toLowerCase() === signer.toLowerCase()))
+            throw fail("Reserve reconciliation requires an authorized origin or backing wallet.", 403);
+          return reply(200, await reserveEngine.reconcile(body.txHash, body.logIndex));
+        }
         if (route === "/reserve/convert") return reply(200, await reserveEngine.convert(body));
         return reply(200, await reserveEngine.redeem(body));
       }
@@ -219,6 +246,8 @@ function createGoldApi({ env = process.env, provider, logger = console } = {}) {
       if (req.method === "GET" && route === "/stats") return reply(200, await stats());
       const wallet = route.match(/^\/wallets\/(0x[0-9a-fA-F]{40})$/);
       if (req.method === "GET" && wallet) return reply(200, { address: ethers.getAddress(wallet[1]), fthg: (await token.balanceOf(wallet[1])).toString(), chainId: CHAIN_ID });
+      const nativeWallet = route.match(/^\/native\/wallets\/(0x[0-9a-fA-F]{40})$/);
+      if (req.method === "GET" && nativeWallet) return reply(200, await nativeBalance(nativeWallet[1]));
       if (req.method === "GET" && route === "/quote") {
         const direction = url.searchParams.get("direction"), amount = url.searchParams.get("amount");
         return reply(200, { direction, amountIn: amount, amountOut: (await quote(direction, amount)).toString(), quoteIsIndicative: true });
@@ -247,7 +276,7 @@ function createGoldApi({ env = process.env, provider, logger = console } = {}) {
       return reply(error.status || 503, { error: error.message });
     }
   }
-  return { handle, stats, quote, verifiedEvents, poolState, confirmations, bridgeAddress,
+  return { handle, stats, quote, verifiedEvents, poolState, marketPrice, walletBalance, nativeBalance, confirmations, bridgeAddress,
     enableReserve(ledger, privateKey, beforeMutation) {
       if (reserveEngine) throw new Error("Gold reserve engine is already enabled.");
       reserveEngine = createReserveEngine({ ledger, privateKey, provider: readProvider, confirmations, beforeMutation });
@@ -257,4 +286,4 @@ function createGoldApi({ env = process.env, provider, logger = console } = {}) {
     close: () => { if (!provider) readProvider.destroy(); } };
 }
 
-module.exports = { createGoldApi, TOKEN_ADDRESS, SOURCE_ADDRESS, RESERVE_ADDRESS, CHAIN_ID };
+module.exports = { createGoldApi, reconciliationMessage, TOKEN_ADDRESS, SOURCE_ADDRESS, RESERVE_ADDRESS, CHAIN_ID };

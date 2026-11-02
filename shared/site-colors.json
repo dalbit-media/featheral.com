@@ -1,0 +1,16 @@
+{
+  "featheral.com": { "color": "#c8891a", "light": "#ffe27a", "dark": "#1b1608" },
+  "gold.featheral.com": { "color": "#e2b13c", "light": "#ffeb99", "dark": "#251e09" },
+  "silver.featheral.com": { "color": "#bac8d9", "light": "#edf3fa", "dark": "#17212d" },
+  "app.featheral.com": { "color": "#a9c5e0", "light": "#e1efff", "dark": "#111e2d" },
+  "db.featheral.com": { "color": "#38b8ba", "light": "#c1f3f1", "dark": "#0b2226" },
+  "dollar.featheral.com": { "color": "#3ccf8e", "light": "#9bf2c4", "dark": "#09251a" },
+  "ledger.featheral.com": { "color": "#3ccf8e", "light": "#9bf2c4", "dark": "#09251a" },
+  "world.featheral.com": { "color": "#655bd4", "light": "#e2dbff", "dark": "#0d0b1f" },
+  "admin.featheral.com": { "color": "#4f46e5", "light": "#c7d2fe", "dark": "#17133a" },
+  "x.featheral.com": { "color": "#ff2d6f", "light": "#ffb4cb", "dark": "#280b16" },
+  "ex.featheral.com": { "color": "#52ddb2", "light": "#a4f4dc", "dark": "#091f1c" },
+  "stats.featheral.com": { "color": "#305fe8", "light": "#bfdbfe", "dark": "#0c1b38" },
+  "sites.featheral.com": { "color": "#5b7b16", "light": "#d5ed9f", "dark": "#172009" },
+  "notes.featheral.com": { "color": "#a855d7", "light": "#edc7ff", "dark": "#261030" }
+}

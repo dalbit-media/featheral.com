@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "sites", "dollar", "admin", "bridge-admin.js"), "utf8");
-const stakingSource = fs.readFileSync(path.join(__dirname, "..", "sites", "dollar", "wallet", "staking.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "..", "sites", "admin.featheral.com", "js", "operations", "bridge.js"), "utf8");
+const stakingSource = fs.readFileSync(path.join(__dirname, "..", "sites", "wallet.featheral.com", "ethereum", "staking.js"), "utf8");
 const account = "0x1111111111111111111111111111111111111111";
 const address = "0x2222222222222222222222222222222222222222";
 const tokenAddress = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
@@ -77,6 +77,8 @@ function app(options = {}) {
     connect() { return this; }
   }
   const helpers = {
+    assertActive() {},
+    listen(event, listener) { listeners[event] = listener; },
     el: (tag, props) => props,
     fth: (value) => `${Number(ethers.formatUnits(value, 18)).toLocaleString("en-US", { maximumFractionDigits: 2 })} FTH$`,
     stat: (label, value) => ({ label, value }),
@@ -96,10 +98,12 @@ function app(options = {}) {
       return { bridge: { address, deployed: state.deployed } };
     },
   };
+  const controllers = {};
   vm.runInNewContext(options.wallet ? stakingSource : source, {
     location: { origin: "http://dollar.localhost:8080" },
     document: { getElementById: node },
     window: {
+      FeatheralAdminControllers: controllers,
       FeatheralProfile: profile,
       FTH: helpers,
       addEventListener(event, listener) { listeners[event] = listener; },
@@ -120,6 +124,7 @@ function app(options = {}) {
     },
     confirm(message) { confirmations.push(message); return state.confirm !== false; },
   });
+  if (!options.wallet) controllers.bridge({ querySelector: selector => node(selector.slice(1)) }, helpers);
   if (options.wallet) nodes.bridgeStatus = node("stakingStatus");
   return {
     state, nodes, sent, simulated, confirmations,

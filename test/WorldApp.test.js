@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "sites", "world", "app.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "..", "sites", "world.featheral.com", "app.js"), "utf8");
 const account = "0x1111111111111111111111111111111111111111";
 
 function fixture({ posts = [], failFeed = false } = {}) {
@@ -82,13 +82,14 @@ describe("World posting experience", () => {
     ui.showGettingStarted(true);
   });
   it("keeps About compatibility, feed navigation, docs and the inline optional profile on the main site", () => {
-    const home = fs.readFileSync(path.join(__dirname, "..", "sites", "world", "index.html"), "utf8");
+    const home = fs.readFileSync(path.join(__dirname, "..", "sites", "world.featheral.com", "index.html"), "utf8");
     expect(home).to.include('data-nav="start"').and.include('href="#/feed"').and.include('data-nav="guide"');
     expect(home).to.include('id="profileEditor"').and.include('Skip for now');
     expect(home).to.include('aria-label="Docs"');
-    expect(source).to.include('profileRoot: $("profileEditor")');
+    expect(source).to.include('FeatheralWorldProfile.mount($("profileEditor")');
+    expect(home).to.include('/shared/world-profile.js').and.include('/shared/world-profile.css');
     expect(source).to.include('if (!name || name === "setup") showGettingStarted');
-    const about = fs.readFileSync(path.join(__dirname, "..", "sites", "world", "featheral", "about", "index.html"), "utf8");
+    const about = fs.readFileSync(path.join(__dirname, "..", "sites", "world.featheral.com", "play", "about", "index.html"), "utf8");
     expect(about).to.include("window.location.replace('/' + window.location.search + '#/')");
   });
   it("shows three labeled examples only on an empty Home feed, with no fake interaction controls", async () => {

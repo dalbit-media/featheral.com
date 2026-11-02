@@ -6,11 +6,15 @@
   "scripts": {
     "prestart": "node scripts/export-abi.js && npm run build:world",
     "start": "node scripts/serve.js",
-    "build:world": "npm run build --prefix sites/world/featheral",
+    "build:world": "npm run build --prefix sites/world.featheral.com/play",
+    "build:logos": "node scripts/build-site-logos.js",
     "compile": "hardhat compile",
     "abi": "node scripts/export-abi.js",
     "deploy:bridge": "node scripts/deploy-bridge.js",
     "generate:service-keys": "node services/token-api/keygen.js",
+    "start:cms": "npm start --prefix services/cms",
+    "test:cms": "npm test --prefix services/cms",
+    "test:db": "node --test services/db-api/tests/*.test.js",
     "test": "hardhat test"
   },
   "engines": {
@@ -24,6 +28,9 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "workspaces": [
+    "services/cms"
+  ],
   "bugs": {
     "url": "https://github.com/dalbit-media/featheral.com/issues"
   },

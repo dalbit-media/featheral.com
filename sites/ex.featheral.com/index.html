@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Featheral Exchange</title>
+  <meta name="description" content="FTHX-funded spot trading, real liquidity pools and executed-trade candlesticks.">
+  <link rel="icon" href="/shared/logo-ex.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/shared/creation.css">
+  <link rel="stylesheet" href="/shared/site-colors.css">
+  <link rel="stylesheet" href="/site/terminal.css">
+</head>
+<body data-site-brand="ex.featheral.com">
+  <header><a class="logo" href="/"><img src="/shared/logo-ex.svg" alt="" width="34" height="34"><span>Featheral Exchange</span></a><nav class="tabs" aria-label="Exchange"><a href="#terminal">Spot</a><a href="#trading-account">Trading account</a><a id="notes-link" href="https://notes.featheral.com/">Notes</a></nav><button type="button" data-central-wallet>Wallet</button></header>
+  <main>
+    <div class="terminal-heading"><div><p class="eyebrow">FEATHERAL EXCHANGE / SPOT</p><h1>Trade the network.</h1><p>Deposit FTHX. Trade against real pools. Withdraw your assets.</p></div><div class="signin"><button id="provider-connect" type="button">Connect wallet</button><button id="disconnect" type="button" hidden>Disconnect trading</button><small id="trading-owner">Trading account not connected</small></div></div>
+    <p id="terminal-status" role="status" aria-live="polite"></p>
+    <section id="terminal" class="terminal-grid">
+      <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol"></label><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
+      <section class="chart-panel panel">
+        <div class="chart-toolbar"><div><h2 id="market-title">FTH$ / FTHX</h2><strong id="spot-price">Loading price...</strong><small id="usd-price"></small></div><label>Timeframe<select id="chart-interval"><option value="1h">1h / 5m candles</option><option value="24h" selected>24h / 1h candles</option><option value="7d">7d / 6h candles</option><option value="30d">30d / 1d candles</option></select></label><button id="refresh-market" type="button">Refresh</button></div>
+        <div class="chart-tools"><label><input id="chart-sma" type="checkbox" checked> SMA 20</label><button id="chart-reset" type="button">Reset zoom</button><button id="chart-fullscreen" type="button">Fullscreen</button><span>Scroll to zoom / drag to pan</span></div>
+        <div id="candle-chart"></div>
+        <p id="market-detail" class="muted"></p><p id="reference-detail" class="muted"></p>
+      </section>
+      <section class="order-panel panel"><h2>Spot order</h2><p>No leverage. 0.3% fee per pool. Pool prices move with supply and demand.</p>
+        <form id="order-form"><label>Side<select id="order-side"><option value="buy">Buy with FTHX</option><option value="sell">Sell for FTHX</option></select></label><label id="order-amount-label">Input amount<input id="order-amount" inputmode="decimal" required autocomplete="off"></label><label>Slippage tolerance (%)<input id="order-slippage" type="number" min="0" max="10" step="0.1" value="0.5" required></label><button type="submit">Preview order</button></form>
+        <div id="order-preview" aria-live="polite"></div><button id="execute-order" type="button" disabled>Confirm spot trade</button><p class="muted">Orders spend only your Exchange trading balance, never your main wallet. Quotes expire after 30 seconds; minimum output is enforced again at execution.</p>
+      </section>
+    </section>
+    <section id="trading-account" class="panel"><div class="account-heading"><h2>Trading account</h2><span id="trading-total" class="muted"></span></div><p>Only FTHX can be deposited. Acquired FTH$, community notes and unused FTHX may be withdrawn to the same owner's wallet. These funds remain part of your network wallet's estimated total, but are not spendable there until withdrawn.</p>
+      <div class="account-forms"><form id="deposit-form"><h3>Deposit FTHX</h3><label>Whole FTHX<input id="deposit-amount" inputmode="numeric" pattern="[1-9][0-9]*" required></label><button type="submit">Preview deposit</button></form><form id="withdraw-form"><h3>Withdraw to wallet</h3><label>Asset<select id="withdraw-symbol"><option>FTHX</option></select></label><label>Amount<input id="withdraw-amount" inputmode="decimal" required></label><button type="submit">Preview withdrawal</button></form></div>
+      <div class="table-wrap"><table><caption>Open spot positions / available trading balances</caption><thead><tr><th>Asset</th><th>Trading balance</th></tr></thead><tbody id="positions"><tr><td colspan="2">Connect to view trading balances.</td></tr></tbody></table></div>
+      <div class="history-grid"><div class="table-wrap"><table><caption>Your executed trades</caption><thead><tr><th>Time</th><th>Market</th><th>Side</th><th>Input</th><th>Output</th></tr></thead><tbody id="trade-history"></tbody></table></div><div class="table-wrap"><table><caption>Deposits and withdrawals</caption><thead><tr><th>Time</th><th>Action</th><th>Amount</th><th>Status</th></tr></thead><tbody id="movement-history"></tbody></table></div></div>
+      <div id="legacy-requests"></div>
+    </section>
+    <details class="panel"><summary>Liquidity provision</summary><p>Liquidity is provided from your main wallet, separate from trading deposits. Withdraw acquired notes first if needed. Pool fees and impermanent-loss risk apply. No pool is funded automatically.</p>
+      <form id="liquidity-form" class="account-forms"><label>Community-note market<select id="liquidity-symbol"></select></label><label>Action<select id="liquidity-action"><option value="add">Add FTHX + notes</option><option value="remove">Remove LP shares</option></select></label><label>FTHX amount / LP shares<input id="liquidity-amount" type="number" min="1" max="1000000000" step="1" required></label><button type="submit">Preview liquidity</button></form><p id="liquidity-positions"></p>
+    </details>
+    <details class="panel"><summary>Administrator / initial FTH$ pool funding</summary><p>Requires administrator authentication, the original authorized Dollar settlement writer, and the owning external wallet. Both currencies must already exist in your main wallet. This is committed pool capital, not a trading deposit or withdrawable LP position. No funds are supplied automatically.</p>
+      <form id="funding-form" class="account-forms"><label>Existing FTH$<input id="funding-dollar" inputmode="decimal" required></label><label>Existing whole FTHX<input id="funding-fthx" inputmode="numeric" pattern="[1-9][0-9]*" required></label><label>Approval (base units)<input id="funding-approval" autocomplete="off" required placeholder="FUND FTH$ ... BASE_UNITS ... FTHX"></label><button type="submit">Review initial funding</button></form>
+    </details>
+    <footer>Internal ledger spot markets, not an order book or a deployed L3 blockchain. Estimates are not redemption guarantees. USD uses live FTHG/USD; initial references are 1 FTHG = 10,000 FTH$ and 1 FTH$ = 100 FTHX until verified funded pools supply prices.</footer>
+  </main>
+  <script src="/site/chart.js" defer></script>
+  <script src="/site/terminal.js" defer></script>
+</body>
+</html>

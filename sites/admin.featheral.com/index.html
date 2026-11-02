@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Featheral Admin</title>
+  <link rel="icon" href="/shared/logo-admin.svg" type="image/svg+xml" />
+  <meta name="description" content="Manage Featheral sites, content, traffic, deployment and ecosystem operations from one administration workspace." />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/server-profile.css" />
+  <link rel="stylesheet" href="/shared/traffic-charts.css" />
+  <link rel="stylesheet" href="/shared/wallet-profile.css" />
+  <link rel="stylesheet" href="/reserve.css" />
+  <link rel="stylesheet" href="/operations.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <a class="brand" href="#/">
+        <img class="logo" src="/shared/logo-admin.svg" alt="" width="32" height="32">
+        <span id="brand-name">Featheral Admin</span>
+      </a>
+      <div id="set-switch"></div>
+      <nav id="nav"></nav>
+      <div class="sidebar-foot">Featheral Admin · sites & operations</div>
+    </aside>
+    <main>
+      <header id="topbar">
+        <button id="menu-toggle" class="icon-btn" title="Menu">☰</button>
+        <div id="crumbs"></div>
+        <div id="top-actions"></div>
+        <button id="admin-wallet" class="icon-btn" type="button" aria-label="Administration signing wallet" title="Signing wallet"></button>
+      </header>
+      <section id="view"></section>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast"></div>
+  <script src="/js/vendor/ethers.js"></script>
+  <script src="/shared/site-links.js"></script>
+  <script src="/shared/wallet-profile.js"></script>
+  <script src="/shared/sql-console.js"></script>
+  <script src="/shared/admin-kit.js"></script>
+  <script src="/js/dollar-format.js"></script>
+  <script src="/js/reserve-view.js"></script>
+  <script src="/js/core.js"></script>
+  <script src="/js/operations.js"></script>
+  <script src="/js/operations/foundation.js"></script>
+  <script src="/js/operations/gold.js"></script>
+  <script src="/js/operations/dollar.js"></script>
+  <script src="/js/operations/bridge.js"></script>
+  <script src="/js/operations/world.js"></script>
+  <script src="/shared/traffic-charts.js"></script>
+  <script src="/js/home.js"></script>
+  <script src="/js/content.js"></script>
+  <script src="/js/media.js"></script>
+  <script src="/js/data.js"></script>
+  <script src="/js/explore.js"></script>
+  <script src="/js/analytics.js"></script>
+  <script src="/js/cms.js"></script>
+  <script src="/js/sites.js"></script>
+  <script src="/js/intranet.js"></script>
+  <script src="/js/silver.js"></script>
+  <script src="/js/notes.js"></script>
+  <script src="/js/server-profile-chart.js"></script>
+  <script src="/js/server-users.js"></script>
+  <script src="/js/database.js"></script>
+</body>
+</html>

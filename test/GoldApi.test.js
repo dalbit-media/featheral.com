@@ -4,6 +4,33 @@ const { ethers } = require("ethers");
 const { createGoldApi, TOKEN_ADDRESS } = require("../services/gold-api/server");
 
 describe("Gold-owned Ethereum RPC", () => {
+  it("reads exact mainnet FTHG wallet balances and rejects other chains", async () => {
+    let chainId = 1n;
+    const reader = createGoldApi({ env: {}, provider: {
+      async getNetwork() { return { chainId }; }, async getBlockNumber() { return 123; },
+      async call(tx) { expect(tx.to.toLowerCase()).to.equal(TOKEN_ADDRESS.toLowerCase()); return ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [1234567890123456789n]); },
+    } });
+    try {
+      const result = await reader.walletBalance(`0x${"11".repeat(20)}`);
+      expect(result.balance).to.equal("1234567890123456789"); expect(result.block).to.equal(123); expect(result.chainId).to.equal(1);
+      chainId = 5n;
+      await expect(reader.walletBalance(`0x${"11".repeat(20)}`)).to.be.rejectedWith("Mainnet");
+    } finally { reader.close(); }
+  });
+  it("owns native ETH wallet reads used by both the public Gold route and Note summaries", async () => {
+    const address = `0x${"11".repeat(20)}`, requests = [];
+    const snapshot = { balances: [{ chainId: 1, balance: "123", error: null }], market: { usdPerEth: null, error: "No feed" } };
+    const gold = createGoldApi({ env: {}, provider: {}, nativeReader: async owner => { requests.push(owner); return snapshot; } });
+    const server = http.createServer((req, res) => gold.handle(req, res));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      expect(await gold.nativeBalance(address)).to.equal(snapshot);
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v1/gold/native/wallets/${address}`);
+      expect(response.status).to.equal(200);
+      expect(await response.json()).to.deep.equal(snapshot);
+      expect(requests).to.deep.equal([address, address]);
+    } finally { await new Promise(resolve => server.close(resolve)); gold.close(); }
+  });
   let api, server, base, calls;
   beforeEach(async () => {
     calls = [];
@@ -51,7 +78,7 @@ describe("Gold-owned Ethereum RPC", () => {
   it("verifies finality, canonical blocks and the configured bridge emitter before exposing ledger events", async () => {
     const bridge = `0x${"11".repeat(20)}`, wallet = `0x${"22".repeat(20)}`, account = `0x${"00".repeat(12)}${wallet.slice(2)}`;
     const txHash = `0x${"ab".repeat(32)}`, blockHash = `0x${"cd".repeat(32)}`;
-    const iface = new ethers.Interface(require("../sites/shared/abi/FthgGameBridge.json").abi);
+    const iface = new ethers.Interface(require("../shared/abi/FthgGameBridge.json").abi);
     const encoded = iface.encodeEventLog(iface.getEvent("FthgConverted"), [wallet, account, 1n, 1000n, 10n, 10000n]);
     const receipt = { hash: txHash, status: 1, blockNumber: 100, blockHash, logs: [{ ...encoded, address: bridge, index: 0 }] };
     let head = 100;

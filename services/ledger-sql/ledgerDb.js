@@ -1,6 +1,6 @@
 "use strict";
 
-const { DatabaseSync } = require("node:sqlite");
+const { open } = require("../db-api/sqlite");
 
 const MAX_QUERY_LENGTH = 4000;
 const MAX_ROWS = 500;
@@ -17,11 +17,10 @@ function plain(value) {
   return value;
 }
 
-// A small embedded SQLite index (node:sqlite) over a hash-chained ledger. The block files stay the
-// source of truth; this database is derived from them, rebuilt on start, and exposed read-only.
+// The block files stay the source of truth; this in-memory SQLite index is rebuilt on start.
 class LedgerDb {
   constructor({ schema, comments = {} }) {
-    this.db = new DatabaseSync(":memory:");
+    this.db = open(":memory:");
     this.db.exec(schema);
     this.comments = comments;
     this.tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((row) => row.name);
@@ -75,7 +74,7 @@ class LedgerDb {
     this.db.close();
   }
 
-  // Runs one user-supplied SELECT. Reads are synchronous, so toggling query_only here cannot race writers.
+  // Reads are synchronous, so query_only cannot race with ledger writes.
   query(input, { maxRows = MAX_ROWS } = {}) {
     if (this.closed) throw sqlError("The ledger database is closed.", 503);
     const text = String(input ?? "").trim().replace(/;+\s*$/, "");

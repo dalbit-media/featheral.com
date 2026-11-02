@@ -1,0 +1,12 @@
+{
+  "id": "/",
+  "name": "Featheral App",
+  "short_name": "Featheral",
+  "description": "Foundation insider workspace",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d131b",
+  "theme_color": "#111820",
+  "icons": [{ "src": "/shared/logo-app.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

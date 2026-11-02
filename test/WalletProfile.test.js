@@ -3,11 +3,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "sites", "shared", "wallet-profile.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "..", "sites", "wallet.featheral.com", "wallet-profile.js"), "utf8");
 const account = "0x1111111111111111111111111111111111111111";
 const preferenceKey = "featheral.walletDisconnected";
 
-function widget(hostname, { accounts = [], preference = null, storedPreference = null, multiple = false, legacy = false, reject = false, onConnect, adminWallets = [], fthgAdminWallets = [], moderators = adminWallets, role = false, configFailure = false, delayedConfig = null, delayedBalances = null, publicAdmin = false, inlineProfile = false, rejectProfile = false, signProfile } = {}) {
+function widget(hostname, { accounts = [], preference = null, storedPreference = null, multiple = false, legacy = false, reject = false, onConnect, adminWallets = [], fthgAdminWallets = [], moderators = adminWallets, role = false, configFailure = false, delayedConfig = null, delayedBalances = null, publicAdmin = false, inlineProfile = false, rejectProfile = false, signProfile, walletFailure = false, central = false, ethereumProvider = false } = {}) {
   const requests = [];
   const walletListeners = {};
   const alerts = [];
@@ -17,6 +17,7 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
   const errors = [];
   const events = [];
   const profileWrites = [];
+  const centralCalls = [];
   function node() {
     return {
       listeners: {},
@@ -109,13 +110,15 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
     Event: class { constructor(type) { this.type = type; } },
     alert(message) { alerts.push(message); },
     async fetch(url, init) {
-      if (url === "/api/v1/dollar/profiles" && init?.method === "POST") {
+      if (url.includes("/api/wallet/accounts/") && walletFailure)
+        return { ok: false, status: 503, json: async () => ({ error: "Central wallet is unavailable." }) };
+      if (url === "/api/v1/notes/profiles" && init?.method === "POST") {
         const data = JSON.parse(init.body);
         profileWrites.push(data);
         return { ok: !rejectProfile, json: async () => rejectProfile ? { error: "Username already taken." }
           : { profile: { username: data.username, avatar: data.avatar }, ledgerHeight: 7 } };
       }
-      if (url.startsWith("/api/v1/dollar/wallets/") && delayedBalances) await delayedBalances;
+      if (url.includes("/api/wallet/accounts/") && delayedBalances) await delayedBalances;
       const isConfig = url === "/api/v1/admin/config" || url === "/api/v1/world/moderation?limit=1";
       if (isConfig && delayedConfig) await delayedConfig;
       return {
@@ -129,21 +132,106 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
           if (url === "/api/v1/admin/config") return { adminWallets, fthgAdminWallets };
           if (url === "/api/v1/world/moderation?limit=1") return { moderators };
           const profile = { username: "tester", avatar: "data:image/png;base64,AA==" };
-          if (url.startsWith("/api/v1/dollar/profiles/")) return { profile };
+          if (url.startsWith("/api/v1/notes/profiles/")) return { profile };
+          if (url.includes("/api/wallet/accounts/")) return { holdings: [{ symbol: "FTHX", balance: "42" }],
+            dollar: { balance: { available: "0", reserved: "0" } },
+            ethereum: { balance: "2000000000000000000" }, portfolio: { usd: "12.00", fthg: "3000000000000000000", partial: false, unpriced: [] } };
           return { address: account, gameAccountId: `wallet:${account}`, profile, fthDollar: { balance: "0", reserved: "0" } };
         },
       };
     },
   });
   window.FeatheralSites = { current: hostname.split(".")[0] === "featheral" ? "foundation" : hostname.split(".")[0] };
-  window.FeatheralProfile.mount(button, { onConnect, profileRoot });
-  return { profile: window.FeatheralProfile, button, requests, otherRequests, otherProvider, walletListeners, alerts, elements, errors, events, profileRoot, profileWrites, adminLink: headerNav.children[0] };
+  if (central) window.FeatheralWallet = { open: config => centralCalls.push(config) };
+  window.FeatheralProfile.mount(button, { onConnect, profileRoot, ethereumProvider });
+  return { profile: window.FeatheralProfile, button, requests, otherRequests, otherProvider, walletListeners, alerts, elements, errors, events, profileRoot, profileWrites, centralCalls, adminLink: headerNav.children[0] };
 }
 
+describe("Central wallet consistency", () => {
+  for (const [host, primary] of [["featheral.com", "FTHX"], ["gold.featheral.com", "FTHG"], ["dollar.featheral.com", "FTH$"], ["world.featheral.com", "FTH$"]]) {
+    it(`opens the common account-following renderer on ${host}`, async () => {
+      const app = widget(host, { central: true });
+      await app.button.listeners.click();
+      expect(app.centralCalls).to.have.length(1);
+      expect(app.centralCalls[0].primary).to.equal(primary);
+      expect(app.requests).not.to.include("eth_requestAccounts");
+    });
+  }
+  it("preserves explicit provider connection on Ethereum transaction screens", async () => {
+    const app = widget("gold.featheral.com", { central: true, ethereumProvider: true });
+    await app.button.listeners.click();
+    expect(app.centralCalls).to.have.length(0);
+    expect(app.requests).to.include("eth_requestAccounts");
+  });
+  it("preserves explicit Ethereum signer labels at runtime without changing generic wallet labels", async () => {
+    const disconnected = widget("ex.featheral.com", { ethereumProvider: true });
+    await settle();
+    expect(disconnected.button.title).to.equal("Connect Ethereum signer");
+    const connected = widget("ex.featheral.com", { ethereumProvider: true, accounts: [account] });
+    await settle();
+    expect(connected.button.title).to.equal("Ethereum signer (connected)");
+    const generic = widget("ex.featheral.com");
+    await settle();
+    expect(generic.button.title).to.equal("Connect wallet to see your balance and profile");
+    expect(source).to.include('button.setAttribute("aria-label", label)');
+  });
+  it("keeps World inline profile authentication separate from wallet portfolio selection", async () => {
+    const app = widget("world.featheral.com", { central: true, inlineProfile: true });
+    await app.profileRoot.children.find(child => child?.tagName === "BUTTON" || child?.textContent === "Connect wallet to set up profile").listeners.click();
+    expect(app.centralCalls).to.have.length(0);
+    expect(app.requests).to.include("eth_requestAccounts");
+  });
+});
+
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+describe("Central wallet themed profile panels", () => {
+  it("shows an existing FTHX balance in the Dollar wallet popup alongside swap access", async () => {
+    const app = widget("dollar.featheral.com", { accounts: [account] });
+    await settle(); await app.button.listeners.click();
+    expect(app.elements.some(element => element.textContent === "42 FTHX")).to.equal(true);
+    expect(app.elements.some(element => element.textContent === "⇄ Swap" && element.href === "https://ex.featheral.com/")).to.equal(true);
+  });
+  it("reports central API failures without inventing balances or disabling profile editing", async () => {
+    const app = widget("gold.featheral.com", { accounts: [account], walletFailure: true });
+    await settle(); await app.button.listeners.click();
+    const panel = app.elements.find(element => element.className === "wp-panel");
+    const descendants = node => [node, ...(node.children || []).flatMap(child => typeof child === "object" ? descendants(child) : [])];
+    const texts = descendants(panel).map(node => node.textContent);
+    expect(texts).to.include("Central wallet is unavailable.");
+    expect(texts).to.include("USD unavailable");
+    expect(texts).not.to.include("$12.00");
+    expect(texts).to.include("Edit World profile ↗");
+    expect(app.errors.some(args => args[0] === "Central wallet portfolio unavailable:")).to.equal(true);
+  });
+  it("native signer panels use central USD valuations or explicitly report unavailable, never a fixed Dollar peg", async () => {
+    for (const walletFailure of [false, true]) {
+      const app = widget("ex.featheral.com", { accounts: [account], ethereumProvider: true, walletFailure });
+      await settle(); await app.button.listeners.click();
+      const panel = app.elements.find(element => element.className === "wp-panel");
+      const descendants = node => [node, ...(node.children || []).flatMap(child => typeof child === "object" ? descendants(child) : [])];
+      const texts = descendants(panel).map(node => node.textContent);
+      expect(texts).to.include(walletFailure ? "USD unavailable" : "$12.00");
+    }
+    expect(source).not.to.match(/0\.01|toUsd|usdPerDollar/);
+  });
+  for (const [hostname, primary] of [["featheral.com", "42 FTHX"], ["gold.featheral.com", "2 FTHG"]]) {
+    it(`preserves the profile panel on ${hostname} with central portfolio totals and primary asset`, async () => {
+      const app = widget(hostname, { accounts: [account] });
+      await settle();
+      await app.button.listeners.click();
+      const panel = app.elements.find(element => element.className === "wp-panel");
+      const descendants = node => [node, ...(node.children || []).flatMap(child => typeof child === "object" ? descendants(child) : [])];
+      const nodes = descendants(panel), texts = nodes.map(node => node.textContent);
+      expect(texts).to.include(primary);
+      expect(texts).to.include("$12.00");
+      expect(texts).to.include("3 FTHG estimated");
+      expect(nodes.some(node => node.href?.startsWith("https://wallet.featheral.com/?primary="))).to.equal(true);
+    });
+  }
+});
 
 describe("Inline World profile editor", () => {
-  it("links World wallet menus to main-page setup while retaining other sites' popup editor", async () => {
+  it("links every wallet menu to World setup without creating an inline wallet editor", async () => {
     const world = widget("world.featheral.com", { accounts: [account] });
     const gold = widget("gold.featheral.com", { accounts: [account] });
     await settle();
@@ -151,9 +239,10 @@ describe("Inline World profile editor", () => {
     await gold.button.listeners.click();
     expect(world.alerts).to.deep.equal([]);
     expect(gold.alerts).to.deep.equal([]);
-    expect(world.elements.some(node => node.href === "/#/setup")).to.equal(true);
+    expect(world.elements.some(node => node.href === "https://world.featheral.com/#/setup")).to.equal(true);
     expect(world.elements.some(node => node.autocomplete === "nickname")).to.equal(false);
-    expect(gold.elements.some(node => node.autocomplete === "nickname")).to.equal(true);
+    expect(gold.elements.some(node => node.autocomplete === "nickname")).to.equal(false);
+    expect(gold.elements.some(node => node.href === "https://world.featheral.com/#/setup")).to.equal(true);
   });
   it("offers optional setup without prompting a visitor's wallet", async () => {
     const app = widget("world.featheral.com", { inlineProfile: true });

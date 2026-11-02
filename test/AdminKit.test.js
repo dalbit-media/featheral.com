@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.join(__dirname, "..", "sites");
-const source = fs.readFileSync(path.join(root, "shared", "admin-kit.js"), "utf8");
+const source = fs.readFileSync(path.join(root, "..", "shared", "admin-kit.js"), "utf8");
 
 function fixture({ hash = "", restricted = false, fail = false } = {}) {
   const handlers = {};
@@ -57,13 +57,14 @@ function fixture({ hash = "", restricted = false, fail = false } = {}) {
     async fetch(url) {
       calls.push(url);
       return {
-        ok: !fail, status: 503,
+        ok: !fail, status: 503, headers: { get: () => "application/json" },
         async json() { return url.includes("/world/") ? { moderators: [moderator] } : { adminWallets: [project], fthgAdminWallets: [] }; },
       };
     },
   });
   const changes = [];
-  const tabs = window.AdminKit.tabs((id) => changes.push(id), (id) => !restricted || id !== "operations");
+  const scope = { querySelector: selector => selector === "[data-admin-tabs]" ? nav : nodes[selector.slice(1)] };
+  const tabs = window.AdminKit.tabs(scope, hash.slice(1), id => { changes.push(id); location.hash = `#/operations/test?tab=${id}`; }, id => !restricted || id !== "operations");
   return { window, nodes, buttons, tabs, changes, location, handlers, calls, errors, moderator, project, setAccount(value) { account = value; } };
 }
 
@@ -77,7 +78,7 @@ describe("Shared administration tabs", () => {
     expect(ui.nodes.queries.attrs.role).to.equal("tabpanel");
     ui.nodes.queries.value = "SELECT * FROM blocks";
     ui.tabs.select("overview");
-    expect(ui.location.hash).to.equal("#overview");
+    expect(ui.location.hash).to.equal("#/operations/test?tab=overview");
     ui.tabs.select("queries");
     expect(ui.nodes.queries.value).to.equal("SELECT * FROM blocks");
     expect(ui.buttons.filter((button) => button.tabIndex === 0)).to.have.length(1);
@@ -95,32 +96,31 @@ describe("Shared administration tabs", () => {
     expect(ui.nodes.overview.hidden).to.equal(false);
   });
 
-  it("rejects invalid hashes and responds to valid hash navigation", () => {
+  it("rejects invalid tabs without changing the enclosing Admin route", () => {
     const ui = fixture({ hash: "#removed-tab" });
     expect(ui.nodes.overview.hidden).to.equal(false);
-    ui.location.hash = "#queries";
-    ui.handlers.hashchange();
+    ui.tabs.select("queries");
     expect(ui.nodes.queries.hidden).to.equal(false);
     expect(ui.tabs.select("removed-tab")).to.equal(false);
   });
 
-  for (const site of ["foundation", "gold", "dollar", "world"]) {
+  for (const site of ["foundation", "dollar", "world"]) {
     it(`wires every ${site} tab to a unique existing panel`, () => {
-      const html = fs.readFileSync(path.join(root, site, "admin", "index.html"), "utf8");
+      const html = fs.readFileSync(path.join(root, "admin.featheral.com", "views", site + ".html"), "utf8");
       const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
       expect(new Set(ids).size).to.equal(ids.length);
       const nav = html.match(/<nav[^>]*data-admin-tabs[^>]*>([\s\S]*?)<\/nav>/)[1];
       const tabs = [...nav.matchAll(/data-tab="([^"]+)"/g)].map((match) => match[1]);
       expect(tabs.length).to.be.greaterThan(1);
       for (const id of tabs) expect(html).to.match(new RegExp(`<section[^>]*id="${id}"`));
-      expect(html).to.include("/shared/admin.css");
-      expect(html).to.include("/shared/admin-kit.js");
+      expect(html).not.to.include("<script");
+      expect(html).not.to.include("<html");
     });
   }
 
   it("does not leave removed Gold control handlers or dead literal DOM references", () => {
-    const html = fs.readFileSync(path.join(root, "gold", "admin", "index.html"), "utf8");
-    const script = fs.readFileSync(path.join(root, "gold", "admin", "app.js"), "utf8");
+    const html = fs.readFileSync(path.join(root, "admin.featheral.com", "views", "gold.html"), "utf8");
+    const script = fs.readFileSync(path.join(root, "admin.featheral.com", "js", "operations", "gold.js"), "utf8");
     const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
     for (const match of script.matchAll(/\$\("([^"]+)"\)|act\("([^"]+)"/g)) expect(ids.has(match[1] || match[2]), match[1] || match[2]).to.equal(true);
     for (const removed of ["depositDynamicBridgeFthg", "initializeDynamicBridgePool", "lpSend", "addMarket", "mTable", "dexRoadmapSummary"]) {
@@ -128,21 +128,20 @@ describe("Shared administration tabs", () => {
       expect(script).not.to.include(removed);
     }
     expect(html).not.to.include("ledger.sqlite");
-    expect(html).to.include('data-path="/admin/#liquidity"');
-    expect(html).to.include('data-tab="game"');
-    expect(html).to.include('data-tab="dex"');
+    expect(html).to.include('id="safety-title"');
+    expect(html).not.to.include('data-tab="dex"');
   });
 
   it("keeps personal staking in the wallet and management in admin", () => {
-    const admin = fs.readFileSync(path.join(root, "dollar", "admin", "index.html"), "utf8");
-    const wallet = fs.readFileSync(path.join(root, "dollar", "wallet", "index.html"), "utf8");
+    const admin = fs.readFileSync(path.join(root, "admin.featheral.com", "views", "dollar.html"), "utf8");
+    const wallet = fs.readFileSync(path.join(root, "wallet.featheral.com", "ethereum", "index.html"), "utf8");
     for (const id of ["stakeForm", "claimForm"]) {
       expect(admin).not.to.include(`id="${id}"`);
       expect(wallet).to.include(`id="${id}"`);
     }
     expect(admin).to.include('id="aprForm"');
     expect(admin).to.include('href="/wallet/#staking"');
-    expect(wallet).to.include("/wallet/staking.js");
+    expect(wallet).to.include("/ethereum/staking.js");
   });
 });
 
@@ -173,7 +172,7 @@ describe("World moderator wallet gate", () => {
 });
 
 describe("World moderation actions", () => {
-  async function submit({ approved = false, wallet = "0x1111111111111111111111111111111111111111" } = {}) {
+  async function submit({ approved = false, wallet = "0x1111111111111111111111111111111111111111", viewChanged = false } = {}) {
     const nodes = {};
     const writes = [];
     const signatures = [];
@@ -183,7 +182,8 @@ describe("World moderation actions", () => {
       if (options) writes.push({ url, ...options });
       return url.endsWith("/stats") ? { ledger: {} } : { moderators: [], suspended: [], posts: [] };
     };
-    const FeatheralProfile = { getProvider: () => ({ async request(request) { signatures.push(request); return "0x1234"; } }) };
+    let active = true;
+    const FeatheralProfile = { getProvider: () => ({ async request(request) { signatures.push(request); if (viewChanged) active = false; return "0x1234"; } }) };
     const window = {
       AdminKit: {
         el() {}, stat() {}, json, tabs() {}, mountWallet() {},
@@ -191,11 +191,14 @@ describe("World moderation actions", () => {
       },
       LedgerSql: { mount() {} },
     };
-    vm.runInNewContext(fs.readFileSync(path.join(root, "world", "admin", "admin.js"), "utf8"), {
+    window.FeatheralAdminControllers = {};
+    window.AdminKit.assertActive = () => { if (!active) throw new Error("Administration view changed."); };
+    vm.runInNewContext(fs.readFileSync(path.join(root, "admin.featheral.com", "js", "operations", "world.js"), "utf8"), {
       window, FeatheralProfile, ethers: require("ethers"), crypto: require("node:crypto").webcrypto,
       confirm: () => approved,
       document: { getElementById: node, querySelectorAll: () => [button] },
     });
+    window.FeatheralAdminControllers.world({ querySelector: selector => node(selector.slice(1)), querySelectorAll: () => [button] }, window.AdminKit);
     node("walletInput").value = wallet;
     node("walletForm").handlers.submit({ preventDefault() {} });
     await new Promise(setImmediate);
@@ -227,13 +230,23 @@ describe("World moderation actions", () => {
     expect(ui.signatures).to.have.length(0);
     expect(ui.writes).to.have.length(0);
   });
+
+  it("does not submit a signature returned after navigating away", async () => {
+    const ui = await submit({ approved: true, viewChanged: true });
+    expect(ui.signatures).to.have.length(1);
+    expect(ui.writes).to.have.length(0);
+    expect(ui.nodes.walletInput.value).to.equal(ui.wallet);
+    expect(ui.nodes.moderationStatus.textContent).to.include("view changed");
+  });
 });
 
 describe("Ledger SQL menu examples", () => {
   for (const [site, page, count] of [["dollar", "admin", 3], ["world", "admin", 3], ["dollar", "explorer", 6], ["world", "ledger", 6]]) {
     it(`provides labeled, executable queries in ${site} ${page}`, () => {
       const filename = page === "admin" ? "admin.js" : `${page}.js`;
-      const script = fs.readFileSync(path.join(root, site, page, filename), "utf8");
+      const script = fs.readFileSync(page === "admin"
+        ? path.join(root, "admin.featheral.com", "js", "operations", site + ".js")
+        : path.join(root, `${site}.featheral.com`, page, filename), "utf8");
       const examples = [...script.matchAll(/\{ title: ("(?:[^"\\]|\\.)*"), sql: ("(?:[^"\\]|\\.)*") \}/g)].map((match) => ({ title: JSON.parse(match[1]), sql: JSON.parse(match[2]) }));
       expect(examples).to.have.length(count);
       const db = site === "dollar"

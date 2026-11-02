@@ -1,0 +1,23 @@
+{
+  "name": "featheral-cms",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Featheral CMS for managing local content and publishing the public media site.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.7",
+    "@noble/hashes": "^1.8.0",
+    "express": "^5.3.0",
+    "parse5": "^7.3.0",
+    "ssh2": "^1.17.0",
+    "web-push": "^3.6.7",
+    "yazl": "^3.3.1"
+  }
+}

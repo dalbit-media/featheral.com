@@ -1,0 +1,42 @@
+"use strict";
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const crypto = require("node:crypto");
+const { Wallet } = require("ethers");
+const { FileJournals } = require("../journal");
+const { CredentialVault } = require("../vault");
+const { OriginApprovals } = require("../approvals");
+const { Deployment } = require("../../cms/lib/deployment");
+const root = path.resolve(__dirname, "..", "..", "..");
+const context = { origin: "http://admin.localhost", session: "test-admin" };
+test("vault-backed deployment needs no password environment variable and requires action-bound proof before launch", async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-vault-deploy-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "key");
+  fs.writeFileSync(file, crypto.randomBytes(32).toString("hex"), { mode: 0o600 });
+  const env = { DB_VAULT_KEY_FILE: file, DEPLOY_TARGET: "root@server.example:/opt/featheral", DEPLOY_ENABLED: "true",
+    DEPLOY_HOST_KEY_SHA256: "SHA256:" + "a".repeat(43), DEPLOY_TLS_EMAIL: "ops@example.com" };
+  const wallet = Wallet.createRandom();
+  const vault = new CredentialVault({ journals: new FileJournals(path.join(directory, "ledger")), env, repository: root,
+    approvals: new OriginApprovals({ wallet: wallet.address }) });
+  vault.save("fixture-separate-root-password", vault.target());
+  const deployment = new Deployment({ root, env, stateDirectory: path.join(directory, "deploy") });
+  deployment.vault = vault;
+  const plan = deployment.plan(), input = { planId: plan.id, approval: `DEPLOY ${plan.digest} ${plan.contentDigest}` };
+  assert.equal(plan.walletApprovalRequired, true); assert.equal(env.DEPLOY_PASSWORD, undefined);
+  assert.ok(!JSON.stringify({ plan, storedPlan: deployment.plans.get(plan.id) }).includes("fixture-separate-root-password"));
+  assert.throws(() => deployment.launch(input, context), { status: 403 });
+  await assert.rejects(deployment.start(input), { status: 403 });
+  let credential;
+  deployment.start = async (_input, received) => { credential = received; };
+  const challenge = deployment.approvalChallenge(input, context);
+  const signed = { ...input, challengeId: challenge.challengeId, signature: await wallet.signMessage(challenge.message) };
+  deployment.launch(signed, context);
+  assert.equal(credential.password, "fixture-separate-root-password");
+  assert.throws(() => deployment.launch(signed, context), { status: 403 });
+  env.DEPLOY_PORT = "2222"; vault.save("new-host-password", vault.target());
+  assert.throws(() => deployment.approvalChallenge(input, context), { status: 409 });
+});

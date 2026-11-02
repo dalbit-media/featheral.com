@@ -1,0 +1,14 @@
+body.cms-layout{overflow-wrap:anywhere}
+.cms-document{max-width:1120px;padding:0 20px 40px}
+.cms-document>.hero{border:0;padding:64px 0 40px}
+.cms-document-sections>section{padding:32px 0;border-top:1px solid var(--line)}
+.cms-document img{max-width:100%;height:auto}
+.cms-document .reserve-panel{margin:0 0 20px;padding:24px}
+.cms-document-sections{min-width:0}
+.cms-document .stat-grid,.cms-document .two-col,.cms-document .cards{min-width:0}
+@media(max-width:640px){
+  .cms-document{padding:0 14px 28px}
+  .cms-document>.hero{padding:40px 0 28px}
+  .cms-document-sections>section{padding:24px 0}
+  .cms-document .reserve-panel{padding:18px}
+}

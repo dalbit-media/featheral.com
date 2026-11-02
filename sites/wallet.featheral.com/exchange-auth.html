@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Authorize Exchange sign-in · Featheral Wallet</title>
+  <link rel="stylesheet" href="/wallet-app.css">
+</head>
+<body data-primary="FTHX">
+  <main><section class="wallet-panel">
+    <h1 id="auth-title">Sign in to Exchange</h1>
+    <p id="auth-description">Unlock your existing built-in wallet to approve this sign-in only. This does not authorize transfers. Your password, keys and wallet session never leave this page.</p>
+    <p id="auth-origin"></p><code id="auth-address">Waiting for wallet…</code>
+    <div id="auth-choice" hidden><label>Wallet<select id="auth-method"><option value="builtin">Built-in wallet</option><option value="external">Browser extension</option></select></label><button id="auth-select" type="button">Connect selected wallet</button><p><a href="/?view=account" target="_blank" rel="noopener">Create or restore a wallet ↗</a></p></div>
+    <details><summary>Review sign-in message</summary><pre id="auth-message" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+    <form id="auth-form"><label id="auth-password-label">Wallet password<input id="auth-password" type="password" required autocomplete="off"></label><button id="auth-submit" type="submit" disabled>Unlock &amp; approve sign-in</button></form>
+    <button id="auth-cancel" type="button">Cancel</button><p><a href="/" target="_blank" rel="noopener">Open full wallet</a></p><p id="auth-status" role="status">Waiting for an Exchange sign-in request.</p>
+  </section></main>
+  <script src="/ethers.js" defer></script><script src="/vault.js" defer></script><script src="/site-sign-in.js" defer></script><script src="/exchange-auth.js" defer></script>
+</body>
+</html>

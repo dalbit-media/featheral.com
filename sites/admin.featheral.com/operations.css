@@ -1,0 +1,22 @@
+.native-operation{--gold:var(--brand);--mut:var(--muted);--txt:var(--ink);font-size:14px;min-width:0}
+.native-operation .native-console{max-width:none;padding:0}
+.native-operation .admin-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 0;margin-bottom:16px;border-bottom:1px solid var(--line)}
+.native-operation .admin-tabs button{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:inherit;cursor:pointer}
+.native-operation .admin-tabs [aria-selected=true]{background:var(--brand);color:#fff}
+.native-operation [hidden]{display:none!important}
+.native-operation .admin-intro{margin-bottom:20px}
+.native-operation .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.native-operation .stat{display:grid;padding:12px;border:1px solid var(--line);border-radius:8px}
+.native-operation .stat b{font-size:18px;overflow-wrap:anywhere}
+.native-operation .stat small{color:var(--muted)}
+.native-operation .supply-card{border:1px solid var(--line);border-radius:10px;padding:14px;margin:12px 0}
+.native-operation .moderation-row{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid var(--line);padding:12px 0}
+.native-operation .moderation-row>div{flex:1;min-width:180px;overflow-wrap:anywhere}
+.native-operation .moderation-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.native-operation .admin-gate,.native-operation .status{overflow-wrap:anywhere}
+.native-operation .sql-input{width:100%;font-family:monospace}
+.native-operation .sql-output{overflow:auto}
+.native-operation .reserve-main button{min-height:32px}
+#admin-wallet{flex-shrink:0;margin-left:8px}
+#admin-wallet svg{width:20px;height:20px}
+@media(max-width:640px){.native-operation .stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
