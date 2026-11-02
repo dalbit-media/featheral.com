@@ -54,7 +54,12 @@ const deployment = new Deployment({ root: path.resolve(__dirname, '..', '..'), s
     finally { store.close(); }
   }),
 }),
-  hostnames: () => [...sitePages.catalog().map(site => site.hostname), ...(siteManager?.records.map(site => site.hostname) || [])] });
+  hostnames: () => [...sitePages.catalog().map(site => site.hostname), ...(siteManager?.records.map(site => site.hostname) || [])],
+  sites: () => {
+    const managed = siteManager?.records || [];
+    return [...sitePages.catalog().filter(site => !managed.some(record => record.hostname === site.hostname && !record.path)), ...managed];
+  },
+});
 if (siteManager && CONFIG.sampleSites) Templates.provision(siteManager);
 const fthxSite = siteManager?.records.find((record) => record.hostname === 'x.featheral.com');
 if (fthxSite) {
@@ -76,7 +81,10 @@ const app = express();
 app.use((req, res, next) => {
   if (requestPolicy(req, res, operationsSettings)) next();
 });
-app.use((req, res, next) => { injectTelemetry(res); next(); });
+app.use((req, res, next) => {
+  if (![String(CONFIG.cmsHost).toLowerCase(), 'admin.localhost'].includes(req.hostname)) injectTelemetry(res);
+  next();
+});
 app.use((req, res, next) => {
   if (!['sites.featheral.com', 'sites.localhost'].includes(req.hostname)) return next();
   const url = new URL(req.url, 'http://local');
@@ -133,29 +141,13 @@ function resolveHostname(value) {
 const hostName = (req) => resolveHostname(req.hostname) || String(req.hostname || '').toLowerCase().replace(/\.$/, '');
 const localRequest = (req) => ['localhost', '127.0.0.1', '::1'].includes(hostName(req)) &&
   ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+const adminAuth = require('./lib/admin-auth').createAdminAuth({ adminHost: String(CONFIG.cmsHost).toLowerCase() });
+app.use('/api/admin-auth', adminAuth.router);
 function cmsAuth(req, res, next) {
-  if (req.cmsAuthorized) return next();
-  if (!operationsSettings.adminConfigured()) {
-    const localCms = ['admin.localhost', 'notes.localhost'].includes(req.hostname) &&
-      ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-    if (localCms || (localRequest(req) && hostName(req) !== String(CONFIG.cmsHost).toLowerCase())) {
-      req.cmsAuthorized = true;
-      return next();
-    }
-    return res.status(503).json({ error: 'Set an Admin password in Settings on localhost before exposing the CMS.' });
-  }
-  const [scheme, encoded] = String(req.get('authorization') || '').split(' ');
-  let supplied = '';
-  if (scheme === 'Basic' && encoded) {
-    try { supplied = Buffer.from(encoded, 'base64').toString('utf8').split(':').slice(1).join(':'); } catch { supplied = ''; }
-  }
-  if (operationsSettings.authenticate(supplied)) {
-    req.cmsAuthorized = true;
-    return next();
-  }
-  res.set('WWW-Authenticate', 'Basic realm="Featheral Admin", charset="UTF-8"').status(401).end('Admin authentication required');
+  adminAuth.authenticate(req, res, next);
 }
-app.use((req, res, next) => hostName(req) === String(CONFIG.cmsHost).toLowerCase() ? cmsAuth(req, res, next) : next());
+app.use((req, res, next) => hostName(req) === String(CONFIG.cmsHost).toLowerCase()
+  ? adminAuth.gate(req, res, () => { injectTelemetry(res); next(); }) : next());
 const { ServerUsers } = require('./lib/server-users');
 const serverUsers = new ServerUsers({ deployment, settings: operationsSettings });
 const ledgerDirectory = path.resolve(env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers'));
@@ -173,20 +165,24 @@ operationsSettings.verifyCredential = async config => {
     const uid = (await serverUsers.command(client, 'id -u')).trim();
     if (!/^\d+$/.test(uid)) throw Object.assign(new Error('SSH server returned an invalid user ID.'), { status: 502 });
     if (uid !== '0') await serverUsers.command(client, "sudo -S -p '' -- true", config.password + '\n');
+    return config.fingerprint;
   } finally { client.end(); config.password = ''; }
 };
 serverUsers.vault = database.vault;
 deployment.vault = database.vault;
 app.database = database;
 app.use('/api/database', database.adminRouter({
-  cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), deployment, serverUsers, adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  cmsAuth, passwordConfigured: () => true, deployment, serverUsers, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 app.use('/api/v1/db', (req, res, next) => ['db.featheral.com', 'db.localhost'].includes(req.hostname)
   ? database.publicRouter(req, res, next) : res.sendStatus(404));
 app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
-  service: serverUsers, cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  service: serverUsers, cmsAuth, passwordConfigured: () => true, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
-app.use('/api/settings', require('../operations/api').settingsApi({ settings: operationsSettings, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase() }));
+app.use('/api/settings', require('../operations/api').settingsApi({
+  settings: operationsSettings, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
+}));
 app.operationsSettings = operationsSettings;
 const serverProfile = new ServerProfile({
   root: path.resolve(__dirname, '..', '..'),
@@ -204,7 +200,7 @@ operationsSettings.listeners.add(() => {
 });
 app.serverProfile = serverProfile;
 app.use('/api/server-profile', serverProfileApi({
-  service: serverProfile, cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  service: serverProfile, cmsAuth, passwordConfigured: () => true, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 let operationsHandler;
 app.setOperationsHandler = handler => { operationsHandler = handler; };
@@ -866,7 +862,7 @@ app.post('/api/notes/markets/:symbol/fund', wrap((req, res) => {
 app.get('/api/deployment/status', wrap((req, res) => res.json(deployment.status())));
 app.post('/api/deployment/plan', wrap((req, res) => {
   if (!req.get('origin') || new URL(req.get('origin')).host !== req.get('host')) throw Object.assign(new Error('Same-origin deployment requests are required'), { status: 403 });
-  res.json(deployment.plan());
+  res.json(deployment.plan(req.body));
 }));
 app.post('/api/deployment/start', wrap((req, res) => {
   if (!req.get('origin') || new URL(req.get('origin')).host !== req.get('host')) throw Object.assign(new Error('Same-origin deployment requests are required'), { status: 403 });

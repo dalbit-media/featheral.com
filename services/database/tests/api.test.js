@@ -9,7 +9,7 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const express = require("express");
 const { Wallet } = require("ethers");
-const { createDatabase } = require("../server");
+const { createDatabase, createSiteServer } = require("../server");
 const { OriginApprovals } = require("../approvals");
 const { spawnSync } = require("node:child_process");
 test("the database service loads without third-party SQL drivers", () => {
@@ -22,6 +22,38 @@ test("the database service loads without third-party SQL drivers", () => {
     require(${JSON.stringify(path.resolve(__dirname, "..", "server.js"))});
   `], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
+});
+test("DB-only deployment serves its site and API without exposing other services or initializing financial writers", async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-db-site-"));
+  const repository = path.resolve(__dirname, "../../..");
+  fs.mkdirSync(path.join(directory, "sites"), { recursive: true });
+  fs.cpSync(path.join(repository, "sites", "db.featheral.com"), path.join(directory, "sites", "db.featheral.com"), { recursive: true });
+  fs.mkdirSync(path.join(directory, "shared"));
+  fs.copyFileSync(path.join(repository, "shared", "logo-db.svg"), path.join(directory, "shared", "logo-db.svg"));
+  const settings = { value: { uploadLimitMiB: 16, requestTimeoutSeconds: 30 }, listeners: new Set(), environment: () => ({}) };
+  const server = createSiteServer({ root: directory, settings });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(async () => { await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }); fs.rmSync(directory, { recursive: true, force: true }); });
+  const request = (url, host = "db.featheral.com", method = "GET") => new Promise((resolve, reject) => {
+    const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: url, method, headers: { Host: host } }, res => {
+      let text = ""; res.setEncoding("utf8"); res.on("data", chunk => { text += chunk; }); res.on("end", () => resolve({ status: res.statusCode, text }));
+    });
+    req.on("error", reject); req.end();
+  });
+  assert.equal((await request("/")).status, 200);
+  assert.match((await request("/")).text, /Featheral Database/);
+  assert.equal((await request("/shared/logo-db.svg")).status, 200);
+  assert.equal((await request("/styles.css")).status, 200);
+  assert.equal(JSON.parse((await request("/api/v1/db/status")).text).siteCutoverComplete, false);
+  assert.equal(JSON.parse((await request("/healthz")).text).mode, "database-only");
+  assert.equal((await request("/", "featheral.com")).status, 404);
+  assert.equal((await request("/api/v1/gold/reserve")).status, 404);
+  assert.equal((await request("/api/intranet/me")).status, 404);
+  assert.equal((await request("/api/database/records")).status, 404);
+  assert.equal((await request("/api/v1/db/status", "db.featheral.com", "POST")).status, 404);
+  for (const name of ["dollar-game", "fth-ledger", "gold-reserve", "world-ledger", "system-database"]) {
+    assert.equal(fs.existsSync(path.join(directory, "data", name)), false, name);
+  }
 });
 async function fixture(t, passwordConfigured = true) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-db-http-"));

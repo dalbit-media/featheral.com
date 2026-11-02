@@ -12,6 +12,21 @@ const express = require('express');
 const { DATA_DIR, writeJson } = require('../lib/store');
 const { dropSite } = require('../lib/wp');
 
+// Node fetch does not preserve overridden Host headers; hostname routing needs raw HTTP.
+function fetchWithHost(url, options = {}) {
+  if (!options.headers?.Host) return globalThis.fetch(url, options);
+  return new Promise((resolve, reject) => {
+    const request = http.request(url, { ...options, headers: { ...options.headers,
+      ...(options.body ? { 'Content-Length': Buffer.byteLength(options.body) } : {}) } }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: response.statusCode, headers: response.headers })));
+    });
+    request.on('error', reject); request.end(options.body);
+  });
+}
+const fetch = fetchWithHost;
+
 function readZip(buffer) {
   let end = buffer.length - 22;
   while (buffer.readUInt32LE(end) !== 0x06054b50) end--;
@@ -37,6 +52,7 @@ function readZip(buffer) {
 }
 
 async function startServer(t, config, cmsPassword, registryFile) {
+  const adminWallet = require("ethers").Wallet.createRandom();
   const pageData = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'cms-page-data-'));
   const configFile = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'admin-config-')), 'admin.config.json');
   writeJson(configFile, config);
@@ -56,6 +72,7 @@ async function startServer(t, config, cmsPassword, registryFile) {
   try {
     closeCaches = loadServer(Object.assign((name) => {
       if (name === 'express') return factory;
+      if (name === './lib/admin-auth') return { createAdminAuth: options => realRequire(name).createAdminAuth({ ...options, wallets: [adminWallet.address] }) };
       if (name === '../operations/configuration') return { assertDatabaseConfiguration() {} };
       if (name === '../operations/runtime') return {
         environment: () => ({ ADMIN_CONFIG_JSON: JSON.stringify(config) }),
@@ -102,7 +119,24 @@ async function startServer(t, config, cmsPassword, registryFile) {
     closeCaches();
     fs.rmSync(pageData, { recursive: true, force: true });
   });
-  return { base: `http://127.0.0.1:${server.address().port}`, app, notesFile: path.join(pageData, 'notes.sqlite'), provision: input => siteManager.create(input) };
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function signIn(host) {
+    const headers = { Host: host, ...(host === 'admin.featheral.com' ? { 'X-Forwarded-Proto': 'https' } : {}), 'Content-Type': 'application/json' };
+    const call = (route, body, cookie) => new Promise((resolve, reject) => {
+      const request = http.request(base + '/api/admin-auth/' + route, { method: 'POST',
+        headers: { ...headers, Origin: `${host === 'admin.featheral.com' ? 'https' : 'http'}://${host}`, ...(cookie ? { Cookie: cookie } : {}) } }, response => {
+        let text = ''; response.on('data', chunk => { text += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: JSON.parse(text) }));
+      });
+      request.on('error', reject); request.end(JSON.stringify(body));
+    });
+    const challenge = await call('challenge', { address: adminWallet.address });
+    const login = await call('verify', { signature: await adminWallet.signMessage(challenge.body.message) }, challenge.headers['set-cookie'][0].split(';')[0]);
+    assert.equal(login.status, 200);
+    return { ...headers, Cookie: login.headers['set-cookie'].find(value => value.startsWith('featheral_admin=')).split(';')[0] };
+  }
+  return { base, app, auth: await signIn('admin.featheral.com'), localAuth: await signIn('admin.localhost'),
+    notesFile: path.join(pageData, 'notes.sqlite'), provision: input => siteManager.create(input) };
 }
 
 test('public Notes ledger API lists currencies and uses bounded keyset pagination', async t => {
@@ -235,7 +269,7 @@ test('Notes admin APIs require auth and same-origin writes, and retired creation
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'notes-http-'));
   const registryFile = path.join(root, 'sites.json');
   writeJson(registryFile, []);
-  const { base, notesFile } = await startServer(t, { siteManagement: true }, 'notes-test', registryFile);
+  const { base, notesFile, auth } = await startServer(t, { siteManagement: true }, 'notes-test', registryFile);
   t.after(() => {
     const { SiteManager } = require('../lib/sites');
     for (const site of new SiteManager({ registryFile }).list()) {
@@ -247,7 +281,7 @@ test('Notes admin APIs require auth and same-origin writes, and retired creation
     const req = http.request(new URL(route, base), { method: body ? 'POST' : 'GET', headers: {
       Host: host, Origin: origin, 'Content-Type': 'application/json',
       'x-creation-token': token,
-      ...(authenticated ? { Authorization: `Basic ${Buffer.from('admin:notes-test').toString('base64')}` } : {}),
+      ...(authenticated && route.startsWith('/api/notes') ? { ...auth, Origin: origin === 'http://notes.featheral.com' ? 'https://admin.featheral.com' : origin } : {}),
     } }, res => {
       const chunks = []; res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => resolve({ status: res.statusCode, body: res.headers['content-type']?.includes('json') ? JSON.parse(Buffer.concat(chunks)) : Buffer.concat(chunks).toString() }));
@@ -324,7 +358,7 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   const baseSite = manager.create({ hostname: `base-${suffix}.example.test`, template: 'sites' });
   manager.records[0].hostname = 'sites.featheral.com';
   manager.persist();
-  const { base, provision } = await startServer(t, { siteManagement: true, allowSync: false }, 'free-sites-test', registryFile);
+  const { base, provision, auth } = await startServer(t, { siteManagement: true, allowSync: false }, 'free-sites-test', registryFile);
   t.after(() => {
     for (const site of new SiteManager({ registryFile }).list()) {
       dropSite(site.key);
@@ -335,7 +369,7 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   const request = (route, payload, admin = false, host = admin ? 'admin.featheral.com' : 'sites.localhost') => new Promise((resolve, reject) => {
     const req = http.request(new URL(route, base), { method: payload === undefined ? 'GET' : 'POST', headers: {
       Host: host, Origin: `http://${host}`, 'Content-Type': 'application/json',
-      ...(admin ? { Authorization: `Basic ${Buffer.from('admin:free-sites-test').toString('base64')}` } : {}),
+      ...(admin ? { ...auth, Origin: 'https://admin.featheral.com' } : {}),
     } }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
@@ -409,7 +443,7 @@ test('Stats is normally CMS-managed and aggregate telemetry enforces origin, pri
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'stats-registry-test-'));
   const registryFile = path.join(root, 'sites.json');
   const statsHost = `stats-${require('node:crypto').randomBytes(5).toString('hex')}.featheral.com`;
-  const { base, provision } = await startServer(t, { siteManagement: true }, 'stats-test-password', registryFile);
+  const { base, provision, auth: admin } = await startServer(t, { siteManagement: true }, 'stats-test-password', registryFile);
   t.after(() => {
     for (const site of new SiteManager({ registryFile }).list()) {
       dropSite(site.key);
@@ -431,7 +465,6 @@ test('Stats is normally CMS-managed and aggregate telemetry enforces origin, pri
     req.on('error', reject);
     req.end(payload === undefined ? undefined : JSON.stringify(payload));
   });
-  const admin = { Authorization: `Basic ${Buffer.from('admin:stats-test-password').toString('base64')}` };
   const created = { status: 201, data: provision({ hostname: statsHost, template: 'stats', name: 'Stats test' }) };
   assert.equal(created.status, 201);
   const info = await request(statsHost, '/api/public/info');
@@ -471,10 +504,9 @@ test('Stats is normally CMS-managed and aggregate telemetry enforces origin, pri
 });
 
 test('unified admin protects every console and forwards authenticated raw API requests without weakening wallet authority', async t => {
-  const { base, app } = await startServer(t, { siteKey: 'test' }, 'admin-test-password');
-  const auth = { Host: 'admin.featheral.com', Authorization: `Basic ${Buffer.from('admin:admin-test-password').toString('base64')}` };
+  const { base, app, auth } = await startServer(t, { siteKey: 'test' }, 'admin-test-password');
   const request = (pathname, { method = 'GET', headers = {}, body } = {}) => new Promise((resolve, reject) => {
-    const req = http.request(new URL(pathname, base), { method, headers }, res => {
+    const req = http.request(new URL(pathname, base), { method, headers: { 'X-Forwarded-Proto': 'https', ...headers } }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => {
@@ -519,23 +551,23 @@ test('unified admin protects every console and forwards authenticated raw API re
   assert.equal((await request(url, { method: 'POST', headers: { ...auth, Origin: 'https://other.example' }, body: '{}' })).status, 403);
   assert.equal((await request(url, { method: 'POST', headers: auth, body: '{}' })).status, 403);
   assert.equal(calls, 0);
-  const response = await request(url, { method: 'POST', headers: { ...auth, Origin: 'http://admin.featheral.com', 'Content-Type': 'application/json' }, body: '{"method":"eth_chainId"}' });
+  const response = await request(url, { method: 'POST', headers: { ...auth, Origin: 'https://admin.featheral.com', 'Content-Type': 'application/json' }, body: '{"method":"eth_chainId"}' });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { url, body: '{"method":"eth_chainId"}' });
   assert.equal(calls, 1);
 });
 
 test('local mode serves only the configured data set and disables loading sites', async (t) => {
-  const { base } = await startServer(t, { brand: 'Test Admin', siteKey: 'only-this-site', allowSync: false });
-  assert.deepEqual(await (await fetch(base + '/api/config')).json(), {
+  const { base, auth } = await startServer(t, { brand: 'Test Admin', siteKey: 'only-this-site', allowSync: false });
+  assert.deepEqual(await (await fetch(base + '/api/config', { headers: auth })).json(), {
     brand: 'Test Admin', siteKey: 'only-this-site', locked: true,
     cmsHost: 'admin.featheral.com', publicHost: 'x.featheral.com',
   });
   for (const [method, url] of [['POST', '/api/connect'], ['POST', '/api/sync'], ['POST', '/api/job/cancel'], ['DELETE', '/api/sets/only-this-site']]) {
-    const response = await fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: '{"url":"https://example.test"}' });
+    const response = await fetch(base + url, { method, headers: { ...auth, Origin: 'https://admin.featheral.com' }, body: '{"url":"https://example.test"}' });
     assert.equal(response.status, 403, `${method} ${url}`);
   }
-  assert.equal((await fetch(base + '/api/sets/another-site/overview')).status, 404);
+  assert.equal((await fetch(base + '/api/sets/another-site/overview', { headers: auth })).status, 404);
   const serverUsers = await new Promise((resolve, reject) => {
     const request = http.get(base + '/api/server-users', { headers: { Host: 'admin.localhost' } }, response => {
       let body = '';
@@ -544,25 +576,25 @@ test('local mode serves only the configured data set and disables loading sites'
     });
     request.on('error', reject);
   });
-  assert.equal(serverUsers.status, 503);
-  assert.match(serverUsers.body.error, /Settings/);
+  assert.equal(serverUsers.status, 401);
+  assert.match(serverUsers.body.error, /wallet/);
   assert.equal((await fetch(base + '/media/another-site/a.jpg')).status, 404);
   assert.equal((await fetch(base + '/media/only-this-site/missing.jpg', { redirect: 'manual' })).status, 404);
-  assert.ok((await (await fetch(base + '/api/library')).json()).every((m) => m.key === 'only-this-site'));
+  assert.ok((await (await fetch(base + '/api/library', { headers: auth })).json()).every((m) => m.key === 'only-this-site'));
 });
 
 test('hostnames route the CMS and public site separately and protect CMS access', async (t) => {
-  const { base } = await startServer(t, { brand: 'Featheral CMS', siteKey: 'test' }, 'test-password');
-  const auth = { authorization: `Basic ${Buffer.from('cms:test-password').toString('base64')}` };
+  const { base, auth, localAuth } = await startServer(t, { brand: 'Featheral CMS', siteKey: 'test' }, 'test-password');
   const request = (pathname, host, headers = {}) => new Promise((resolve, reject) => {
-    http.get(new URL(pathname, base), { headers: { host, ...headers } }, (response) => {
+    http.get(new URL(pathname, base), { headers: { ...(host === 'admin.featheral.com' ? { 'X-Forwarded-Proto': 'https' } : {}), ...headers, Host: host } }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString() }));
     }).on('error', reject);
   });
   const cmsDenied = await request('/', 'admin.featheral.com');
-  assert.equal(cmsDenied.status, 401);
+  assert.equal(cmsDenied.status, 200);
+  assert.match(cmsDenied.body, /Sign in to Admin/);
   const cms = await request('/', 'admin.featheral.com', auth);
   assert.equal(cms.status, 200);
   assert.match(cms.body, /Featheral Admin/);
@@ -592,15 +624,15 @@ test('hostnames route the CMS and public site separately and protect CMS access'
   const apiDenied = await request('/api/sets/test/cms/content', 'x.featheral.com');
   assert.equal(apiDenied.status, 401);
   const apiAllowed = await request('/api/sets/test/cms/content', 'x.featheral.com', auth);
-  assert.equal(apiAllowed.status, 404, 'authenticated CMS API reaches the configured content lookup');
-  assert.equal((await request('/', 'admin.localhost')).status, 401);
-  assert.match((await request('/', 'admin.localhost', auth)).body, /Featheral Admin/);
+  assert.equal(apiAllowed.status, 401, 'Admin sessions cannot authorize another hostname');
+  assert.equal((await request('/', 'admin.localhost')).status, 200);
+  assert.match((await request('/', 'admin.localhost', localAuth)).body, /Featheral Admin/);
   assert.match((await request('/', 'x.localhost')).body, /data-tab="swipe"/);
-  assert.match((await request('/?site=test', 'admin.localhost', auth)).body, /data-tab="swipe"/);
+  assert.match((await request('/?site=test', 'admin.localhost', localAuth)).body, /data-tab="swipe"/);
   assert.equal((await request('/api/public/info?site=test', 'admin.localhost')).status, 401);
 });
 
-test('password-free CMS development is limited to the loopback local alias', async (t) => {
+test('CMS development requires signed wallet access even on the loopback local alias', async (t) => {
   const { base } = await startServer(t, { brand: 'Featheral CMS', siteKey: 'test', allowSync: false });
   const request = (host) => new Promise((resolve, reject) => {
     http.get(new URL('/api/config', base), { headers: { host } }, (response) => {
@@ -613,8 +645,8 @@ test('password-free CMS development is limited to the loopback local alias', asy
     const registry = path.join(temp, 'sites.json');
     fs.writeFileSync(registry, '[]');
     t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
-    const { base } = await startServer(t, { siteManagement: true }, 'page-test-password', registry);
-    const headers = { Host: 'admin.featheral.com', Authorization: `Basic ${Buffer.from('cms:page-test-password').toString('base64')}` };
+    const { base, auth } = await startServer(t, { siteManagement: true }, 'page-test-password', registry);
+    const headers = { ...auth, Origin: 'https://admin.featheral.com' };
     const catalog = await (await fetch(base + '/api/sites', { headers })).json();
     for (const hostname of require('../lib/site-pages').hosts) {
       assert.equal(catalog.filter(site => site.hostname === hostname && !site.path).length, 1, hostname);
@@ -623,7 +655,7 @@ test('password-free CMS development is limited to the loopback local alias', asy
     assert.equal(wallet.management, 'classic');
     assert.equal(wallet.cmsCompatible, false);
     assert.equal(wallet.contentEditable, false);
-    assert.equal((await fetch(base + '/api/sites/media.featheral.com/pages', { headers: { Host: 'admin.featheral.com' } })).status, 401);
+    assert.equal((await fetch(base + '/api/sites/media.featheral.com/pages', { headers: { Host: 'admin.featheral.com', 'X-Forwarded-Proto': 'https' } })).status, 401);
     const result = await (await fetch(base + '/api/sites/media.featheral.com/pages', { headers })).json();
     assert.ok(result.pages.length > 0);
     const page = result.pages[0];
@@ -649,10 +681,10 @@ test('password-free CMS development is limited to the loopback local alias', asy
     const status = await (await fetch(base + '/api/deployment/status', { headers })).json();
     assert.deepEqual(status, { running: false, result: null });
   });
-  assert.equal(await request('admin.localhost'), 200);
-  assert.equal(await request('admin.featheral.com'), 503);
-  assert.equal(await request('x.localhost'), 503);
-  assert.equal(await request('admin.localhost.example.com'), 503);
+  assert.equal(await request('admin.localhost'), 401);
+  assert.equal(await request('admin.featheral.com'), 403);
+  assert.equal(await request('x.localhost'), 401);
+  assert.equal(await request('admin.localhost.example.com'), 401);
 });
 
 test('site management creates selectable sites and isolates hostname routing, content, themes and media', async (t) => {
@@ -664,7 +696,7 @@ test('site management creates selectable sites and isolates hostname routing, co
   const firstHost = `one-${suffix}.example.test`;
   const secondHost = `two-${suffix}.example.test`;
   const first = manager.create({ hostname: firstHost });
-  const { base, provision } = await startServer(t, {
+  const { base, provision, auth } = await startServer(t, {
     brand: 'CMS', siteKey: first.key, publicHost: firstHost, allowSync: false, siteManagement: true,
   }, 'test-password', registryFile);
   t.after(() => {
@@ -674,12 +706,11 @@ test('site management creates selectable sites and isolates hostname routing, co
     }
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const auth = { authorization: `Basic ${Buffer.from('cms:test-password').toString('base64')}` };
   const request = (pathname, host, method = 'GET', payload, authenticated = false) => new Promise((resolve, reject) => {
     const body = payload === undefined ? '' : JSON.stringify(payload);
     const req = http.request(new URL(pathname, base), {
       method, headers: {
-        host, ...(authenticated ? auth : {}),
+        host, ...(authenticated ? { ...auth, Origin: 'https://admin.featheral.com' } : {}),
         ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}),
       },
     }, (res) => {
@@ -756,7 +787,8 @@ test('text exports include complete content and respect all/filtered scopes', as
     }
   } finally { db.close(); }
 
-  const { base: root } = await startServer(t, { brand: 'Test Admin', siteKey: key, allowSync: false });
+  const { base: root, auth } = await startServer(t, { brand: 'Test Admin', siteKey: key, allowSync: false });
+  const fetch = url => fetchWithHost(url, { headers: auth });
   const base = `${root}/api/sets/${key}/export/`;
 
   const all = await fetch(base + 'posts.txt?status=all');
@@ -808,7 +840,7 @@ test('exchange and ecommerce APIs authenticate wallets and isolate demo funds, c
   const suffix = crypto.randomBytes(5).toString('hex');
   const ex = manager.create({ hostname: `ex-${suffix}.example.test`, template: 'exchange' });
   const shop = manager.create({ hostname: `shop-${suffix}.example.test`, template: 'store' });
-  const { base } = await startServer(t, {
+  const { base, auth } = await startServer(t, {
     siteKey: ex.key, publicHost: ex.hostname, siteManagement: true, allowSync: false,
   }, 'demo-http-password', registryFile);
   t.after(() => {
@@ -820,7 +852,7 @@ test('exchange and ecommerce APIs authenticate wallets and isolate demo funds, c
     const req = http.request(new URL(url, base), { method, headers: {
       host: site.hostname, ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}),
       ...(token ? { 'x-wallet-token': token } : {}),
-      ...(admin ? { authorization: `Basic ${Buffer.from('cms:demo-http-password').toString('base64')}` } : {}),
+      ...(admin ? { ...auth, Origin: 'https://admin.featheral.com' } : {}),
     } }, (res) => {
       const chunks = []; res.on('data', (c) => chunks.push(c)); res.on('error', reject);
       res.on('end', () => {

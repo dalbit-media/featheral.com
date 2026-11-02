@@ -2,6 +2,19 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { walletUi, primaryFor, allowedOrigin } = require("../../wallet/ui");
 const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+test("Admin header and sign-in wallet avatars use a fixed compact positioned control", () => {
+  const admin = path.resolve(__dirname, "../../../sites/admin.featheral.com");
+  const login = fs.readFileSync(path.join(admin, "login.html"), "utf8");
+  const header = fs.readFileSync(path.join(admin, "index.html"), "utf8");
+  const styles = fs.readFileSync(path.join(admin, "styles.css"), "utf8");
+  assert.match(header, /id="admin-wallet" class="icon-btn wallet-icon"/);
+  assert.match(login, /id="login-wallet" class="wallet-icon"/);
+  assert.match(login, /class="login-actions"/);
+  for (const [source, id] of [[styles, "admin-wallet"], [login, "login-wallet"]]) {
+    assert.match(source, new RegExp(`#${id} \\{[^}]*position: relative;[^}]*flex: 0 0 32px;[^}]*width: 32px; height: 32px;[^}]*padding: 0;`));
+    assert.match(source, new RegExp(`#${id} \\.wp-avatar \\{ width: 32px; height: 32px; box-sizing: border-box; \\}`));
+  }
+});
 test("gateway retains verified uninitialized Gold snapshots for opening valuation instead of discarding them", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../scripts/serve.js"), "utf8");
   let reader, reads = 0;
@@ -569,7 +582,7 @@ test("ecosystem navigation has currency headers and the full footer hierarchy wi
   assert.deepEqual(foundation.children[1].children.map(group => group.children[0].textContent), ["Currencies", "World & community", "Apps", "Ledgers", "Tools"]);
   assert.equal(fixture("wallet", true).footer, undefined, "embedded wallets do not repeat host navigation");
   assert.equal(fixture("wallet", false, "?embedded=1").footer, undefined, "embedding is detected before async wallet initialization");
-  assert.equal(fixture("admin").footer.querySelectorAll("a[data-site]").length, 16, "Admin includes the ecosystem footer");
+  assert.equal(fixture("admin").footer, undefined, "Admin keeps navigation inside its viewport-height workspace");
   const css = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.css"), "utf8");
   assert.match(css, /footer\.eco-footer\{display:block/);
   assert.match(css, /@media\(max-width:700px\)[\s\S]*\.eco-bar\{display:none!important\}/);

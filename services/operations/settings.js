@@ -5,7 +5,7 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { OriginApprovals } = require("../database/approvals");
 const { SystemDatabase } = require("../database/system");
-const { fields, normalizeConfiguration } = require("./configuration");
+const { fields, settingsControls, normalizeConfiguration } = require("./configuration");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const defaults = Object.freeze({
   host: "", port: 22, directory: "/opt/featheral", fingerprint: "", enabled: false,
@@ -33,6 +33,13 @@ function passwordHash(password) {
     throw fail(400, "Admin password must contain 16–1024 bytes without line breaks.");
   const salt = crypto.randomBytes(16).toString("hex");
   return `${salt}:${crypto.scryptSync(password, salt, 32).toString("hex")}`;
+}
+function validateSshTarget(value) {
+  for (const name of ["host", "fingerprint"]) if (typeof value[name] !== "string") throw fail(400, `Invalid ${name}.`);
+  if (value.host && !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value.host)) throw fail(400, "Invalid SSH hostname or IPv4 address.");
+  if (!Number.isSafeInteger(value.port) || value.port < 1 || value.port > 65535) throw fail(400, "SSH port must be an integer from 1 to 65535.");
+  if (value.fingerprint && !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(value.fingerprint)) throw fail(400, "Enter an independently verified SHA256 SSH host fingerprint.");
+  value.fingerprint = value.fingerprint.replace(/=+$/, "");
 }
 class OperationsSettings {
   constructor({ root, file = path.join(root, "data", "operations", "settings.enc.json"), bootstrapFile = bootstrapPath(),
@@ -105,11 +112,80 @@ class OperationsSettings {
     return true;
   }
   status() {
-    const { credential, adminHash, runtime, ...publicValue } = this.value;
+    const { credential, adminHash, runtime, siteServers, ...publicValue } = this.value;
     return { ...publicValue, configured: fs.existsSync(this.bootstrapFile), enrolled: Boolean(credential),
       username: credential?.username || "root", adminConfigured: Boolean(adminHash), busy: this.busy, wallet: this.approvals.wallet,
       runtimeFields: fields.map(field => ({ ...field, configured: Boolean(runtime[field.name]), value: field.secret ? "" : runtime[field.name] || "" })),
+      controls: this.controls(null),
       restartRequired: this.startedRuntime !== undefined && JSON.stringify(runtime) !== this.startedRuntime };
+  }
+  controls(site) {
+    return settingsControls.filter(field => field.site === site).map(field => ({
+      ...field, configured: Boolean(this.value.runtime[field.name]), value: field.secret ? "" : this.value.runtime[field.name] || "",
+    }));
+  }
+  siteStatus(site, hostname) {
+    const { credential, ...profile } = this.value.siteServers?.[site] || { useShared: true, url: "", host: "", port: 22, fingerprint: "" };
+    return { ...profile, site, revision: this.value.revision, enrolled: Boolean(credential), username: credential?.username || "root",
+      controls: this.controls(hostname), restartRequired: this.status().restartRequired,
+      sharedHost: this.value.host, sharedPort: this.value.port, sharedEnrolled: Boolean(this.value.credential) };
+  }
+  prepareSite(site, input, hostname) {
+    if (!/^[a-z0-9][a-z0-9.-]{0,252}$/.test(site)) throw fail(400, "Invalid site identifier.");
+    if (this.busy || this.isBusy()) throw fail(409, "Wait for the current settings or deployment operation.");
+    if (!input || input.revision !== this.value.revision || !input.settings || typeof input.settings !== "object" || Array.isArray(input.settings))
+      throw fail(409, "Reload site settings before saving.");
+    const allowed = new Set(["useShared", "url", "host", "port", "fingerprint", "credential", "runtime", "runtimeConfirmation"]);
+    for (const name of Object.keys(input.settings)) if (!allowed.has(name)) throw fail(400, `Unknown site setting: ${name}`);
+    const previous = this.value.siteServers?.[site] || { useShared: true, url: "", host: "", port: 22, fingerprint: "", credential: null };
+    const profile = { ...previous, ...input.settings };
+    if (["host", "port"].some(name => profile[name] !== previous[name]) && input.settings.fingerprint === undefined) profile.fingerprint = "";
+    delete profile.runtime; delete profile.runtimeConfirmation;
+    if (typeof profile.useShared !== "boolean" || typeof profile.url !== "string") throw fail(400, "Invalid site server settings.");
+    if (profile.url) {
+      let url;
+      try { url = new URL(profile.url); } catch { throw fail(400, "Enter a full site server URL."); }
+      if (profile.url.length > 2048 || /[\0\r\n]/.test(profile.url) || url.username || url.password || url.search || url.hash
+        || !["http:", "https:"].includes(url.protocol)
+        || url.protocol !== "https:" && !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) && !url.hostname.endsWith(".localhost"))
+        throw fail(400, "Use HTTPS (HTTP only for localhost), without credentials, query or fragment.");
+      profile.url = url.href;
+    }
+    validateSshTarget(profile);
+    if (input.settings.credential !== undefined) profile.credential = parseCredential(input.settings.credential);
+    if (previous.credential && ["host", "port", "fingerprint"].some(name => profile[name] !== previous[name]) && input.settings.credential === undefined)
+      throw fail(400, "Re-enter and verify the site credential when changing its SSH target.");
+    if (!profile.useShared && (!profile.url || !profile.host || !profile.credential))
+      throw fail(400, "A separate server requires a URL, SSH host and credential.");
+    let runtime = this.value.runtime;
+    if (input.settings.runtime !== undefined) {
+      if (!input.settings.runtime || typeof input.settings.runtime !== "object" || Array.isArray(input.settings.runtime)) throw fail(400, "Invalid site service settings.");
+      const editable = new Set(settingsControls.filter(field => field.site === hostname).map(field => field.name));
+      for (const name of Object.keys(input.settings.runtime)) if (!editable.has(name)) throw fail(400, "This service setting belongs to another site or requires offline configuration.");
+      if (input.settings.runtimeConfirmation !== "APPLY RUNTIME SETTINGS") throw fail(400, "Confirm the service restart and backup requirement before saving runtime changes.");
+      runtime = normalizeConfiguration(input.settings.runtime, runtime);
+    }
+    this.key().fill(0);
+    return { ...this.value, revision: this.value.revision + 1, runtime, siteServers: { ...this.value.siteServers, [site]: profile } };
+  }
+  siteChallenge(site, input, context, hostname) {
+    this.prepareSite(site, input, hostname);
+    return this.approvals.challenge("SAVE SITE SETTINGS", { site, revision: input.revision, settings: input.settings }, context, `${site} · revision ${input.revision}`);
+  }
+  async saveSite(site, input, context, hostname) {
+    const next = this.prepareSite(site, input, hostname);
+    this.approvals.consume("SAVE SITE SETTINGS", { site, revision: input.revision, settings: input.settings }, context, input);
+    this.busy = true;
+    try {
+      const profile = next.siteServers[site];
+      if (input.settings.credential !== undefined || !profile.useShared && this.value.siteServers?.[site]?.useShared !== false) {
+        const verified = { ...next, ...profile };
+        await this.verifyConnection(verified);
+        profile.fingerprint = verified.fingerprint;
+      }
+      this.persist(next);
+      return this.siteStatus(site, hostname);
+    } finally { this.busy = false; }
   }
   environment() { return { ...this.value.runtime }; }
   markStarted() { this.startedRuntime = JSON.stringify(this.value.runtime); }
@@ -120,12 +196,13 @@ class OperationsSettings {
     const actual = crypto.scryptSync(password, salt, 32);
     return crypto.timingSafeEqual(actual, Buffer.from(hash, "hex"));
   }
-  prepare(input, { allowUnconfiguredAdmin = false } = {}) {
+  prepare(input) {
     if (this.busy || this.isBusy()) throw fail(409, "Wait for the current settings or deployment operation.");
     if (!input || input.revision !== this.value.revision || !input.settings || Array.isArray(input.settings)) throw fail(409, "Reload Settings before saving.");
     const allowed = new Set([...Object.keys(defaults), "credential", "adminPassword", "runtime", "runtimeConfirmation"]);
     for (const name of Object.keys(input.settings)) if (!allowed.has(name)) throw fail(400, `Unknown operations setting: ${name}`);
     const next = { ...this.value, ...input.settings, revision: this.value.revision + 1 };
+    if (["host", "port"].some(name => next[name] !== this.value[name]) && input.settings.fingerprint === undefined) next.fingerprint = "";
     delete next.adminPassword;
     delete next.runtimeConfirmation;
     if (input.settings.runtime !== undefined) {
@@ -135,11 +212,9 @@ class OperationsSettings {
     }
     if (typeof next.enabled !== "boolean") throw fail(400, "Deployment enabled must be a boolean.");
     for (const name of ["host", "directory", "fingerprint", "tlsEmail"]) if (typeof next[name] !== "string") throw fail(400, `Invalid ${name}.`);
-    if (next.host && !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(next.host)) throw fail(400, "Invalid SSH hostname or IPv4 address.");
+    validateSshTarget(next);
     if (!/^\/[a-zA-Z0-9/_-]+$/.test(next.directory) || next.directory === "/" || next.directory.split("/").includes(".."))
       throw fail(400, "Use an absolute deployment directory other than /, without traversal.");
-    if (next.fingerprint && !/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(next.fingerprint)) throw fail(400, "Enter an independently verified SHA256 SSH host fingerprint.");
-    next.fingerprint = next.fingerprint.replace(/=+$/, "");
     if (next.tlsEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.tlsEmail)) throw fail(400, "Invalid certificate registration email.");
     const bounds = { port: [1, 65535], uploadLimitMiB: [1, 1024], requestTimeoutSeconds: [5, 3600],
       sshTimeoutSeconds: [5, 120], deploymentTimeoutSeconds: [60, 7200], networkLimitBytesPerSecond: [0, Number.MAX_SAFE_INTEGER] };
@@ -150,9 +225,8 @@ class OperationsSettings {
     const changedTarget = ["host", "port", "fingerprint"].some(name => next[name] !== this.value[name]);
     if (changedTarget && this.value.credential && supplied === undefined) throw fail(400, "Re-enter and verify the credential when changing the SSH host, port or host key.");
     if (input.settings.adminPassword) next.adminHash = passwordHash(input.settings.adminPassword);
-    if (!next.adminHash && (!allowUnconfiguredAdmin || next.enabled)) throw fail(400, "Set an Admin password before saving operations settings.");
-    if ((supplied !== undefined || next.enabled) && (!next.host || !next.fingerprint || !next.credential))
-      throw fail(400, "SSH host, pinned fingerprint and credential are required.");
+    if ((supplied !== undefined || next.enabled) && (!next.host || !next.credential))
+      throw fail(400, "SSH host and credential are required.");
     if (next.enabled && !next.tlsEmail) throw fail(400, "Certificate email is required before enabling deployment.");
     this.key().fill(0);
     return next;
@@ -166,22 +240,63 @@ class OperationsSettings {
     this.approvals.consume("SAVE OPERATIONS SETTINGS", { revision: input.revision, settings: input.settings }, context, input);
     this.busy = true;
     try {
-      if (input.settings.credential !== undefined) {
-        if (!this.verifyCredential) throw fail(503, "SSH verification is unavailable.");
-        await this.verifyCredential(this.connection(next));
-      }
+      if (input.settings.credential !== undefined || next.enabled && !next.fingerprint) await this.verifyConnection(next);
       this.persist(next);
       return this.status();
     } finally { this.busy = false; }
   }
-  connection(value = this.value) {
-    if (!value.host || !value.fingerprint || !value.credential) throw fail(503, "Set and verify SSH credentials in Admin Settings.");
+  async verifyConnection(value) {
+    if (!this.verifyCredential) throw fail(503, "SSH verification is unavailable.");
+    const config = this.connection(value, true);
+    const fingerprint = await this.verifyCredential(config) || config.fingerprint;
+    if (!fingerprint) throw fail(502, "SSH did not confirm a server host key. Settings were not saved.");
+    const target = { ...value, fingerprint };
+    validateSshTarget(target);
+    value.fingerprint = target.fingerprint;
+  }
+  connection(value = this.value, enrollment = false) {
+    if (!value.host || !value.credential || !value.fingerprint && !enrollment) throw fail(503, "Set and verify SSH credentials in Admin Settings.");
     return { host: value.host, port: value.port, directory: value.directory, fingerprint: value.fingerprint,
+      trustOnFirstUse: enrollment && !value.fingerprint,
       ...value.credential, keyFile: "", email: value.tlsEmail, vault: true,
       sshTimeoutSeconds: value.sshTimeoutSeconds, deploymentTimeoutSeconds: value.deploymentTimeoutSeconds,
       uploadLimitMiB: value.uploadLimitMiB, requestTimeoutSeconds: value.requestTimeoutSeconds, settingsRevision: value.revision };
   }
   configuration() { const { password, ...config } = this.connection(); return { ...config, password: "" }; }
+  deploymentTargets(sites, includePasswords = false) {
+    const shared = this.connection();
+    const targets = new Map([["shared", { id: "shared", ...shared, hosts: [], urls: [] }]]);
+    for (const site of sites) {
+      const profile = this.value.siteServers?.[site.key];
+      if (profile && !profile.useShared && site.path) throw fail(400, "Separate deployment requires a whole hostname, not a hosted path.");
+      const id = profile && !profile.useShared ? site.key : "shared";
+      if (!targets.has(id)) targets.set(id, { id, ...this.connection({ ...this.value, ...profile }), hosts: [], urls: [profile.url] });
+      const target = targets.get(id);
+      if (!target.hosts.includes(site.hostname)) target.hosts.push(site.hostname);
+    }
+    const output = [...targets.values()].filter(target => target.hosts.length);
+    const assigned = new Set(), connections = new Set();
+    for (const target of output) {
+      const connection = `${target.host}:${target.port}`;
+      if (connections.has(connection)) throw fail(400, "Sites on the same SSH server must use Shared server, not duplicate separate targets.");
+      connections.add(connection);
+      for (const hostname of target.hosts) {
+        if (assigned.has(hostname)) throw fail(400, "A hostname cannot be assigned to different deployment servers.");
+        assigned.add(hostname);
+      }
+      if (!includePasswords) target.password = "";
+    }
+    return output;
+  }
+  challengeDeployment(binding, context, sites) {
+    const targets = this.deploymentTargets(sites);
+    return this.approvals.challenge("DEPLOY REVIEWED RELEASE", { binding, revision: this.value.revision }, context,
+      `Automatically detect installation: reuse existing private data and keys; initialize only empty shared-server storage. If the managed-site registry is empty, create published-only sites without source ownership, balances, rewards, uploads or history. Stream redacted server output to the Admin console. ${targets.map(target => `${target.username}@${target.host}: ${target.hosts.join(", ")}`).join(" · ")}`);
+  }
+  useDeployment(binding, context, input, sites) {
+    this.approvals.consume("DEPLOY REVIEWED RELEASE", { binding, revision: this.value.revision }, context, input);
+    return this.deploymentTargets(sites, true);
+  }
   challengeUse(action, binding, context) {
     this.configuration();
     return this.approvals.challenge(action, { binding, revision: this.value.revision }, context, `${this.value.credential.username}@${this.value.host}`);

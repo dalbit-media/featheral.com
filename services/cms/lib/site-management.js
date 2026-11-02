@@ -16,14 +16,14 @@ function managementFor(site) {
   if (!site.path && ["notes.featheral.com", "ex.featheral.com"].includes(hostname))
     links.push({ label: "Native Notes & markets", href: "#/notes" });
   if (!site.path && hostname === "stats.featheral.com") links.push({ label: "Network & site traffic", href: "#/overview" });
-  if (site.builtin && hostname === "admin.featheral.com") links.push({ label: "All sites & deployment", href: "#/" });
+  if (site.builtin && hostname === "admin.featheral.com") links.push({ label: "All sites", href: "#/" });
   if (site.builtin && hostname === "db.featheral.com") links.push({ label: "Database journals", href: "#/database" });
-  if (site.builtin && hostname === "admin.featheral.com") links.push({ label: "Server & service settings", href: "#/settings" });
   if (site.builtin && hostname === "wallet.featheral.com") links.push({ label: "Service operations", href: "#/operations" });
   if (site.contentEditable !== false) links.push({ label: "Content & appearance",
     href: site.builtin ? `#/site-pages/${encoded}` : `#/set/${encodeURIComponent(site.key)}/cms-content` });
   if (!site.builtin) links.push({ label: "Site settings", href: `#/set/${encodeURIComponent(site.key)}/site-settings` });
-  links.push({ label: "Deployment", href: "#/deployment" });
+  links.push({ label: "Server & service settings", href: `#/site-server/${encodeURIComponent(site.key)}` });
+  links.push({ label: "Deployment settings", href: "#/settings" });
   return links;
 }
 module.exports = { managementFor };

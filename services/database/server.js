@@ -20,8 +20,8 @@ function createDatabase({ directory, repository, env = require("../operations/ru
     if (!streams().includes(name)) throw fail(404, "Unknown public ledger namespace.");
     return name;
   };
-  const context = req => ({ origin: req.get("origin"),
-    session: crypto.createHash("sha256").update(req.get("authorization") || "").digest("hex") });
+  const context = req => ({ origin: req.get("origin"), wallet: req.adminWallet,
+    session: req.adminSession || crypto.createHash("sha256").update(req.get("authorization") || "").digest("hex") });
   const run = fn => (req, res) => Promise.resolve().then(() => fn(req, res)).catch(error => {
     console.error("Database operation failed:", error.status || error.code || 500);
     if (!res.headersSent) res.status(error.status || 500).json({ error: error.status ? error.message : "Database operation failed. Check the private server log." });
@@ -74,6 +74,9 @@ function createDatabase({ directory, repository, env = require("../operations/ru
     }));
     router.post("/accounts/challenge", run((req, res) => res.json(serverUsers.challengeList(req.body, context(req)))));
     router.post("/accounts/browse", run(async (req, res) => res.json(await serverUsers.list(req.body, context(req)))));
+    router.get("/logs", run((_req, res) => res.json(serverUsers.logCatalog())));
+    router.post("/logs/challenge", run((req, res) => res.json(serverUsers.challengeLogs(req.body, context(req)))));
+    router.post("/logs/read", run(async (req, res) => res.json(await serverUsers.readLogs(req.body, context(req)))));
     router.use((error, _req, res, _next) => {
       console.error("Database request rejected:", error.status || 400);
       res.status(error.status === 413 ? 413 : 400).json({ error: "Invalid database request." });
@@ -93,4 +96,32 @@ function createDatabase({ directory, repository, env = require("../operations/ru
   publicRouter.use((_req, res) => res.status(404).json({ error: "No public ledger writes. Manage databases through Admin." }));
   return { journals, domain, profiles, sqlite, vault, summary, adminRouter, publicRouter, close: () => profiles.close() };
 }
-module.exports = { createDatabase };
+function createSiteServer({ root, settings, hosts = ["db.featheral.com"] }) {
+  const http = require("node:http");
+  const env = settings.environment();
+  const { requestPolicy, configureServer } = require("../operations/http");
+  const database = createDatabase({
+    directory: env.DB_LEDGER_DIR || path.join(root, "data", "file-ledgers"), repository: root, env, credentialVault: settings,
+  });
+  const app = express();
+  app.use((req, res, next) => {
+    res.set({ "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" });
+    if (req.method === "GET" && req.path === "/healthz") return res.json({ status: "ok", release: path.basename(root), sites: hosts, mode: "database-only" });
+    if (!hosts.includes(req.hostname) && req.hostname !== "db.localhost") return res.status(404).json({ error: "Site is assigned to another server." });
+    next();
+  });
+  app.use("/api/v1/db", database.publicRouter);
+  app.use("/api", (_req, res) => res.status(404).json({ error: "Only the database public API is served by this server." }));
+  app.use("/shared", express.static(path.join(root, "shared"), { dotfiles: "deny", index: false }));
+  app.use(express.static(path.join(root, "sites", "db.featheral.com"), { dotfiles: "deny" }));
+  app.use((_req, res) => res.sendStatus(404));
+  app.use((error, _req, res, _next) => {
+    console.error("Database site request failed:", error.status || error.code || 500);
+    res.status(error.status || 500).json({ error: "Database site request failed." });
+  });
+  const server = http.createServer((req, res) => { if (requestPolicy(req, res, settings)) app(req, res); });
+  configureServer(server, settings);
+  server.once("close", () => { database.close(); sqlite.closeAll(); });
+  return server;
+}
+module.exports = { createDatabase, createSiteServer };

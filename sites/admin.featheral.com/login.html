@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in - Featheral Admin</title>
+  <link rel="stylesheet" href="/shared/wallet-profile.css">
+  <style>
+    body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #f5f6fa; color: #202338; font: 16px system-ui, sans-serif; }
+    main { max-width: 32rem; margin: 1.5rem; padding: 2rem; background: white; border: 1px solid #e1e4ed; border-radius: 1rem; }
+    h1 { margin-top: 0; } p { line-height: 1.6; } button { cursor: pointer; padding: .7rem 1rem; border: 1px solid #cdd1df; border-radius: .5rem; background: white; }
+    #login-sign { background: #353c99; color: white; } #login-status { overflow-wrap: anywhere; }
+    .login-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #login-wallet { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; border: 0; border-radius: 50%; box-sizing: border-box; }
+    #login-wallet .wp-avatar { width: 32px; height: 32px; box-sizing: border-box; }
+    #login-wallet svg { flex: none; width: 18px; height: 18px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Featheral Admin</h1>
+    <p>Connect the origin or Dollar reserve wallet, then sign in. No Admin password is needed.</p>
+    <div class="login-actions">
+    <button id="login-wallet" class="wallet-icon" type="button" aria-label="Connect Admin wallet" title="Connect Admin wallet"></button>
+    <button id="login-sign" type="button">Sign in to Admin</button>
+    </div>
+    <p id="login-status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="/js/vendor/ethers.js"></script>
+  <script src="/shared/wallet-profile.js"></script>
+  <script src="/js/login.js"></script>
+</body>
+</html>

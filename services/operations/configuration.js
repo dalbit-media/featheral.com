@@ -38,6 +38,24 @@ for (const prefix of ["FTH_LEDGER", "WORLD_LEDGER"]) {
 }
 for (const chain of [1, 8453, 42161, 10, 324, 59144]) add("Wallet RPC", `WALLET_RPC_${chain}`, "url", true);
 const byName = new Map(fields.map(field => [field.name, field]));
+const settingsControls = [
+  ["HOST", null, "Listen address"], ["PORT", null, "HTTP port"],
+  ["FEATHERAL_ADMIN_WALLETS", null, "Administrator wallets"],
+  ["APP_ORIGIN", "world.featheral.com", "Public World origin"],
+  ["APP_ICE_URLS", "app.featheral.com", "Call STUN / TURN servers"],
+  ["APP_TURN_SECRET", "app.featheral.com", "Call server secret"],
+  ["APP_VAPID_PUBLIC_KEY", "app.featheral.com", "Push public key"],
+  ["APP_VAPID_PRIVATE_KEY", "app.featheral.com", "Push private key"],
+  ["SILVER_CODE_KEY", "silver.featheral.com", "Product code encryption key"],
+  ["GOLD_API_RPC_URL", "gold.featheral.com", "Ethereum RPC URL"],
+  ["GOLD_API_BRIDGE_ADDRESS", "gold.featheral.com", "Bridge contract"],
+  ["GOLD_RESERVE_MODE", "gold.featheral.com", "Reserve mode"],
+  ["WORLD_MODERATORS", "media.featheral.com", "Moderator wallets"],
+  ["DB_LEDGER_DIR", "db.featheral.com", "Journal storage directory"],
+  ["DB_WALLET_PROFILES_FILE", "db.featheral.com", "Wallet profile database"],
+  ...[1, 8453, 42161, 10, 324, 59144].map((chain, index) =>
+    [`WALLET_RPC_${chain}`, "wallet.featheral.com", `${["Ethereum", "Base", "Arbitrum", "Optimism", "ZKsync", "Linea"][index]} RPC URL`]),
+].map(([name, site, label]) => ({ ...byName.get(name), site, label }));
 function normalizeConfiguration(input, existing = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw fail("Runtime configuration must be an object.");
   const output = { ...existing };
@@ -108,4 +126,4 @@ function assertDatabaseConfiguration(root, env = process.env) {
   if (require("node:fs").existsSync(require("node:path").join(root, ".env")) || legacy.length)
     throw new Error(`Legacy application configuration found${legacy.length ? ` (${legacy.join(", ")})` : ""}. Stop the service, migrate a private .env with scripts/init-settings.js --migrate-env (add --setup for first-run Admin enrollment or legacy SSH-key configuration), and remove application environment overrides before restarting.`);
 }
-module.exports = { fields: Object.freeze(fields), normalizeConfiguration, environmentConfiguration, assertDatabaseConfiguration };
+module.exports = { fields: Object.freeze(fields), settingsControls: Object.freeze(settingsControls), normalizeConfiguration, environmentConfiguration, assertDatabaseConfiguration };

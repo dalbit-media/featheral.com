@@ -1,14 +1,57 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const { pipeline } = require('node:stream/promises');
 const { Client } = require('ssh2');
 const yazl = require('yazl');
 const { hosts } = require('./site-pages');
 const { sshTarget } = require('../../database/ssh-target');
+const { StringDecoder } = require('node:string_decoder');
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+function redactServerLog(text, secrets = []) {
+  for (const secret of secrets.filter(Boolean).sort((a, b) => b.length - a.length))
+    text = text.split(secret).join('[REDACTED]');
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, '[REDACTED PRIVATE KEY]')
+    .replace(/\b(authorization|cookie|set-cookie|password|token|secret|api[_-]?key)\s*[:=]\s*[^\r\n]+/gi, '$1: [REDACTED]')
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[REDACTED]@');
+}
+const installerSteps = {
+  provision: 'Provisioning Node, Nginx and Certbot.',
+  'apt-update': 'Refreshing operating-system package indexes.',
+  'apt-install': 'Installing Nginx, Certbot and system prerequisites.',
+  'node-repository': 'Configuring the signed Node 24 package repository.',
+  'node-update': 'Refreshing Node package indexes.',
+  'node-install': 'Installing Node 24.',
+  'node-check': 'Verifying Node 24 or newer.',
+  'private-data': 'Checking private storage. Existing installations require restored data; brand-new installations require empty directories.',
+  extract: 'Extracting the uploaded release ZIP.',
+  'legacy-env': 'Checking for an unmigrated shared .env. Migrate it into Settings before deployment.',
+  'link-data': 'Linking the existing private data into the release.',
+  dependencies: 'Installing locked dependencies.',
+  initialize: 'Initializing new empty storage and external encryption key. Gold disabled; financial writers unconfigured.',
+  'runtime-settings': 'Loading encrypted runtime Settings and checking financial reader modes.',
+  'world-dependencies': 'Installing locked World dependencies.',
+  build: 'Building World and exporting ABIs.',
+  'pm2-install': 'Installing the PM2 process manager.',
+  'nginx-existing': 'Checking existing Nginx configuration. Unmanaged configuration requires review before replacement.',
+  nginx: 'Validating Nginx and hostname routing.',
+  dns: 'Verifying DNS resolution for the assigned hostnames.',
+  activate: 'Activating the release and restarting PM2.',
+  'import-pages': 'Importing published CMS pages. Reusing existing managed sites or creating published-only sites when the registry is empty.',
+  'import-registry-missing': 'The release contains managed sites, but the remote managed-site registry is missing. Restore their matching CMS registry and private site data before deploying. Do not initialize a replacement registry.',
+  'import-registry-mismatch': 'The remote managed-site registry does not match the reviewed sites. Restore the matching registry and private site data before deploying.',
+  'import-template': 'Published content references a template missing from this release. Review the source content and tracked templates before deploying.',
+  'import-fresh-conflict': 'Fresh managed-site creation refused existing sites or data. Use normal deployment after a successful import; never overwrite existing state.',
+  'pm2-start': 'Starting the release with PM2.',
+  health: 'Checking release identity and assigned site responses.',
+  'pm2-startup': 'Saving PM2 state and configuring service startup.',
+  https: 'Configuring HTTPS certificates and automatic renewal.',
+  verified: 'HTTPS checks completed.',
+};
 function sshConfiguration(env) {
   const target = sshTarget(env);
   const password = env.DEPLOY_PASSWORD || '';
@@ -25,18 +68,32 @@ function configuration(env) {
 function releaseFiles(root) {
   const roots = new Set(['sites', 'shared', 'services', 'scripts', 'contracts']);
   const names = new Set(['package.json', 'package-lock.json', 'hardhat.config.js', 'ecosystem.config.cjs']);
-  const files = [];
-  const walk = (directory, prefix) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (['data', 'node_modules', 'dist', '.git', 'backups', '.ssh', 'keys', 'secrets'].includes(entry.name) || entry.name.startsWith('.')) continue;
-      const relative = prefix + entry.name;
-      if (entry.isDirectory()) walk(path.join(directory, entry.name), relative + '/');
-      else if (entry.isFile() && /\.(js|cjs|mjs|ts|json|css|html|md|svg|png|jpe?g|webp|gif|ico|txt|xml|webmanifest|sol|sh|woff2?|ttf|yaml|yml)$/i.test(entry.name)) files.push(relative);
+  let tracked;
+  const inventory = path.join(root, '.deployment-source.json');
+  if (!fs.existsSync(path.join(root, '.git')) && fs.existsSync(inventory)) {
+    const stored = JSON.parse(fs.readFileSync(inventory, 'utf8'));
+    if (!Array.isArray(stored.files) || stored.files.some(file => typeof file !== 'string')) throw error(503, 'Invalid deployed Git-tracked source inventory.');
+    tracked = stored.files.join('\0');
+  } else {
+    try { tracked = execFileSync('git', ['-C', root, 'ls-files', '--cached', '-z'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }); }
+    catch { throw error(503, 'Git-tracked release inventory is unavailable. Deploy from a Git working tree or a reviewed release.'); }
+  }
+  const canonicalRoot = fs.realpathSync(root);
+  return [...new Set(tracked.split('\0').filter(Boolean))].filter(file => {
+    const parts = file.split('/');
+    if ((!roots.has(parts[0]) && !names.has(file)) || parts.some(part =>
+      ['data', 'node_modules', 'dist', 'backups', 'keys', 'secrets'].includes(part) || part.startsWith('.'))
+      || /\.(?:pem|sqlite|key|env)$/i.test(file)) return false;
+    const absolute = path.resolve(root, ...parts);
+    if (!absolute.startsWith(path.resolve(root) + path.sep)) throw error(400, 'Invalid tracked release path.');
+    try {
+      const stat = fs.lstatSync(absolute);
+      if (!stat.isFile() || stat.isSymbolicLink()) return false;
+      if (!fs.realpathSync(absolute).startsWith(canonicalRoot + path.sep)) throw error(400, 'Tracked release files cannot traverse linked directories.');
+      return true;
     }
-  };
-  for (const directory of roots) walk(path.join(root, directory), directory + '/');
-  for (const name of names) if (fs.existsSync(path.join(root, name))) files.push(name);
-  return files.sort();
+    catch (err) { if (err.code === 'ENOENT') return false; throw err; }
+  }).sort();
 }
 const digestFiles = (root, files) => {
   const hash = crypto.createHash('sha256');
@@ -44,27 +101,35 @@ const digestFiles = (root, files) => {
   return hash.digest('hex');
 };
 class Deployment {
-  constructor({ root, env = require("../../operations/runtime").environment(), settings, clientFactory = () => new Client(), snapshot = () => ({ integrated: [], managed: [] }), hostnames = () => hosts,
+  constructor({ root, env = require("../../operations/runtime").environment(), settings, clientFactory = () => new Client(), snapshot = () => ({ integrated: [], managed: [] }), hostnames = () => hosts, sites,
     stateDirectory = path.join(root, 'data', 'deployment') }) {
     this.root = root; this.env = env; this.clientFactory = clientFactory;
     this.settings = settings;
     this.vault = settings;
     this.snapshot = snapshot;
     this.hostnames = hostnames;
-    this.plans = new Map(); this.running = false; this.result = null;
+    this.sites = sites || (() => this.hostnames().map(hostname => ({ key: hostname, hostname })));
+    this.plans = new Map(); this.running = false; this.result = null; this.logs = [];
     this.stateDirectory = stateDirectory;
     this.statusFile = path.join(stateDirectory, 'status.json');
     if (fs.existsSync(this.statusFile)) {
       const previous = JSON.parse(fs.readFileSync(this.statusFile, 'utf8'));
+      this.logs = Array.isArray(previous.logs) ? previous.logs.slice(-200) : [];
       if (typeof previous.running !== 'boolean' || !Object.hasOwn(previous, 'result')) throw new Error('Invalid saved deployment status');
-      this.result = previous.running ? { success: false, error: 'The CMS restarted during a deployment. The remote systemd job may still be running; inspect its log/status before retrying.' } : previous.result;
+      this.result = previous.running ? { ...previous.result, success: false, error: 'The CMS restarted during a deployment. The remote systemd job may still be running; inspect each target log/status before retrying.' } : previous.result;
     }
   }
-  plan() {
+  plan(input = {}) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw error(400, 'Deployment plan options must be an object.');
+    if (input.initialize !== undefined || input.freshManagedSites !== undefined) throw error(400, 'Installation is detected automatically. Reload Admin and review a new plan.');
     const config = this.settings ? this.settings.configuration() : this.vault && !this.env.DEPLOY_PASSWORD && !this.env.DEPLOY_KEY_FILE
       ? { ...this.vault.configuration(), email: this.env.DEPLOY_TLS_EMAIL } : configuration(this.env);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email || '')) throw error(400, 'Set a certificate registration email in Admin Settings.');
     const files = releaseFiles(this.root);
+    const required = ['scripts/deploy-release.sh', 'scripts/serve.js', 'scripts/init-settings.js', 'package.json', 'ecosystem.config.cjs',
+      'services/cms/lib/admin-auth.js', 'sites/admin.featheral.com/login.html', 'sites/admin.featheral.com/js/login.js'];
+    const missing = required.filter(file => !files.includes(file));
+    if (missing.length) throw error(400, `The Git-tracked release is missing required startup files: ${missing.join(', ')}. Track these application source files before deploying.`);
     const digest = digestFiles(this.root, files);
     const content = JSON.stringify(this.snapshot());
     const contentDigest = crypto.createHash('sha256').update(content).digest('hex');
@@ -72,20 +137,33 @@ class Deployment {
     if (!domains.length || domains.some(host => !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host))) throw error(400, 'Deployment requires valid public hostnames');
     const id = crypto.randomUUID();
     const createdAt = Date.now();
+    const targets = this.settings ? this.settings.deploymentTargets(this.sites()) : [{ id: 'shared', ...config, hosts: domains, urls: [] }];
+    if (JSON.stringify([...new Set(targets.flatMap(target => target.hosts))].sort()) !== JSON.stringify([...domains].sort()))
+      throw error(400, 'Deployment targets must cover every site hostname.');
+    const targetDigest = crypto.createHash('sha256').update(JSON.stringify(targets)).digest('hex');
     this.plans.clear();
-    this.plans.set(id, { config, files, digest, content, contentDigest, domains, createdAt });
+    this.plans.set(id, { config, files, digest, content, contentDigest, domains, createdAt, targets, targetDigest });
     return { id, digest, contentDigest, expiresAt: createdAt + 10 * 60_000, target: `${config.username}@${config.host}:${config.directory}`,
+      targetDigest, targets: targets.map(({ password, keyFile, ...target }) => target),
       files: files.length, hosts: domains, enabled: this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true', walletApprovalRequired: Boolean(config.vault),
       ...(this.settings ? { settingsRevision: config.settingsRevision, uploadLimitMiB: config.uploadLimitMiB, requestTimeoutSeconds: config.requestTimeoutSeconds, deploymentTimeoutSeconds: config.deploymentTimeoutSeconds } : {}),
-      steps: ['Upload current local source and published CMS pages/themes by SFTP (not just committed files).',
+      steps: ['Upload the same Git-tracked working-tree ZIP and published CMS pages/themes to every reviewed server; untracked files are excluded.',
+        'Use each server’s own SSH credential; configure Nginx/HTTPS only for the hostnames assigned to that server. Point their DNS A/AAAA records to that server before deployment.',
+        'Deploy separate servers first and the shared administration server last. A DB-only target runs no financial writers or other site services.',
         'Keep encrypted Settings, external bootstrap, signing keys, ledgers, media and CMS databases outside releases; never put them in Git.',
-        'Require pre-provisioned private data, encrypted Settings and external bootstrap for the first deployment; do not create a new economy.',
+        'Automatically reuse existing storage and encryption keys. Only an empty shared Admin server is initialized; Gold stays disabled and financial writers unconfigured. Separate full-stack servers require restored data. Never replace existing private data.',
+        'Automatically reuse the managed-site registry. If empty or absent, create published-only sites without source ownership, balances, rewards, uploads or history; conflicting data folders are refused. Media links may require replacement.',
         'Install locked dependencies; build World and export ABIs.',
         'Provision Node 24, PM2, Nginx and Certbot on Ubuntu/Debian using the verified SSH/sudo credential.',
         'Validate Nginx, apply upload/timeout limits, switch release, reload PM2, configure HTTPS and enable certificate renewal.',
         'Health-check all sites; restore the previous code release on failure without rolling back monetary data.'] };
   }
-  status() { return { running: this.running, result: this.result }; }
+  status() { return { running: this.running, result: this.result, logs: this.logs }; }
+  log(message) {
+    this.logs.push({ at: Date.now(), message });
+    if (this.logs.length > 200) this.logs.shift();
+    this.persistStatus();
+  }
   persistStatus() {
     fs.mkdirSync(path.dirname(this.statusFile), { recursive: true });
     const temporary = this.statusFile + '.tmp';
@@ -97,7 +175,8 @@ class Deployment {
     if (this.settings?.busy) throw error(409, 'Wait for the Settings operation.');
     if (this.running) throw error(409, 'Another deployment is running');
     const plan = this.plans.get(input?.planId);
-    if (!plan || Date.now() - plan.createdAt > 10 * 60_000 || input?.approval !== `DEPLOY ${plan.digest} ${plan.contentDigest}`) throw error(400, 'Review a fresh plan and provide its exact approval phrase');
+    if (!plan || Date.now() - plan.createdAt > 10 * 60_000) throw error(400, 'Deployment plan expired or unavailable. Review a new plan.');
+    if (input?.approval !== `DEPLOY ${plan.digest} ${plan.contentDigest}`) throw error(400, 'Enter the exact approval phrase from the reviewed deployment plan.');
     if (digestFiles(this.root, releaseFiles(this.root)) !== plan.digest) throw error(409, 'Source changed after the plan. Generate and review a new plan.');
     if (JSON.stringify(this.snapshot()) !== plan.content) throw error(409, 'CMS content changed after the plan. Generate a new plan.');
     if (JSON.stringify([...new Set(this.hostnames())]) !== JSON.stringify(plan.domains)) throw error(409, 'The site list changed after the plan. Generate a new plan.');
@@ -106,22 +185,28 @@ class Deployment {
       if (['username', 'host', 'directory', 'port', 'fingerprint', 'settingsRevision'].some(key => current[key] !== plan.config[key]))
         throw error(409, 'The vault SSH target changed after the plan. Generate a new plan.');
     }
+    if (this.settings && crypto.createHash('sha256').update(JSON.stringify(this.settings.deploymentTargets(this.sites()))).digest('hex') !== plan.targetDigest)
+      throw error(409, 'Site server assignments changed after review. Generate a new plan.');
     return plan;
   }
   approvalChallenge(input, context) {
     const plan = this.validate(input);
     if (!plan.config.vault) throw error(400, 'This deployment does not use a stored credential.');
-    return this.vault.challengeUse('DEPLOY REVIEWED RELEASE', { planId: input.planId, digest: plan.digest, contentDigest: plan.contentDigest }, context);
+    const binding = { planId: input.planId, digest: plan.digest, contentDigest: plan.contentDigest, ...(this.settings ? { targetDigest: plan.targetDigest } : {}), installation: 'auto' };
+    return this.settings ? this.settings.challengeDeployment(binding, context, this.sites())
+      : this.vault.challengeUse('DEPLOY REVIEWED RELEASE', binding, context);
   }
   launch(input, context) {
     const plan = this.validate(input);
-    const credential = plan.config.vault ? this.vault.use('DEPLOY REVIEWED RELEASE',
-      { planId: input.planId, digest: plan.digest, contentDigest: plan.contentDigest }, context, input) : null;
+    const binding = { planId: input.planId, digest: plan.digest, contentDigest: plan.contentDigest, ...(this.settings ? { targetDigest: plan.targetDigest } : {}), installation: 'auto' };
+    const credential = this.settings ? this.settings.useDeployment(binding, context, input, this.sites())
+      : plan.config.vault ? this.vault.use('DEPLOY REVIEWED RELEASE', binding, context, input) : null;
     void this.start(input, credential).catch(err => console.error('CMS deployment job rejected:', err.status || err.name));
     return this.status();
   }
   async connect(config) {
     const client = this.clientFactory();
+    let observedFingerprint;
     try { await new Promise((resolve, reject) => {
       client.once('ready', resolve).once('error', reject);
       client.connect({ host: config.host, port: config.port, username: config.username,
@@ -129,77 +214,161 @@ class Deployment {
         readyTimeout: (config.sshTimeoutSeconds || 15) * 1000,
         hostVerifier: key => {
           const actual = `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
+          if (!config.fingerprint && config.trustOnFirstUse) { observedFingerprint = actual; return true; }
           return actual === config.fingerprint;
         } });
     }); } catch (err) { client.end(); throw err; }
+    if (observedFingerprint) config.fingerprint = observedFingerprint;
     return client;
   }
-  async execute(client, command, input = "", timeoutSeconds = 900) {
+  async execute(client, command, input = "", timeoutSeconds = 900, onPhase, onLog) {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => { client.end(); reject(error(504, 'Remote deployment timed out; inspect the server log before retrying.')); }, timeoutSeconds * 1000);
       client.exec(command, (err, stream) => {
       if (err) { clearTimeout(timeout); return reject(err); }
-      // Remote output may contain environment values. Do not return it to browsers.
-      stream.on('data', () => {}); stream.stderr.on('data', () => {});
+      let failure;
+      const reader = () => {
+        const decoder = new StringDecoder('utf8');
+        let output = '', dropping = false, privateKey = false;
+        const lineReceived = line => {
+          line = line.replace(/\r$/, '');
+          if (privateKey) {
+            if (/-----END [^-]*PRIVATE KEY-----/.test(line)) privateKey = false;
+            return;
+          }
+          if (/-----BEGIN [^-]*PRIVATE KEY-----/.test(line)) {
+            privateKey = !/-----END [^-]*PRIVATE KEY-----/.test(line);
+            onLog?.('[REDACTED PRIVATE KEY]');
+            return;
+          }
+          const match = /^FEATHERAL_PHASE:([a-z-]+)$/.exec(line);
+          if (match && Object.hasOwn(installerSteps, match[1])) { onPhase?.(match[1]); return; }
+          const failed = /^FEATHERAL_FAILURE:([a-z-]+):([0-9]{1,3})$/.exec(line);
+          if (!failure && failed && Object.hasOwn(installerSteps, failed[1]) && Number(failed[2]) > 0 && Number(failed[2]) <= 255) {
+            failure = `Installer failed at ${failed[1]} (exit ${Number(failed[2])}). ${installerSteps[failed[1]]}`;
+            onPhase?.(failed[1], Number(failed[2]));
+          }
+          if (!failed && line && !line.startsWith('FEATHERAL_PHASE:')) onLog?.(line);
+        };
+        const receive = text => {
+          for (const part of text.split(/(?<=\n)/)) {
+            const ended = part.endsWith('\n');
+            if (!dropping) output += part;
+            if (output.length > 65536) {
+              onLog?.('[Deployment log line omitted: exceeds 64 KiB.]');
+              output = ''; dropping = true;
+            }
+            if (ended) {
+              if (!dropping) lineReceived(output.slice(0, -1));
+              output = ''; dropping = false;
+            }
+          }
+        };
+        return { data: chunk => receive(decoder.write(chunk)), end: () => { receive(decoder.end()); if (output) lineReceived(output); } };
+      };
+      const stdout = reader(), stderr = reader();
+      stream.on('data', stdout.data);
+      stream.stderr.on('data', stderr.data);
       stream.once('error', err => { clearTimeout(timeout); reject(err); });
-      stream.once('close', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(error(502, `Remote deployment command failed (exit ${code ?? 'unknown'}). Check the server deployment log.`)); });
+      stream.once('close', code => {
+        clearTimeout(timeout);
+        stdout.end(); stderr.end();
+        if (code === 0 && !failure) return resolve();
+        const err = error(502, failure || `Remote deployment command failed (exit ${code ?? 'unknown'}). Check the server deployment log.`);
+        if (failure) err.publicMessage = failure;
+        reject(err);
+      });
       if (typeof stream.end === 'function') stream.end(input);
     }); });
   }
   async start(input, credential) {
     const plan = this.validate(input);
-    if (plan.config.vault && !credential?.password) throw error(403, 'Origin-wallet approval is required to use the stored deployment credential.');
-    this.plans.delete(input.planId); this.running = true; this.result = null;
+    const credentials = Array.isArray(credential) ? credential : [{ ...plan.config, id: 'shared', password: credential?.password || plan.config.password }];
+    if (plan.config.vault && plan.targets.some(target => !credentials.find(item => item.id === target.id)?.password))
+      throw error(403, 'Origin-wallet approval is required for every deployment target.');
+    this.plans.delete(input.planId); this.running = true; this.result = null; this.logs = [];
     const temporary = this.stateDirectory;
     const archive = path.join(temporary, `${crypto.randomUUID()}.zip`);
     const bootstrap = archive + '.sh';
-    let client;
+    const results = [];
     try {
       fs.mkdirSync(temporary, { recursive: true });
-      this.persistStatus();
+      this.log('Preparing the reviewed Git-tracked release archive.');
       const zip = new yazl.ZipFile();
       const captured = crypto.createHash('sha256');
       for (const file of plan.files) {
         const buffer = fs.readFileSync(path.join(this.root, ...file.split('/')));
         captured.update(file).update('\0').update(buffer);
-        zip.addBuffer(buffer, file);
-        if (file === 'scripts/deploy-release.sh') fs.writeFileSync(bootstrap, buffer, { mode: 0o600 });
+        const deployed = file.endsWith('.sh') ? Buffer.from(buffer.toString('utf8').replace(/\r\n/g, '\n')) : buffer;
+        zip.addBuffer(deployed, file);
+        if (file === 'scripts/deploy-release.sh') fs.writeFileSync(bootstrap, deployed, { mode: 0o600 });
       }
       if (captured.digest('hex') !== plan.digest) throw error(409, 'Source changed while preparing the archive. Review a new plan.');
       zip.addBuffer(Buffer.from(plan.content), '.cms-published.json');
+      zip.addBuffer(Buffer.from(JSON.stringify({ files: plan.files })), '.deployment-source.json');
       const writing = pipeline(zip.outputStream, fs.createWriteStream(archive, { mode: 0o600 }));
       zip.end(); await writing;
-      client = await this.connect(plan.config.vault ? { ...plan.config, password: credential.password } : plan.config);
+      this.log('Release archive ready; the same ZIP will be sent to every target.');
       const releaseId = `release-${Date.now()}-${plan.digest.slice(0, 12)}`;
-      const remote = `${plan.config.directory}/releases/${releaseId}`;
-      await this.execute(client, `mkdir -p ${quote(remote)}`, "", plan.config.sshTimeoutSeconds || 20);
-      const sftp = await this.transfer(client, callback => client.sftp(callback), plan.config.sshTimeoutSeconds || 20);
-      try {
-        await this.transfer(client, callback => sftp.fastPut(archive, `${remote}/release.zip`, callback), plan.config.deploymentTimeoutSeconds || 900);
-        await this.transfer(client, callback => sftp.fastPut(bootstrap, `${remote}/deploy-release.sh`, callback), plan.config.sshTimeoutSeconds || 20);
-      } finally { sftp.end(); }
-      if (this.settings) {
-        const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(plan.config.directory)} ${quote(releaseId)} ${quote(plan.config.email)} ${quote(plan.domains.join(' '))} ${quote(plan.config.uploadLimitMiB)} ${quote(plan.config.requestTimeoutSeconds)}`;
-        const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then printf '%s\\n' "$password" | ${job}; else printf '%s\\n' "$password" | sudo -S -p '' -v && printf '%s\\n' "$password" | sudo -n ${job}; fi`;
-        await this.execute(client, command,
-          credential.password + '\n', plan.config.deploymentTimeoutSeconds);
-      } else {
-        await this.execute(client, `sudo -n systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(plan.config.directory)} ${quote(releaseId)} ${quote(plan.config.email)} ${quote(plan.domains.join(' '))}`);
+      const targets = [...plan.targets].sort((a, b) => Number(a.id === 'shared') - Number(b.id === 'shared'));
+      for (const target of targets) {
+        this.result = { success: false, targets: results, currentTarget: target.host, message: 'Deployment in progress; not yet verified.' };
+        this.persistStatus();
+        try {
+          await this.deployTarget(target, credentials.find(item => item.id === target.id), archive, bootstrap, releaseId);
+          results.push({ host: target.host, hosts: target.hosts, success: true });
+          this.log(`${target.host}: deployment and HTTPS health checks verified.`);
+        } catch (err) {
+          results.push({ host: target.host, hosts: target.hosts, success: false, ...(err.publicMessage ? { error: err.publicMessage } : {}) });
+          if (!err.publicMessage) this.log(`${target.host}: deployment failed; inspect the private server log before retrying.`);
+          throw err;
+        }
       }
-      this.result = { success: true, digest: plan.digest, completedAt: Date.now() };
+      this.result = { success: true, digest: plan.digest, targets: results, completedAt: Date.now() };
+      this.log('All deployment targets verified successfully.');
       return this.result;
     } catch (err) {
-      this.result = { success: false, completedAt: Date.now(), error: 'Deployment failed; inspect the remote deployment log. No success is assumed.' };
+      this.result = { success: false, targets: results, completedAt: Date.now(), error: `${err.publicMessage || 'Deployment failed; inspect each target result and its remote deployment log.'} Verified servers are not rolled back across servers.` };
+      this.log(`Deployment stopped (${err.status || 502}). Verified servers have not been rolled back across servers.`);
       console.error('CMS deployment failed:', err.code || err.status || err.name);
       throw error(err.status || 502, this.result.error);
     } finally {
-      client?.end();
-      if (credential) credential.password = '';
+      for (const item of credentials) item.password = '';
+      if (credential && !Array.isArray(credential)) credential.password = '';
       fs.rmSync(archive, { force: true });
       fs.rmSync(bootstrap, { force: true });
       this.running = false;
       this.persistStatus();
     }
+  }
+  async deployTarget(config, credential, archive, bootstrap, releaseId) {
+    let client;
+    try {
+      this.log(`${config.host}: connecting to SSH with the saved credential and pinned server key.`);
+      client = await this.connect(config.vault ? { ...config, password: credential.password } : config);
+      const remote = `${config.directory}/releases/${releaseId}`;
+      await this.execute(client, `mkdir -p ${quote(remote)}`, "", config.sshTimeoutSeconds || 20);
+      const sftp = await this.transfer(client, callback => client.sftp(callback), config.sshTimeoutSeconds || 20);
+      this.log(`${config.host}: uploading the release ZIP and Linux installer over SFTP.`);
+      try {
+        await this.transfer(client, callback => sftp.fastPut(archive, `${remote}/release.zip`, callback), config.deploymentTimeoutSeconds || 900);
+        await this.transfer(client, callback => sftp.fastPut(bootstrap, `${remote}/deploy-release.sh`, callback), config.sshTimeoutSeconds || 20);
+      } finally { sftp.end(); }
+      this.log(`${config.host}: running setup, build, PM2, Nginx, certificates and health checks. Server output follows (credentials redacted).`);
+      const secrets = [config.password, credential?.password, this.env.DEPLOY_PASSWORD,
+        this.settings?.value.credential?.password,
+        ...Object.values(this.settings?.value.siteServers || {}).map(profile => profile.credential?.password),
+        ...require('../../operations/configuration').fields.filter(field => field.secret).flatMap(field => [this.settings?.value.runtime?.[field.name], this.env[field.name]])];
+      const onLog = line => this.log(`${config.host}: ${redactServerLog(line, secrets)}`);
+      const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(config.directory)} ${quote(releaseId)} ${quote(config.email)} ${quote(config.hosts.join(' '))}${this.settings ? ` ${quote(config.uploadLimitMiB)} ${quote(config.requestTimeoutSeconds)} ${quote(config.id === 'shared')}` : ''}`;
+      if (this.settings) {
+        const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then printf '%s\\n' "$password" | ${job}; else printf '%s\\n' "$password" | sudo -S -p '' -v && printf '%s\\n' "$password" | sudo -n ${job}; fi`;
+        await this.execute(client, command, credential.password + '\n', config.deploymentTimeoutSeconds, (phase, exitCode) => this.logPhase(config.host, phase, exitCode), onLog);
+      } else await this.execute(client, `sudo -n ${job}`, "", 900, (phase, exitCode) => this.logPhase(config.host, phase, exitCode), onLog);
+    } finally { client?.end(); }
+  }
+  logPhase(host, phase, exitCode) {
+    if (Object.hasOwn(installerSteps, phase)) this.log(`${host}: ${exitCode ? `Installer failed at ${phase} (exit ${exitCode}). ` : ''}${installerSteps[phase]}`);
   }
   transfer(client, operation, seconds) {
     return new Promise((resolve, reject) => {
@@ -209,4 +378,4 @@ class Deployment {
     });
   }
 }
-module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles };
+module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles, redactServerLog };

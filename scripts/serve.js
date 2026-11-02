@@ -1,3 +1,28 @@
+const deploymentManifestFile = require("node:path").join(__dirname, "..", ".deployment-hosts.json");
+const deploymentManifest = require("node:fs").existsSync(deploymentManifestFile)
+  ? JSON.parse(require("node:fs").readFileSync(deploymentManifestFile, "utf8")) : null;
+if (deploymentManifest && (!Array.isArray(deploymentManifest.hosts) || !deploymentManifest.hosts.length
+  || typeof deploymentManifest.primary !== "boolean" || deploymentManifest.hosts.some(host => typeof host !== "string"
+    || !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host))
+  || [["uploadLimitMiB", 1, 1024], ["requestTimeoutSeconds", 5, 3600]].some(([key, min, max]) =>
+    deploymentManifest[key] !== undefined && (!Number.isInteger(deploymentManifest[key])
+      || deploymentManifest[key] < min || deploymentManifest[key] > max)))) throw new Error("Invalid deployment hostname or HTTP limit assignment.");
+if (deploymentManifest?.hosts.length === 1 && deploymentManifest.hosts[0] === "db.featheral.com") {
+  const root = require("node:path").resolve(__dirname, "..");
+  const settings = require("node:fs").existsSync(require("node:path").join(root, "data", "system-database"))
+    ? require("../services/operations/runtime") : {
+      value: { uploadLimitMiB: deploymentManifest.uploadLimitMiB || 16, requestTimeoutSeconds: deploymentManifest.requestTimeoutSeconds || 90 },
+      listeners: new Set(), environment: () => ({ HOST: "127.0.0.1", PORT: "8080" }),
+    };
+  const env = settings.environment();
+  require("../services/operations/configuration").assertDatabaseConfiguration(root);
+  const databaseServer = require("../services/database/server").createSiteServer({
+    root, settings, hosts: deploymentManifest.hosts,
+  });
+  databaseServer.listen(Number(env.PORT) || 8080, env.HOST || "127.0.0.1", () => console.log("Featheral database site/API ready (no financial writers)."));
+  const stop = () => databaseServer.close(() => process.exit(0));
+  process.on("SIGINT", stop); process.on("SIGTERM", stop);
+} else {
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -13,6 +38,9 @@ const { worldProfileReader } = require("../sites/world.featheral.com/play/server
 const { requestPolicy, configureServer } = require("../services/operations/http");
 const runtimeSettings = require("../services/operations/runtime");
 const env = runtimeSettings.environment();
+if (deploymentManifest && !deploymentManifest.primary
+  && (env.FTH_LEDGER_MODE !== "reader" || env.WORLD_LEDGER_MODE !== "reader" || (env.GOLD_RESERVE_MODE || "disabled") !== "disabled"))
+  throw new Error("A separate non-DB server requires preconfigured Dollar/World readers and disabled Gold reserves. Never start a second financial writer.");
 
 const root = path.resolve(__dirname, "..");
 require("../services/operations/configuration").assertDatabaseConfiguration(root);
@@ -206,15 +234,23 @@ const server = http.createServer(async (req, res) => {
   if (!requestPolicy(req, res, cms.operationsSettings)) return;
   cms.serverProfile?.recordRequest(req, res);
   try {
-    injectTelemetry(res);
     const url = new URL(req.url, "http://x");
     const hostname = new URL(`http://${req.headers.host || "localhost"}`).hostname;
     const site = siteFor(hostname);
-    if (url.pathname.startsWith("/api/telemetry/")) return cms.telemetryRequest(req, res);
+    if (site !== "admin") injectTelemetry(res);
     if (req.method === "GET" && url.pathname === "/healthz") {
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({ status: "ok", release: path.basename(root) }));
     }
+    const internalProfileRead = req.method === "GET" && /^\/api\/v1\/profiles\/0x[0-9a-f]{40}$/i.test(url.pathname)
+      && ["127.0.0.1", "::1", "[::1]", "localhost"].includes(hostname)
+      && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
+    if (deploymentManifest && !deploymentManifest.hosts.includes(hostname)
+      && !(site === "cms" && deploymentManifest.hosts.includes("admin.featheral.com")) && !internalProfileRead) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Site is assigned to another server." }));
+    }
+    if (url.pathname.startsWith("/api/telemetry/")) return cms.telemetryRequest(req, res);
     if (site === "cms") return redirect(res, siteUrl(req, "admin", url.pathname + url.search), 301);
     if (site === "db" && url.pathname.startsWith("/api/")) {
       if (url.pathname.startsWith("/api/v1/db/")) return cms(req, res);
@@ -477,3 +513,4 @@ function shutdown(exitCode = 0) {
 }
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
+}

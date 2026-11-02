@@ -143,14 +143,15 @@ test('traffic defaults to hourly lines and switches periods with a shared scale'
       { key: 'stats-featheral-com', hostname: 'stats.featheral.com', name: 'Stats', status: 'ready' },
       { key: 'sites-featheral-com--one', hostname: 'sites.featheral.com', path: '/one', name: 'One', status: 'ready' },
     ];
+    sites.forEach(site => { site.managementLinks = require('../lib/site-management').managementFor(site); });
     const context = vm.createContext({
       state: { integratedSites: [sites[0]], library: sites.slice(1), overview: {}, key: sites[1].key },
-      location: { hash: '#/', hostname: 'admin.localhost', protocol: 'http:', port: '8080' },
+      location: { hash: '#/set/stats-featheral-com/overview', hostname: 'admin.localhost', protocol: 'http:', port: '8080' },
       $: selector => elements[selector],
       esc: String, isLocal: () => true, managesSites: () => true,
-      hrefFor: parts => '#/' + parts.join('/'),
+      hrefFor: (parts, q = {}) => '#/' + parts.join('/') + (Object.keys(q).length ? '?' + new URLSearchParams(q) : ''),
       setHref: id => '#/' + id,
-      parseHash: () => ({ parts: context.location.hash.slice(2).split('/'), q: {} }),
+      parseHash: () => ({ parts: context.location.hash.slice(2).split('?')[0].split('/'), q: {} }),
     });
     vm.runInContext(source.slice(source.indexOf('function siteSelectionUrl'), source.indexOf("$('#menu-toggle')")), context);
     context.renderSidebar('home');
@@ -162,13 +163,12 @@ test('traffic defaults to hourly lines and switches periods with a shared scale'
     const select = elements['#set-select'];
     select.value = 'https://stats.featheral.com/';
     select.change();
-    assert.equal(context.location.hash, '#/set/stats-featheral-com/overview');
+    assert.equal(context.location.hash, '#/overview');
     select.value = 'https://sites.featheral.com/one/';
     select.change();
-    assert.equal(context.location.hash, '#/set/sites-featheral-com--one/overview');
+    assert.equal(context.location.hash, '#/set/sites-featheral-com--one/cms-content');
     assert.doesNotMatch(html, /Classic|https:\/\/admin.featheral.com\/operations/);
-    assert.match(elements['#nav'].innerHTML, /href="#\/deployment"/);
-    assert.match(elements['#nav'].innerHTML, /href="#\/notes"/);
+    assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"|href="#\/notes"/);
     context.state.integratedSites.push({ builtin: true, cmsCompatible: false, hostname: 'world.featheral.com', status: 'ready' });
     context.renderSidebar('operations');
     const main = elements['#set-switch'].innerHTML.split('</select>')[0];
@@ -176,30 +176,130 @@ test('traffic defaults to hourly lines and switches periods with a shared scale'
     assert.match(main, /value="https:\/\/gold.featheral.com\/"/);
     assert.doesNotMatch(elements['#set-switch'].innerHTML, /classic-select/);
     assert.equal((elements['#set-switch'].innerHTML.match(/<select/g) || []).length, 1);
-    context.location.hash = '#/operations/gold';
-    context.renderSidebar('operations');
-    assert.match(elements['#nav'].innerHTML, /href="#\/deployment"/);
     context.state.key = null;
+    context.location.hash = '#/operations/gold?tab=reserve';
+    context.renderSidebar('operations');
+    assert.match(elements['#set-switch'].innerHTML, /value="https:\/\/gold.featheral.com\/" selected/);
+    assert.match(elements['#nav'].innerHTML, /href="#\/operations\/gold" class="active"/);
+    assert.match(elements['#nav'].innerHTML, /href="#\/site-pages\/gold.featheral.com"/);
+    assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"|href="#\/settings"|href="#\/silver"|href="#\/notes"/);
+    select.value = '';
+    select.change();
+    assert.equal(context.location.hash, '#/');
+    context.renderSidebar('home');
+    assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"/);
+    assert.match(elements['#nav'].innerHTML, /href="#\/server-profile"/);
+    assert.match(elements['#nav'].innerHTML, /href="#\/settings"/);
     context.location.hash = '#/deployment';
     context.renderSidebar('deployment');
     assert.match(elements['#nav'].innerHTML, /All sites<\/a>/);
-    assert.match(elements['#nav'].innerHTML, /href="#\/deployment"/);
+    assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"/);
     context.location.hash = '#/site-pages/gold.featheral.com';
     context.renderSidebar('home');
-    assert.match(elements['#nav'].innerHTML, /href="#\/deployment"/);
+    assert.match(elements['#set-switch'].innerHTML, /value="https:\/\/gold.featheral.com\/" selected/);
+    assert.match(elements['#nav'].innerHTML, /href="#\/site-pages\/gold.featheral.com" class="active"/);
+    assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"/);
   });
 
-  test('deployment controls live on the dedicated view, not the Sites overview', () => {
+  test('site navigation stays scoped across native workspaces, traffic and CMS data', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'sites', 'admin.featheral.com', 'js', 'core.js'), 'utf8');
+    const elements = { '#set-switch': {}, '#nav': {}, '#set-select': { addEventListener(event, handler) { this.change = handler; } } };
+    const hosts = ['featheral.com', 'gold.featheral.com', 'dollar.featheral.com', 'media.featheral.com',
+      'app.featheral.com', 'silver.featheral.com', 'notes.featheral.com', 'ex.featheral.com',
+      'stats.featheral.com', 'db.featheral.com', 'admin.featheral.com'];
+    const catalog = hosts.map(hostname => ({ hostname, key: hostname, builtin: true, status: 'ready' }));
+    for (const site of catalog.filter(site => ['notes.featheral.com', 'ex.featheral.com', 'stats.featheral.com'].includes(site.hostname))) {
+      site.builtin = false;
+      site.managed = true;
+    }
+    catalog.forEach(site => { site.managementLinks = require('../lib/site-management').managementFor(site); });
+    const context = vm.createContext({
+      state: { integratedSites: catalog, library: [{ key: 'hosted', hostname: 'sites.featheral.com', path: '/one', status: 'ready' }], overview: {}, key: null },
+      location: { hash: '#/' }, $: selector => elements[selector], esc: String,
+      isLocal: () => true, managesSites: () => true, HIDDEN_TYPES: [], fmtNum: String,
+      publicPreview: () => '/preview',
+      hrefFor: (parts, q = {}) => '#/' + parts.join('/') + (Object.keys(q).length ? '?' + new URLSearchParams(q) : ''),
+      setHref: id => '#/set/hosted/' + id,
+      parseHash: () => {
+        const [route, query] = context.location.hash.slice(2).split('?');
+        return { parts: route.split('/'), q: Object.fromEntries(new URLSearchParams(query)) };
+      },
+    });
+    vm.runInContext(source.slice(source.indexOf('function siteSelectionUrl'), source.indexOf("$('#menu-toggle')")), context);
+    for (const [route, hostname] of [
+      ['operations/foundation', 'featheral.com'], ['operations/dollar?tab=ledger', 'dollar.featheral.com'],
+      ['operations/world', 'media.featheral.com'], ['intranet', 'app.featheral.com'],
+      ['silver', 'silver.featheral.com'], ['notes', 'notes.featheral.com'],
+      ['notes?site=ex.featheral.com', 'ex.featheral.com'], ['overview', 'stats.featheral.com'],
+      ['overview?site=gold.featheral.com', 'gold.featheral.com'], ['database', 'db.featheral.com'],
+      ['site-pages/admin.featheral.com', 'admin.featheral.com'],
+      ['site-server/db.featheral.com', 'db.featheral.com'],
+    ]) {
+      context.location.hash = '#/' + route;
+      context.renderSidebar(route.split('/')[0]);
+      assert.match(elements['#set-switch'].innerHTML, new RegExp(`value="https://${hostname}/" selected`), route);
+      assert.match(elements['#nav'].innerHTML, /All sites<\/a>/, route);
+      assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"|href="#\/settings"|href="#\/server-profile"|href="#\/operations"/, route);
+      if (hostname === 'app.featheral.com' || hostname === 'silver.featheral.com') {
+        const ownRoute = hostname === 'app.featheral.com' ? 'intranet' : 'silver';
+        const otherRoute = ownRoute === 'intranet' ? 'silver' : 'intranet';
+        assert.match(elements['#nav'].innerHTML, new RegExp(`href="#/${ownRoute}"`));
+        assert.doesNotMatch(elements['#nav'].innerHTML, new RegExp(`href="#/${otherRoute}"`));
+      }
+    }
+    const select = elements['#set-select'];
+    select.value = 'https://ex.featheral.com/';
+    select.change();
+    assert.equal(context.location.hash, '#/notes?site=ex.featheral.com');
+    context.state.key = 'hosted';
+    context.state.overview.hosted = { hasDb: true, contentTypes: [], hostname: 'sites.featheral.com' };
+    context.location.hash = '#/set/hosted/database';
+    context.renderSidebar('database');
+    const nav = elements['#nav'].innerHTML;
+    assert.match(nav, /href="#\/set\/hosted\/database" class="active"/);
+    assert.match(nav, /href="#\/set\/hosted\/cms-content"/);
+    assert.match(nav, /href="#\/site-server\/hosted"/);
+    assert.doesNotMatch(nav, /href="#\/database"|href="#\/deployment"|href="#\/intranet"|href="#\/silver"|href="#\/notes"/);
+    context.location.hash = '#/set/hosted/site-settings';
+    context.renderSidebar('site-settings');
+    assert.match(elements['#nav'].innerHTML, /href="#\/set\/hosted\/site-settings" class="active"/);
+    context.state.key = null;
+    for (const route of ['', 'operations', 'deployment', 'server-profile', 'settings']) {
+      context.location.hash = '#/' + route;
+      context.renderSidebar(route || 'home');
+      assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/deployment"/);
+      assert.match(elements['#nav'].innerHTML, /href="#\/server-profile"/);
+      assert.match(elements['#nav'].innerHTML, /href="#\/settings"/);
+      assert.doesNotMatch(elements['#nav'].innerHTML, /href="#\/intranet"|href="#\/silver"|href="#\/notes"|href="#\/database"|href="#\/operations"/);
+      assert.match(elements['#nav'].innerHTML, /href="#\/logs"/);
+      assert.equal((elements['#nav'].innerHTML.match(/<a /g) || []).length, 4);
+      assert.doesNotMatch(elements['#set-switch'].innerHTML, / selected/);
+    }
+  });
+
+  test('deployment controls live in one Settings card, not the Sites overview or a separate menu', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'sites', 'admin.featheral.com', 'js', 'sites.js'), 'utf8');
-    const sites = source.slice(source.indexOf('VIEWS.sites ='), source.indexOf('VIEWS.deployment ='));
-    const deployment = source.slice(source.indexOf('VIEWS.deployment ='), source.indexOf("VIEWS['site-pages'] ="));
+    const sites = source.slice(source.indexOf('VIEWS.sites ='), source.indexOf('function deploymentControlsHtml'));
+    const deployment = source.slice(source.indexOf('function deploymentControlsHtml'), source.indexOf("VIEWS['site-pages'] ="));
     assert.doesNotMatch(sites, /deployment-plan|deployment-start|deploymentTimer/);
     assert.match(sites, /traffic-refresh/);
-    assert.match(deployment, /renderSidebar\('deployment'\)/);
+    assert.match(deployment, /location.hash = '#\/settings'/);
     assert.match(deployment, /deployment-plan/);
-    assert.match(deployment, /approval:.*deployment-approval/);
+    assert.match(deployment, /approval = \$\('#deployment-approval'\)/);
+    assert.match(deployment, /approval: approval.value/);
     assert.match(deployment, /viewCleanup = .*clearInterval/);
     assert.match(deployment, /await status\(\)/);
+    const settings = fs.readFileSync(path.join(__dirname, '../../../sites/admin.featheral.com/js/settings.js'), 'utf8').split('VIEWS["site-server"]')[0];
+    assert.equal((settings.match(/class="card /g) || []).length, 1);
+    assert.match(settings, /deploymentControlsHtml\(\)/);
+    assert.match(settings, /mountDeploymentControls\(token/);
+    assert.match(settings, /Root password or user:password/);
+    assert.doesNotMatch(settings, /Admin access|Advanced server settings|name="runtimeConfirmation"|name="enabled"/);
+    assert.match(settings, /settings-deployment/);
+    assert.match(settings, /1\. Connection/);
+    assert.match(deployment, /deployment-review-heading">2\. Review/);
+    assert.match(deployment, /deployment-console-heading">3\. Deployment console/);
+    assert.match(deployment, /role="log" aria-labelledby="deployment-console-heading"/);
   });
 
   test('all core sites have hostname-named frontend folders and a shell or CMS documents', () => {

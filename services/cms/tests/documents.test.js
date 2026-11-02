@@ -256,7 +256,7 @@ test('deployment snapshots include complete published documents and editable met
     assert.doesNotMatch(page.body, /data-cms-copy/);
   }
 });
-test('deployment imports full-page HTML, title, description and theme into a restored CMS', t => {
+test('deployment imports full-page HTML, title, description and theme into a fresh CMS without a managed-site registry', t => {
   const { pages, directory } = fixture(t);
   const original = pages.pages('featheral.com').find(page => page.template === 'docs/index.html');
   const saved = pages.save('featheral.com', original.id, { title: 'Deployed docs', excerpt: 'Deployed description',
@@ -267,9 +267,10 @@ test('deployment imports full-page HTML, title, description and theme into a res
   const documents = path.join(target, 'sites', 'admin.featheral.com', 'documents');
   fs.mkdirSync(documents, { recursive: true });
   fs.cpSync(path.join(root, 'sites', 'admin.featheral.com', 'documents', 'featheral.com'), path.join(documents, 'featheral.com'), { recursive: true });
-  const cmsData = path.join(target, 'services', 'cms', 'data');
+  const cmsData = path.join(directory, 'shared', 'cms-data');
   fs.mkdirSync(cmsData, { recursive: true });
-  fs.writeFileSync(path.join(cmsData, 'sites.json'), '[]');
+  fs.mkdirSync(path.join(target, 'services', 'cms'), { recursive: true });
+  fs.symlinkSync(cmsData, path.join(target, 'services', 'cms', 'data'), process.platform === 'win32' ? 'junction' : 'dir');
   fs.writeFileSync(path.join(target, '.cms-published.json'), JSON.stringify(snapshot));
   const script = path.join(root, 'scripts', 'import-site-pages.js');
   vm.runInNewContext(fs.readFileSync(script, 'utf8'), { require: createRequire(script), __dirname: path.join(target, 'scripts') });
@@ -282,4 +283,122 @@ test('deployment imports full-page HTML, title, description and theme into a res
     assert.equal(restored.theme('featheral.com').theme, 'forest');
     assert.match(restored.render('featheral.com', original.template), /Deployed full page/);
   } finally { restored.close(); }
+});
+test('deployment refuses conflicting data or mismatched registry before writing integrated content', t => {
+  const { directory } = fixture(t);
+  const target = path.join(directory, 'release'), cmsData = path.join(target, 'services', 'cms', 'data');
+  fs.mkdirSync(cmsData, { recursive: true });
+  fs.writeFileSync(path.join(target, '.cms-published.json'), JSON.stringify({
+    integrated: [{ hostname: 'featheral.com', pages: [] }],
+    managed: [{ hostname: 'sites.featheral.com', key: 'hosted', path: '/example' }],
+  }));
+  const script = path.join(root, 'scripts', 'import-site-pages.js');
+  const diagnostics = [];
+  const scriptRequire = createRequire(script);
+  const run = () => vm.runInNewContext(fs.readFileSync(script, 'utf8'),
+    { require: name => name === 'node:fs' ? { ...fs, writeSync(fd, message) { assert.equal(fd, 3); diagnostics.push(message); } } : scriptRequire(name),
+      process: { env: { FEATHERAL_DEPLOY_DIAGNOSTICS: '1' } }, __dirname: path.join(target, 'scripts') });
+  fs.mkdirSync(path.join(cmsData, 'hosted'));
+  assert.throws(run, /cannot replace an existing source data folder/);
+  assert.deepEqual(diagnostics, ['FEATHERAL_FAILURE:import-fresh-conflict:1\n']);
+  assert.deepEqual(fs.readdirSync(cmsData), ['hosted']);
+  fs.writeFileSync(path.join(cmsData, 'sites.json'), JSON.stringify([{ hostname: 'sites.featheral.com', key: 'hosted', path: '/different' }]));
+  assert.throws(run, /Restore the matching managed-site registry/);
+  assert.equal(diagnostics.at(-1), 'FEATHERAL_FAILURE:import-registry-mismatch:1\n');
+  assert.deepEqual(fs.readdirSync(cmsData).sort(), ['hosted', 'sites.json']);
+});
+test('a complete integrated-site deployment snapshot imports into empty CMS storage', t => {
+  const { pages, directory } = fixture(t);
+  const snapshot = { integrated: pages.snapshot(), managed: [] };
+  const target = path.join(directory, 'release');
+  fs.mkdirSync(target);
+  fs.symlinkSync(path.join(root, 'sites'), path.join(target, 'sites'), process.platform === 'win32' ? 'junction' : 'dir');
+  const cmsData = path.join(target, 'services', 'cms', 'data');
+  fs.mkdirSync(cmsData, { recursive: true });
+  fs.writeFileSync(path.join(target, '.cms-published.json'), JSON.stringify(snapshot));
+  const script = path.join(root, 'scripts', 'import-site-pages.js');
+  vm.runInNewContext(fs.readFileSync(script, 'utf8'), { require: createRequire(script), __dirname: path.join(target, 'scripts') });
+  const restored = new SitePages({ root: target, dataDir: cmsData });
+  try { assert.deepEqual(restored.snapshot(), snapshot.integrated); }
+  finally { restored.close(); }
+});
+test('automatic managed-site import creates published-only sites and reuses them without source rewards', t => {
+  const { directory } = fixture(t);
+  const target = path.join(directory, 'release'), dataDir = path.join(directory, 'shared', 'cms-data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(path.join(target, 'services', 'cms'), { recursive: true });
+  fs.symlinkSync(dataDir, path.join(target, 'services', 'cms', 'data'), process.platform === 'win32' ? 'junction' : 'dir');
+  const { FileJournals } = require('../../database/journal');
+  assert.throws(() => new FileJournals(path.join(target, 'services', 'cms', 'data', 'guard-test')), /Ledger root cannot contain symbolic links/);
+  fs.rmdirSync(path.join(dataDir, 'guard-test'));
+  fs.mkdirSync(path.join(target, 'sites'));
+  const CmsStore = require('../lib/cms');
+  const original = new CmsStore(path.join(directory, 'source.sqlite'));
+  const settings = { ...original.siteSettings(), homepage: 'content', homeSlug: 'home', displayName: 'Published site' };
+  original.close();
+  const snapshot = { integrated: [], managed: [
+    { key: 'legacy-source-key', hostname: 'x.featheral.com', theme: 'editorial', settings,
+      pages: [{ id: 99, type: 'page', status: 'publish', slug: 'home', title: 'Published home', body: '<p>Published body</p>', excerpt: '' }],
+      rewards: { enabled: true, amount: 999 }, owner: 'not-copied' },
+    { key: 'sites-featheral-com--example', hostname: 'sites.featheral.com', path: '/example', theme: 'editorial', settings,
+      pages: [{ type: 'page', status: 'publish', slug: 'home', title: 'Hosted home', body: '<p>Hosted</p>', excerpt: '' }] },
+  ] };
+  const file = path.join(target, '.cms-published.json');
+  fs.writeFileSync(file, JSON.stringify(snapshot));
+  const script = path.join(root, 'scripts', 'import-site-pages.js');
+  const run = () => vm.runInNewContext(fs.readFileSync(script, 'utf8'), {
+    require: createRequire(script), __dirname: path.join(target, 'scripts'),
+    process: { argv: ['node', 'import-site-pages.js'], env: {} },
+  });
+  const collision = path.join(dataDir, 'x-featheral-com');
+  fs.mkdirSync(collision);
+  assert.throws(run, /existing data folder/);
+  assert.equal(fs.existsSync(path.join(dataDir, 'sites.json')), false);
+  fs.rmdirSync(collision);
+  snapshot.managed[1].theme = 'invalid-theme';
+  fs.writeFileSync(file, JSON.stringify(snapshot));
+  assert.throws(run, /Theme must be one of/);
+  assert.equal(fs.existsSync(collision), false);
+  assert.equal(fs.existsSync(path.join(dataDir, 'sites.json')), false);
+  snapshot.managed[1].theme = 'editorial';
+  snapshot.managed[0].key = '../unsafe';
+  fs.writeFileSync(file, JSON.stringify(snapshot));
+  assert.throws(run, /Invalid published site key/);
+  snapshot.managed[0].key = 'legacy-source-key';
+  fs.writeFileSync(file, JSON.stringify(snapshot));
+  run();
+  const registryFile = path.join(dataDir, 'sites.json');
+  const registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
+  assert.equal(registry.length, 2);
+  assert.equal(registry[0].key, 'x-featheral-com');
+  assert.equal(registry[0].publishedSourceKey, 'legacy-source-key');
+  assert.equal(registry[0].owner, undefined);
+  for (const record of registry) {
+    assert.deepEqual(fs.readdirSync(path.join(dataDir, record.key, 'uploads')), []);
+    const store = new CmsStore(path.join(dataDir, record.key, 'cms.sqlite'));
+    try {
+      assert.equal(store.list().length, 1);
+      assert.equal(store.list()[0].status, 'publish');
+      assert.equal(store.revisions(store.list()[0].id).length, 0);
+      assert.equal(store.theme(), 'editorial');
+    } finally { store.close(); }
+  }
+  assert.equal(fs.existsSync(path.join(dataDir, 'notes.sqlite')), false);
+  const before = fs.readFileSync(registryFile, 'utf8');
+  run();
+  assert.equal(fs.readFileSync(registryFile, 'utf8'), before);
+  snapshot.managed[0].pages[0].body = '<p>Updated published body</p>';
+  const next = path.join(directory, 'next-release');
+  fs.mkdirSync(path.join(next, 'services', 'cms'), { recursive: true });
+  fs.mkdirSync(path.join(next, 'sites'));
+  fs.symlinkSync(dataDir, path.join(next, 'services', 'cms', 'data'), process.platform === 'win32' ? 'junction' : 'dir');
+  fs.writeFileSync(path.join(next, '.cms-published.json'), JSON.stringify(snapshot));
+  vm.runInNewContext(fs.readFileSync(script, 'utf8'), {
+    require: createRequire(script), __dirname: path.join(next, 'scripts'),
+    process: { argv: ['node', 'import-site-pages.js'], env: {} },
+  });
+  const updated = new CmsStore(path.join(dataDir, registry[0].key, 'cms.sqlite'));
+  try { assert.equal(updated.list()[0].body, '<p>Updated published body</p>'); }
+  finally { updated.close(); }
+  assert.equal(fs.existsSync(path.join(dataDir, 'notes.sqlite')), false);
 });

@@ -1,12 +1,13 @@
 "use strict";
 const crypto = require("node:crypto");
 const { ethers } = require("ethers");
-const { SOURCE_ADDRESS } = require("../gold/reserve");
+const { SOURCE_ADDRESS, RESERVE_ADDRESS } = require("../gold/reserve");
 const { canonical } = require("../fth-ledger/codec");
 const { fail } = require("./journal");
 class OriginApprovals {
-  constructor({ wallet = SOURCE_ADDRESS, now = Date.now } = {}) {
+  constructor({ wallet = SOURCE_ADDRESS, wallets = [wallet, RESERVE_ADDRESS], now = Date.now } = {}) {
     this.wallet = ethers.getAddress(wallet); this.now = now;
+    this.wallets = wallets.map(address => ethers.getAddress(address));
     this.key = crypto.randomBytes(32); this.pending = new Map();
   }
   binding(action, value, context) {
@@ -14,17 +15,19 @@ class OriginApprovals {
     return crypto.createHmac("sha256", this.key).update(canonical({ action, value, origin: context.origin, session: context.session })).digest("hex");
   }
   challenge(action, value, context, target) {
+    const wallet = context?.wallet || this.wallet;
+    if (!this.wallets.includes(wallet)) throw fail(403, "An authorized Admin wallet is required.");
     const binding = this.binding(action, value, context), now = this.now(), expiresAt = now + 300000;
     for (const [id, item] of this.pending) if (item.expiresAt <= now) this.pending.delete(id);
     if (this.pending.size >= 1000) throw fail(429, "Too many pending approvals. Wait five minutes.");
     const challengeId = crypto.randomUUID();
     const message = ["Featheral database credential authorization", "", `Action: ${action}`, `Origin: ${context.origin}`,
-      `Target: ${target}`, `Wallet: ${this.wallet}`, `Nonce: ${challengeId}`,
+      `Target: ${target}`, `Wallet: ${wallet}`, `Nonce: ${challengeId}`,
       `Issued at: ${new Date(now).toISOString()}`, `Expires at: ${new Date(expiresAt).toISOString()}`,
       "Approve only the operation prepared in this Admin session.",
       "No Ethereum transaction. Never disclose your wallet private key."].join("\n");
-    this.pending.set(challengeId, { binding, message, expiresAt });
-    return { challengeId, message, wallet: this.wallet, expiresAt, target };
+    this.pending.set(challengeId, { binding, message, expiresAt, wallet });
+    return { challengeId, message, wallet, expiresAt, target };
   }
   consume(action, value, context, input) {
     const item = this.pending.get(input?.challengeId);
@@ -33,7 +36,7 @@ class OriginApprovals {
       throw fail(403, "Approval expired or does not match the exact action, credential, target and Admin session.");
     let signer;
     try { signer = ethers.verifyMessage(item.message, input.signature); } catch { throw fail(403, "Invalid wallet signature."); }
-    if (signer !== this.wallet) throw fail(403, "Only the FTHG origin wallet may authorize server credentials.");
+    if (signer !== item.wallet || context.wallet && context.wallet !== item.wallet) throw fail(403, "Sign with the authorized wallet that prepared this Admin operation.");
   }
 }
 module.exports = { OriginApprovals };

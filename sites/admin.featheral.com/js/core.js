@@ -20,6 +20,7 @@ async function api(url, opts = {}) {
   const r = await fetch(url, opts);
   const ct = r.headers.get('content-type') || '';
   const data = ct.includes('json') ? await r.json() : await r.text();
+  if (r.status === 401) location.reload();
   if (!r.ok) throw new Error((data && data.error) || data || r.statusText);
   return data;
 }
@@ -153,7 +154,7 @@ async function loadConfig() {
   document.title = state.config.brand;
   $('#brand-name').textContent = state.config.brand;
   if (isLocal()) $('.sidebar-foot').textContent = 'Local software · stored data only';
-  if (managesSites()) state.integratedSites = (await api('/api/sites')).filter(site => site.builtin);
+  if (managesSites()) state.integratedSites = await api('/api/sites');
 }
 
 async function loadLibrary() {
@@ -180,31 +181,58 @@ const OPERATION_VIEWS = [
   { key: 'world', hostname: 'media.featheral.com', label: 'Media moderation', description: 'Public social feed and moderation management.' },
 ];
 const isClassicSite = site => site.builtin === true || site.cmsCompatible === false;
-const managementHref = site => site.managementLinks?.[0]?.href
-  || (site.builtin ? hrefFor(['site-pages', site.hostname]) : hrefFor(['set', site.key, 'overview']));
+const managementHref = site => {
+  const href = site.managementLinks?.[0]?.href
+    || (site.builtin ? hrefFor(['site-pages', site.hostname]) : hrefFor(['set', site.key, 'overview']));
+  return href === '#/notes' && site.hostname === 'ex.featheral.com'
+    ? hrefFor(['notes'], { site: site.hostname }) : href;
+};
+
+function sidebarSite(sites) {
+  const { parts, q } = parseHash();
+  if (parts[0] === 'set') return sites.find(site => site.key === parts[1]);
+  if (parts[0] === 'site-server') return sites.find(site => site.key === parts[1]);
+  if (parts[0] === 'site-pages') return sites.find(site => site.hostname === parts[1] && !site.path);
+  const hostname = parts[0] === 'operations' ? OPERATION_VIEWS.find(view => view.key === parts[1])?.hostname
+    : ({ intranet: 'app.featheral.com', silver: 'silver.featheral.com',
+      notes: q.site === 'ex.featheral.com' ? q.site : 'notes.featheral.com',
+      database: 'db.featheral.com', overview: q.site || 'stats.featheral.com' })[parts[0]];
+  return sites.find(site => site.hostname + (site.path || '') === hostname);
+}
 
 function renderSidebar(active) {
   const lib = [...(state.integratedSites || []), ...state.library].filter((m, i, all) => m.status === 'ready'
     && all.findIndex(other => siteSelectionUrl(other) === siteSelectionUrl(m)) === i);
+  const selectedSite = sidebarSite(lib);
+  const siteSelected = Boolean(selectedSite || state.key || parseHash().parts[0] === 'site-pages');
   const ov = state.key ? state.overview[state.key] : null;
   $('#set-switch').innerHTML = (lib.length || managesSites()) && (!isLocal() || managesSites())
-    ? `<select id="set-select" aria-label="Choose a site"><option value="">— choose a site —</option>${lib.map((m) => `<option value="${esc(siteSelectionUrl(m))}" ${m.builtin ? location.hash === managementHref(m) || location.hash.startsWith(managementHref(m) + '?') ? 'selected' : '' : m.key === state.key ? 'selected' : ''}>${esc(m.hostname + (m.path || '') || m.name)}</option>`).join('')}</select>
+    ? `<select id="set-select" aria-label="Choose a site"><option value="">${managesSites() ? 'All sites' : '— choose a site —'}</option>${lib.map((m) => `<option value="${esc(siteSelectionUrl(m))}" ${m === selectedSite ? 'selected' : ''}>${esc(m.hostname + (m.path || '') || m.name)}</option>`).join('')}</select>
        ${ov ? `<div class="site-mini ellipsis" title="${esc(ov.siteUrl || ov.options?.home || '')}">${esc(ov.siteUrl || ov.options?.home || '')}</div>` : ''}`
     : '';
   const sel = $('#set-select');
   if (sel) sel.addEventListener('change', () => {
+    if (!sel.value && managesSites()) { location.hash = '#/'; return; }
     const selected = lib.find(site => siteSelectionUrl(site) === sel.value);
     if (selected) location.hash = managementHref(selected);
   });
 
-  const nav = managesSites() ? [['home', '⌂', 'All sites', '#/'], ['operations', '⚙', 'Service operations', '#/operations'],
-    ['deployment', DEPLOY_ICON, 'Deployment', hrefFor(['deployment'])]] : isLocal() ? [] : [['home', '⌂', 'Sites & sync', '#/']];
-  if (managesSites()) nav.push(['notes', '↔', 'Notes · rewards & markets', '#/notes']);
-  if (managesSites()) nav.push(['server-profile', '⚙', 'Server profile', '#/server-profile']);
-  if (managesSites()) nav.push(['settings', '⚙', 'Settings', '#/settings']);
-  if (managesSites()) nav.push(['database', '▤', 'Database journals', '#/database']);
-  nav.push(['intranet', '◎', 'App · insiders & missions', '#/intranet']);
-  nav.push(['silver', '◇', 'Silver · products & codes', '#/silver']);
+  const nav = siteSelected ? (managesSites() || !isLocal() ? [['sites', '⌂', 'All sites', '#/']] : [])
+    : managesSites() ? [['home', '⌂', 'All sites', '#/']] : isLocal() ? [] : [['home', '⌂', 'Sites & sync', '#/']];
+  if (!siteSelected) {
+    if (managesSites()) nav.push(['server-profile', '⚙', 'Server profile', '#/server-profile']);
+    if (managesSites()) nav.push(['settings', '⚙', 'Settings', '#/settings']);
+    if (managesSites()) nav.push(['logs', '≡', 'Logs', '#/logs']);
+  }
+  if (selectedSite && !ov) {
+    nav.push(['sep', '', selectedSite.hostname + (selectedSite.path || '')]);
+    const links = selectedSite.managementLinks || [{ label: 'Content & appearance',
+      href: selectedSite.builtin ? hrefFor(['site-pages', selectedSite.hostname]) : managementHref(selectedSite) }];
+    links.forEach((link, index) => {
+      if (['#/', '#/operations', '#/deployment', '#/settings'].includes(link.href)) return;
+      nav.push([`site-link-${index}`, '⚙', link.label, index === 0 ? managementHref(selectedSite) : link.href]);
+    });
+  }
   if (ov) {
     const contentCount = (ov.contentTypes || []).filter((t) => !HIDDEN_TYPES.includes(t.type) && !['auto-draft', 'inherit'].includes(t.status)).reduce((a, t) => a + t.n, 0) - (ov.trashed || 0);
     nav.push(['sep', '', 'Explore']);
@@ -235,10 +263,12 @@ function renderSidebar(active) {
     nav.push(['sep', '', 'Site internals']);
     nav.push(['addons', '🧩', 'Plugins & themes', null, (ov.addons?.plugins || 0) + (ov.addons?.themes || 0)]);
     if (ov.hasDb) nav.push(['database', '🗄', 'Database tables', null, ov.counts?.tables]);
+    if (managesSites() && selectedSite) nav.push(['site-server', '⚙', 'Server & service settings', hrefFor(['site-server', selectedSite.key])]);
   }
   $('#nav').innerHTML = nav.map(([id, ic, label, href, count]) => {
-    if (id === 'sep') return `<div class="sep">${label}</div>`;
-    const isOn = id === active || (id === 'home' && active === 'import');
+    if (id === 'sep') return `<div class="sep">${esc(label)}</div>`;
+    const isOn = id.startsWith('site-link-') ? location.hash === href || location.hash.startsWith(href + '?')
+      : id === active || (id === 'home' && active === 'import');
     return `<a href="${href || setHref(id)}" class="${isOn ? 'active' : ''}"><span class="ic">${ic}</span>${esc(label)}${count ? `<span class="count">${fmtNum(count)}</span>` : ''}</a>`;
   }).join('');
 }
@@ -277,6 +307,8 @@ async function render() {
     if (parts[0] === 'notes') { state.key = null; return await VIEWS.notes(q, token); }
     if (parts[0] === 'server-profile' || parts[0] === 'server-users') { state.key = null; return await VIEWS['server-profile'](q, token); }
     if (parts[0] === 'settings' && managesSites()) { state.key = null; return await VIEWS.settings(q, token); }
+    if (parts[0] === 'logs' && managesSites()) { state.key = null; return await VIEWS.logs(q, token); }
+    if (parts[0] === 'site-server' && parts[1] && managesSites()) { state.key = null; return await VIEWS['site-server'](parts[1], q, token); }
     if (parts[0] === 'database' && managesSites()) { state.key = null; return await VIEWS.database(q, token); }
     if (parts[0] === 'deployment' && managesSites()) { state.key = null; return await VIEWS.deployment(q, token); }
     if (parts[0] === 'site-pages' && parts[1]) { state.key = null; renderSidebar('home'); return await VIEWS['site-pages'](parts[1], q, token); }

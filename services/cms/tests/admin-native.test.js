@@ -23,14 +23,15 @@ test('all core and hosted sites have accurate native, editor and deployment dest
   for (const [hostname, primary] of Object.entries(expected)) {
     const links = managementFor({ hostname, key: hostname, builtin: true });
     assert.equal(links[0].href, primary, hostname);
-    assert.equal(links.at(-1).href, '#/deployment');
+    assert.equal(links.at(-1).href, '#/settings');
+    assert.ok(links.some(link => link.href === `#/site-server/${hostname}`));
     assert.equal(new Set(links.map(link => link.href)).size, links.length);
   }
   for (const hostname of ['notes.featheral.com', 'ex.featheral.com', 'stats.featheral.com']) {
     assert.equal(managementFor({ hostname, key: hostname, managed: true })[0].href, expected[hostname]);
   }
   const hosted = managementFor({ hostname: 'sites.featheral.com', path: '/sample', key: 'hosted-sample' });
-  assert.deepEqual(hosted.map(link => link.href), ['#/set/hosted-sample/cms-content', '#/set/hosted-sample/site-settings', '#/deployment']);
+  assert.deepEqual(hosted.map(link => link.href), ['#/set/hosted-sample/cms-content', '#/set/hosted-sample/site-settings', '#/site-server/hosted-sample', '#/settings']);
   assert.ok(!managementFor({ hostname: 'wallet.featheral.com', builtin: true, contentEditable: false })
     .some(link => link.href.includes('site-pages')));
 });

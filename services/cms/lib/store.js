@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const { imageSize } = require('./imagesize');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const storage = path.join(__dirname, '..', 'data');
+fs.mkdirSync(storage, { recursive: true });
+const DATA_DIR = fs.realpathSync(storage);
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp|bmp|svg|avif|ico|tiff?|heic)$/i;
 const SIZE_VARIANT = /-(\d+)x(\d+)(@2x)?\.[a-z0-9]+$/i;

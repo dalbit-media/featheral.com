@@ -32,6 +32,22 @@ function initialize(file = bootstrapPath(), { repository = root } = {}) {
   settings.key().fill(0);
   return settings;
 }
+function initializeNewInstallation(repository, file, { uploadLimitMiB = 16, requestTimeoutSeconds = 90 } = {}) {
+  for (const directory of [path.join(repository, "data"), path.join(repository, "services", "cms", "data")]) {
+    if (!fs.existsSync(directory) || fs.readdirSync(directory).length)
+      throw new Error("New installation requires empty private data directories. Restore or reuse existing data instead.");
+  }
+  const settings = initialize(file, { repository });
+  settings.prepare({ revision: 0, settings: { uploadLimitMiB, requestTimeoutSeconds } });
+  const value = { ...settings.value, revision: 1, uploadLimitMiB, requestTimeoutSeconds,
+    runtime: normalizeConfiguration({ HOST: "127.0.0.1", PORT: "8080", GOLD_RESERVE_MODE: "disabled",
+      FTH_LEDGER_MODE: "unconfigured", WORLD_LEDGER_MODE: "unconfigured",
+      ADMIN_CONFIG_JSON: JSON.stringify({ siteManagement: true, sampleSites: false, allowSync: false }) }) };
+  settings.persist(value);
+  const restored = new OperationsSettings({ root: repository, bootstrapFile: file });
+  if (JSON.stringify(restored.value) !== JSON.stringify(value)) throw new Error("New installation Settings read-back failed.");
+  return restored;
+}
 function migrateEnvironment(settings, envFile = path.join(root, ".env"), { setup = false } = {}) {
   privateFile(envFile, true);
   const text = fs.readFileSync(envFile, "utf8"), env = require("node:util").parseEnv(text);
@@ -56,14 +72,13 @@ function migrateEnvironment(settings, envFile = path.join(root, ".env"), { setup
   for (const [name, value] of Object.entries(incoming))
     if (settings.value.runtime[name] && settings.value.runtime[name] !== value) throw new Error(`Database and environment disagree on ${name}. Resolve the conflict before migration.`);
   const next = { ...settings.value, revision: settings.value.revision + 1, runtime: normalizeConfiguration(incoming, settings.value.runtime) };
-  if (!next.adminHash && !env.CMS_PASSWORD && !setup) throw new Error("Migration requires the existing CMS_PASSWORD. Use --setup for a disabled-deployment migration followed by localhost Admin enrollment.");
   if (env.CMS_PASSWORD) {
     if (next.adminHash && !settings.authenticate(env.CMS_PASSWORD)) throw new Error("Admin passwords disagree. Resolve the conflict before migration.");
     next.adminHash = passwordHash(env.CMS_PASSWORD);
   }
   if (env.DEPLOY_KEY_FILE && !setup) throw new Error("SSH key authentication is not migrated to a password. Use --setup to archive legacy configuration and enroll a replacement credential from localhost; the environment file was not changed.");
   if (env.DEPLOY_TARGET) {
-    const target = sshTarget(env, { allowUnpinned: setup && !env.DEPLOY_PASSWORD && !env.DB_VAULT_KEY_FILE && !settings.value.credential });
+    const target = sshTarget(env, { allowUnpinned: true });
     if (settings.value.credential && (settings.value.host !== target.host || settings.value.port !== target.port
       || settings.value.directory !== target.directory || settings.value.fingerprint !== target.fingerprint
       || settings.value.credential.username !== target.username || env.DEPLOY_PASSWORD && settings.value.credential.password !== env.DEPLOY_PASSWORD))
@@ -89,12 +104,10 @@ function migrateEnvironment(settings, envFile = path.join(root, ".env"), { setup
   next.tlsEmail = env.DEPLOY_TLS_EMAIL || next.tlsEmail;
   next.networkLimitBytesPerSecond = Number(env.SERVER_PROFILE_NETWORK_LIMIT_BPS || next.networkLimitBytesPerSecond);
   next.enabled = false;
-  if (setup && !next.adminHash && !["127.0.0.1", "::1", "localhost"].includes(next.runtime.HOST || "127.0.0.1"))
-    throw new Error("First-run setup requires a loopback HOST. Change the legacy HOST to 127.0.0.1 before migration.");
   const settingsInput = Object.fromEntries(Object.keys(require("../services/operations/settings").defaults).map(name => [name, next[name]]));
   if (env.CMS_PASSWORD) settingsInput.adminPassword = env.CMS_PASSWORD;
   if (next.credential) settingsInput.credential = `${next.credential.username}:${next.credential.password}`;
-  settings.prepare({ revision: settings.value.revision, settings: settingsInput }, { allowUnconfiguredAdmin: setup });
+  settings.prepare({ revision: settings.value.revision, settings: settingsInput });
   const backupDirectory = path.join(path.dirname(settings.bootstrapFile), "migration-backups");
   fs.mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
   const backupFile = path.join(backupDirectory, `legacy-${crypto.randomUUID()}.enc.json`);
@@ -122,7 +135,7 @@ function migrateEnvironment(settings, envFile = path.join(root, ".env"), { setup
   } catch {
     throw new Error("Settings were verified in the database, but legacy file cleanup failed. Remove the migrated .env/admin config before restarting.");
   }
-  return { backupFile, setupRequired: !next.adminHash, credentialEnrollmentRequired: Boolean(env.DEPLOY_KEY_FILE && !next.credential),
+  return { backupFile, setupRequired: Boolean(env.DEPLOY_TARGET && (!next.credential || !next.fingerprint)), credentialEnrollmentRequired: Boolean(env.DEPLOY_KEY_FILE && !next.credential),
     fingerprintEnrollmentRequired: Boolean(env.DEPLOY_TARGET && !next.fingerprint) };
 }
 if (require.main === module) {
@@ -136,21 +149,24 @@ if (require.main === module) {
         if (!value || !path.isAbsolute(value)) throw new Error(`${arg} requires an absolute path.`);
         if (arg === "--bootstrap-file") file = value; else envFile = value;
       } else if (!arg.startsWith("--")) file = arg;
-      else if (!["--migrate-settings", "--migrate-env", "--setup"].includes(arg)) throw new Error(`Unknown option: ${arg}`);
+      else if (!["--migrate-settings", "--migrate-env", "--setup", "--new-installation"].includes(arg)) throw new Error(`Unknown option: ${arg}`);
     }
     if (args.includes("--setup") && !args.includes("--migrate-env")) throw new Error("--setup requires --migrate-env.");
-    const settings = initialize(file);
+    if (args.includes("--new-installation") && args.some(arg => ["--migrate-settings", "--migrate-env", "--setup"].includes(arg)))
+      throw new Error("New installation cannot migrate or replace existing state.");
+    const settings = args.includes("--new-installation")
+      ? initializeNewInstallation(root, file) : initialize(file);
     if (args.includes("--migrate-settings")) settings.migrateLegacy();
     else if (fs.existsSync(settings.file)) throw new Error("Use --migrate-settings to move existing encrypted Settings to the system database.");
     const migration = args.includes("--migrate-env") ? migrateEnvironment(settings, envFile, { setup: args.includes("--setup") }) : null;
     console.log("External bootstrap initialized. Keep the key separately backed up. Newly created Windows bootstrap/key files are restricted to the current account; existing files must also have service-account-only ACLs.");
-    console.log(args.includes("--migrate-env") ? "Runtime settings verified in the system database; legacy files removed. Deployment remains disabled pending review." : "Open Admin Settings on localhost, set Admin access, and sign with the origin wallet.");
+    console.log(args.includes("--migrate-env") ? "Runtime settings verified in the system database; legacy files removed. Deployment remains disabled pending review." : "Open Admin, connect the origin or Dollar reserve wallet and sign in. No Admin password is needed.");
     if (migration) {
       console.log("Encrypted legacy configuration backup:", migration.backupFile);
-      if (migration.setupRequired) console.log(`Start the service on loopback, then open http://admin.localhost:${settings.environment().PORT || "8080"}/#/settings and enroll an Admin password with origin-wallet approval.`);
+      if (migration.setupRequired) console.log(`Open Admin over HTTPS (or http://admin.localhost:${settings.environment().PORT || "8080"}/#/settings on loopback), sign in with an authorized wallet and review SSH enrollment.`);
       if (migration.credentialEnrollmentRequired) console.log("Legacy SSH key authentication was archived, not converted. Set and verify username:password in Settings before enabling deployment. The original SSH key file is unchanged.");
-      if (migration.fingerprintEnrollmentRequired) console.log("The legacy SSH fingerprint was missing or invalid and is only in the encrypted backup. Set an independently verified SHA256 host fingerprint in Settings; deployment remains disabled.");
+      if (migration.fingerprintEnrollmentRequired) console.log("The legacy SSH fingerprint was missing or invalid and is only in the encrypted backup. Verify the SSH/sudo credential in Settings to automatically pin the server key; deployment remains disabled.");
     }
   } catch (error) { console.error("Settings initialization failed:", error.message); process.exitCode = 1; }
 }
-module.exports = { initialize, migrateEnvironment };
+module.exports = { initialize, initializeNewInstallation, migrateEnvironment };

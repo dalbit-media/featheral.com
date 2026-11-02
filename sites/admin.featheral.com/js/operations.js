@@ -5,10 +5,10 @@ async function approveAdminAction(challenge, active) {
   const sameWallet = () => provider === window.FeatheralProfile.getProvider()
     && window.FeatheralProfile.snapshot().account?.toLowerCase() === account?.toLowerCase();
   if (!active()) throw new Error("Admin view changed. No operation was submitted.");
-  if (!provider || !account || account.toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error(`Connect the FTHG origin wallet ${challenge.wallet} in the header.`);
+  if (!provider || !account || account.toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error(`Connect the Admin signing wallet ${challenge.wallet} in the header.`);
   const signature = await provider.request({ method: "personal_sign", params: [ethers.hexlify(ethers.toUtf8Bytes(challenge.message)), account] });
   if (!active() || !sameWallet()) throw new Error("View or wallet changed. No operation was submitted.");
-  if (ethers.verifyMessage(challenge.message, signature).toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error("Invalid origin-wallet signature.");
+  if (ethers.verifyMessage(challenge.message, signature).toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error("Invalid Admin-wallet signature.");
   return { challengeId: challenge.challengeId, signature };
 }
 async function mountOperation(key, q, token) {
@@ -35,8 +35,21 @@ async function mountOperation(key, q, token) {
   window.FeatheralAdminControllers[key](root, kit);
   if (key === "dollar") window.FeatheralAdminControllers.bridge(root, kit);
 }
-window.addEventListener("DOMContentLoaded", () => {
-  window.FeatheralProfile.mount($("#admin-wallet"), { ethereumProvider: true }).catch(error => {
-    console.error("Admin signing wallet:", error); toast(error.message);
+window.addEventListener("DOMContentLoaded", async () => {
+  $("#admin-sign-out").addEventListener("click", async () => {
+    try { await api("/api/admin-auth/logout", { json: {} }); location.reload(); }
+    catch (error) { console.error("Admin sign-out failed:", error); toast(error.message); }
   });
+  try {
+    const session = await api("/api/admin-auth/session");
+    if (!session.authenticated) { location.reload(); return; }
+    window.addEventListener("featheral:wallet", async event => {
+      if (event.detail.account?.toLowerCase() === session.wallet.toLowerCase()) return;
+      try { await api("/api/admin-auth/logout", { json: {} }); location.reload(); }
+      catch (error) { console.error("Admin wallet session could not be closed:", error); toast(error.message); }
+    });
+    await window.FeatheralProfile.mount($("#admin-wallet"), { ethereumProvider: true });
+  } catch (error) {
+    console.error("Admin signing wallet:", error); toast(error.message);
+  }
 });

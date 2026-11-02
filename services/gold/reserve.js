@@ -374,4 +374,4 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
   };
 }
 
-module.exports = { createReserveEngine, validateGoldTransaction, conversionMessage, goldEntries, RATE, TREASURY, REDEMPTION_ESCROW, SOURCE_ADDRESS };
+module.exports = { createReserveEngine, validateGoldTransaction, conversionMessage, goldEntries, RATE, TREASURY, REDEMPTION_ESCROW, SOURCE_ADDRESS, RESERVE_ADDRESS };

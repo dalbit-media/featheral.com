@@ -61,7 +61,7 @@
     for (const title of root.querySelectorAll("header .brand, header a.logo, a.game-brand, a.site-brand")) {
       if (title.tagName === "A") { title.dataset.site = current; title.removeAttribute("data-path"); title.href = url(current); }
     }
-    if (!window.location.pathname.startsWith("/operations/")
+    if (current !== "admin" && !window.location.pathname.startsWith("/operations/")
       && document.body.dataset.embedded !== "true"
       && !(current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1")
       && !document.querySelector(".eco-footer")) {
