@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { SiteManager } = require('../lib/sites');
 const CmsStore = require('../lib/cms');
 

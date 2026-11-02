@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { ApiError } from './economy.ts';
 import type { Session } from './store.ts';
 import { dollarsScale } from '../src/dollars.ts';

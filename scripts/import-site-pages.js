@@ -31,7 +31,7 @@ if (fs.existsSync(file)) {
         store.setTheme(site.theme);
         store.setSiteSettings(site.settings);
         if (site.rewards) {
-          const { Notes } = require('../services/notes-api/ledger');
+          const { Notes } = require('../services/notes/ledger');
           const notes = new Notes(path.join(__dirname, '..', 'services', 'cms', 'data', 'notes.sqlite'));
           try { notes.setProgram(site.key, site.rewards); } finally { notes.close(); }
         }

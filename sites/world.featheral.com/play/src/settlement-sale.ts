@@ -55,7 +55,7 @@ export class SettlementSale {
   }
   mount(parent: Element): void {
     if (!settlementSalesAvailable(this.state())) {
-      parent.innerHTML = `<p>${translate('Build a market stall, trade hub or city bank to sell here.', this.language)} <a href="/play/market/">${translate('Open marketplace', this.language)}</a></p>`;
+      parent.innerHTML = `<p>${translate('Build a market stall, trade hub or city bank to sell here.', this.language)} <a href="/market/">${translate('Open marketplace', this.language)}</a></p>`;
       return;
     }
     parent.replaceChildren(this.root); this.paint();

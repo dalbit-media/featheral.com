@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { Notes } = require('../../notes-api/ledger');
-const { Markets, PLACEHOLDERS, TARGET } = require('../../notes-api/markets');
-const { SYSTEM_TREASURY_ACCOUNT } = require('../../dollar-api/funds');
+const { Notes } = require('../../notes/ledger');
+const { Markets, PLACEHOLDERS, TARGET } = require('../../notes/markets');
+const { SYSTEM_TREASURY_ACCOUNT } = require('../../notes/game-funds');
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'note-markets-'));
   const notes = new Notes(path.join(root, 'notes.sqlite')), markets = new Markets(notes);
@@ -68,7 +68,7 @@ test('funding and buy/sell preserve FTHX supply, exact reserves, fees and retry 
   assert.ok(BigInt(pool.base) * BigInt(pool.quote) >= BigInt(TARGET) ** 2n);
   assert.equal(markets.catalog()[0].volume, 1000 + sell.output);
   assert.equal(markets.catalog(Date.now() + 86400001)[0].volume, 0);
-  const { Creation } = require('../../notes-api/creation');
+  const { Creation } = require('../../notes/creation');
   const creation = new Creation(notes, { list: () => [] });
   creation.createNote('0xbuyer', { symbol: 'ART', name: 'Art' });
   const trending = creation.trending();
@@ -109,7 +109,7 @@ test('special-character symbols remain reserved without deleting funded pools, h
   entry.run('0xholder', 50, 'FTH#');
   notes.db.prepare("INSERT INTO note_trades(owner,request_id,fingerprint,symbol,side,amount,output,volume,at) VALUES ('0xholder','historic-request-0001','historic','FTH#','buy',50,50,50,?)").run(Date.now());
   const before = notes.db.prepare("SELECT * FROM notes_entries").all();
-  const { Creation } = require('../../notes-api/creation');
+  const { Creation } = require('../../notes/creation');
   const creation = new Creation(notes, { list: () => [] });
   for (const symbol of PLACEHOLDERS.filter(symbol => !/^FTH[A-Z0-9]$/.test(symbol))) {
     assert.throws(() => markets.quote(symbol, 'buy', 10), /reserved/);
@@ -129,7 +129,7 @@ test('special-character symbols remain reserved without deleting funded pools, h
 
 test('FTHG stays reserved and hidden even when legacy Notes definitions and pools exist', t => {
   const { notes, markets } = fixture(t);
-  const { Creation } = require('../../notes-api/creation');
+  const { Creation } = require('../../notes/creation');
   const creation = new Creation(notes, { list: () => [] });
   notes.db.prepare("INSERT INTO note_currencies VALUES ('FTHG','Legacy Gold','0xholder',0)").run();
   notes.db.prepare("INSERT INTO note_markets(symbol,base,quote) VALUES ('FTHG',100,100)").run();

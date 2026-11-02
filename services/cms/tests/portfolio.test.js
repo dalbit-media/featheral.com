@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { portfolio } = require('../../notes-api/portfolio');
-const { createMarketPriceReader } = require('../../gold-api/prices');
+const { portfolio } = require('../../notes/portfolio');
+const { createMarketPriceReader } = require('../../gold/prices');
 const unit = 10n ** 18n;
 function openingGold() {
   return { chain: { id: 1, tokenAddress: '0xba658127d93b17e577e1b8e8995cab3ae7d7c665' }, checkedAt: new Date().toISOString(),

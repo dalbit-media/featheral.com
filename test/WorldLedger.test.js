@@ -7,9 +7,9 @@ const { Readable } = require("node:stream");
 const vm = require("node:vm");
 const { Worker } = require("node:worker_threads");
 const { ethers } = require("ethers");
-const sqlite = require("../services/db-api/sqlite");
-const { createWorldApi } = require("../services/social-ledger/api");
-const { socialMessage } = require("../services/social-ledger/social");
+const sqlite = require("../services/database/sqlite");
+const { createWorldApi } = require("../services/media/api");
+const { socialMessage } = require("../services/media/social");
 
 function call(handler, method, url, body) {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
@@ -241,7 +241,7 @@ describe("World Feed Database", () => {
           try { parentPort.postMessage({ receipt: world.database.submit({ kind: "POST", data: workerData.data }) }); }
           catch (error) { parentPort.postMessage({ error: error.message }); }
           finally { world.close(); }
-        `, { eval: true, workerData: { gate, data, env, api: require.resolve("../services/social-ledger/api"), sqlite: require.resolve("../services/db-api/sqlite") } });
+        `, { eval: true, workerData: { gate, data, env, api: require.resolve("../services/media/api"), sqlite: require.resolve("../services/database/sqlite") } });
         workers.push(worker);
         let ready;
         const started = new Promise((resolve) => { ready = resolve; });
@@ -299,9 +299,9 @@ describe("World Feed Database", () => {
   });
 
   it("renders database status and read-only SQL, with direct post links", async () => {
-    const source = fs.readFileSync(path.join(__dirname, "..", "sites", "world.featheral.com", "ledger", "ledger.js"), "utf8");
-    const html = fs.readFileSync(path.join(__dirname, "..", "sites", "world.featheral.com", "ledger", "index.html"), "utf8");
-    assert.ok(html.includes("World Feed Database"));
+    const source = fs.readFileSync(path.join(__dirname, "..", "sites", "media.featheral.com", "ledger", "ledger.js"), "utf8");
+    const html = fs.readFileSync(path.join(__dirname, "..", "sites", "media.featheral.com", "ledger", "index.html"), "utf8");
+    assert.ok(html.includes("Media Feed Database"));
     assert.ok(!/data-route="(?:blocks|transactions|files)"/.test(html));
     const nodes = new Map();
     class Node {
@@ -331,11 +331,11 @@ describe("World Feed Database", () => {
     assert.ok(node("view").children.some((item) => item.textContent === "Database status"));
     location.hash = "#/sql";
     await events.hashchange();
-    assert.equal(mounted[0].title, "World Feed Database SQL");
+    assert.equal(mounted[0].title, "Media Feed Database SQL");
     assert.ok(mounted[0].examples.some((item) => /FROM actions/.test(item.sql)));
     node("searchInput").value = `0x${"ab".repeat(32)}`;
     node("searchForm").listeners.submit({ preventDefault() {} });
-    assert.equal(routes[0], `/post/0x${"ab".repeat(32)}`);
+    assert.equal(routes[0], `/#/post/0x${"ab".repeat(32)}`);
     assert.ok(calls.every((url) => url.endsWith("/stats")));
   });
 });

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const ethers = require('ethers');
 const { Vault } = require('../../../sites/wallet.featheral.com/vault')(ethers);
 const { combine } = require('../../../sites/wallet.featheral.com/portfolio-view');
-const { portfolio } = require('../../notes-api/portfolio');
+const { portfolio } = require('../../notes/portfolio');
 const unit = 10n ** 18n;
 function storage() {
   const data = new Map();

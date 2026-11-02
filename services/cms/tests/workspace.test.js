@@ -2,10 +2,10 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { Wallet } = require("ethers");
-const { Notes } = require("../../notes-api/ledger");
-const { Creation } = require("../../notes-api/creation");
-const { Workspace } = require("../../notes-api/workspace");
-const { SYSTEM_TREASURY_ACCOUNT } = require("../../dollar-api/funds");
+const { Notes } = require("../../notes/ledger");
+const { Creation } = require("../../notes/creation");
+const { Workspace } = require("../../notes/workspace");
+const { SYSTEM_TREASURY_ACCOUNT } = require("../../notes/game-funds");
 const signIn = require("../../../sites/wallet.featheral.com/site-sign-in");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 function fixture(t) {

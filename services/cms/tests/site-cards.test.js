@@ -116,7 +116,9 @@ test('integrated card metadata uses real favicons and current CMS homepage descr
   assert.equal(pages.presentation('gold.featheral.com').tagline, 'Edited reserve tagline');
   assert.equal(pages.presentation('dollar.featheral.com').favicon, '/shared/logo-dollar.svg');
   assert.equal(pages.presentation('world.featheral.com').favicon, '/shared/logo-world.svg');
-  assert.match(pages.presentation('world.featheral.com').tagline, /Explore/);
+  assert.match(pages.presentation('world.featheral.com').tagline, /정착지|settlement/i);
+  assert.equal(pages.presentation('media.featheral.com').favicon, '/shared/logo-media.svg');
+  assert.match(pages.presentation('media.featheral.com').tagline, /Public wallet-signed/);
   assert.equal(pages.presentation('ex.featheral.com').favicon, '/shared/logo-ex.svg');
   assert.equal(pages.catalog().find(site => site.hostname === 'gold.featheral.com').cmsCompatible, true);
   assert.equal(pages.catalog().find(site => site.hostname === 'world.featheral.com').cmsCompatible, false);
@@ -200,12 +202,13 @@ test('traffic defaults to hourly lines and switches periods with a shared scale'
     assert.match(deployment, /await status\(\)/);
   });
 
-  test('all nine core sites have hostname-named frontend folders and a shell or CMS documents', () => {
+  test('all core sites have hostname-named frontend folders and a shell or CMS documents', () => {
     const root = path.resolve(__dirname, '..', '..', '..', 'sites');
-    for (const hostname of ['featheral.com', 'gold.featheral.com', 'dollar.featheral.com', 'world.featheral.com',
-      'admin.featheral.com', 'x.featheral.com', 'ex.featheral.com', 'stats.featheral.com', 'sites.featheral.com']) {
+    for (const hostname of require('../lib/site-pages').hosts) {
       assert.ok(fs.statSync(path.join(root, hostname)).isDirectory(), hostname);
-      assert.ok(fs.existsSync(path.join(root, hostname, 'index.html')) ||
+      const shell = hostname === 'world.featheral.com' ? path.join('play', 'index.html')
+        : hostname === 'wallet.featheral.com' ? 'wallet-app.html' : 'index.html';
+      assert.ok(fs.existsSync(path.join(root, hostname, shell)) ||
         fs.existsSync(path.join(root, 'admin.featheral.com', 'documents', hostname)), hostname);
     }
   });

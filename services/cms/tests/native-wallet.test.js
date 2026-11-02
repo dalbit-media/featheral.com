@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { NETWORKS, createNativeReader } = require('../../gold-api/native');
-const { portfolio } = require('../../notes-api/portfolio');
+const { NETWORKS, createNativeReader } = require('../../gold/native');
+const { portfolio } = require('../../notes/portfolio');
 const now = 1793570000000, unit = 10n ** 18n, address = '0x1111111111111111111111111111111111111111';
 function reader({ failure = null, wrongChain = false, stale = false, balance = unit, usd = 2000 } = {}) {
   const calls = [], errors = [];

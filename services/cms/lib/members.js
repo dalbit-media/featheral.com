@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { parse: imageDims } = require('./imagesize');
 const { serialize } = require('./phpser');
 const { moveToThumbnails } = require('./thumbnails');

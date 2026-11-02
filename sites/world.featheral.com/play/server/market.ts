@@ -1,4 +1,4 @@
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot } from './economy.ts';
 import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';

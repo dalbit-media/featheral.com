@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { test } from 'node:test';
 import { accrue, apply, capacity, collectResource, createAccount, execute, migrateEconomy, snapshot } from './economy.ts';
 import { collectFinds, findCollectionItem, inventory } from './inventory.ts';

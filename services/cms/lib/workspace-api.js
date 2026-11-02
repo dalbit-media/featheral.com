@@ -1,7 +1,7 @@
 "use strict";
 const express = require("express");
 const crypto = require("node:crypto");
-const { Workspace } = require("../../notes-api/workspace");
+const { Workspace } = require("../../notes/workspace");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require("../../operations/runtime").environment(), pushTransport }) {
   const workspace = new Workspace(notes, markets, profileReader), router = express.Router(), limits = new Map();

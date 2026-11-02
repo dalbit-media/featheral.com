@@ -10,7 +10,7 @@ const colors = require('../../../shared/site-colors.json');
 const root = path.resolve(__dirname, '..', '..', '..');
 test('all core badges preserve the main SVG and have distinct symbols', () => {
   const base = fs.readFileSync(path.join(root, 'shared', 'logo.svg'), 'utf8');
-  assert.equal(new Set(Object.values(badges)).size, 12);
+  assert.equal(new Set(Object.values(badges)).size, 13);
   for (const name of Object.keys(badges)) {
     const generated = fs.readFileSync(path.join(root, 'shared', `logo-${name}.svg`), 'utf8');
     assert.equal(generated, logo(base, name));
@@ -21,13 +21,13 @@ test('all core badges preserve the main SVG and have distinct symbols', () => {
       ? JSON.parse(fs.readFileSync(path.join(root, 'sites', 'admin.featheral.com', 'documents', `${name}.featheral.com`, 'document-index-html.json'), 'utf8'))
       : null;
     const shell = document ? document.layout + document.body
-      : fs.readFileSync(path.join(root, 'sites', `${name}.featheral.com`, 'index.html'), 'utf8');
+      : fs.readFileSync(path.join(root, 'sites', `${name}.featheral.com`, ...(name === 'world' ? ['play', 'index.html'] : ['index.html'])), 'utf8');
     assert.match(shell, new RegExp(`rel="icon"[^>]*href="/shared/logo-${name}\\.svg"`));
     assert.match(shell, new RegExp(`<img[^>]*src="/shared/logo-${name}\\.svg"`));
   }
   assert.equal(fs.readFileSync(path.join(root, 'sites', 'x.featheral.com', 'logo.svg'), 'utf8'), logo(base, 'x'));
   assert.equal(fs.readFileSync(path.join(root, 'sites', 'world.featheral.com', 'play', 'public', 'favicon.svg'), 'utf8'), logo(base, 'world'));
-  assert.equal(new Set(Object.values(colors).map(palette => palette.color)).size, 13);
+  assert.equal(new Set(Object.values(colors).map(palette => palette.color)).size, 14);
 });
 
 test('Gold published content uses the badge without rewriting user edits or revisions', t => {
@@ -46,7 +46,7 @@ test('Gold published content uses the badge without rewriting user edits or revi
 
 test('every World game entry uses the shared World favicon', () => {
   const game = path.join(root, 'sites', 'world.featheral.com', 'play');
-  for (const directory of ['', 'about', 'bank', 'communicate', 'help', 'market', 'federation', 'journal', 'settlement', 'whitepaper']) {
+  for (const directory of ['', 'explore', 'bank', 'communicate', 'help', 'market', 'federation', 'journal', 'settlement', 'whitepaper']) {
     const html = fs.readFileSync(path.join(game, directory, 'index.html'), 'utf8');
     assert.match(html, /rel="icon" href="\/shared\/logo-world.svg"/);
   }

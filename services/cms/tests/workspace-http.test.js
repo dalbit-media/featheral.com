@@ -5,8 +5,8 @@ const http = require("node:http");
 const { once } = require("node:events");
 const express = require("express");
 const { Wallet } = require("ethers");
-const { Notes } = require("../../notes-api/ledger");
-const { Creation } = require("../../notes-api/creation");
+const { Notes } = require("../../notes/ledger");
+const { Creation } = require("../../notes/creation");
 const { workspaceApi } = require("../lib/workspace-api");
 
 async function fixture(t, env = {}) {

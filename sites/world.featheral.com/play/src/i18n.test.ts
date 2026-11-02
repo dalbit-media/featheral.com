@@ -281,7 +281,7 @@ test('Korean game and Web3 copy uses familiar, consistent terms without changing
   assert.match(disclosure, /투자 수익이나 거버넌스 권리를 약속하지 않습니다/);
 });
 test('static Korean entry copy stays aligned with the catalog for English switching', () => {
-  for (const file of ['../about/index.html', '../whitepaper/index.html', '../index.html', '../settlement/index.html', '../market/index.html']) {
+  for (const file of ['../index.html', '../whitepaper/index.html', '../explore/index.html', '../settlement/index.html', '../market/index.html']) {
     const html = readFileSync(new URL(file, import.meta.url), 'utf8');
     const strings = [
       ...[...html.matchAll(/>([^<>]+)</g)].map(match => match[1]),
@@ -347,7 +347,7 @@ test('white paper pages render every chapter, table and contract disclosure with
     assert.match(html, /<div class="paper-table" tabindex="0" role="region"/);
     assert.match(html, /0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665/);
     assert.match(html, /https:\/\/www\.who\.int\//);
-    assert.ok(html.includes(`/play/whitepaper/?lang=${language === 'ko' ? 'en' : 'ko'}`));
+    assert.ok(html.includes(`/whitepaper/?lang=${language === 'ko' ? 'en' : 'ko'}`));
     assert.doesNotMatch(html, /href="[^"]*WHITEPAPER[^"]*\.md"/);
     assert.ok(html.includes(language === 'ko' ? '토큰 투자 제안서가 아닙니다' : 'Not a token offering'));
   }

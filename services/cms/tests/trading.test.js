@@ -3,13 +3,13 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), crypto = require("node:crypto");
 const { ethers } = require("ethers");
-const { Notes } = require("../../notes-api/ledger");
-const { Creation } = require("../../notes-api/creation");
-const { Exchange, DOLLAR_POOL } = require("../../notes-api/exchange");
-const { Trading } = require("../../notes-api/trading");
-const { createDollarApi } = require("../../notes-api/dollar");
+const { Notes } = require("../../notes/ledger");
+const { Creation } = require("../../notes/creation");
+const { Exchange, DOLLAR_POOL } = require("../../notes/exchange");
+const { Trading } = require("../../notes/trading");
+const { createDollarApi } = require("../../notes/dollar");
 const { walletAccountId } = require("../../fth-ledger/transfer");
-const { SYSTEM_TREASURY_ACCOUNT } = require("../../dollar-api/funds");
+const { SYSTEM_TREASURY_ACCOUNT } = require("../../notes/game-funds");
 async function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "exchange-trading-")), notes = new Notes(path.join(root, "notes.sqlite"));
   const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
@@ -109,7 +109,7 @@ test("Interrupted Dollar withdrawals block new trades and recover after an ackno
   assert.deepEqual(supply(), initial);
 });
 test("Candles use exact executed OHLC ratios and volumes, omit empty buckets and reject invalid intervals", () => {
-  const { candles, period } = require("../../notes-api/candles");
+  const { candles, period } = require("../../notes/candles");
   const result = candles([{ at: 1, base: "3", quote: "9" }, { at: 2, base: "2", quote: "8" },
     { at: 3, base: "5", quote: "5" }, { at: 4, base: "4", quote: "8" }, { at: 1001, base: "1", quote: "2" }], 100);
   assert.deepEqual(result.map(c => c.at), [0, 1000]);

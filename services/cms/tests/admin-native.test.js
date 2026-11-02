@@ -12,7 +12,8 @@ const kitSource = fs.readFileSync(path.join(root, 'shared', 'admin-kit.js'), 'ut
 test('all core and hosted sites have accurate native, editor and deployment destinations', () => {
   const expected = {
     'featheral.com': '#/operations/foundation', 'gold.featheral.com': '#/operations/gold',
-    'dollar.featheral.com': '#/operations/dollar', 'world.featheral.com': '#/operations/world',
+    'dollar.featheral.com': '#/operations/dollar', 'media.featheral.com': '#/operations/world',
+    'world.featheral.com': '#/site-pages/world.featheral.com',
     'app.featheral.com': '#/intranet', 'silver.featheral.com': '#/silver',
     'notes.featheral.com': '#/notes', 'ex.featheral.com': '#/notes',
     'stats.featheral.com': '#/overview', 'wallet.featheral.com': '#/operations',
@@ -36,7 +37,7 @@ test('all core and hosted sites have accurate native, editor and deployment dest
 
 test('native templates have no standalone shells, duplicate IDs, scripts or iframe consoles', () => {
   for (const key of ['foundation', 'gold', 'dollar', 'world']) {
-    const html = fs.readFileSync(path.join(admin, 'views', key + '.html'), 'utf8');
+    const html = fs.readFileSync(path.join(admin, 'pages', key + '.html'), 'utf8');
     assert.doesNotMatch(html, /<html|<head\b|<body|<script|<iframe|admin-console\.js|https:\/\/cdn/i, key);
     const ids = [], tabs = [];
     const visit = node => {

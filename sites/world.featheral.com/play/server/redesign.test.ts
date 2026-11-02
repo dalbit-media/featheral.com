@@ -11,7 +11,7 @@ import { monetaryPolicy } from '../src/monetary-policy.ts';
 import { waterRequirement } from '../src/upkeep.ts';
 import type { Account } from './economy.ts';
 import type { Command } from '../src/api-types.ts';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { Exchange } from './market.ts';
 import { enforceMonetaryPolicy } from './monetary-policy.ts';
 import { SqliteStore } from './store.ts';

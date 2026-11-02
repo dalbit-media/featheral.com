@@ -5,9 +5,9 @@ const { ethers } = require("ethers");
 const { BlockStore } = require("./store");
 const { ZERO_HASH, canonical, txHash, blockHash } = require("./codec");
 const { walletAccountId, accountWallet, verifyTransfer } = require("./transfer");
-const { verifySignedProfile, assertFreshSignature } = require("../token-api/profile");
+const { verifySignedProfile, assertFreshSignature } = require("../identity/profile");
 const { createFthDb, ingestFthBlock } = require("./sql");
-const { validateGoldTransaction, goldEntries, TREASURY, REDEMPTION_ESCROW } = require("../gold-api/reserve");
+const { validateGoldTransaction, goldEntries, TREASURY, REDEMPTION_ESCROW } = require("../gold/reserve");
 
 const KINDS = new Set(["GENESIS", "CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "PROFILE", "GAME", "GOLD", "GOLD_POLICY"]);
 const VALUE_KINDS = new Set(["CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "GAME", "GOLD"]);

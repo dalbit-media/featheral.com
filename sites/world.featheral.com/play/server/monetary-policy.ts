@@ -1,4 +1,4 @@
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { createHash } from 'node:crypto';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import { collectionPolicy } from '../src/collection.ts';

@@ -69,8 +69,8 @@ test('bank conversion lives on its dedicated route and the account FTHG card lin
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const bank = readFileSync(new URL('./wallet-view.ts', import.meta.url), 'utf8');
   assert.match(account, /class="account-balance account-gold"/);
-  assert.match(account, /href="\/play\/bank\/" data-account-bank/);
-  assert.doesNotMatch(account, /\/play\/market\/#gold/);
+  assert.match(account, /href="\/bank\/" data-account-bank/);
+  assert.doesNotMatch(account, /\/market\/#gold/);
   assert.match(account, /section class="account-section account-wallet-section"[^>]*aria-labelledby="account-wallet-title"/);
   assert.match(account, /data-world-profile-button/);
   assert.doesNotMatch(account, /details class="account-section account-wallet-section"/);

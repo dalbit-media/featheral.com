@@ -4,12 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), http = require("node:http");
 const { once } = require("node:events");
 const { Wallet } = require("ethers");
-const { createDollarApi } = require("../../notes-api/dollar");
-const { createWorldApi } = require("../../social-ledger/api");
-const { createWalletProfiles } = require("../../db-api/wallet-profiles");
-const sqlite = require("../../db-api/sqlite");
-const { profileMessage, verifySignedProfile } = require("../../token-api/profile");
-const { profileUi, prepareProfile } = require("../../token-api/profile-ui");
+const { createDollarApi } = require("../../notes/dollar");
+const { createWorldApi } = require("../../media/api");
+const { createWalletProfiles } = require("../../database/wallet-profiles");
+const sqlite = require("../../database/sqlite");
+const { profileMessage, verifySignedProfile } = require("../../identity/profile");
+const { profileUi, prepareProfile } = require("../../identity/profile-ui");
 const { validate } = require("../../../sites/wallet.featheral.com/site-sign-in");
 
 test("World JSON profile model and constrained wallet approval bind bio, avatar, wallet and timestamp", async () => {
@@ -22,7 +22,7 @@ test("World JSON profile model and constrained wallet approval bind bio, avatar,
   assert.equal(browserPattern.test("-invalid"), false);
   const prepared = prepareProfile(input), signed = { ...prepared.profile, signature: await wallet.signMessage(prepared.message) };
   assert.equal(verifySignedProfile(signed).bio, input.bio);
-  for (const origin of ["http://app.localhost:8080", "http://world.localhost:8080", "https://app.featheral.com", "https://world.featheral.com"])
+  for (const origin of ["http://app.localhost:8080", "http://world.localhost:8080", "https://app.featheral.com", "https://world.featheral.com", "https://media.featheral.com", "http://media.localhost:8080"])
     validate(wallet.address, prepared.message, true, origin);
   for (const origin of ["https://evil.example", "https://x.featheral.com", undefined])
     assert.throws(() => validate(wallet.address, prepared.message, true, origin), /standard/);

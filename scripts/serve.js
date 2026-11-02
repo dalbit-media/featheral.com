@@ -2,11 +2,11 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { Readable, pipeline } = require("node:stream");
-const { createGoldApi } = require("../services/gold-api/server");
-const { createDollarApi } = require("../services/notes-api/dollar");
-const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/dollar-api/funds");
-const { activateLiveReserve } = require("../services/gold-api/activation");
-const { createWorldApi } = require("../services/social-ledger/api");
+const { createGoldApi } = require("../services/gold/server");
+const { createDollarApi } = require("../services/notes/dollar");
+const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/notes/game-funds");
+const { activateLiveReserve } = require("../services/gold/activation");
+const { createWorldApi } = require("../services/media/api");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 const { worldProfileReader } = require("../sites/world.featheral.com/play/server/world-profile.ts");
@@ -67,7 +67,7 @@ if (reserveMode === "isolated") {
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json" };
 const sitesRoot = path.join(root, "sites");
 // Static sites and the private-data-backed CMS share one hostname gateway.
-const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats"];
+const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats"];
 const cms = require("../services/cms/server");
 const { injectTelemetry } = require("../services/cms/lib/telemetry");
 const gameDirectory = path.resolve(env.DOLLAR_GAME_DIR || path.join(root, "data", "dollar-game"));
@@ -225,7 +225,7 @@ const server = http.createServer(async (req, res) => {
     if (site === "ledger" && url.pathname.startsWith("/api/notes/ledger/")) return cms(req, res);
     if (site === "ledger" && url.pathname === "/explorer")
       return redirect(res, siteUrl(req, "ledger", "/explorer/" + url.search), 301);
-    if (site !== "admin" && url.pathname.startsWith("/api/v1/world/profile") && await world.handle(req, res)) return;
+    if (site !== "admin" && /^\/api\/v1\/(?:world|media)\/profile/.test(url.pathname) && await world.handle(req, res)) return;
     if (["app", "silver", "db", "ledger"].includes(site) && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/shared/")) {
       const directory = site === "ledger" && (url.pathname === "/fth.js" || url.pathname.startsWith("/explorer/"))
         ? path.join(sitesRoot, "dollar.featheral.com")
@@ -292,7 +292,7 @@ const server = http.createServer(async (req, res) => {
       const summary = url.pathname.match(/^\/api\/wallet\/accounts\/(0x[0-9a-fA-F]{40})$/);
       if (url.pathname.startsWith("/api/wallet/accounts/")) {
         const origin = req.headers.origin;
-        if (origin && !require("../services/wallet-api/ui").allowedOrigin(origin)) {
+        if (origin && !require("../services/wallet/ui").allowedOrigin(origin)) {
           res.writeHead(403, { "Content-Type": types[".json"] });
           return res.end(JSON.stringify({ error: "Unsupported wallet reader origin." }));
         }
@@ -306,7 +306,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify(result));
       }
       if (url.pathname === "/api/wallet/ui") {
-        const config = require("../services/wallet-api/ui").walletUi(url.searchParams);
+        const config = require("../services/wallet/ui").walletUi(url.searchParams);
         res.writeHead(200, { "Content-Type": types[".json"], "Cache-Control": "no-store" });
         return res.end(JSON.stringify(config));
       }
@@ -321,7 +321,7 @@ const server = http.createServer(async (req, res) => {
         "/ethereum/staking.js": path.join("ethereum", "staking.js") };
       if (Object.hasOwn(assets, url.pathname)) {
         if (assets[url.pathname].endsWith(".html")) {
-          require("../services/wallet-api/ui").walletUi(url.searchParams);
+          require("../services/wallet/ui").walletUi(url.searchParams);
           res.setHeader("Content-Security-Policy", url.pathname.startsWith("/ethereum/") || url.pathname === "/exchange-auth.html" ? "frame-ancestors 'none'"
             : "frame-ancestors 'self' https://featheral.com https://*.featheral.com http://localhost:* http://*.localhost:*");
         }
@@ -362,11 +362,11 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname.startsWith("/api/v1/dollar/") && await api.handle(req, res)) return;
     }
     if (site === "dollar" && url.pathname.startsWith("/api/creation/")) return cms(req, res);
-    if (["foundation", "gold", "dollar", "world"].includes(site)
+    if (["foundation", "gold", "dollar", "world", "media"].includes(site)
         && (url.pathname === "/admin" || url.pathname.startsWith("/admin/"))) {
-      return redirect(res, siteUrl(req, "admin", `/#/operations/${site}`), 301);
+      return redirect(res, siteUrl(req, "admin", `/#/operations/${site === "media" ? "world" : site}`), 301);
     }
-    if (!["foundation", "gold", "dollar", "world", "ledger"].includes(site) ||
+    if (!["foundation", "gold", "dollar", "world", "media", "ledger"].includes(site) ||
         (site === "foundation" && cms.resolveHostname(hostname))) {
       cms(req, res);
       return;
@@ -387,21 +387,18 @@ const server = http.createServer(async (req, res) => {
     if (site === "dollar" && url.pathname.startsWith("/explorer/"))
       return redirect(res, siteUrl(req, "ledger", url.pathname + url.search), 301);
     let p = decodeURIComponent(url.pathname);
-    if (!["dollar", "world"].includes(site) && (p === "/wallet" || p.startsWith("/wallet/"))) return redirect(res, siteUrl(req, "world", "/play/bank/") + url.search);
+    if (!["dollar", "world", "media"].includes(site) && (p === "/wallet" || p.startsWith("/wallet/"))) return redirect(res, siteUrl(req, "world", "/bank/") + url.search);
     if (["/wallet", "/admin", "/explorer", "/ledger", "/play"].includes(p)) return redirect(res, p + "/" + url.search, 301);
-    if (site === "world" && p === "/about") return redirect(res, "/about/" + url.search, 301);
     let base = path.join(sitesRoot, site === "foundation" ? "featheral.com" : `${site}.featheral.com`);
     if (site === "world" && (p.startsWith("/wallet/") || p === "/fth.js")) base = path.join(sitesRoot, "dollar.featheral.com");
-    if (site === "world" && p === "/about/") {
-      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
-      p = "/about/";
-    }
-    if (site === "world" && p.startsWith("/play/")) {
-      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
-      p = p.slice("/play".length);
-    }
-    if (site === "world" && ["/robots.txt", "/sitemap.xml"].includes(p)) {
-      base = path.join(sitesRoot, "world.featheral.com", "play", "dist");
+    if (!p.startsWith("/shared/") && !p.startsWith("/wallet/") && p !== "/fth.js") {
+      const resource = require("./site-routing").worldResource(site, p);
+      if (resource?.redirect) {
+        const target = new URL(siteUrl(req, resource.redirect, resource.pathname));
+        target.search = url.search;
+        return redirect(res, target.href, 301);
+      }
+      if (resource) { base = path.join(sitesRoot, resource.directory); p = resource.pathname; }
     }
     if (p.startsWith("/shared/")) {
       base = path.join(root, "shared");

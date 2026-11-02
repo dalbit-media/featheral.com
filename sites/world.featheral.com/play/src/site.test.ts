@@ -27,11 +27,11 @@ test('every Play game entry loads the canonical World wallet/profile assets', ()
   const transform = typeof plugin.transformIndexHtml === 'object' ? plugin.transformIndexHtml.handler : plugin.transformIndexHtml;
   assert.equal(typeof transform, 'function');
   if (typeof transform !== 'function') throw new Error('Missing profile asset transform');
-  for (const file of ['index.html', ...['settlement', 'market', 'communicate', 'federation', 'contacts', 'journal', 'help', 'bank'].map(route => `${route}/index.html`)]) {
+  for (const file of ['explore/index.html', ...['settlement', 'market', 'communicate', 'federation', 'contacts', 'journal', 'help', 'bank'].map(route => `${route}/index.html`)]) {
     const html = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     const tags = transform(html, { path: file, filename: file });
     assert.ok(Array.isArray(tags));
-    assert.deepEqual(tags.map(tag => tag.attrs?.href ?? tag.attrs?.src), ['/shared/wallet-profile.css', '/shared/wallet-profile.js']);
+    assert.deepEqual(tags.map(tag => tag.attrs?.href ?? tag.attrs?.src), ['/shared/wallet-profile.css', '/shared/wallet-profile.js', '/shared/featheral.css', '/shared/site-links.js']);
   }
   assert.equal(transform('<script src="/src/landing.ts"></script>', { path: '/about/', filename: 'about/index.html' }), undefined);
 });
@@ -101,19 +101,19 @@ test('owned Water facilities appear on the shared settlement grid with stable co
 });
 test('public entry points, simulator exports and white paper use the Featheral brand', () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
-  const landing = read('../about/index.html');
-  assert.match(landing, /<title>Featheral \|/);
+  const landing = read('../index.html');
+  assert.match(landing, /<title>Getting started · Featheral World/);
   assert.match(landing, /class="top world-header"/);
   assert.match(landing, /class="eco-bar" aria-label="Featheral sites"/);
   assert.match(landing, /href="\/shared\/featheral\.css"/);
   assert.match(landing, /src="\/shared\/wallet-profile\.js"/);
-  assert.match(landing, /src="\/play-launch\.js"/);
+  assert.match(landing, /src="\/shared\/site-links\.js"/);
   assert.doesNotMatch(landing, /class="site-header"|class="mobile-menu"/);
   assert.match(landing, /<html lang="ko">/);
   assert.match(landing, /src="\/images\/featheral-world\.svg"/);
   assert.match(read('../public/images/featheral-world.svg'), /^<svg/);
-  assert.match(read('../index.html'), /<title>Featheral 플레이 \|/);
-  assert.match(read('../index.html'), /<html lang="ko">/);
+  assert.match(read('../explore/index.html'), /<title>Featheral 플레이 \|/);
+  assert.match(read('../explore/index.html'), /<html lang="ko">/);
   const simulator = read('./main.ts');
   assert.doesNotMatch(simulator, /class="wordmark play-brand"/);
   assert.match(read('./journal.ts'), /'featheral-recovery\.json' : 'featheral-world\.json'/);
@@ -122,15 +122,15 @@ test('public entry points, simulator exports and white paper use the Featheral b
   const preview = readFileSync(new URL('../public/images/social-preview-ko.png', import.meta.url));
   assert.equal(preview.readUInt32BE(16), 1200);
   assert.equal(preview.readUInt32BE(20), 630);
-  assert.match(landing, /href="\/play\/whitepaper\/"/);
-  assert.match(landing, /href="\/play\/about\/"/);
+  assert.match(landing, /href="\/whitepaper\/"/);
+  assert.match(landing, /href="\/"/);
   assert.doesNotMatch(landing, /WHITEPAPER.*\.md|백서[^<]*\(\.md\)/);
   assert.match(landing, /property="og:locale" content="ko_KR"/);
   assert.doesNotMatch(landing, /\bTerra\b|>\s*terra(?=<)/);
 });
 
 test('language selection is available only in the landing footer, not the header or game', () => {
-  const landing = readFileSync(new URL('../about/index.html', import.meta.url), 'utf8');
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const header = landing.match(/<header\b[\s\S]*?<\/header>/)?.[0];
   const footer = landing.match(/<footer\b[\s\S]*?<\/footer>/)?.[0];
   assert.ok(header);
@@ -142,7 +142,7 @@ test('language selection is available only in the landing footer, not the header
   const simulator = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(simulator, /languageControl|language-picker|data-language|wireLanguageControls/);
   assert.match(simulator, /import \{ language, languageLocale, localize \}/);
-  assert.doesNotMatch(readFileSync(new URL('../index.html', import.meta.url), 'utf8'), /data-language|language-picker/);
+  assert.doesNotMatch(readFileSync(new URL('../explore/index.html', import.meta.url), 'utf8'), /data-language|language-picker/);
 });
 test('settlement has a dedicated production entry and the header has individual resource controls without aggregate claim', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -152,7 +152,7 @@ test('settlement has a dedicated production entry and the header has individual 
   assert.match(page, /noindex,follow/);
   assert.match(page, /src="\/src\/main.ts"/);
   assert.match(vite, /'settlement\/index': resolve\('settlement', 'index.html'\)/);
-  assert.match(main, /href="\/play\/settlement\/#inventory"/);
+  assert.match(main, /href="\/settlement\/#inventory"/);
   assert.doesNotMatch(main, /claim-all/);
   assert.match(main, /data-action="resource-management"/);
   assert.match(main, /data-action="funds-management"/);
@@ -243,7 +243,7 @@ test('marketplace has its own entry, complete tradable catalog and FTH$ quote cu
   assert.match(page, /<html lang="ko">/);
   assert.match(page, /noindex,follow/);
   assert.match(vite, /'market\/index': resolve\('market', 'index.html'\)/);
-  assert.match(main, /href=.*\/play\/market\//);
+  assert.match(main, /href=.*\/market\//);
   assert.match(main, /new Marketplace/);
   assert.doesNotMatch(main, /function marketPanel|Simulated market · Fixed prices|type: 'trade'/);
   assert.equal(marketAssets.length, 53);
@@ -443,7 +443,7 @@ test('inventory and crafting are independent tasks with actionable owned equipme
   assert.match(craftingPanel(state, () => '', 'all'), /Item inventory full[\s\S]*data-settlement-panel="inventory"/);
   const sidebarInventory = inventoryPanel(state, () => '', 'all', 'en', 'explore');
   const sidebarCrafting = craftingPanel(state, () => '', 'all', 'explore');
-  assert.match(sidebarInventory, /href="\/play\/settlement\/#decorate">Manage layout/);
+  assert.match(sidebarInventory, /href="\/settlement\/#decorate">Manage layout/);
   for (const panel of [sidebarInventory, sidebarCrafting]) {
     assert.doesNotMatch(panel, /data-action="prepare-decoration"/);
     assert.match(panel, /data-action="inventory-filter"|data-action="crafting-filter"/);
@@ -493,7 +493,7 @@ test('Explore sidebar prioritizes recurring actions and links to detailed settle
   assert.match(css, /\.sidebar-action-row\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(sidebar, /recruitmentButton\(true\)/);
   assert.match(sidebar, /class="button sidebar-upgrade"/);
-  for (const task of ['residents', 'production', 'crafting']) assert.match(sidebar, new RegExp(`href="/play/settlement/#${task}"`));
+  for (const task of ['residents', 'production', 'crafting']) assert.match(sidebar, new RegExp(`href="/settlement/#${task}"`));
   assert.doesNotMatch(sidebar, /workforcePanel\(|storagePanel\(|inventoryPanel\(|craftingPanel\(|buildingsPanel\(|data-sidebar-task/);
   assert.match(sidebar, /bag\.pending\.some\(item => !bag\.marketReserved\?\.includes\(item\)\)/);
   assert.doesNotMatch(main, /toggle-sidebar|close-sidebar|sidebar-open/);
@@ -503,7 +503,7 @@ test('mobile Explore exposes primary settlement actions immediately and links to
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
   assert.match(main, /class="sidebar-mobile-heading"/);
-  assert.match(main, /href="\/play\/settlement\/#residents" aria-label="Residents"/);
+  assert.match(main, /href="\/settlement\/#residents" aria-label="Residents"/);
   assert.match(css, /#app\.explore-page\{grid-template-rows:var\(--game-header-height,170px\) minmax\(0,1fr\) auto 65px;min-height:0\}/);
   assert.match(css, /\.explore-page \.sidebar\{display:flex;grid-column:1;grid-row:3/);
   assert.match(css, /\.explore-page \.rail\{grid-row:4\}/);
@@ -912,7 +912,7 @@ test('sidebar spending is labeled with resource names and remains readable on di
 });
 
 test('four live counters lead the hero and mirror in the World header with FTHG trades next to settlements', () => {
-  const landing = readFileSync(new URL('../about/index.html', import.meta.url), 'utf8');
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(landing, /<section class="hero section-shell"[^>]*>\s*<section class="world-stats"/);
   assert.match(landing, /<header class="top world-header"[^>]*>[\s\S]*?<div class="world-live-cards"[^>]*>/);
   assert.equal((landing.match(/data-total=/g) ?? []).length, 6);
@@ -958,22 +958,23 @@ test('homepage count-up abbreviates visually while exact accessible totals and G
 });
 
 test('landing copy leads with playable goals and immediate play links without hiding limits', () => {
-  const landing = readFileSync(new URL('../about/index.html', import.meta.url), 'utf8');
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const hero = landing.match(/<div class="hero-copy">([\s\S]*?)<div class="hero-world">/)?.[1];
   assert.ok(hero);
   assert.match(hero, /무료 싱글플레이 탐험·건설 게임/);
-  assert.match(hero, /땅을 탐험하고,/);
-  assert.match(hero, /도시를 키우세요/);
+  assert.match(hero, /Explore a world/);
+  assert.match(hero, /Build a settlement/);
+  assert.match(hero, /Shape a federation/);
   assert.match(hero, /주민을 배치해 자원을 모으고/);
   assert.ok(hero.includes(`${Object.keys(terrainDetails).length}가지 지형`));
   assert.match(hero, /수도까지 키워/);
-  assert.match(hero, /지금 무료로 시작하기/);
+  assert.match(hero, /Start exploring/);
   assert.match(hero, /설치·지갑 연결·결제 없이/);
   assert.match(hero, /초기 프로토타입/);
   const playCalls = [...landing.matchAll(/<a class="(?:btn [^"]*|preview-cta)" href="([^"]+)">/g)];
   assert.equal(playCalls.length, 4);
-  assert.match(landing, /class="play-launch" data-play-launch href="\/play\/"/);
-  for (const [, href] of playCalls) assert.equal(href, '/play/');
+  assert.match(landing, /class="play-launch" href="\/explore\/"/);
+  for (const [, href] of playCalls) assert.ok(['/explore/', '/settlement/'].includes(href), href);
   assert.match(landing, /게임 시간 7일마다/);
   assert.match(landing, /게임 시간 1~3주 후 복귀하면/);
   assert.match(landing, /미배치 주민은 자원을 생산하지 않으며/);
@@ -995,7 +996,7 @@ test('resource allocation removes tile selection and discloses advanced FTH$ cos
   assert.match(simulator, /requestMove\(destination\.x, destination\.y\)/);
   assert.match(simulator, /work\.expeditions\.map/);
   assert.match(simulator, /nextExploration\(game, state\.workforce\.expeditions\)/);
-  const landing = readFileSync(new URL('../about/index.html', import.meta.url), 'utf8');
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(landing, /자원별로 자동 배치/);
   assert.match(landing, /주간 운송비/);
   for (const [file, patterns] of [
@@ -1010,7 +1011,7 @@ test('SEO metadata does not invent a canonical domain and is never applied to th
   const plugin = landingSeo(resolvePublicSite({ url: '', channels: { github: '', discord: '', x: '', telegram: '' } }));
   const transform = plugin.transformIndexHtml;
   assert.ok(typeof transform === 'function');
-  const tags = await transform('', { path: '/about/index.html', filename: 'about/index.html' });
+  const tags = await transform('', { path: '/index.html', filename: 'index.html' });
   assert.ok(Array.isArray(tags));
   assert.equal(tags.some(tag => tag.attrs?.rel === 'canonical'), false);
   const structured = tags.find(tag => tag.tag === 'script')!;
@@ -1019,7 +1020,7 @@ test('SEO metadata does not invent a canonical domain and is never applied to th
   assert.equal(schema.name, 'Featheral');
   assert.deepEqual(schema.inLanguage, ['ko', 'en']);
   assert.equal('url' in schema, false);
-  assert.equal(await transform('', { path: '/play/index.html', filename: 'play/index.html' }), undefined);
+  assert.equal(await transform('', { path: '/explore/index.html', filename: 'explore/index.html' }), undefined);
 });
 test('configured SEO produces absolute sharing URLs, a public-page sitemap and API crawl exclusions', async () => {
   const plugin = landingSeo(resolvePublicSite({
@@ -1027,10 +1028,10 @@ test('configured SEO produces absolute sharing URLs, a public-page sitemap and A
   }));
   const transform = plugin.transformIndexHtml;
   assert.ok(typeof transform === 'function');
-  const tags = await transform('', { path: '/about/index.html', filename: 'about/index.html' });
+  const tags = await transform('', { path: '/index.html', filename: 'index.html' });
   assert.ok(Array.isArray(tags));
-  assert.equal(tags.find(tag => tag.attrs?.rel === 'canonical')?.attrs?.href, 'https://example.test/play/about/');
-  assert.equal(tags.find(tag => tag.attrs?.property === 'og:image')?.attrs?.content, 'https://example.test/play/images/social-preview-ko.png');
+  assert.equal(tags.find(tag => tag.attrs?.rel === 'canonical')?.attrs?.href, 'https://example.test/');
+  assert.equal(tags.find(tag => tag.attrs?.property === 'og:image')?.attrs?.content, 'https://example.test/images/social-preview-ko.png');
   const structured = JSON.parse(String(tags.find(tag => tag.tag === 'script')!.children));
   assert.deepEqual(structured.sameAs, ['https://github.com/example/project']);
   const files: { fileName: string; source: string }[] = [];
@@ -1038,13 +1039,13 @@ test('configured SEO produces absolute sharing URLs, a public-page sitemap and A
   Reflect.apply(plugin.generateBundle, { emitFile: (file: { fileName: string; source: string }) => files.push(file) }, []);
   assert.match(files.find(file => file.fileName === 'robots.txt')!.source, /Disallow: \/api\//);
   const sitemap = files.find(file => file.fileName === 'sitemap.xml')!.source;
-  assert.match(sitemap, /<loc>https:\/\/example.test\/play\/<\/loc>/);
-  assert.match(sitemap, /<loc>https:\/\/example.test\/play\/about\/<\/loc>/);
-  assert.match(sitemap, /<loc>https:\/\/example.test\/play\/whitepaper\/<\/loc>/);
+  assert.match(sitemap, /<loc>https:\/\/example.test\/<\/loc>/);
+  assert.equal((sitemap.match(/<loc>https:\/\/example.test\/<\/loc>/g) ?? []).length, 1);
+  assert.match(sitemap, /<loc>https:\/\/example.test\/whitepaper\/<\/loc>/);
   const paperTags = await transform('', { path: '/whitepaper/index.html', filename: 'whitepaper/index.html' });
   assert.ok(Array.isArray(paperTags));
-  assert.equal(paperTags.find(tag => tag.attrs?.rel === 'canonical')?.attrs?.href, 'https://example.test/play/whitepaper/');
-  assert.equal(sitemap.includes('/play/'), true);
+  assert.equal(paperTags.find(tag => tag.attrs?.rel === 'canonical')?.attrs?.href, 'https://example.test/whitepaper/');
+  assert.equal(sitemap.includes('/'), true);
 });
 test('configured links use HTTPS and a normalized canonical root origin', () => {
   const configured = resolvePublicSite({

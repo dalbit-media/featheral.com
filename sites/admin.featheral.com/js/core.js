@@ -177,7 +177,7 @@ const OPERATION_VIEWS = [
   { key: 'foundation', hostname: 'featheral.com', label: 'Foundation overview', description: 'Governance, ecosystem status and foundation management.' },
   { key: 'gold', hostname: 'gold.featheral.com', label: 'Gold reserve & token', description: 'FTHG, Ethereum backing and reserve administration.' },
   { key: 'dollar', hostname: 'dollar.featheral.com', label: 'Dollar ledger & funds', description: 'FTH$ ledger, treasury, transfers and redemption management.' },
-  { key: 'world', hostname: 'world.featheral.com', label: 'World moderation', description: 'Game, settlements and moderation management.' },
+  { key: 'world', hostname: 'media.featheral.com', label: 'Media moderation', description: 'Public social feed and moderation management.' },
 ];
 const isClassicSite = site => site.builtin === true || site.cmsCompatible === false;
 const managementHref = site => site.managementLinks?.[0]?.href

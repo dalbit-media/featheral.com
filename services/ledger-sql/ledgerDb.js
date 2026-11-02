@@ -1,6 +1,6 @@
 "use strict";
 
-const { open } = require("../db-api/sqlite");
+const { open } = require("../database/sqlite");
 
 const MAX_QUERY_LENGTH = 4000;
 const MAX_ROWS = 500;

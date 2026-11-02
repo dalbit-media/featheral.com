@@ -4,7 +4,7 @@ const { parse } = require('parse5');
 const CmsStore = require('./cms');
 const { Documents } = require('./documents');
 
-const hosts = ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'app.featheral.com', 'dollar.featheral.com', 'world.featheral.com', 'admin.featheral.com', 'x.featheral.com', 'ex.featheral.com',
+const hosts = ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'app.featheral.com', 'dollar.featheral.com', 'world.featheral.com', 'media.featheral.com', 'admin.featheral.com', 'x.featheral.com', 'ex.featheral.com',
   'notes.featheral.com', 'sites.featheral.com', 'stats.featheral.com', 'wallet.featheral.com', 'db.featheral.com'];
 const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -42,7 +42,8 @@ class SitePages {
   }
   presentation(hostname) {
     const document = this.documents.template(hostname, 'index.html');
-    const file = path.join(this.root, 'sites', hostname, hostname === 'wallet.featheral.com' ? 'wallet-app.html' : 'index.html');
+    const file = path.join(this.root, 'sites', hostname, hostname === 'wallet.featheral.com' ? 'wallet-app.html'
+      : hostname === 'world.featheral.com' ? path.join('play', 'index.html') : 'index.html');
     const html = document ? document.layout : fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
     let tagline = '', favicon = '/shared/logo.svg';
     const walk = node => {
@@ -59,7 +60,9 @@ class SitePages {
     if (!this.cache.has(hostname)) {
       fs.mkdirSync(this.directory, { recursive: true });
       const legacy = path.join(this.directory, 'cms.featheral.com.sqlite');
-      const file = hostname === 'admin.featheral.com' && fs.existsSync(legacy) ? legacy : path.join(this.directory, `${hostname}.sqlite`);
+      const socialLegacy = path.join(this.directory, 'world.featheral.com.sqlite');
+      const file = hostname === 'admin.featheral.com' && fs.existsSync(legacy) ? legacy
+        : hostname === 'media.featheral.com' && fs.existsSync(socialLegacy) ? socialLegacy : path.join(this.directory, `${hostname}.sqlite`);
       this.cache.set(hostname, new CmsStore(file));
     }
     return this.cache.get(hostname);

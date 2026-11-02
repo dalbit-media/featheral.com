@@ -31,7 +31,7 @@ export class SettlementHalfSale {
       <p role="status" data-half-status></p>
       <div class="half-sale-actions"><button type="button" class="button primary" data-half-submit disabled>Review half sale</button>
       <button type="button" class="button" data-half-refresh>Refresh quote</button></div>
-      <a href="/play/market/">Open marketplace</a>`;
+      <a href="/market/">Open marketplace</a>`;
     localize(this.root);
     this.root.querySelector('[data-half-submit]')!.addEventListener('click', () => { void this.execute(); });
     this.root.querySelector('[data-half-refresh]')!.addEventListener('click', () => { void this.refresh(); });

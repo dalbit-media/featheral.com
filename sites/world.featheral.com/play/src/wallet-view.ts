@@ -3,7 +3,7 @@ import { localize } from './i18n-dom.ts';
 
 export class WalletPage {
   constructor(root: HTMLElement) {
-    root.innerHTML = `<header class="bank-heading"><div><small>FEATHERAL WALLET</small><h1>World funds &amp; wallet</h1><p>Keep a separate gameplay budget. FTHG and staking principal remain on Ethereum Mainnet.</p></div><a class="button" href="/play/market/">Open marketplace</a></header>
+    root.innerHTML = `<header class="bank-heading"><div><small>FEATHERAL WALLET</small><h1>World funds &amp; wallet</h1><p>Keep a separate gameplay budget. FTHG and staking principal remain on Ethereum Mainnet.</p></div><a class="button" href="/market/">Open marketplace</a></header>
       <p><a class="button" href="/world-funds.html" target="_blank" rel="noopener">Manage World deposits &amp; withdrawals</a></p>
       <p>Authorize a separate World budget, then approve each deposit or withdrawal. Existing legacy direct-wallet sessions remain unchanged until you explicitly switch.</p>
       <div class="world-dollar-wallet" data-dollar-wallet></div>`;

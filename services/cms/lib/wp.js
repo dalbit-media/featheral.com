@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { setDir, readJson } = require('./store');
 const { maybeUnserialize } = require('./phpser');
 const T = require('./text');

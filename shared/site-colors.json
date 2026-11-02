@@ -7,6 +7,7 @@
   "dollar.featheral.com": { "color": "#3ccf8e", "light": "#9bf2c4", "dark": "#09251a" },
   "ledger.featheral.com": { "color": "#3ccf8e", "light": "#9bf2c4", "dark": "#09251a" },
   "world.featheral.com": { "color": "#655bd4", "light": "#e2dbff", "dark": "#0d0b1f" },
+  "media.featheral.com": { "color": "#287a9b", "light": "#c4efff", "dark": "#102c38" },
   "admin.featheral.com": { "color": "#4f46e5", "light": "#c7d2fe", "dark": "#17133a" },
   "x.featheral.com": { "color": "#ff2d6f", "light": "#ffb4cb", "dark": "#280b16" },
   "ex.featheral.com": { "color": "#52ddb2", "light": "#a4f4dc", "dark": "#091f1c" },

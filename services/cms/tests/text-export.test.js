@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const { once } = require('node:events');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { inflateRawSync } = require('node:zlib');
 const { test } = require('node:test');
 const express = require('express');
@@ -63,7 +63,7 @@ async function startServer(t, config, cmsPassword, registryFile) {
         listeners: new Set(), adminConfigured: () => Boolean(cmsPassword),
         authenticate: password => Boolean(cmsPassword) && password === cmsPassword,
       };
-      if (name === '../notes-api/ledger') {
+      if (name === '../notes/ledger') {
         const module = realRequire(name);
         return { ...module, Notes: class extends module.Notes {
           constructor() { super(path.join(pageData, 'notes.sqlite')); }
@@ -150,7 +150,7 @@ test('public Notes ledger API lists currencies and uses bounded keyset paginatio
 
 test('public creation APIs enforce wallet ownership, fee signatures, origin and safe owner editing', async t => {
   const { ethers } = require('ethers');
-  const { createDollarApi } = require('../../notes-api/dollar');
+  const { createDollarApi } = require('../../notes/dollar');
   const { walletAccountId } = require('../../fth-ledger/transfer');
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'creation-http-'));
   const registryFile = path.join(root, 'sites.json'); writeJson(registryFile, []);
@@ -187,7 +187,7 @@ test('public creation APIs enforce wallet ownership, fee signatures, origin and 
   source.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,1000,'fixture',0,'test')").run(wallet.address.toLowerCase()); source.close();
   assert.equal((await request('/notes', mint, login.token)).status, 402);
   assert.equal((await request('/sites/prepare', { slug: 'blocked', name: 'Blocked' }, login.token)).status, 402);
-  await dollar.ledger.submit({ id: 'test-funds', kind: 'CREDIT', account: walletAccountId(wallet.address), amount: require('../../notes-api/creation').SITE_COST,
+  await dollar.ledger.submit({ id: 'test-funds', kind: 'CREDIT', account: walletAccountId(wallet.address), amount: require('../../notes/creation').SITE_COST,
     data: { src: 'FthgConverted', tx: `0x${'ef'.repeat(32)}` } });
   const minted = await request('/notes', mint, login.token);
   assert.equal(minted.status, 201);
@@ -276,7 +276,7 @@ test('Notes admin APIs require auth and same-origin writes, and retired creation
   const wallet = require('ethers').Wallet.createRandom(), owner = wallet.address.toLowerCase();
   const source = open(notesFile);
   const credit = source.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,?,'fixture',0,'test')");
-  credit.run(require('../../dollar-api/funds').SYSTEM_TREASURY_ACCOUNT, 1000000);
+  credit.run(require('../../notes/game-funds').SYSTEM_TREASURY_ACCOUNT, 1000000);
   credit.run(owner, 1000); source.close();
   assert.equal((await request(market, approval)).status, 409, 'reserved funding stays disabled with sufficient treasury funds');
   assert.equal((await request('/api/notes/markets/FTHA/fund', { approval: 'FUND FTHA 1000000 FTHX 1000000 NOTES' })).status, 200);
@@ -497,7 +497,7 @@ test('unified admin protects every console and forwards authenticated raw API re
   assert.equal((await request('/api/server-users', { headers: { ...auth, 'X-Forwarded-Proto': 'http' } })).status, 403);
   assert.equal((await request('/api/server-users', { headers: { ...auth, Host: 'x.featheral.com' } })).status, 404);
   for (const url of ['/js/operations/gold.js', '/reserve.css', '/js/reserve-view.js',
-    '/js/dollar-format.js', '/js/operations/world.js', '/shared/admin-kit.js', '/views/gold.html', '/js/vendor/ethers.js']) {
+    '/js/dollar-format.js', '/js/operations/world.js', '/shared/admin-kit.js', '/pages/gold.html', '/js/vendor/ethers.js']) {
     const response = await request(url, { headers: auth });
     assert.equal(response.status, 200, url);
     assert.ok(!(await response.text()).startsWith('<!doctype html>'));
@@ -623,11 +623,11 @@ test('password-free CMS development is limited to the loopback local alias', asy
     assert.equal(wallet.management, 'classic');
     assert.equal(wallet.cmsCompatible, false);
     assert.equal(wallet.contentEditable, false);
-    assert.equal((await fetch(base + '/api/sites/world.featheral.com/pages', { headers: { Host: 'admin.featheral.com' } })).status, 401);
-    const result = await (await fetch(base + '/api/sites/world.featheral.com/pages', { headers })).json();
+    assert.equal((await fetch(base + '/api/sites/media.featheral.com/pages', { headers: { Host: 'admin.featheral.com' } })).status, 401);
+    const result = await (await fetch(base + '/api/sites/media.featheral.com/pages', { headers })).json();
     assert.ok(result.pages.length > 0);
     const page = result.pages[0];
-    const publish = revision => fetch(base + `/api/sites/world.featheral.com/pages/${page.id}`, {
+    const publish = revision => fetch(base + `/api/sites/media.featheral.com/pages/${page.id}`, {
       method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ body: 'Updated CMS copy', revision }),
     });
     assert.equal((await publish(page.revision)).status, 200);

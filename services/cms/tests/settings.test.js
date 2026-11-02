@@ -6,7 +6,7 @@ const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const { Wallet } = require("ethers");
-const { OriginApprovals } = require("../../db-api/approvals");
+const { OriginApprovals } = require("../../database/approvals");
 const { OperationsSettings, parseCredential } = require("../../operations/settings");
 const { Deployment } = require("../lib/deployment");
 const { settingsApi } = require("../../operations/api");
@@ -148,12 +148,14 @@ test("offline migration imports runtime and financial configuration into the dat
   assert.equal(f.settings.environment().APP_TURN_SECRET, "preserved-fixture");
   assert.ok(!JSON.stringify(f.settings.database.settings()).includes("preserved-fixture"));
   const newBootstrap = path.join(f.directory, "new", "bootstrap.json");
-  const initialized = initialize(newBootstrap), originalKey = initialized.key().toString("hex");
-  assert.equal(initialize(newBootstrap).key().toString("hex"), originalKey);
+  const repository = path.join(f.directory, "fresh-repository");
+  fs.mkdirSync(repository);
+  const initialized = initialize(newBootstrap, { repository }), originalKey = initialized.key().toString("hex");
+  assert.equal(initialize(newBootstrap, { repository }).key().toString("hex"), originalKey);
 });
 
 test("offline migration imports the existing encrypted root vault without discarding its journal or key", t => {
-  const f = fixture(t), { FileJournals } = require("../../db-api/journal"), { CredentialVault } = require("../../db-api/vault");
+  const f = fixture(t), { FileJournals } = require("../../database/journal"), { CredentialVault } = require("../../database/vault");
   const oldKey = path.join(f.directory, "legacy.key"), oldDirectory = path.join(f.directory, "legacy-ledger");
   fs.writeFileSync(oldKey, crypto.randomBytes(32).toString("hex"), { mode: 0o600 });
   const env = { DB_VAULT_KEY_FILE: oldKey, DEPLOY_TARGET: "root@server.example:/opt/featheral", DEPLOY_HOST_KEY_SHA256: "SHA256:" + "a".repeat(43) };
@@ -310,7 +312,7 @@ test("runtime settings are encrypted, redacted, revision-bound and marked for re
   assert.equal(status.runtimeFields.find(field => field.name === "APP_TURN_SECRET").value, "");
   assert.equal(status.runtimeFields.find(field => field.name === "PORT").value, "9091");
   assert.ok(!JSON.stringify(status).includes("fixture-turn-secret"));
-  const { FileJournals } = require("../../db-api/journal");
+  const { FileJournals } = require("../../database/journal");
   const journals = new FileJournals(fs.realpathSync(f.settings.database.directory));
   const records = journals.replay("databases/system").records;
   for (const secret of [password, adminPassword, "fixture-turn-secret", f.settings.value.adminHash])
@@ -416,4 +418,60 @@ test("offline migration keeps the source configuration when database read-back c
   f.settings.persist = value => { persist(value); fs.writeFileSync(f.keyFile, crypto.randomBytes(32).toString("hex")); };
   assert.throws(() => migrateEnvironment(f.settings, file), { status: 503 });
   assert.equal(fs.readFileSync(file, "utf8"), text);
+});
+
+test("explicit setup migration archives SSH-key configuration encrypted and allows signed localhost Admin enrollment", async t => {
+  const f = fixture(t), file = path.join(f.directory, "legacy.env"), sshKey = path.join(f.directory, "original-ssh-key");
+  fs.writeFileSync(sshKey, "fixture-key-unchanged", { mode: 0o600 });
+  const text = `GOLD_RESERVE_MODE=disabled\nDEPLOY_TARGET=deploy@server.example:/opt/featheral\nDEPLOY_KEY_FILE='${sshKey}'\nDEPLOY_HOST_KEY_SHA256=SHA256:${"a".repeat(43)}\nDEPLOY_ENABLED=true\n`;
+  fs.writeFileSync(file, text, { mode: 0o600 });
+  assert.throws(() => migrateEnvironment(f.settings, file), /--setup/);
+  assert.equal(fs.readFileSync(file, "utf8"), text);
+  const result = migrateEnvironment(f.settings, file, { setup: true });
+  assert.equal(result.setupRequired, true);
+  assert.equal(result.credentialEnrollmentRequired, true);
+  assert.equal(f.settings.value.enabled, false);
+  assert.equal(f.settings.value.credential, null);
+  assert.equal(f.settings.value.adminHash, null);
+  assert.equal(f.settings.value.host, "server.example");
+  assert.equal(f.settings.environment().GOLD_RESERVE_MODE, "disabled");
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(fs.readFileSync(sshKey, "utf8"), "fixture-key-unchanged");
+  const backup = fs.readFileSync(result.backupFile, "utf8");
+  assert.ok(!backup.includes("DEPLOY_KEY_FILE"));
+  const envelope = JSON.parse(backup), key = f.settings.key();
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "hex"));
+    decipher.setAAD(Buffer.from("featheral-legacy-migration-v1"));
+    decipher.setAuthTag(Buffer.from(envelope.tag, "hex"));
+    const restored = JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, "hex")), decipher.final()]).toString("utf8"));
+    assert.equal(restored.environment, text);
+    assert.equal(restored.envFile, file);
+  } finally { key.fill(0); }
+  assert.throws(() => f.settings.prepare({ revision: 1, settings: { allowUnconfiguredAdmin: true } }), { status: 400 });
+  assert.throws(() => f.settings.prepare({ revision: 1, settings: {} }), /Admin password/);
+  await f.save({ revision: 1, settings: { adminPassword } });
+  assert.equal(f.settings.authenticate(adminPassword), true);
+  assert.equal(f.settings.value.enabled, false);
+  assert.equal(new OperationsSettings({ root: f.root, bootstrapFile: f.bootstrapFile }).authenticate(adminPassword), true);
+});
+
+test("setup migration refuses externally bound first-run configuration without modifying the source", t => {
+  const f = fixture(t), file = path.join(f.directory, "legacy.env"), text = "HOST=0.0.0.0\nGOLD_RESERVE_MODE=disabled";
+  fs.writeFileSync(file, text, { mode: 0o600 });
+  assert.throws(() => migrateEnvironment(f.settings, file, { setup: true }), /loopback HOST/);
+  assert.equal(fs.readFileSync(file, "utf8"), text);
+  assert.equal(f.settings.value.revision, 0);
+});
+
+test("setup migration archives an invalid SSH fingerprint without authorizing it for server operations", t => {
+  const f = fixture(t), file = path.join(f.directory, "legacy.env");
+  fs.writeFileSync(file, "DEPLOY_TARGET=deploy@server.example:/opt/featheral\nDEPLOY_KEY_FILE=legacy.key\nDEPLOY_HOST_KEY_SHA256=replace-me", { mode: 0o600 });
+  const result = migrateEnvironment(f.settings, file, { setup: true });
+  assert.equal(result.fingerprintEnrollmentRequired, true);
+  assert.equal(f.settings.value.fingerprint, "");
+  assert.equal(f.settings.value.host, "server.example");
+  assert.equal(f.settings.value.enabled, false);
+  assert.throws(() => f.settings.configuration(), { status: 503 });
+  assert.throws(() => require("../../database/ssh-target").sshTarget({ DEPLOY_TARGET: "deploy@server.example:/opt/featheral", DEPLOY_HOST_KEY_SHA256: "replace-me" }), { status: 400 });
 });

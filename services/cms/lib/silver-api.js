@@ -1,6 +1,6 @@
 "use strict";
 const express = require("express");
-const { SilverStore } = require("../../notes-api/silver-store");
+const { SilverStore } = require("../../notes/silver-store");
 function silverApi({ notes, markets, cmsAuth, env = require("../../operations/runtime").environment() }) {
   const store = new SilverStore(notes, markets, env), router = express.Router(), limits = new Map();
   const secure = req => req.secure || req.get("x-forwarded-proto") === "https";

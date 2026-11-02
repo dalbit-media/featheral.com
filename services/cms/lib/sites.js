@@ -1,6 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { SyncRunner } = require('./sync');
 const CmsStore = require('./cms');
 const Templates = require('./templates');
@@ -62,7 +62,7 @@ class SiteManager {
       || ['api', 'site', 'shared', 'media', 'admin', 'operations', 'healthz'].includes(slug)))
       throw error(400, 'Free website names must be lowercase letters, numbers or hyphens, at most 63 characters, and cannot use reserved routes');
     const sitePath = slug === undefined ? '' : `/${slug}`;
-    if (['featheral.com', 'gold.featheral.com', 'dollar.featheral.com', 'world.featheral.com'].includes(host))
+    if (['featheral.com', 'gold.featheral.com', 'dollar.featheral.com', 'world.featheral.com', 'media.featheral.com'].includes(host))
       throw error(409, 'This is an integrated application site. Edit its CMS content and theme from Sites instead.');
     if (host === this.cmsHost || host === 'cms.featheral.com') throw error(409, 'The admin hostname and retired CMS alias cannot be used for a public site');
     if (this.records.some((record) => record.hostname === host && (record.path || '') === sitePath)) throw error(409, 'That site already exists');

@@ -80,7 +80,9 @@
   .preview-cta,.site-footer nav a{display:flex;align-items:center;min-height:44px;font-size:14px}
   .faq-section summary{min-height:44px;font-size:15px}
 }
+.hero h1>span{white-space:normal}
 @media(max-width:900px){
+  header.world-header[data-wallet-header]:has(>.world-live-cards){flex-wrap:wrap}
   .world-live-cards{order:3;flex:1 0 100%;width:100%;max-width:none;min-width:0;margin:0}
 }
 @media(max-width:650px){

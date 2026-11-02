@@ -11,7 +11,7 @@
   const site = host.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar"].includes(site) ? "FTH$" : "FTHX";
   let primary = defaultPrimary;
-  const worldProfileUrl = `${centralOrigin.replace("//wallet.", "//world.")}/#/setup`;
+  const worldProfileUrl = `${centralOrigin.replace("//wallet.", "//media.")}/#/setup`;
   const AVATAR_SIZE = 160;
   const MAX_AVATAR_BYTES = 40 * 1024;
   const USERNAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{2,23}$/;
@@ -220,7 +220,7 @@
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
     return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
-  // Must match services/token-api/profile.js profileMessage().
+  // Must match services/identity/profile.js profileMessage().
   async function profileMessage({ address, username, avatar, issuedAt }) {
     return [
       "Featheral profile update",

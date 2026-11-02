@@ -10,6 +10,7 @@ const badges = {
   db: '<ellipse cx="52" cy="46" rx="7" ry="3"/><path d="M45 46v11c0 4 14 4 14 0V46m-14 5c0 4 14 4 14 0"/>',
   dollar: '<path d="M55 47h-5a3 3 0 000 6h3a3 3 0 010 6h-5m4-15v18"/>',
   world: '<circle cx="52" cy="52" r="7"/><ellipse cx="52" cy="52" rx="3" ry="7"/><path d="M45 52h14"/>',
+  media: '<path d="M44 45h16v11H51l-5 4v-4h-2z"/><path d="M48 49h8m-8 3h5"/>',
   admin: '<path d="M49 44h6l1 4 4 1v6l-4 1-1 4h-6l-1-4-4-1v-6l4-1z"/><circle cx="52" cy="52" r="3"/>',
   x: '<path d="M46 46l12 12m0-12L46 58"/>',
   ex: '<path d="M44 48h15l-4-4m-11 12h15m-15 0l4 4"/>',

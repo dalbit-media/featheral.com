@@ -7,7 +7,7 @@ const { ethers } = require("ethers");
 const { FthLedger, BlockStore } = require("../services/fth-ledger/ledger");
 const { canonical, blockHash } = require("../services/fth-ledger/codec");
 const { transferMessage, walletAccountId } = require("../services/fth-ledger/transfer");
-const { ServiceAuthenticator, canonicalRequest } = require("../services/token-api/auth");
+const { ServiceAuthenticator, canonicalRequest } = require("../services/identity/auth");
 
 const FTH = (value) => ethers.parseUnits(String(value), 18).toString();
 async function rejects(promise, text) {

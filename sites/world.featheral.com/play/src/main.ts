@@ -115,7 +115,7 @@ app.classList.toggle('has-world-chat', explorePage || settlementPage);
 app.classList.toggle('inbox-full-page', navigationPage === 'communicate');
 app.innerHTML = `
   <nav class="rail" aria-label="Main navigation">
-    <a class="game-brand" href="/play/" aria-label="Featheral World"><img src="/shared/logo.svg" alt="" width="34" height="34"><span>WORLD</span></a>
+    <a class="game-brand" href="/" aria-label="Featheral World"><img src="/shared/logo.svg" alt="" width="34" height="34"><span>WORLD</span></a>
     <div class="rail-links">
       ${primaryGamePageKeys.map(key => `<a class="nav-button ${key === navigationPage ? 'active' : ''}" href="${gamePages[key].path}" ${key === navigationPage ? 'aria-current="page"' : ''} aria-label="${gamePages[key].label}" title="${gamePages[key].label}">${icon(key)}<span>${gamePages[key].label}</span></a>`).join('')}
     </div>
@@ -143,7 +143,7 @@ app.innerHTML = `
       <button type="button" class="account-avatar" data-account-toggle aria-label="Account" title="Account" aria-controls="account-pane" aria-expanded="false">${icon('account')}</button>
     </div>
   </header>
-  ${!explorePage ? '' : `<aside class="sidebar" id="explore-sidebar" aria-label="Territory overview"><div class="sidebar-mobile-heading"><strong>Explore</strong><div><a class="button" href="/play/settlement/#residents" aria-label="Residents" title="Residents">${icon('people')}</a><a class="button" href="/play/settlement/">${icon('home')} Settlement ${icon('chevron')}</a></div></div><div id="sidebar-content"></div><section class="location-card" id="location-card" aria-labelledby="current-tile-title"></section></aside>`}
+  ${!explorePage ? '' : `<aside class="sidebar" id="explore-sidebar" aria-label="Territory overview"><div class="sidebar-mobile-heading"><strong>Explore</strong><div><a class="button" href="/settlement/#residents" aria-label="Residents" title="Residents">${icon('people')}</a><a class="button" href="/settlement/">${icon('home')} Settlement ${icon('chevron')}</a></div></div><div id="sidebar-content"></div><section class="location-card" id="location-card" aria-labelledby="current-tile-title"></section></aside>`}
   ${explorePage || settlementPage ? '<aside class="weather-overlay" aria-label="World conditions"><div data-map-environment></div></aside>' : ''}
   <main class="map" aria-label="Exploration map" ${!explorePage ? 'hidden' : ''}>
     <canvas id="world" tabindex="0" aria-label="Procedural world. Click unknown nearby terrain to send a week-long expedition with two residents. Travel on known terrain with arrow keys. Drag to pan and scroll to zoom."></canvas>
@@ -229,6 +229,7 @@ else {
   });
 }const account = new AccountPane(document.querySelector<HTMLButtonElement>('[data-account-toggle]')!, language, () => state,
   next => { synchronize(next); render(); });
+document.dispatchEvent(new Event('featheral:site-ready'));
 localize(document);
 function mountWorldChat(): void {
   const root = document.querySelector<HTMLElement>('[data-social-content]');
@@ -646,7 +647,7 @@ function renderManagement(): void {
   } else if (management === 'funds') {
     replaceContent(root, `<div class="treasury-balance">${icon('dollars')}<strong>${formatDollars(state.dollars, languageLocale)}</strong><small>FTH$</small></div>
       <p class="fineprint">Sell resources regularly to fund transport, recruitment and upgrades.</p>
-      <a class="button wide" href="/play/bank/">Open wallet, conversion and staking</a><div data-settlement-half-sale></div><a class="button wide" href="/play/market/">Open marketplace ${icon('arrow')}</a>`);
+      <a class="button wide" href="/bank/">Open wallet, conversion and staking</a><div data-settlement-half-sale></div><a class="button wide" href="/market/">Open marketplace ${icon('arrow')}</a>`);
   } else {
     const resource = management, crew = state.workforce.crews[resource];
     const fee = state.collection?.fees[resource] ?? 0, expiry = state.collection?.automationUntil[resource] ?? 0;
@@ -663,7 +664,7 @@ function renderManagement(): void {
       <section class="resource-allocation"><h3>Crew allocation</h3><p class="fineprint">${fmt(state.availableWorkers)} ${translate('Unallocated', language)} · ${fmt(game.population)} ${translate('Population', language)}</p>
       <button class="button wide" data-action="automatic" aria-pressed="${state.workforce.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</button>
       ${crewManagementCard(resource, false)}</section><section class="resource-trading"><div data-resource-sale="${resource}"></div>
-      <div class="collection-links"><button class="button" data-action="population-management">${icon('people')}Manage crews</button><a class="button" href="/play/market/?asset=collection-${resource}-1">Marketplace ${icon('arrow')}</a></div></section></div>`);
+      <div class="collection-links"><button class="button" data-action="population-management">${icon('people')}Manage crews</button><a class="button" href="/market/?asset=collection-${resource}-1">Marketplace ${icon('arrow')}</a></div></section></div>`);
   }
   renderRecruitment(); renderWorkTimers(); localize(managementDialog);
 }
@@ -689,7 +690,7 @@ async function collectAndSell(resource: Resource): Promise<void> {
   if (command) await act(command);
 }
 function gearCard(): string {
-  return `<a class="sidebar-gear" href="/play/settlement/#inventory">${icon('layers')}<span><strong>Item inventory</strong><small><span>${state.inventory.equipped ? translate(itemName(state.inventory.equipped), language) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></small></span>${icon('chevron')}</a>`;
+  return `<a class="sidebar-gear" href="/settlement/#inventory">${icon('layers')}<span><strong>Item inventory</strong><small><span>${state.inventory.equipped ? translate(itemName(state.inventory.equipped), language) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></small></span>${icon('chevron')}</a>`;
 }
 function renderSidebar(): void {
   const next = stages[game.stage + 1], quote = nextExploration(game, state.workforce.expeditions);
@@ -714,12 +715,12 @@ function renderSidebar(): void {
       ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
     </div>
     <div class="sidebar-status"><span>${state.availableWorkers} available residents</span><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></div>
-    ${nextReturn ? `<div class="sidebar-expeditions"><a href="/play/settlement/#residents">${state.workforce.expeditions.length} expeditions exploring</a>${completionMeter(expeditionStartedAt(nextReturn), nextReturn.readyAt, 'Next return')}</div>` : ''}
+    ${nextReturn ? `<div class="sidebar-expeditions"><a href="/settlement/#residents">${state.workforce.expeditions.length} expeditions exploring</a>${completionMeter(expeditionStartedAt(nextReturn), nextReturn.readyAt, 'Next return')}</div>` : ''}
     <div class="sidebar-secondary-actions" role="group" aria-label="Additional actions">
       ${game.stage >= 0 && next ? `<button class="button sidebar-upgrade" data-action="upgrade" ${upgradeReady ? '' : 'disabled'}>${icon('plus')} Upgrade ${costChips(next.cost)}</button>` : ''}
-      <a class="button" href="/play/settlement/#residents">${icon('people')} Residents</a>
-      <a class="button" href="/play/settlement/#production">${icon('warehouse')} Storage</a>
-      <a class="button" href="/play/settlement/#crafting">${icon('spark')} Crafting</a>
+      <a class="button" href="/settlement/#residents">${icon('people')} Residents</a>
+      <a class="button" href="/settlement/#production">${icon('warehouse')} Storage</a>
+      <a class="button" href="/settlement/#crafting">${icon('spark')} Crafting</a>
     </div>
     ${gearCard()}`);
   renderRecruitment(); renderWorkTimers(); localize(root);
@@ -734,11 +735,11 @@ function renderCommunityPage(): void {
   const description = navigationPage === 'communicate' || navigationPage === 'contacts' ? 'Public nearby settlement and federation conversations.'
     : navigationPage === 'federation' ? 'Build relationships. Shape your community. Grow together.'
       : 'The latest discoveries, milestones and everyday life in your settlement.';
-  const heading = `<header class="page-heading"><span class="page-emblem">${icon(navigationPage)}</span><div><span class="eyebrow">YOUR WORLD, CONNECTED</span><h1>${title}</h1><p>${description}</p></div><a class="button" href="/play/help/#guide-community">${icon('help')} Field guide</a></header>`;
+  const heading = `<header class="page-heading"><span class="page-emblem">${icon(navigationPage)}</span><div><span class="eyebrow">YOUR WORLD, CONNECTED</span><h1>${title}</h1><p>${description}</p></div><a class="button" href="/help/#guide-community">${icon('help')} Field guide</a></header>`;
   if (navigationPage === 'communicate' || navigationPage === 'contacts') {
     if (!root.childElementCount) {
       const inboxHeading = navigationPage === 'communicate'
-        ? `<header class="inbox-heading"><h1>${title}</h1><a class="button" href="/play/contacts/">${icon('people')} Contacts</a><a class="button" href="/play/help/#guide-community">${icon('help')} Field guide</a></header>` : heading;
+        ? `<header class="inbox-heading"><h1>${title}</h1><a class="button" href="/contacts/">${icon('people')} Contacts</a><a class="button" href="/help/#guide-community">${icon('help')} Field guide</a></header>` : heading;
       const appHost = location.hostname.endsWith('.localhost') || location.hostname === 'localhost' ? 'app.localhost' : 'app.featheral.com';
       const appUrl = `${location.protocol}//${appHost}${location.port ? ':' + location.port : ''}/`;
       root.innerHTML = `${inboxHeading}<p class="fineprint">Foundation work, team inbox, calls and shared files now live in <a href="${appUrl}">Featheral App</a>. Gameplay conversations and existing messages stay here.</p><div class="inbox-page" data-inbox></div>`;
@@ -854,7 +855,7 @@ function renderSettlement(): void {
   const root = document.querySelector('#settlement-content')!;
   if (visitingSettlement) {
     if (!root.childElementCount) {
-      root.innerHTML = `<section class="page-card visitor-settlement"><h1>Visiting a settlement</h1><p>Visitor group chat is separate from public Explore and federation channels. Visiting does not grant access to another player's resources or controls.</p><button class="button" data-open-visitor-chat>Settlement visitor chat</button><a class="button" href="/play/contacts/">Contacts</a><a class="button" href="/play/settlement/">Your settlement</a></section>`;
+      root.innerHTML = `<section class="page-card visitor-settlement"><h1>Visiting a settlement</h1><p>Visitor group chat is separate from public Explore and federation channels. Visiting does not grant access to another player's resources or controls.</p><button class="button" data-open-visitor-chat>Settlement visitor chat</button><a class="button" href="/contacts/">Contacts</a><a class="button" href="/settlement/">Your settlement</a></section>`;
       localize(root);
       root.querySelector('[data-open-visitor-chat]')!.addEventListener('click', focusWorldChat);
     }
@@ -901,13 +902,13 @@ function waterUpkeepPanel(compact = false): string {
   if (compact) return `<div class="water-upkeep-row${upkeep.paused ? ' water-shortage' : ''}">
     <span class="water-upkeep-use" title="${escape(translate('50 L per resident / day before climate adjustments.', language))}">${icon('water')}<strong>${resourceFmt('water', upkeep.dailyConsumption)}<small>/${translate('day', language)}</small></strong></span>
     ${completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)}
-    <a href="/play/market/?asset=water&amp;side=buy" aria-label="${escape(translate('Buy Water', language))}" title="${escape(translate('Buy Water', language))}">${icon('plus')}</a>
-    <a href="/play/settlement/#buildings" aria-label="${escape(translate('Water facilities', language))}" title="${escape(translate('Water facilities', language))}">${icon('settings')}</a>
+    <a href="/market/?asset=water&amp;side=buy" aria-label="${escape(translate('Buy Water', language))}" title="${escape(translate('Buy Water', language))}">${icon('plus')}</a>
+    <a href="/settlement/#buildings" aria-label="${escape(translate('Water facilities', language))}" title="${escape(translate('Water facilities', language))}">${icon('settings')}</a>
     ${upkeep.paused ? '<small class="water-shortage-text" role="status">Water shortage pauses advanced activity, not residents.</small>' : ''}</div>`;
   return `<div class="notice water-upkeep" role="status"><div class="water-upkeep-heading"><strong>Daily Water</strong>${costChips({ water: upkeep.dailyConsumption })}</div>
     <div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>
     <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Water shortage pauses advanced activity, not residents.</p>' : ''}</div>
-    <div class="water-upkeep-links"><a href="/play/market/?asset=water&amp;side=buy">Buy Water</a><a href="/play/settlement/#buildings">Water facilities</a></div></div>`;
+    <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>`;
 }
 function crewAllocationLimit(resource: Resource): number {
   const others = resources.reduce((sum, key) => sum + (key === resource ? 0
@@ -959,7 +960,7 @@ function activityAutomationPanel(activity: ActivityKind): string {
     <div class="automation-items">${collectionDurations.map(weeks => {
       const item = `activity-${activity}-${weeks}` as const, owned = state.inventory.items.includes(item);
       return `<button class="button automation-item" data-action="activate-activity" data-item="${item}" ${owned ? '' : 'disabled'}><strong>${weeks}w</strong><small>${owned ? 'Activate' : 'Find or buy'}</small></button>`;
-    }).join('')}</div><a href="/play/market/?asset=activity-${activity}-1">Marketplace</a>
+    }).join('')}</div><a href="/market/?asset=activity-${activity}-1">Marketplace</a>
     </section>`;
 }
 function expeditionStartedAt(expedition: Expedition): number {
@@ -1147,7 +1148,7 @@ app.addEventListener('click', event => {
   if (isSettlementTask(target.dataset.settlementPanel)) {
     const task = target.dataset.settlementPanel;
     if (settlementPage) showSettlementTask(target.closest('.settlement-dock') && task === settlementTask ? null : task);
-    else location.assign(`/play/settlement/?lang=${language}#${task}`);
+    else location.assign(`/settlement/?lang=${language}#${task}`);
     return;
   }
   const action = target.dataset.action;

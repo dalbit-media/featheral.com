@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { EventEmitter, once } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

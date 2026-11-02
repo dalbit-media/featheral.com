@@ -11,10 +11,10 @@
     "compile": "hardhat compile",
     "abi": "node scripts/export-abi.js",
     "deploy:bridge": "node scripts/deploy-bridge.js",
-    "generate:service-keys": "node services/token-api/keygen.js",
+    "generate:service-keys": "node services/identity/keygen.js",
     "start:cms": "npm start --prefix services/cms",
     "test:cms": "npm test --prefix services/cms",
-    "test:db": "node --test services/db-api/tests/*.test.js",
+    "test:db": "node --test services/database/tests/*.test.js",
     "test": "hardhat test"
   },
   "engines": {

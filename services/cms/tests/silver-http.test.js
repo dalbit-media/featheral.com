@@ -6,8 +6,8 @@ const { once } = require("node:events");
 const crypto = require("node:crypto");
 const express = require("express");
 const { Wallet } = require("ethers");
-const { Notes } = require("../../notes-api/ledger");
-const { Creation } = require("../../notes-api/creation");
+const { Notes } = require("../../notes/ledger");
+const { Creation } = require("../../notes/creation");
 const { silverApi } = require("../lib/silver-api");
 async function fixture(t) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), buyer = Wallet.createRandom(), treasury = Wallet.createRandom();

@@ -3,14 +3,156 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#101713" />
-    <meta name="description" content="Featheral에서 지형을 탐험하고 자원을 모아 정착지를 키워 보세요. 지갑 연결·결제 없이 즐기는 한국어 정착지 건설·거버넌스 시뮬레이션입니다." />
-    <meta name="robots" content="noindex,follow" />
+    <meta name="theme-color" content="#f6f7fb" />
+    <meta name="description" content="21가지 지형을 탐험하고 주민을 배치해 자원을 모으세요. 정착지를 수도까지 키우는 무료 싱글플레이 게임 Featheral. 설치·지갑 연결·결제 없이 브라우저에서 지금 시작하세요." />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Featheral" />
+    <meta property="og:title" content="Featheral | 작은 세계, 더 큰 목소리." />
+    <meta property="og:description" content="첫 정착지를 세우고 주민을 배치해 새로운 건물을 해금하세요. 무료 싱글플레이 브라우저 게임, 지금 시작하세요." />
+    <meta property="og:locale" content="ko_KR" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Featheral | 작은 세계, 더 큰 목소리." />
+    <meta name="twitter:description" content="첫 정착지부터 다음 탐험, 나만의 수도까지. 지갑 연결·결제 없이 브라우저에서 무료로 플레이하세요." />
     <link rel="icon" href="/shared/logo-world.svg" type="image/svg+xml" />
-    <title>Featheral 플레이 | 정착지 건설·거버넌스 시뮬레이션</title>
+    <link rel="stylesheet" href="/shared/featheral.css" />
+    <link rel="stylesheet" href="/shared/wallet-profile.css" />
+    <link rel="stylesheet" href="/src/landing.css" />
+    <title>Getting started · Featheral World — Settlement &amp; Federation</title>
   </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+  <body class="site-world world-about">
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <nav class="eco-bar" aria-label="Featheral sites" data-no-localize><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+    <header class="top world-header" data-no-localize>
+      <a class="brand" href="/"><img src="/shared/logo-world.svg" alt="" width="34" height="34"><b>Featheral World</b></a>
+      <div class="world-live-cards" role="group" aria-label="Live world statistics" data-state="loading">
+        <div class="world-live-card" role="group" aria-label="Settlements"><span>Settlements</span><strong><span data-total="settlements">—</span></strong></div>
+        <div class="world-live-card" role="group" aria-label="Ethereum FTHG supply"><span>Ethereum FTHG supply</span><strong><span data-gold-supply>—</span></strong></div>
+        <div class="world-live-card" role="group" aria-label="FTH$ supply"><span>FTH$ supply</span><strong><span data-total="dollars">—</span></strong></div>
+        <div class="world-live-card" role="group" aria-label="Population"><span>Population</span><strong><span data-total="population">—</span></strong></div>
+      </div>
+      <nav aria-label="World site">
+        <a href="/" aria-current="page">Getting started</a>
+        <a href="/settlement/">Settlement</a>
+        <a href="/federation/">Federation</a>
+        <a href="/help/">Field guide</a>
+        <a class="play-launch" href="/explore/">Explore</a>
+        <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg></button>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero section-shell" aria-labelledby="hero-title">
+        <section class="world-stats" aria-labelledby="stats-title">
+          <div class="world-stats-heading"><p id="stats-title" class="eyebrow">함께 자라나는 세계</p><p id="stats-status" role="status">실시간 통계를 보려면 자바스크립트가 필요합니다.</p></div>
+          <dl class="world-stats-grid">
+            <div class="world-stat" title="서버에 생성된 정착지 수입니다. 비활성 정착지도 포함하며, 홈페이지 방문만으로는 정착지가 생성되지 않습니다."><dt>정착지 수</dt><dd><span class="stat-icon" data-icon="home" aria-hidden="true"></span><span data-total="settlements">&mdash;</span></dd></div>
+            <div class="world-stat" title="Verified Ethereum Mainnet FTHG total supply from the Gold API."><dt>Ethereum FTHG supply</dt><dd><span class="stat-icon" data-icon="gold" aria-hidden="true"></span><span data-gold-supply>&mdash;</span></dd></div>
+            <div class="world-stat world-stat-fthg" title="Dollar ledger supply, including wallets, game market pools and escrow. FTH$ is not fiat currency."><dt>페더럴 달러 · FTH$ 총유통량</dt><dd><span class="stat-icon" data-icon="dollars" aria-hidden="true"></span><span data-total="dollars">&mdash;</span></dd></div>
+            <div class="world-stat" title="비활성 정착지를 포함한 게임 내 전체 주민 수입니다. 실제 이용자 수나 동시 접속자 수가 아닙니다."><dt>월드 전체 인구</dt><dd><span class="stat-icon" data-icon="people" aria-hidden="true"></span><span data-total="population">&mdash;</span></dd></div>
+          </dl>
+          <div class="world-stats-footer"><p><span>1 페더럴 골드 =</span> <strong data-public-gold-rate>&mdash;</strong> <span>FTH$ · 준비금 기준 실시간 환율</span></p><p>World gameplay statistics, Dollar ledger supply and verified Ethereum FTHG data. Each fund service remains authoritative.</p></div>
+        </section>
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="status-light"></span> 무료 싱글플레이 탐험·건설 게임</div>
+          <h1 id="hero-title">Explore a world.<br /><span>Build a settlement. Shape a federation.</span></h1>
+          <p class="hero-description">주민을 배치해 자원을 모으고, 창고와 건물을 업그레이드하세요. 21가지 지형을 탐험하며 작은 정착지를 수도까지 키워 보세요.</p>
+          <div class="hero-actions"><a class="btn btn-dark" href="/explore/">Start exploring <span aria-hidden="true">&rarr;</span></a><a class="text-link" href="#how-it-works"><span class="play-circle" aria-hidden="true">&#9654;</span> Getting started</a></div>
+          <p class="entry-note"><span data-icon="check" aria-hidden="true"></span> 설치·지갑 연결·결제 없이, PC와 모바일 브라우저에서 바로 플레이하세요.</p>
+          <div class="prototype-note"><span class="tiny-island" aria-hidden="true">&#10022;</span><span>정착지를 세우면 첫 주민 12명이 합류합니다.<small>플레이 가능한 초기 프로토타입 · PC·모바일 웹 지원</small></span></div>
+        </div>
+        <div class="hero-world">
+          <div class="world-halo" aria-hidden="true"></div>
+          <span class="world-coordinate coordinate-top" aria-hidden="true">나만의 월드 / 001</span>
+          <img class="island-art" src="/images/featheral-world.svg" width="900" height="760" alt="작은 집과 소나무, 강, 공동 회관이 있는 초록빛 섬의 일러스트입니다." fetchpriority="high" />
+          <div class="floating-note note-home"><span class="note-icon" data-icon="home" aria-hidden="true"></span><span>나만의 첫 정착지<small>내 손으로 키우는 도시의 시작.</small></span></div>
+          <div class="floating-note note-together"><span class="note-icon" data-icon="federation" aria-hidden="true"></span><span>게임 속 연방에 가입하세요.<small>마을 회관을 건설하고 가상 투표에 참여하세요.</small></span></div>
+          <p class="illustration-caption">이 그림은 미리보기입니다. 나만의 세계는 게임에서 시작됩니다.</p>
+        </div>
+      </section>
+
+      <div class="promise-strip section-shell" aria-label="게임 특징"><span><span data-icon="compass" aria-hidden="true"></span> 21가지 지형 탐험</span><span><span data-icon="warehouse" aria-hidden="true"></span> 주민 배치·주간 채집</span><span><span data-icon="people" aria-hidden="true"></span> 정착지에서 수도까지</span><span><span data-icon="lock" aria-hidden="true"></span> 지갑·결제 없이 플레이</span></div>
+
+      <section id="how-it-works" class="journey-section section-shell" aria-labelledby="journey-title">
+        <div class="section-heading"><div><p class="eyebrow">쉽게 시작하고, 키울수록 빠져드는 재미.</p><h2 id="journey-title">정착하고, 채집하고,<br />탐험하며 성장하세요.</h2></div><p>정착지를 세우고 주민을 배치하면 채집이 시작됩니다. 탐험으로 새 자원지를 찾고, 건물을 업그레이드해 다음 성장 단계를 열어 보세요.</p></div>
+        <div class="journey">
+          <noscript><style>.journey-tabs{display:none}.journey-panel[hidden]{display:block!important}</style><p>아래에서 세 단계를 모두 볼 수 있습니다. 게임을 플레이하려면 자바스크립트가 필요합니다.</p></noscript>
+          <div class="journey-tabs" role="tablist" aria-label="게임 진행 방식 알아보기" aria-orientation="vertical">
+            <button id="step-settle" role="tab" aria-selected="true" aria-controls="panel-settle" data-step="settle"><span class="step-number">01</span><span><strong>정착하고 첫 주민을 맞이하세요.</strong><small>탐험과 정착</small></span><span class="step-arrow" aria-hidden="true">&nearr;</span></button>
+            <button id="step-grow" role="tab" aria-selected="false" aria-controls="panel-grow" tabindex="-1" data-step="grow"><span class="step-number">02</span><span><strong>주민을 배치하고 자원을 받으세요.</strong><small>채집과 성장</small></span><span class="step-arrow" aria-hidden="true">&nearr;</span></button>
+            <button id="step-govern" role="tab" aria-selected="false" aria-controls="panel-govern" tabindex="-1" data-step="govern"><span class="step-number">03</span><span><strong>연방에 가입하고 가상 투표에 참여하세요.</strong><small>연방과 거버넌스</small></span><span class="step-arrow" aria-hidden="true">&nearr;</span></button>
+          </div>
+          <div class="journey-preview">
+            <div class="preview-topline"><span><i></i> 게임 미리보기</span><small>실제 보상이 아닌 설명용 예시</small></div>
+            <section id="panel-settle" class="journey-panel" role="tabpanel" aria-labelledby="step-settle" tabindex="0">
+              <div class="mini-scene scene-settle" aria-hidden="true"><span class="scene-sun"></span><span class="scene-tree tree-one" data-icon="wood"></span><span class="scene-tree tree-two" data-icon="wood"></span><span class="scene-house" data-icon="home"></span><span class="scene-path"></span><span class="scene-tag">나의 첫 보금자리</span></div>
+              <div class="preview-copy"><span class="preview-label">탐험부터 정착까지</span><h3>첫 정착지에서 시작되는 나만의 월드.</h3><p>숲과 강 사이에서 정착할 땅을 찾아보세요. 시작 자원으로 정착지를 세우면 첫 주민 12명이 합류합니다.</p><div class="mini-chips"><span><span data-icon="compass" aria-hidden="true"></span> 탐험</span><span><span data-icon="home" aria-hidden="true"></span> 정착</span><span><span data-icon="people" aria-hidden="true"></span> 주민 12명</span></div></div>
+            </section>
+            <section id="panel-grow" class="journey-panel" role="tabpanel" aria-labelledby="step-grow" tabindex="0" hidden>
+              <div class="mini-scene scene-grow"><div class="preview-storage"><span><span data-icon="wood" aria-hidden="true"></span> 목재 저장량 <strong>50 / 100</strong></span><div class="demo-meter" aria-hidden="true"><i></i></div><small>보유량 50% · 자원별 유료 수거</small></div><span class="scene-tag">기다리는 동안에도 차곡차곡.</span></div>
+              <div class="preview-copy"><span class="preview-label">꾸준히 모으고, 차근차근 성장하세요</span><h3>정착지는 오늘도 성장 중.</h3><p>자원지에 주민을 배치하면 게임 시간 7일 후 채집을 마칩니다. 상단 자원 버튼에서 FTH$ 운송비를 내고 수거하거나 수거 후 판매로 운송비를 마련하세요. 탐험·거래로 얻은 자동 수거권은 1·4·12주 동안 유효합니다. 물이 부족해도 주민은 떠나지 않습니다.</p><div class="mini-chips"><span><span data-icon="sun" aria-hidden="true"></span> 주간 채집</span><span><span data-icon="warehouse" aria-hidden="true"></span> 저장 공간 확장</span><span><span data-icon="layers" aria-hidden="true"></span> 정착지 업그레이드</span></div></div>
+            </section>
+            <section id="panel-govern" class="journey-panel" role="tabpanel" aria-labelledby="step-govern" tabindex="0" hidden>
+              <div class="mini-scene scene-govern"><div class="preview-ballot"><span class="ballot-symbol" data-icon="water" aria-hidden="true"></span><div><small>가상 의회</small><strong>하천 유역 복원</strong><span>함께하는 결정의 의미를 알아보세요.</span></div><span class="ballot-check" data-icon="check" aria-hidden="true"></span></div><span class="scene-tag">공동체의 가치는 자원보다 큽니다.</span></div>
+              <div class="preview-copy"><span class="preview-label">거버넌스, 직접 참여해 보세요</span><h3>성장하고, 가입하고, 투표하세요.</h3><p>마을로 성장하고 우호도를 높여 연방에 가입하세요. 마을 회관을 건설하면 가상 안건에 투표할 수 있습니다. 게임 속 거버넌스를 체험하는 기능이며, 실제 정치적 권한을 부여하지는 않습니다.</p><div class="mini-chips"><span><span data-icon="people" aria-hidden="true"></span> 우호 관계</span><span><span data-icon="federation" aria-hidden="true"></span> 연방</span><span><span data-icon="flag" aria-hidden="true"></span> 안건 투표</span></div></div>
+            </section>
+            <a class="preview-cta" href="/settlement/">지금 내 정착지 키우기 <span aria-hidden="true">&rarr;</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="ideas-section section-shell" aria-labelledby="ideas-title">
+        <div class="section-heading"><div><p class="eyebrow">탐험할 땅도, 키울 재미도 계속</p><h2 id="ideas-title">다음 탐험에는<br /><em>무엇이 기다릴까요?</em></h2></div><p>숲과 강을 넘어 사막·화산·빙하까지. 지형마다 자원과 탐험 시간이 달라집니다. 필요한 자원지를 찾아 주민을 어디에 배치할지 정해 보세요.</p></div>
+        <div class="idea-grid">
+          <article class="idea-card"><span class="idea-icon" data-icon="sun" aria-hidden="true"></span><h3>탐험으로 새 자원지를 찾으세요.</h3><p>미배치 주민 2명을 탐험대로 보내세요. 게임 시간 1~3주 후 복귀하면 탐험한 지역이 지도에 표시됩니다.</p><span class="idea-footer">주민 2명 · 게임 시간 1~3주 <span aria-hidden="true">&rarr;</span></span></article>
+          <article class="idea-card"><span class="idea-icon" data-icon="people" aria-hidden="true"></span><h3>주민 배치가 성장의 시작.</h3><p>어느 자원에 몇 명을 배치할지 결정하세요. 미배치 주민은 자원을 생산하지 않으며, 배치한 채집팀은 오프라인에서도 게임 시간 7일마다 자원을 보냅니다.</p><span class="idea-footer">배치한 주민만 자원 생산 <span aria-hidden="true">&rarr;</span></span></article>
+          <article class="idea-card"><span class="idea-icon" data-icon="flag" aria-hidden="true"></span><h3>성장할수록 새로운 기능이 열려요.</h3><p>건물은 FTH$를 자동 지급하지 않습니다. 정착지에서 보유 자원을 시장가로 판매해 운영 자금을 마련하세요. 도시 은행은 석유 채집과 자원 거래를 해금하며 연방에서는 가상 안건에 투표할 수 있습니다.</p><span class="idea-footer">성장에 따라 해금되는 건물과 기능 <span aria-hidden="true">&rarr;</span></span></article>
+        </div>
+        <p class="section-footnote">현재는 서버 기반 싱글플레이 프로토타입입니다. 실제 DAO나 온체인 게임 경제가 아니며, 금전적 보상을 제공하지 않습니다.</p>
+      </section>
+
+      <section id="community" class="community-section" aria-labelledby="community-title">
+        <div class="section-shell community-inner">
+          <div class="community-copy"><p class="eyebrow">지금 플레이하고, 다음 소식도 만나 보세요</p><h2 id="community-title">커뮤니티는 준비 중,<br />플레이는 지금.</h2><p>게임은 지금 바로 플레이할 수 있습니다. 공식 커뮤니티와 공지 채널은 준비되는 대로 안내하겠습니다. 그동안 나만의 월드부터 시작해 보세요.</p><a class="btn btn-mint" href="/explore/">지금 무료로 플레이 <span aria-hidden="true">&rarr;</span></a><p class="channel-notice"><span data-icon="lock" aria-hidden="true"></span> 공식 링크는 준비 중입니다. 현재 회원 가입이나 알림 구독 기능은 운영하지 않습니다.</p></div>
+          <div class="channel-grid" aria-label="공식 채널: 링크 준비 중">
+            <a class="channel-card" data-community="discord" aria-disabled="true" tabindex="-1"><span class="channel-symbol" aria-hidden="true">D</span><span><strong>Discord</strong><small>플레이 후기와 아이디어를 나눠요.</small></span><span class="channel-state">준비 중</span></a>
+            <a class="channel-card" data-community="x" aria-disabled="true" tabindex="-1"><span class="channel-symbol" aria-hidden="true">X</span><span><strong>X</strong><small>업데이트와 개발 소식을 전해요.</small></span><span class="channel-state">준비 중</span></a>
+            <a class="channel-card" data-community="telegram" aria-disabled="true" tabindex="-1"><span class="channel-symbol" aria-hidden="true">T</span><span><strong>Telegram</strong><small>공식 공지와 소식을 확인하세요.</small></span><span class="channel-state">준비 중</span></a>
+            <a class="channel-card" data-community="github" aria-disabled="true" tabindex="-1"><span class="channel-symbol github-symbol" aria-hidden="true">GH</span><span><strong>GitHub</strong><small>개발 과정과 기술 아이디어를 살펴보세요.</small></span><span class="channel-state">준비 중</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section id="token" class="token-section section-shell" aria-labelledby="token-title">
+        <div class="token-copy"><p class="eyebrow">FEATHERAL DOLLAR · FTH$ / FEATHERAL GOLD · FTHG</p><h2 id="token-title">Real wallet funds, virtual worlds.</h2><p>World uses your authorized Dollar wallet for FTH$ gameplay. Gold API reads actual Ethereum FTHG; Dollar API owns all FTH$ balances and settlement. New accounts and market pools start empty.</p><a class="text-link" href="/whitepaper/">백서 살펴보기 <span aria-hidden="true">&nearr;</span></a></div>
+        <div class="token-card"><div class="token-card-heading"><span class="token-emblem" aria-hidden="true">F</span><div><h3>Featheral Gold <span>FTHG</span></h3><p>Ethereum Mainnet</p></div></div><div class="contract-placeholder"><span>FTHG token contract</span><code data-no-localize>0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665</code></div><p class="token-warning"><span data-icon="lock" aria-hidden="true"></span> Verify contracts and wallet approvals independently. Never share recovery phrases or private keys.</p><p class="token-disclosure">FTH$ is not USD or an on-chain token. Conversion and staking require a deployed, funded Ethereum bridge. Gameplay spending burns existing FTH$; no investment return or governance right is promised.</p></div>
+      </section>
+
+      <section id="questions" class="faq-section section-shell" aria-labelledby="faq-title">
+        <div><p class="eyebrow">시작 전에 알아 두세요</p><h2 id="faq-title">궁금한 점이<br />있으신가요?</h2><a class="text-link" href="/whitepaper/">더 알아보기: 백서 <span aria-hidden="true">&nearr;</span></a></div>
+        <div class="faq-list">
+          <details><summary>Featheral은 어떤 게임인가요?<span aria-hidden="true">+</span></summary><p>Featheral은 브라우저에서 즐기는 캐주얼 정착지 건설·Web3 거버넌스 시뮬레이션입니다. 지도를 탐험하고 정착지를 키우며, 주민을 배치해 자원을 모으고 가상의 연방과 의회에 참여할 수 있습니다. 현재는 시뮬레이션 서버 기반 싱글플레이 프로토타입이며, 실제 배포된 DAO가 아닙니다.</p></details>
+          <details><summary>지갑이나 암호화폐가 필요한가요?<span aria-hidden="true">+</span></summary><p>아니요. 지갑 연결, 결제, 가스비, 토큰 클레임 없이 브라우저에서 바로 플레이하세요. 자산을 판매해 기존 FTH$를 받고 게임과 거래소에서 사용하세요. 정착·주민·건물·탐험 지급금은 없습니다.</p></details>
+          <details><summary>자원을 모으고 성장하려면 어떻게 하나요?<span aria-hidden="true">+</span></summary><p>정착하면 주민이 자원별로 자동 배치됩니다. 채집팀이 게임 시간 7일마다 자원을 보내며, 미배치 주민은 자원을 생산하지 않습니다. 거리에 따른 주간 운송비, 탐험 출발 비용, 주민 모집에 쓸 금속을 준비하세요. 모집 비용은 인구가 늘수록 높아집니다. 탐험에는 주민 2명이 필요하고 게임 시간 1~3주가 걸립니다. 탐험한 지역은 무료로 즉시 이동할 수 있습니다. 각 자원은 저장량 50%부터 받을 수 있으며, 주민 모집은 금속을 먼저 지불하면 게임 시간 1주 뒤에 완료됩니다. 한 번에 한 팀만 모집하며 자동으로 반복하지 않습니다.</p></details>
+          <details><summary>내 세계는 저장되나요?<span aria-hidden="true">+</span></summary><p>Progress is saved by the Dollar game service. Guest access depends on its browser cookie; an authorized wallet can restore its linked settlement by signing again. Exported snapshots cannot restore funds.</p></details>
+          <details><summary>페더럴 골드(FTHG)는 출시되었나요?<span aria-hidden="true">+</span></summary><p>FTHG is an actual Ethereum Mainnet token. World never creates simulated FTHG. Open Wallet and staking for configured bridge operations; FTH$ redemption requires an authorized service, not a public withdrawal form.</p></details>
+          <details><summary>어떻게 참여하고 소식을 받을 수 있나요?<span aria-hidden="true">+</span></summary><p>공식 GitHub, Discord, X, Telegram 링크는 아직 공개되지 않았으며 각 카드에 준비 중으로 표시되어 있습니다. 검증된 링크가 추가되면 해당 채널에서 공지를 확인하고 참여하세요. 이메일 목록, 자동 알림 등록, 외부 계정 연결 기능은 운영하지 않습니다.</p></details>
+        </div>
+      </section>
+
+      <section class="last-call section-shell" aria-labelledby="last-title"><span class="last-call-spark" data-icon="spark" aria-hidden="true"></span><p class="eyebrow">설치 없이 지금 시작하세요</p><h2 id="last-title">첫 정착지를 지금 세우세요.</h2><a class="btn btn-dark" href="/explore/">무료로 플레이 시작 <span aria-hidden="true">&rarr;</span></a><p>지갑 연결·결제 없이 즐기는 시뮬레이션입니다.</p></section>
+    </main>
+    <footer class="site-footer section-shell">
+      <div class="footer-top">
+        <a class="site-brand" href="/" aria-label="Featheral 홈">featheral<span class="brand-dot">.</span></a><p>작은 세계, 더 큰 목소리.</p>
+        <nav aria-label="하단 메뉴"><a href="/explore/">플레이</a><a href="/whitepaper/">백서</a><a href="#community">커뮤니티와 GitHub</a><a href="#token">FTHG 현황</a></nav>
+        <label class="language-picker"><span>언어</span><select data-language aria-label="언어"><option value="ko">한국어</option><option value="en">English</option></select></label>
+      </div>
+      <div class="footer-bottom"><p>독립적인 시뮬레이션 프로토타입입니다. 금전적 보상, 토큰 판매, 투자 제안, 실제 거버넌스 권한을 제공하지 않습니다.</p><p>FTH$와 골드는 게임 내 재화이며 배포된 토큰이 아닙니다. 현금 출금은 지원하지 않습니다.</p></div>
+    </footer>
+    <script src="/shared/site-links.js"></script>
+    <script src="/shared/wallet-profile.js"></script>
+    <script>FeatheralProfile.mount(document.getElementById("walletButton"), { primaryCurrency: "fthDollar", walletUrl: FeatheralSites.url("dollar", "/wallet/") });</script>
+    <script type="module" src="/src/landing.ts"></script>
   </body>
 </html>

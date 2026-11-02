@@ -106,7 +106,7 @@ describe("Shared administration tabs", () => {
 
   for (const site of ["foundation", "dollar", "world"]) {
     it(`wires every ${site} tab to a unique existing panel`, () => {
-      const html = fs.readFileSync(path.join(root, "admin.featheral.com", "views", site + ".html"), "utf8");
+      const html = fs.readFileSync(path.join(root, "admin.featheral.com", "pages", site + ".html"), "utf8");
       const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
       expect(new Set(ids).size).to.equal(ids.length);
       const nav = html.match(/<nav[^>]*data-admin-tabs[^>]*>([\s\S]*?)<\/nav>/)[1];
@@ -119,7 +119,7 @@ describe("Shared administration tabs", () => {
   }
 
   it("does not leave removed Gold control handlers or dead literal DOM references", () => {
-    const html = fs.readFileSync(path.join(root, "admin.featheral.com", "views", "gold.html"), "utf8");
+    const html = fs.readFileSync(path.join(root, "admin.featheral.com", "pages", "gold.html"), "utf8");
     const script = fs.readFileSync(path.join(root, "admin.featheral.com", "js", "operations", "gold.js"), "utf8");
     const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]));
     for (const match of script.matchAll(/\$\("([^"]+)"\)|act\("([^"]+)"/g)) expect(ids.has(match[1] || match[2]), match[1] || match[2]).to.equal(true);
@@ -133,7 +133,7 @@ describe("Shared administration tabs", () => {
   });
 
   it("keeps personal staking in the wallet and management in admin", () => {
-    const admin = fs.readFileSync(path.join(root, "admin.featheral.com", "views", "dollar.html"), "utf8");
+    const admin = fs.readFileSync(path.join(root, "admin.featheral.com", "pages", "dollar.html"), "utf8");
     const wallet = fs.readFileSync(path.join(root, "wallet.featheral.com", "ethereum", "index.html"), "utf8");
     for (const id of ["stakeForm", "claimForm"]) {
       expect(admin).not.to.include(`id="${id}"`);
@@ -246,12 +246,12 @@ describe("Ledger SQL menu examples", () => {
       const filename = page === "admin" ? "admin.js" : `${page}.js`;
       const script = fs.readFileSync(page === "admin"
         ? path.join(root, "admin.featheral.com", "js", "operations", site + ".js")
-        : path.join(root, `${site}.featheral.com`, page, filename), "utf8");
+        : path.join(root, `${site === "world" ? "media" : site}.featheral.com`, page, filename), "utf8");
       const examples = [...script.matchAll(/\{ title: ("(?:[^"\\]|\\.)*"), sql: ("(?:[^"\\]|\\.)*") \}/g)].map((match) => ({ title: JSON.parse(match[1]), sql: JSON.parse(match[2]) }));
       expect(examples).to.have.length(count);
       const db = site === "dollar"
         ? require("../services/fth-ledger/sql").createFthDb()
-        : require("../services/social-ledger/social").SocialLedger.prototype.buildSql();
+        : require("../services/media/social").SocialLedger.prototype.buildSql();
       try {
         for (const example of examples) {
           expect(example.title).not.to.equal("");

@@ -82,7 +82,7 @@ export class Inbox {
         visit.textContent = translate('Visit settlement', this.language);
         visit.addEventListener('click', async () => {
           visit.disabled = true;
-          try { await visitSettlement(this.csrf(), settlement.id); if (!this.closed) location.assign(`/play/settlement/?visit=${encodeURIComponent(settlement.id)}`); }
+          try { await visitSettlement(this.csrf(), settlement.id); if (!this.closed) location.assign(`/settlement/?visit=${encodeURIComponent(settlement.id)}`); }
           catch (error) { this.status(error instanceof Error ? error.message : 'The action could not be completed.'); visit.disabled = false; }
         });
         card.append(detail, visit);

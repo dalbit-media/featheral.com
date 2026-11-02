@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Community feed · Featheral Media</title>
+<meta name="description" content="Public wallet-signed posts, conversations and profiles on Featheral Media.">
+<meta property="og:title" content="Featheral Media">
+<meta property="og:image" content="/shared/logo-media.svg">
+<link rel="icon" href="/shared/logo-media.svg">
+<meta name="theme-color" content="#f6f7fb">
+<link rel="stylesheet" href="/shared/featheral.css">
+<link rel="stylesheet" href="/shared/wallet-profile.css">
+<link rel="stylesheet" href="/shared/world-profile.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body class="site-world world-app">
+<nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
+<header class="top world-header">
+  <a class="brand" href="/"><img src="/shared/logo-media.svg" alt="" width="34" height="34"><b>Featheral Media</b></a>
+  <nav aria-label="Media site">
+    <a href="/ledger/">Ledger</a>
+    <a class="play-launch" data-site="world" data-path="/explore/" href="https://world.featheral.com/explore/" target="_blank" rel="noopener" aria-label="Play (opens a new window)" title="Play in a new window"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Play</span></a>
+    <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
+    </button>
+  </nav>
+</header>
+<div class="app">
+  <aside class="rail" aria-label="Featheral Media">
+    <nav class="rail-nav">
+      <a href="#/setup" data-nav="start" aria-label="Set up profile"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H3zM9 20v-7h6v7"/></svg></span><b>Set up profile</b></a>
+      <a href="#/feed" data-nav="feed" aria-label="Community feed"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h10"/></svg></span><b>Community feed</b></a>
+      <a href="#/explore" data-nav="explore" aria-label="Explore"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg></span><b>Explore</b></a>
+      <a href="#/me" data-nav="me" aria-label="Profile"><span aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span><b>Profile</b></a>
+      <a href="#/guide" data-nav="guide" aria-label="Media guide"><span aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16"/></svg></span><b>Media guide</b></a>
+    </nav>
+    <button id="railPost" class="btn primary rail-post" type="button">Post</button>
+  </aside>
+
+  <main class="column" id="column">
+    <header class="col-head" id="colHead" hidden></header>
+    <section id="gettingStarted" class="getting-started" aria-labelledby="welcome-title">
+      <div class="welcome-hero">
+        <p class="welcome-eyebrow">Post · Follow · Connect</p>
+        <h2 id="welcome-title">Your voice. Your community.</h2>
+        <p>Read public posts without signing in. Connect a wallet to publish, reply and follow.</p>
+        <a class="btn" href="#/feed">Browse the community</a>
+      </div>
+      <section id="profileSetup" class="welcome-card" aria-labelledby="setup-title">
+        <p class="welcome-eyebrow" data-cms-copy="index-html-4539">Make yourself recognizable · Optional</p><h2 id="setup-title" data-cms-copy="index-html-4607">Your avatar &amp; profile</h2>
+        <p data-cms-copy="index-html-4668">Use one public identity across community posts and World chat. Profile setup is optional; gameplay does not require it.</p>
+        <div id="profileEditor" class="inline-profile"><p class="muted">Enable JavaScript to connect your wallet and set up a profile. You can read this introduction without connecting.</p></div>
+        <a class="welcome-skip" href="#/feed">Skip for now — browse posts</a>
+      </section>
+      <section class="welcome-card"><h2 data-cms-copy="index-html-5912">A community, not just a game</h2><p data-cms-copy="index-html-5949">Share what you are building, follow others and join nearby public chat. Community posts require a connected wallet and a free sign-in signature. Posts, profiles and avatars are public—never share secrets.</p><a class="btn" href="#/feed">Visit the community feed</a></section>
+    </section>
+    <section id="gettingGuide" class="getting-started" aria-labelledby="guide-title" hidden>
+      <section class="welcome-card"><h2 id="guide-title">Signed conversations</h2><p>Posts, replies, likes and follows use wallet-signed actions. Existing social records and their signatures remain unchanged after the move to Media.</p></section>
+      <section class="welcome-card"><h2 data-cms-copy="index-html-8095">Community and privacy</h2><p data-cms-copy="index-html-8125">Set up your avatar and username on Getting started. Posting uses wallet-signed actions on the World communication ledger. Game chat uses your linked World profile. Public profiles, avatars and posts are persistent records; do not upload sensitive information.</p><a class="btn" href="#/setup">Set up my profile</a> <a class="btn" data-site="world" data-path="/help/" href="https://world.featheral.com/help/" target="_blank" rel="noopener">Full gameplay guide</a></section>
+    </section>
+    <div id="composerHost"></div>
+    <div id="newBanner" hidden></div>
+    <div id="feed" aria-live="polite"><p class="muted pad">Loading…</p></div>
+  </main>
+
+  <aside class="side" aria-label="Search and suggestions">
+    <section class="side-card" id="worldStatus"><h2>A growing world</h2><p class="muted fine" role="status">Loading public world totals…</p></section>
+    <form id="searchForm" role="search"><input id="searchInput" type="search" placeholder="Search posts, @username or wallet" aria-label="Search Featheral Media" autocomplete="off"></form>
+    <section class="side-card" id="ledgerCard"><h2>World ledger</h2><p class="muted fine">Loading…</p></section>
+    <section class="side-card" id="followCard"><h2>Who to follow</h2><p class="muted fine">Loading…</p></section>
+    <p class="muted fine side-foot">Posts are signed by your wallet and recorded on the open World communication ledger. <a href="/ledger/#/sql">Query it with SQL</a> · <a href="#/guide">Getting-started guide</a> · <a href="/docs/">Docs</a></p>
+  </aside>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="/shared/site-links.js"></script>
+<script src="/shared/wallet-profile.js"></script>
+<script src="/shared/world-profile.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

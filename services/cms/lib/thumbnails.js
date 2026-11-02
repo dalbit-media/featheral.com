@@ -1,7 +1,7 @@
 // Moves posts into the WordPress "Thumbnails" category of a stored data set: the category is
 // created if needed, the posts lose their other categories (tags are kept) and category counts
 // are recomputed.
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 
 function moveToThumbnails(dbFile, ids, { name = 'Thumbnails', slug = 'thumbnails' } = {}) {
   const db = open(dbFile);

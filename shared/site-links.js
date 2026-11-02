@@ -3,9 +3,11 @@
 // Cross-site links for the Featheral hosts. Works on production (gold.featheral.com) and local
 // development (gold.localhost:8080) by swapping only the first host label and keeping protocol/port.
 (() => {
-  const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "ledger", "admin", "x", "ex", "notes", "sites", "stats", "wallet"];
+  const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "x", "ex", "notes", "sites", "stats", "wallet"];
   const publicSites = [["foundation", "Foundation"], ["gold", "Gold · FTHG"], ["dollar", "Dollar · FTH$"],
-    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["ledger", "Ledger"], ["x", "X"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"]];
+    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["x", "X"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"], ["admin", "Admin"]];
+  const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$",
+    app: "FTHX", media: "FTHX", x: "FTHX", notes: "FTHX", sites: "FTHX" };
   const { protocol, hostname, port } = window.location;
   const labels = hostname.split(".");
   const isIp = /^[\d.]+$/.test(hostname) || hostname.includes(":");
@@ -14,9 +16,9 @@
 
   function url(site, path = "/") {
     if (site === "cms") site = "admin";
-    if (["foundation", "gold", "dollar", "world"].includes(site) && /^\/admin(?:\/|$|#)/.test(path)) {
+    if (["foundation", "gold", "dollar", "world", "media"].includes(site) && /^\/admin(?:\/|$|#)/.test(path)) {
       const tab = path.split("#")[1];
-      path = `/#/operations/${site}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
+      path = `/#/operations/${site === "media" ? "world" : site}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
       site = "admin";
     }
     const host = site === "foundation" ? base : `${site}.${base}`;
@@ -24,16 +26,24 @@
   }
 
   function apply(root = document) {
-    const header = root.querySelector?.("body > header, #app > header, header.topbar");
+    const header = root.querySelector?.("body > header, #app > header, header.topbar, #app header.topbar");
+    if (!document.querySelector('link[data-site-navigation], link[href="/shared/site-links.css"]')) {
+      const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/shared/site-links.css";
+      style.dataset.siteNavigation = "true"; document.head.append(style);
+    }
     if (!root.querySelector?.(".eco-bar") && header && current !== "admin"
       && !window.location.pathname.startsWith("/operations/")) {
       const bar = document.createElement("nav");
       bar.className = "eco-bar";
       bar.setAttribute("aria-label", "Featheral sites");
-      header.before(bar);
+      if (current === "world" && document.querySelector("#app .rail")) document.body.prepend(bar);
+      else header.before(bar);
     }
     for (const bar of root.querySelectorAll(".eco-bar")) {
-      for (const [site, label] of [...publicSites, ...(current === "admin" ? [["admin", "Admin"]] : [])]) {
+      const related = publicSites.filter(([site]) => site === current || currencies[current] && currencies[site] === currencies[current]);
+      for (const link of bar.querySelectorAll("a")) if (!related.some(([site]) => link.dataset.site === site)) link.remove();
+      bar.setAttribute("aria-label", currencies[current] ? `${currencies[current]} sites` : "Current site");
+      for (const [site, label] of related) {
         if (bar.querySelector(`a[data-site="${site}"]`)) continue;
         const link = document.createElement("a");
         link.dataset.site = site;
@@ -48,7 +58,10 @@
         new ResizeObserver(resize).observe(bar);
       }
     }
-    if (header && current !== "admin" && !window.location.pathname.startsWith("/operations/")
+    for (const title of root.querySelectorAll("header .brand, header a.logo, a.game-brand, a.site-brand")) {
+      if (title.tagName === "A") { title.dataset.site = current; title.removeAttribute("data-path"); title.href = url(current); }
+    }
+    if (!window.location.pathname.startsWith("/operations/")
       && document.body.dataset.embedded !== "true"
       && !(current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1")
       && !document.querySelector(".eco-footer")) {
@@ -68,9 +81,10 @@
       const groups = document.createElement("ul");
       for (const [label, sites] of [
         ["Currencies", ["gold", "silver", "dollar"]],
-        ["Apps", ["app", "world", "x", "ex", "notes", "sites"]],
+        ["World & community", ["world", "media"]],
+        ["Apps", ["app", "x", "ex", "notes", "sites"]],
         ["Ledgers", ["ledger"]],
-        ["Tools", ["wallet", "stats", "db"]],
+        ["Tools", ["wallet", "stats", "db", "admin"]],
       ]) {
         const group = document.createElement("li"), heading = document.createElement("span");
         heading.textContent = label;
@@ -84,11 +98,13 @@
       foundation.append(groups); tree.append(foundation); nav.append(tree); footer.append(nav);
       document.body.append(footer);
     }
-    if (current !== "admin") {
-      for (const link of root.querySelectorAll('nav a, .eco-bar a')) {
+    {
+      for (const link of root.querySelectorAll('header nav a, .eco-bar a')) {
         const target = link.dataset.site ? new URL(url(link.dataset.site, link.dataset.path || "/"))
           : new URL(link.getAttribute("href") || "/", window.location.href);
-        if (["admin", "cms"].includes(link.dataset.site) || target.hostname.startsWith("admin.") || /^\/admin(?:\/|$)/.test(target.pathname))
+        const site = link.dataset.site || publicSites.find(([key]) => target.origin === new URL(url(key)).origin)?.[0];
+        if (site && site !== current && (!currencies[current] || currencies[site] !== currencies[current])
+          || current !== "admin" && (target.hostname.startsWith("admin.") || /^\/admin(?:\/|$)/.test(target.pathname)))
           link.remove();
       }
     }
@@ -98,7 +114,12 @@
     }
   }
 
-  window.FeatheralSites = { url, apply, current, SITES };
+  if (current === "world" && /^#\/(?:feed|following|post|user|me|setup|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {
+    window.location.replace(url("media") + window.location.search + window.location.hash);
+    return;
+  }
+  window.FeatheralSites = { url, apply, current, SITES, currencies };
+  document.addEventListener("featheral:site-ready", () => apply());
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => apply());
   else apply();
   if (current !== "wallet" && current !== "admin" && !document.querySelector('script[data-central-wallet-loader]')) {

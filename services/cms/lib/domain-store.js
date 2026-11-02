@@ -1,8 +1,8 @@
 'use strict';
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { FileJournals } = require('../../db-api/journal');
-const { createDomainApi } = require('../../db-api/domain');
+const { FileJournals } = require('../../database/journal');
+const { createDomainApi } = require('../../database/domain');
 
 let configuredDomain;
 const standaloneDomains = new Map();

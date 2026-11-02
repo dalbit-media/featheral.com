@@ -1,4 +1,4 @@
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const HOUR = 3600000;
 const MINUTE = 60000;
 const colors = require('../../../shared/site-colors.json');

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { WpApi } = require('./wpapi');
 const { setDir, readJson, writeJson, buildUploadsIndex } = require('./store');
 const { serialize } = require('./phpser');

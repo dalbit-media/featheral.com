@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { test } from 'node:test';
 import { accrue, apply, createAccount, snapshot } from './economy.ts';
 import { SqliteStore } from './store.ts';

@@ -5,7 +5,7 @@ const { pipeline } = require('node:stream/promises');
 const { Client } = require('ssh2');
 const yazl = require('yazl');
 const { hosts } = require('./site-pages');
-const { sshTarget } = require('../../db-api/ssh-target');
+const { sshTarget } = require('../../database/ssh-target');
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;

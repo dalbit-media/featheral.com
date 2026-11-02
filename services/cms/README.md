@@ -13,7 +13,7 @@ are also included in traffic reporting and deployment hostname review.
 The workspace and privileged APIs are protected by the Admin password managed in **Settings**; frontend assets contain no authority. The main gateway dispatches authenticated API requests to the original Gold, Dollar and World services; signing, moderator/on-chain roles and wallet confirmations still apply. Writes must come from the admin origin. The standalone CMS service explicitly reports that operational APIs require the main `npm start` server. Backend modules and private datasets remain under `services/cms/`; an existing old CMS-host page database is reused to preserve its content/themes.
 
 CMS and Notes use Node's built-in SQLite with connections created and managed
-through `services/db-api/sqlite.js`. Standalone modules and tools import its
+through `services/database/sqlite.js`. Standalone modules and tools import its
 `open(file, options)` directly; no external database driver is required.
 Standalone CMS shutdown calls `database.sqlite.closeAll()` after service cleanup.
 
@@ -78,7 +78,7 @@ receive one grant, to its assignee. Ordinary reaction-reward minting of FTHS is
 disabled. Explicit Exchange pool funding remains a separate approved operation;
 it requires existing treasury FTHX and never happens at startup.
 
-`services/notes-api/workspace.js` stores membership, channels, messages, reads,
+`services/notes/workspace.js` stores membership, channels, messages, reads,
 files, shared notes, missions, calls, grants and audit records in the existing
 Notes SQLite database. Include that database in consistent private backups.
 On startup FTHS is registered under the system treasury and its old unissued
@@ -278,6 +278,19 @@ and supply its backup path as legacy `ADMIN_CONFIG` during migration. Deployment
 disabled until reviewed. Migration refuses legacy SSH-key authentication rather
 than discarding it; re-enroll a password credential in Settings. Keep the original
 external vault key and journals for recovery. For existing encrypted JSON Settings,
+If there is no existing Admin password or the old deployment uses an SSH key,
+use `node scripts/init-settings.js --migrate-env --setup`. It archives the exact
+source configuration encrypted beside the external bootstrap, leaves the SSH key
+file untouched, preserves supported settings and keeps deployment disabled.
+Unconfigured Admin setup requires a loopback binding. Start the service and set
+Admin access at `http://admin.localhost:8080/#/settings` (use the migrated port).
+Sign with the origin wallet, then enroll the replacement SSH/sudo credential.
+The setup migration exception is offline-only; normal API saves still require
+an Admin password. All migrations retain encrypted source backups in
+`migration-backups/` beside the bootstrap using AAD `featheral-legacy-migration-v1`. For existing encrypted JSON Settings,
+Invalid/missing legacy fingerprints are archived and left unset during credential-free
+setup, never trusted for an SSH connection. New Windows bootstrap/key and backup
+files are ACL-restricted to the account running initialization. For existing encrypted JSON Settings,
 run `node scripts/init-settings.js --migrate-settings` with their original bootstrap
 first. Unknown environment names, conflicting aliases or conflicting saved values
 abort migration without removing source configuration.
@@ -421,7 +434,7 @@ Public `GET /api/creation/markets` lists funded/unfunded pools. On Notes, `POST 
 
 The first content on the Notes homepage ranks all notes by **last-24-hour executed FTHX volume**, counting buy inputs and sell outputs once per trade, not reserves, reward activity or fabricated volume. FTHX shows aggregate quote volume across pairs; each other note shows its pair volume. These per-note volumes are not summed as independent totals. Native circulation is shown separately below the ranking. Unfunded markets show zero volume and disabled trading. Non-placeholder community currencies currently have no configured pool. A Refresh volumes control loads the latest ranking.
 
-Notes owns the Dollar API implementation in `services/notes-api/dollar.js`; the original `services/dollar-api/server.js` remains a compatibility export. Existing `/api/v1/` endpoints, Dollar URLs, game funding, signing keys, ledger files and Gold backing rules remain unchanged. The same authenticated API is available on the Notes host. No second FTH$ ledger is created. Activation of either FTH$ or FTHX regular reward programs explicitly fails. Existing native program records are treated as disabled at read and execution time, without rewriting balances or historical payouts.
+Notes owns the Dollar API implementation in `services/notes/dollar.js`; the original `services/notes/dollar.js` remains a compatibility export. Existing `/api/v1/` endpoints, Dollar URLs, game funding, signing keys, ledger files and Gold backing rules remain unchanged. The same authenticated API is available on the Notes host. No second FTH$ ledger is created. Activation of either FTH$ or FTHX regular reward programs explicitly fails. Existing native program records are treated as disabled at read and execution time, without rewriting balances or historical payouts.
 
 FTHX accounting is global in ignored `data/notes.sqlite`. At startup each registered site's old `qprn_ledger` is imported once with source IDs, row counts, totals and SHA-256 audit digest; old tables are preserved. Wallet balances sum all original site entries. A changed legacy source after migration prevents startup instead of double-crediting it. Public FTHX top-ups, tips, posting costs and shop/demo FTHX operations now use this global balance within SQLite transactions; other demo assets remain site-local and are not the real FTH$ ledger.
 
@@ -431,7 +444,7 @@ Admin-authenticated APIs: `GET /api/notes`, `GET /api/notes/sites`, `PUT /api/no
 
 The Ledger site exposes public, read-only Notes browsing through `GET /api/notes/ledger/currencies` and `GET /api/notes/ledger/:symbol/entries`. Entry reads support an optional `address`, a `before` entry-ID cursor and a `limit` from 1 to 100. Pages are newest-first and keyset-paginated; Notes database entries are not hash-chained blocks. FTH$ remains on its separate native daily-file currency ledger.
 
-All core frontend folders are under `sites/`, named by full hostname: `featheral.com`, `gold.featheral.com`, `dollar.featheral.com`, `ledger.featheral.com`, `world.featheral.com`, `admin.featheral.com`, `x.featheral.com`, `ex.featheral.com`, `stats.featheral.com`, `sites.featheral.com` and `notes.featheral.com`. Exchange and Stats serve their own shells while reusing the managed-site renderer/assets. CMS data stays in its existing private location. The site dropdown uses canonical full URLs as both labels and option values (including hosted website paths); selection resolves to existing dataset keys or integrated editors without renaming databases.
+All core frontend folders are under `sites/`, named by full hostname. World serves its getting-started landing and settlement/federation game from `world.featheral.com/play/`; the former World social frontend now belongs to `media.featheral.com`. Its existing CMS overrides and feed database remain intact. Media owns moderation (`#/operations/world` remains compatible); World has no social moderation screen. Backend folders use ownership names (`database`, `gold`, `notes`, `identity`, `wallet`, `media`), and Admin screens are in `pages/`. Exchange and Stats serve their own shells while reusing the managed-site renderer/assets. The site dropdown uses canonical full URLs as both labels and option values (including hosted website paths); selection resolves to existing dataset keys or integrated editors without renaming databases.
 
 ### Free websites
 
@@ -589,7 +602,7 @@ The app can connect to a **WordPress site through its REST API**, bulk-download 
 
 ## Requirements
 
-- Node.js **22.5+** (built-in SQLite managed through db-api; tested on Node 24)
+- Node.js **22.5+** (built-in SQLite managed through database; tested on Node 24)
 
 ## Run
 

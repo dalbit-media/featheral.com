@@ -3,7 +3,7 @@ const operations = {
   "featheral.com": ["foundation", "Foundation governance & status"],
   "gold.featheral.com": ["gold", "Gold reserve & token safety"],
   "dollar.featheral.com": ["dollar", "Dollar ledger & bridge"],
-  "world.featheral.com": ["world", "World moderation"],
+  "media.featheral.com": ["world", "Media moderation"],
 };
 function managementFor(site) {
   const hostname = site.hostname, encoded = encodeURIComponent(hostname);

@@ -3,7 +3,7 @@
 // tags). Longer posts get more keyword tags; tags on fewer than MIN_POSTS posts are dropped. Auto tags carry the description AUTO_MARK, so a
 // rerun replaces them without touching hand-made tags.
 const path = require('path');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { htmlToText, decodeEntities } = require('./text');
 
 const AUTO_MARK = 'auto-tag';

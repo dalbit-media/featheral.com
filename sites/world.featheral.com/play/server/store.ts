@@ -1,5 +1,5 @@
-import sqlite from '../../../../services/db-api/sqlite.js';
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { ChatDirectoryStore } from './chat-directory.ts';
 import { randomBytes, createHash } from 'node:crypto';
 import { ApiError, createAccount, initializeUpkeep, migrateClock, migrateEconomy, migratePhysicalEconomy } from './economy.ts';

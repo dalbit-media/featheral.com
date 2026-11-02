@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { test } from 'node:test';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { SqliteStore } from './store.ts';
 import { createApi } from './http.ts';
 import { apply, execute } from './economy.ts';

@@ -1,13 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const sqlite = require('../../db-api/sqlite');
+const sqlite = require('../../database/sqlite');
 const { Telemetry } = require('../lib/telemetry');
-const { Notes } = require('../../notes-api/ledger');
+const { Notes } = require('../../notes/ledger');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-test('standalone CMS and Notes connections share the db-api SQLite manager', () => {
+test('standalone CMS and Notes connections share the database SQLite manager', () => {
   const baseline = sqlite.activeConnections;
   const telemetry = new Telemetry(':memory:');
   let notes;

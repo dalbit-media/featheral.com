@@ -5,17 +5,17 @@ const os = require("node:os");
 const path = require("node:path");
 const { ethers } = require("ethers");
 const { FthLedger, walletAccountId } = require("../services/fth-ledger/ledger");
-const { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT } = require("../services/dollar-api/funds");
+const { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT } = require("../services/notes/game-funds");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
 const { apply } = require("../sites/world.featheral.com/play/server/economy.ts");
 const { gameFundAccount } = require("../sites/world.featheral.com/play/server/funds.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 const { walletLinkMessage } = require("../sites/world.featheral.com/play/src/funds.ts");
-const { createDollarApi } = require("../services/dollar-api/server");
+const { createDollarApi } = require("../services/notes/dollar");
 const { Readable } = require("node:stream");
 const { transferMessage } = require("../services/fth-ledger/transfer");
 const http = require("node:http");
-const { createGoldApi } = require("../services/gold-api/server");
+const { createGoldApi } = require("../services/gold/server");
 
 describe("Dollar-owned World funds", () => {
   let directory, ledger, store, adapter, database;

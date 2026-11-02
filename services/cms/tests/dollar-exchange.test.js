@@ -2,12 +2,12 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
 const { ethers } = require('ethers');
-const { Notes } = require('../../notes-api/ledger');
-const { Creation } = require('../../notes-api/creation');
-const { Exchange, DOLLAR_POOL } = require('../../notes-api/exchange');
-const { createDollarApi } = require('../../notes-api/dollar');
+const { Notes } = require('../../notes/ledger');
+const { Creation } = require('../../notes/creation');
+const { Exchange, DOLLAR_POOL } = require('../../notes/exchange');
+const { createDollarApi } = require('../../notes/dollar');
 const { walletAccountId, transferMessage } = require('../../fth-ledger/transfer');
-const { SYSTEM_TREASURY_ACCOUNT } = require('../../dollar-api/funds');
+const { SYSTEM_TREASURY_ACCOUNT } = require('../../notes/game-funds');
 test('World sync shares only a public account with the fixed Dollar host and explicitly reports missing sessions', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../../../sites/world.featheral.com/wallet-sync.js'), 'utf8');
   const accountId = `0x${'ab'.repeat(32)}`;
@@ -65,7 +65,7 @@ async function fixture(t) {
 }
 test('FTH$ converts through real FTHX/FTHS pools and pays for a digital Silver order without minting at checkout', async t => {
   const { notes, creation, exchange, owner, wallet, fund, api } = await fixture(t);
-  new (require('../../notes-api/workspace').Workspace)(notes, creation.markets);
+  new (require('../../notes/workspace').Workspace)(notes, creation.markets);
   creation.markets.fund('FTHS', 'FUND FTHS 1000000 FTHX 1000000 NOTES');
   await fund();
   const input = { from: 'FTH$', to: 'FTHS', amount: ethers.parseUnits('10', 18).toString() };
@@ -78,7 +78,7 @@ test('FTH$ converts through real FTHX/FTHS pools and pays for a digital Silver o
   assert.equal(exchange.account(owner).trades.length, 1);
   const silverSupply = notes.db.prepare("SELECT SUM(amount) AS n FROM notes_entries WHERE symbol='FTHS'").get().n;
   const dollarSupply = api.ledger.summary().supply;
-  const store = new (require('../../notes-api/silver-store').SilverStore)(notes, creation.markets, { SILVER_CODE_KEY: crypto.randomBytes(32).toString('hex') });
+  const store = new (require('../../notes/silver-store').SilverStore)(notes, creation.markets, { SILVER_CODE_KEY: crypto.randomBytes(32).toString('hex') });
   store.configure({ treasury: ethers.Wallet.createRandom().address, terms: 'Digital code only', enabled: true, revision: 0 });
   const product = store.saveProduct({ title: 'Test redemption', brand: 'Fixture issuer', category: 'giftcard', description: 'Isolated fixture',
     region: 'Japan only', denomination: 'Fixture units', sourcing: 'Japan test supplier', terms: 'Test issuer terms',
@@ -209,7 +209,7 @@ test('Dollar routes buy and sell notes through FTHX with signatures, exact retri
   await complete(request);
   const reference = exchange.market().referencePrice;
   assert.notEqual(BigInt(reference.numerator), 10n * BigInt(reference.denominator), 'executed trade moves the funded opening reserve ratio');
-  const { portfolio } = require('../../notes-api/portfolio');
+  const { portfolio } = require('../../notes/portfolio');
   const estimated = portfolio([{ symbol: 'FTH$', balance: ethers.parseUnits('1', 18).toString() }], exchange.pool(), []);
   assert.equal(estimated.dollarReference.source, 'exchange');
   assert.equal(estimated.totals.FTHX.value, (BigInt(reference.numerator) * 10n ** 18n / BigInt(reference.denominator)).toString());

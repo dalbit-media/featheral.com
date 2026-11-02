@@ -20,7 +20,8 @@ describe("Foundation managed-site gateway", () => {
       || hostname === "featheral.com" && file === "governance/index.html";
     const handle = (name) => ({ handle: async () => { calls.push([name]); return name === "dollar" && claimDollar || name === "gold" && claimGold; } });
     vm.runInNewContext(handlerSource, {
-      URL, console, path, require: name => name === "../services/wallet-api/ui" ? require("../services/wallet-api/ui") : require(name),
+      URL, console, path, require: name => name === "./site-routing" ? require("../scripts/site-routing") : require(name),
+      requestPolicy: () => true, gameApi: null, dollarGameApi: null,
       injectTelemetry() {},
       http: { createServer: (fn) => { handler = fn; } },
       siteFor,
@@ -94,17 +95,29 @@ describe("Foundation managed-site gateway", () => {
     for (const [host, site] of [["localhost:8080", "foundation"], ["gold.featheral.com", "gold"], ["dollar.localhost:8080", "dollar"], ["world.featheral.com", "world"], ["unknown.example", "foundation"]]) {
       const calls = await fixture().request(host);
       expect(calls.slice(0, 3)).to.deep.equal([["gold"], ["world"], ["dollar"]]);
-      expect(calls[3]).to.deep.equal(["static", path.join(__dirname, "..", "sites", site === "foundation" ? "featheral.com" : `${site}.featheral.com`, "index.html")]);
+      expect(calls[3]).to.deep.equal(["static", path.join(__dirname, "..", "sites", site === "foundation" ? "featheral.com" : `${site}.featheral.com`, ...(site === "world" ? ["play", "dist", "index.html"] : ["index.html"]))]);
     }
   });
   it("serves shared assets outside sites and the relocated World play build", async () => {
     for (const [url, expected] of [
       ["/shared/site-links.js", path.join("shared", "site-links.js")],
-      ["/play/", path.join("sites", "world.featheral.com", "play", "dist", "index.html")],
+      ["/explore/", path.join("sites", "world.featheral.com", "play", "dist", "explore", "index.html")],
     ]) {
       const calls = await fixture().request("world.featheral.com", url);
       expect(calls[3]).to.deep.equal(["static", path.join(__dirname, "..", expected)]);
     }
+  });
+  it("moves social pages to Media and preserves legacy game paths and query strings", async () => {
+    for (const [route, destination] of [
+      ["/play/?lang=en", "http://world.localhost:8080/explore/?lang=en"],
+      ["/play/settlement/?tab=storage", "http://world.localhost:8080/settlement/?tab=storage"],
+      ["/ledger/?post=abc", "http://media.localhost:8080/ledger/?post=abc"],
+      ["/about/", "http://world.localhost:8080/"],
+    ]) expect((await fixture().request("world.localhost:8080", route)).at(-1)).to.deep.equal(["redirect", destination, 301]);
+    expect((await fixture().request("media.localhost:8080", "/docs/?lang=en")).at(-1))
+      .to.deep.equal(["redirect", "http://media.localhost:8080/?lang=en#/guide", 301]);
+    expect((await fixture().request("media.localhost:8080")).at(-1))
+      .to.deep.equal(["static", path.join(__dirname, "..", "sites", "media.featheral.com", "index.html")]);
   });
   it("keeps the original Dollar landing page and serves the standalone wallet only at wallet routes", async () => {
     const rootCalls = await fixture().request("dollar.localhost:8080", "/");
@@ -180,8 +193,10 @@ describe("Foundation cross-site links", () => {
     const location = new URL(origin);
     const links = ["foundation", "gold", "dollar", "world"].map((site) => ({
       dataset: { site }, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
+      remove() { links.splice(links.indexOf(this), 1); },
     }));
     const bar = {
+      querySelectorAll: () => [...links], setAttribute() {},
       querySelector(selector) { return selector === ".eco-toggle" ? this.toggle : links.find((link) => selector.includes(`"${link.dataset.site}"`)); },
       append(link) { links.push(link); },
       prepend(toggle) { this.toggle = toggle; },
@@ -193,24 +208,25 @@ describe("Foundation cross-site links", () => {
       },
     };
     const document = {
-      head: { append() {} }, querySelector() { return null; },
+      body: { dataset: { embedded: "true" } },
+      head: { append() {} }, querySelector(selector) { return selector === ".eco-bar" ? bar : null; }, addEventListener() {},
       readyState: "complete",
-      querySelectorAll(selector) { return selector === ".eco-bar" ? [bar] : selector === 'nav a, .eco-bar a' ? [] : links; },
+      querySelectorAll(selector) { return selector === ".eco-bar" ? [bar] : selector === "a[data-site]" ? links : []; },
       createElement() { return { dataset: {}, attributes: {}, listeners: {}, addEventListener(name, listener) { this.listeners[name] = listener; }, setAttribute(name, value) { this.attributes[name] = value; } }; },
     };
     const window = { location };
-    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "shared", "site-links.js"), "utf8"), { window, document });
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "shared", "site-links.js"), "utf8"), { window, document, URL });
     return { sites: window.FeatheralSites, links, bar };
   }
 
-  it("links every ecosystem host while preserving protocol and local port", () => {
+  it("restricts shared title navigation to the current currency while preserving host roots", () => {
     for (const [origin, expected] of [["http://admin.localhost:8080/", "http://ex.localhost:8080/"], ["https://x.featheral.com/", "https://ex.featheral.com/"], ["http://127.0.0.1:8080/", "http://ex.localhost:8080/"]]) {
       const { sites, links } = fixture(origin);
       expect(sites.url("ex")).to.equal(expected);
-      expect(links).to.have.length(sites.current === "admin" ? 15 : 14);
+      const expectedSites = sites.SITES.filter(site => site === sites.current || sites.currencies[sites.current] && sites.currencies[site] === sites.currencies[sites.current]);
+      expect(links.map(link => link.dataset.site).sort()).to.deep.equal([...expectedSites].sort());
       sites.apply();
-      expect(links).to.have.length(sites.current === "admin" ? 15 : 14);
-      expect(links.find((link) => link.dataset.site === "ex").href).to.equal(expected);
+      expect(links).to.have.length(expectedSites.length);
     }
   });
 
@@ -228,7 +244,7 @@ describe("Foundation cross-site links", () => {
       expect(links.find(link => link.dataset.site === site).attributes["aria-current"]).to.equal("page");
       expect(bar.toggle).to.equal(undefined);
       sites.apply();
-      expect(links).to.have.length(14);
+      expect(links.every(link => link.dataset.site === site || sites.currencies[site] && sites.currencies[link.dataset.site] === sites.currencies[site])).to.equal(true);
     }
   });
   it("points legacy CMS links and product admin deep links directly to the unified host", () => {
@@ -244,7 +260,7 @@ describe("Foundation cross-site links", () => {
       { dataset: {}, getAttribute: () => "/docs/" },
     ];
     for (const link of links) link.remove = () => { link.removed = true; };
-    const document = { readyState: "complete", head: { append() {} }, querySelector() { return null; }, createElement() { return { dataset: {} }; }, querySelectorAll: selector => selector === 'nav a, .eco-bar a' ? links : [] };
+    const document = { readyState: "complete", body: { dataset: { embedded: "true" } }, addEventListener() {}, head: { append() {} }, querySelector() { return null; }, createElement() { return { dataset: {} }; }, querySelectorAll: selector => selector === 'header nav a, .eco-bar a' ? links : [] };
     const window = { location: new URL("https://gold.featheral.com/") };
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, "..", "shared", "site-links.js"), "utf8"), { window, document, URL });
     expect(links.map(link => !!link.removed)).to.deep.equal([true, true, true, false]);

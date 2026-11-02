@@ -3,7 +3,7 @@
 const { LedgerDb } = require("../ledger-sql/ledgerDb");
 const { canonical, txHash } = require("./codec");
 const { accountWallet } = require("./transfer");
-const { goldEntries } = require("../gold-api/reserve");
+const { goldEntries } = require("../gold/reserve");
 
 const SCHEMA = `
 CREATE TABLE blocks (

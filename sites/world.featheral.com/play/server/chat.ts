@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { ApiError } from './economy.ts';
 import { chatCapacity, chatHistoryLimit, chatMessageLimit } from '../src/chat.ts';
 import type { ChatMessage, ChatProfile, ChatSubmission } from '../src/chat.ts';

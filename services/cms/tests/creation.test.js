@@ -4,11 +4,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { ethers } = require('ethers');
-const { Notes } = require('../../notes-api/ledger');
-const { Creation, SITE_COST } = require('../../notes-api/creation');
+const { Notes } = require('../../notes/ledger');
+const { Creation, SITE_COST } = require('../../notes/creation');
 const { SiteManager } = require('../lib/sites');
-const { createDollarApi } = require('../../notes-api/dollar');
-const { SYSTEM_TREASURY_ACCOUNT } = require('../../dollar-api/funds');
+const { createDollarApi } = require('../../notes/dollar');
+const { SYSTEM_TREASURY_ACCOUNT } = require('../../notes/game-funds');
 const { walletAccountId } = require('../../fth-ledger/transfer');
 
 function fixture(t, mode = 'writer') {

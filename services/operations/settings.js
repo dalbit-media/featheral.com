@@ -3,8 +3,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { OriginApprovals } = require("../db-api/approvals");
-const { SystemDatabase } = require("../db-api/system");
+const { OriginApprovals } = require("../database/approvals");
+const { SystemDatabase } = require("../database/system");
 const { fields, normalizeConfiguration } = require("./configuration");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const defaults = Object.freeze({
@@ -120,7 +120,7 @@ class OperationsSettings {
     const actual = crypto.scryptSync(password, salt, 32);
     return crypto.timingSafeEqual(actual, Buffer.from(hash, "hex"));
   }
-  prepare(input) {
+  prepare(input, { allowUnconfiguredAdmin = false } = {}) {
     if (this.busy || this.isBusy()) throw fail(409, "Wait for the current settings or deployment operation.");
     if (!input || input.revision !== this.value.revision || !input.settings || Array.isArray(input.settings)) throw fail(409, "Reload Settings before saving.");
     const allowed = new Set([...Object.keys(defaults), "credential", "adminPassword", "runtime", "runtimeConfirmation"]);
@@ -150,7 +150,7 @@ class OperationsSettings {
     const changedTarget = ["host", "port", "fingerprint"].some(name => next[name] !== this.value[name]);
     if (changedTarget && this.value.credential && supplied === undefined) throw fail(400, "Re-enter and verify the credential when changing the SSH host, port or host key.");
     if (input.settings.adminPassword) next.adminHash = passwordHash(input.settings.adminPassword);
-    if (!next.adminHash) throw fail(400, "Set an Admin password before saving operations settings.");
+    if (!next.adminHash && (!allowUnconfiguredAdmin || next.enabled)) throw fail(400, "Set an Admin password before saving operations settings.");
     if ((supplied !== undefined || next.enabled) && (!next.host || !next.fingerprint || !next.credential))
       throw fail(400, "SSH host, pinned fingerprint and credential are required.");
     if (next.enabled && !next.tlsEmail) throw fail(400, "Certificate email is required before enabling deployment.");

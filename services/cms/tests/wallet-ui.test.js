@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { walletUi, primaryFor, allowedOrigin } = require("../../wallet-api/ui");
+const { walletUi, primaryFor, allowedOrigin } = require("../../wallet/ui");
 const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
 test("gateway retains verified uninitialized Gold snapshots for opening valuation instead of discarding them", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../scripts/serve.js"), "utf8");
@@ -519,7 +519,7 @@ test("shared header spacing keeps the connected address readable instead of forc
   assert.match(css, /header\[data-wallet-header\]:not\(\[data-wallet-header=FTHX\]\)\{flex-wrap:nowrap\}/,
     "mobile brand and wallet stay on one row");
 });
-test("mobile ecosystem navigation is an expanded footer hierarchy with canonical links and no admin or embedded duplication", () => {
+test("ecosystem navigation has currency headers and the full footer hierarchy without embedded duplication", () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
   function fixture(host, embedded = false, query = "") {
     class Node {
@@ -537,7 +537,7 @@ test("mobile ecosystem navigation is an expanded footer hierarchy with canonical
       }
       querySelector(selector) {
         if (selector === 'script[data-central-wallet-loader]') return {};
-        if (selector === "body > header, #app > header, header.topbar") return header;
+        if (selector === "body > header, #app > header, header.topbar, #app header.topbar") return header;
         const site = selector.match(/^a\[data-site="(.+)"\]$/)?.[1];
         if (site) return this.querySelectorAll("a[data-site]").find(link => link.dataset.site === site);
         return this.querySelectorAll(selector)[0];
@@ -545,7 +545,7 @@ test("mobile ecosystem navigation is an expanded footer hierarchy with canonical
     }
     const body = new Node("body"), header = new Node("header"), bar = new Node("nav");
     body.dataset.embedded = String(embedded); bar.className = "eco-bar"; body.append(bar, header);
-    const document = { body, readyState: "loading", createElement: tag => new Node(tag),
+    const document = { body, head: new Node("head"), readyState: "loading", createElement: tag => new Node(tag),
       addEventListener() {}, querySelector: selector => body.querySelector(selector),
       querySelectorAll: selector => body.querySelectorAll(selector) };
     const window = { location: new URL(`http://${host}.localhost:8080/${query}`), getComputedStyle: () => ({ position: "static" }) };
@@ -556,21 +556,22 @@ test("mobile ecosystem navigation is an expanded footer hierarchy with canonical
   }
   const ui = fixture("gold"), links = ui.footer.querySelectorAll("a[data-site]");
   assert.equal(ui.body.querySelectorAll(".eco-footer").length, 1);
-  assert.equal(ui.bar.querySelectorAll("a[data-site]").length, 14, "desktop retains the public site bar");
-  assert.equal(links.length, 14);
-  assert.equal(new Set(links.map(link => link.dataset.site)).size, 14);
-  assert.ok(links.every(link => !["admin", "cms"].includes(link.dataset.site)));
+  assert.equal(ui.bar.querySelectorAll("a[data-site]").length, 2, "Gold shares its header only with Foundation");
+  assert.equal(links.length, 16);
+  assert.equal(new Set(links.map(link => link.dataset.site)).size, 16);
+  assert.ok(links.some(link => link.dataset.site === "admin"));
+  assert.ok(links.some(link => link.dataset.site === "media"));
   assert.equal(links.find(link => link.dataset.site === "gold").href, "http://gold.localhost:8080/");
   assert.equal(links.find(link => link.dataset.site === "foundation").href, "http://localhost:8080/");
   assert.equal(links.filter(link => link.attributes["aria-current"] === "page").length, 1);
   const foundation = ui.footer.children[0].children[0].children[0];
   assert.equal(foundation.children[0].dataset.site, "foundation");
-  assert.deepEqual(foundation.children[1].children.map(group => group.children[0].textContent), ["Currencies", "Apps", "Ledgers", "Tools"]);
+  assert.deepEqual(foundation.children[1].children.map(group => group.children[0].textContent), ["Currencies", "World & community", "Apps", "Ledgers", "Tools"]);
   assert.equal(fixture("wallet", true).footer, undefined, "embedded wallets do not repeat host navigation");
   assert.equal(fixture("wallet", false, "?embedded=1").footer, undefined, "embedding is detected before async wallet initialization");
-  assert.equal(fixture("admin").footer, undefined, "admin console retains its own navigation");
+  assert.equal(fixture("admin").footer.querySelectorAll("a[data-site]").length, 16, "Admin includes the ecosystem footer");
   const css = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.css"), "utf8");
-  assert.match(css, /\.eco-footer\{display:none\}/);
+  assert.match(css, /footer\.eco-footer\{display:block/);
   assert.match(css, /@media\(max-width:700px\)[\s\S]*\.eco-bar\{display:none!important\}/);
   assert.match(css, /footer\.eco-footer\{[^}]*text-align:left/);
   assert.match(css, /body\.eco-fixed-header>#view\{height:auto;min-height:100dvh\}/,

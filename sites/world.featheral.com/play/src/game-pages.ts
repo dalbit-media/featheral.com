@@ -1,13 +1,13 @@
 export const gamePages = {
-  world: { label: 'Explore', path: '/play/' },
-  home: { label: 'Settlement', path: '/play/settlement/' },
-  market: { label: 'Market', path: '/play/market/' },
-  bank: { label: 'Wallet and staking', path: '/play/bank/' },
-  communicate: { label: 'Inbox', path: '/play/communicate/' },
-  contacts: { label: 'Contacts', path: '/play/contacts/' },
-  federation: { label: 'Federation', path: '/play/federation/' },
-  journal: { label: 'Journal', path: '/play/journal/' },
-  help: { label: 'Field guide', path: '/play/help/' },
+  world: { label: 'Explore', path: '/explore/' },
+  home: { label: 'Settlement', path: '/settlement/' },
+  market: { label: 'Market', path: '/market/' },
+  bank: { label: 'Wallet and staking', path: '/bank/' },
+  communicate: { label: 'Inbox', path: '/communicate/' },
+  contacts: { label: 'Contacts', path: '/contacts/' },
+  federation: { label: 'Federation', path: '/federation/' },
+  journal: { label: 'Journal', path: '/journal/' },
+  help: { label: 'Field guide', path: '/help/' },
 } as const;
 export type GamePage = keyof typeof gamePages;
 export const gamePageKeys = Object.keys(gamePages) as GamePage[];

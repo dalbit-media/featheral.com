@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const http = require("node:http");
 const { ethers } = require("ethers");
-const { createGoldApi, TOKEN_ADDRESS } = require("../services/gold-api/server");
+const { createGoldApi, TOKEN_ADDRESS } = require("../services/gold/server");
 
 describe("Gold-owned Ethereum RPC", () => {
   it("reads exact mainnet FTHG wallet balances and rejects other chains", async () => {

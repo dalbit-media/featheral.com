@@ -1,6 +1,6 @@
 # Featheral
 
-One Node server (`scripts/serve.js`) hosts the Foundation ecosystem, selected by the request host. Foundation, Gold and Dollar expose their currency APIs; World feed actions and wallet profiles use the DB API. CMS-managed hosts use their independent CMS/public APIs:
+One Node server (`scripts/serve.js`) hosts the Foundation ecosystem, selected by the request host. Foundation, Gold and Dollar expose their currency APIs; Media owns social actions and the database service owns wallet profiles. CMS-managed hosts use their independent CMS/public APIs:
 
 | Site | Production host | Local URL | Source |
 | --- | --- | --- | --- |
@@ -10,12 +10,17 @@ One Node server (`scripts/serve.js`) hosts the Foundation ecosystem, selected by
 | Featheral App (intranet) | app.featheral.com | http://app.localhost:8080/ | `sites/app.featheral.com/` |
 | Featheral Dollar (FTH$) | dollar.featheral.com | http://dollar.localhost:8080/ (`/wallet/`, `/explorer/`) | `sites/dollar.featheral.com/` |
 | Featheral Ledger | ledger.featheral.com | http://ledger.localhost:8080/ | `sites/ledger.featheral.com/` |
-| Featheral World | world.featheral.com | http://world.localhost:8080/ | `sites/world.featheral.com/` |
+| Featheral World (settlement & federation game) | world.featheral.com | http://world.localhost:8080/ | `sites/world.featheral.com/play/` |
+| Featheral Media (social community) | media.featheral.com | http://media.localhost:8080/ | `sites/media.featheral.com/` |
 | Featheral Admin (CMS & operations) | admin.featheral.com | http://admin.localhost:8080/ | `sites/admin.featheral.com/` |
 | Featheral X | x.featheral.com | http://x.localhost:8080/ | `sites/x.featheral.com/` |
 | Featheral Exchange | ex.featheral.com | http://ex.localhost:8080/ | `sites/ex.featheral.com/` |
 
 All frontend source lives under `sites/`, named by its public hostname. Common assets remain in `shared/`; backend services and private data stay in `services/` and their existing data directories. World game source remains nested in `sites/world.featheral.com/play/`. X supplies the shared CMS-managed public-page shell, also used by Exchange and newly registered sites; Exchange's demo assets live in its own directory. The CMS server preserves `/site/` asset URLs and authenticated preview behavior without copying the shared renderer.
+
+Services are named by ownership: `database`, `gold`, `notes` (including Dollar and game funds), `identity`, `wallet`, `media`, `cms`, and `operations`. Admin screen modules live in `sites/admin.featheral.com/pages/`. The redundant Dollar API wrapper and empty social placeholder pages have been removed; tests, migration tooling and private data are retained.
+
+Header title links return to the current site's landing page. Shared header links show only sites with the same primary currency: Foundation/Gold (FTHG), Silver (FTHS), Dollar/World (FTH$), and App/Media/X/Notes/Sites (FTHX). Multi-currency tools keep their own header entry. Every non-embedded site has the full core-site hierarchy in its footer, including cross-currency destinations and Admin.
 
 The core sites use the main `shared/logo.svg` feather emblem. Foundation uses it unchanged; the other sites add small symbol badges (including Silver ingots and the App phone), each colored for its site theme. Headers, favicons, Admin cards and traffic legends use these variants. The shared palette in `shared/site-colors.json` also colors chart lines. After editing the main SVG, palette or badge paths, run `npm run build:logos` to regenerate shared variants and legacy X/World favicon aliases, then `npm run build:world` to refresh the game build.
 
@@ -138,7 +143,7 @@ Admin **Sites** lists Foundation, Gold, Dollar, World and Admin alongside X/Exch
 
 World and Admin retain revision-checked plain-text blocks bound to their native application templates with stable `data-cms-copy` keys. World gameplay, wallets, profiles and feeds, plus conversion/wallet/explorer applications and APIs, are unchanged. X, Exchange and other registered sites retain their existing full CMS editor.
 
-Administration uses native views in `sites/admin.featheral.com/views/` and scoped controllers in `js/operations/`, not embedded legacy consoles. Foundation overview/access, Gold reserve/token safety, Dollar liquidity/rewards/ledger and World moderation share the Admin shell and one persistent signing-wallet control. All core and hosted sites are individually selectable; API-provided management links open the appropriate operations, App intranet, Silver marketplace, Notes rewards/markets or content workspace. `#/notes` consolidates market funding; existing `#/set/<key>/note-markets` links remain compatible. Legacy `/operations/<service>/` URLs redirect to native `#/operations/<service>` routes. Existing wallet role checks, signed message bytes, ledger formats and transaction confirmations remain unchanged. `admin.featheral.com` authenticates the workspace and forwards protected `/api/v1/*` requests to the owning Gold/Dollar/World services without parsing away request bodies. API writes also require the admin origin. Admin access and operations configuration are managed in **Settings**; CMS backend/private data remain in `services/cms/`. The old CMS-host content database is reused if present, preserving edits and themes.
+Administration uses native views in `sites/admin.featheral.com/pages/` and scoped controllers in `js/operations/`, not embedded legacy consoles. Foundation overview/access, Gold reserve/token safety, Dollar liquidity/rewards/ledger and World moderation share the Admin shell and one persistent signing-wallet control. All core and hosted sites are individually selectable; API-provided management links open the appropriate operations, App intranet, Silver marketplace, Notes rewards/markets or content workspace. `#/notes` consolidates market funding; existing `#/set/<key>/note-markets` links remain compatible. Legacy `/operations/<service>/` URLs redirect to native `#/operations/<service>` routes. Existing wallet role checks, signed message bytes, ledger formats and transaction confirmations remain unchanged. `admin.featheral.com` authenticates the workspace and forwards protected `/api/v1/*` requests to the owning Gold/Dollar/World services without parsing away request bodies. API writes also require the admin origin. Admin access and operations configuration are managed in **Settings**; CMS backend/private data remain in `services/cms/`. The old CMS-host content database is reused if present, preserving edits and themes.
 
 The retired `cms.featheral.com` / `cms.localhost` hostnames redirect to Admin, and product `/admin/` URLs redirect to their matching unified console. Cross-site links point directly to Admin. Deployment plans/Nginx hosts now include `admin.featheral.com`; remote DNS/TLS changes still require reviewed deployment.
 
@@ -167,6 +172,9 @@ Existing installations should stop the writer, keep an offline backup, then run
 imports all supported runtime configuration, Admin access and operations settings,
 including an existing encrypted root vault or legacy password. After a successful
 database read-back, it removes the migrated `.env` and any imported Admin config.
+An encrypted copy of the exact source configuration is retained under
+`migration-backups/` beside the external bootstrap, using its original encryption
+key and AES-GCM AAD `featheral-legacy-migration-v1`.
 Unrecognized names and conflicting aliases/database values stop migration without
 removing the source file. Review any customized old Admin JSON before upgrading;
 set `ADMIN_CONFIG` to its backup path to import it as `ADMIN_CONFIG_JSON`.
@@ -174,6 +182,19 @@ If encrypted JSON Settings were already configured, first run
 `node scripts/init-settings.js --migrate-settings` with their original bootstrap/key.
 Deployment is disabled after migration. SSH-key installations must re-enroll a
 password credential; migration refuses to discard them. Existing balances,
+For installations without an Admin password or using legacy SSH-key authentication,
+run `node scripts/init-settings.js --migrate-env --setup`. This explicitly archives
+the old configuration, preserves supported values and disables deployment without
+converting or deleting the SSH key. If Admin access is unconfigured, only a loopback
+binding is accepted. Start the service, open `http://admin.localhost:8080/#/settings`
+(or the migrated port), set an Admin password and sign with the origin wallet.
+Then enroll and verify the replacement SSH/sudo `username:password` before enabling
+deployment. Normal Settings saves still require an Admin password. Existing balances,
+In setup mode, an invalid or missing legacy host fingerprint is archived but left
+unset in active Settings when no SSH credential is imported. It never authorizes
+an unpinned connection; enter an independently verified fingerprint before use.
+New Windows bootstrap/key and migration-backup files have inheritance removed
+and access granted only to the account running initialization. Existing balances,
 profiles, domain data stores, signing identities and legacy vault journals are
 preserved, not regenerated or relocated. Linux accounts remain OS-managed.
 Runtime changes require typing `APPLY RUNTIME SETTINGS`, wallet approval and a
@@ -230,7 +251,7 @@ changes require another reviewed deployment. Feature-specific limits may be lowe
 ### File-ledger migration (staged)
 
 `db.featheral.com` (`db.localhost:8080`) is the new database-service host.
-Its in-process database API lives in `services/db-api`. It centrally opens and
+Its in-process database API lives in `services/database`. It centrally opens and
 closes the built-in Node SQLite connections used by existing domain modules;
 no third-party database driver is used. Public `GET /api/v1/db/status` reports
 the migration stage without exposing records.
@@ -278,7 +299,9 @@ Set the Admin password in **Settings** before exposing `admin.featheral.com`; th
 
 The X age gate and disabled live syncing are preserved. **Exchange assets, including its demo FTH$, are local simulations, separate from the Foundation Dollar ledger, with no real funds, deposits or bridge.** See the [CMS documentation](services/cms/README.md) for site management, content and API details.
 
-Unknown hosts serve the Foundation site. World embeds the Dollar wallet at `/wallet/` and `/play/bank/`; Foundation and Gold wallet links redirect to World's wallet page. `/admin/` redirects to that site's console within unified Admin. The game is mounted on World at `/play/`; World home is the merged Getting-started landing page. Legacy `/about/` and `/play/about/` entries redirect there while preserving query parameters (static no-JavaScript marketing fallback remains). `npm start` builds `sites/world.featheral.com/play/` and runs its APIs in the gateway process. Shared assets live in `shared/` and are served at `/shared/` on every host.
+Unknown hosts serve the Foundation site. World serves Getting started at `/`, exploration at `/explore/`, and settlement, federation and other game pages at their root paths. Legacy `/play/` redirects to `/explore/`; `/play/settlement/` and other deep links redirect to their root equivalents. `/about/` and `/play/about/` redirect to Getting started. Query strings are preserved. `npm start` builds `sites/world.featheral.com/play/` and runs its APIs in the gateway process. Shared assets live in `shared/` and are served at `/shared/` on every host.
+
+Media serves the social feed, profile setup at `/#/setup`, guide at `/#/guide` and database explorer at `/ledger/`. Old World social hash links and `/ledger/` redirect to Media; old docs/news placeholders redirect to the Media guide/feed. `/api/v1/media` is canonical, while `/api/v1/world` remains compatible. Existing feed databases, signed messages, user profiles and financial records are not renamed or reset. Public deployment requires DNS and a reviewed TLS/deployment plan covering `media.featheral.com`.
 
 Wallet connection behaves the same on every site: page load only silently restores an already-authorized wallet for that origin, unless you previously disconnected. Connecting on another Featheral site never triggers an automatic permission prompt; click the wallet icon to authorize a new origin. The disconnect preference is shared across sites through a parent-domain cookie.
 
@@ -288,11 +311,11 @@ Play uses World's canonical username/avatar and the same profile editor, not a s
 
 When multiple wallet apps are installed, the shared wallet icon opens a wallet-app picker on all sites, including admin pages. Apps are discovered through EIP-6963, with a legacy injected-provider fallback. With multiple apps, choose one explicitly before connecting; with one app, already-authorized accounts can restore silently. Profile/game signatures, FTH$ transfers, and Ethereum transactions all use the selected app.
 
-World home defaults to Getting started for all visits; no wallet, profile or game-session creation is required. Optional inline avatar/username setup explains public persistence and free signing, with a direct skip-to-play action. Left navigation includes Getting started, Community feed (`/#/feed`), social Explore/search, Profile, Game guide and Docs. On mobile these remain accessible through the bottom bar. Play and Ledger remain in the compact header. Profile edit links use `/#/setup`; draft profile inputs survive same-wallet balance refreshes and feed/guide navigation. Wallet/account changes clear another wallet's draft and are revalidated before publication.
+World home defaults to Getting started; no wallet or profile is required to read it. Media defaults to its community feed and provides optional inline avatar/username setup, social Explore/search, Profile and the Media guide. Draft profile inputs survive same-wallet refreshes and feed/guide navigation. Wallet/account changes clear another wallet's draft and are revalidated before publication.
 
 The social layout is centered within a 1,280px desktop container, with a 600px feed between navigation and suggestions. The feed fills its grid column rather than inheriting the shared marketing-page margins; tablets hide suggestions, and phones use a full-width feed.
 
-World's colored Play icon sits beside the header wallet control. The header launches `/play/` in a separate, reusable popup window; browsers may open a tab instead according to their settings. If a popup is blocked, allow popups for World and try again.
+Gameplay links use ordinary browser navigation to World rather than a separate popup launcher.
 
 The merged World landing combines the game introduction, first three steps, optional profile setup, community entry and read-only public totals. The guide explains resources, weather, finite reserve funding and privacy without leaving the main site. Content panes do not repeat sidebar menu titles; feed tabs, search context and profile/post back controls remain available.
 
@@ -344,8 +367,8 @@ Run `npm run abi` to regenerate the ABI-only admin artifacts after contract sour
 
 ### API ownership and World wallet
 
-- `services/gold-api/` owns Ethereum FTHG, bridge and staking reads: `/api/v1/gold/stats`, `/wallets/:address`, `/quote` and `/rpc`. RPC is read-only, rate-limited and bounds log scans. Ethereum writes are signed by the selected browser wallet, never by World.
-- `services/dollar-api/` owns `/api/v1/dollar/*`, including confirmed bridge settlement, transfers, balances, profiles and the native journal. `/api/v1/dollar/stats` works without Ethereum connectivity. Legacy `/api/v1/*` paths remain compatible.
+- `services/gold/` owns Ethereum FTHG, bridge and staking reads: `/api/v1/gold/stats`, `/wallets/:address`, `/quote` and `/rpc`. RPC is read-only, rate-limited and bounds log scans. Ethereum writes are signed by the selected browser wallet, never by World.
+- `services/notes/dollar.js` owns `/api/v1/dollar/*`, including confirmed bridge settlement, transfers, balances, profiles and the native journal. `/api/v1/dollar/stats` works without Ethereum connectivity. Legacy `/api/v1/*` paths remain compatible.
 - Dollar also owns `/api/dollar/game/*`: gameplay state, spending, market reserves and escrow. World owns sessions/chat under `/api/session` and `/api/chat*`, and consumes the two funding APIs via same-origin gateway namespaces. There is no separate World currency ledger.
 - In Account, **Use wallet for gameplay** signs an origin/session/time-bound authorization. The settlement uses that wallet's actual available FTH$ balance. Disconnect, account switch, or **Stop wallet gameplay access** revokes the current browser capability; signing again restores the same settlement. Other authorized browser sessions remain independent.
 - FTH$ displays at most **two decimals**. The journal retains 18-decimal integer amounts; gameplay retains four decimals, leaving smaller wallet dust untouched. Signed transfer amounts are never rounded for display.
@@ -494,7 +517,7 @@ Every site has its own console at `/admin/`, with consistent site styling and sh
 | `gold.…/admin/` | Public reserve flows, OFF-SYNC history and essential token safety |
 | `dollar.…/admin/` | Dynamic-bridge liquidity, reward policy, service roles and safety; ledger monitoring and SQL |
 | `localhost:8080/admin/` (foundation) | Ecosystem status and admin wallet lists |
-| `world.…/admin/` | World moderation (hide/unhide posts, suspend/restore wallets) and SQL |
+| `media.…/admin/` (legacy `world.…/admin/`) | Media moderation (hide/unhide posts, suspend/restore wallets) and SQL |
 
 Foundation and Dollar project access uses `FEATHERAL_ADMIN_WALLETS` and configured FTHG project wallets; Dollar also recognizes the fixed bridge project wallets. Gold uses fixed project wallets and on-chain roles. World uses only the service's `WORLD_MODERATORS` / `FEATHERAL_ADMIN_WALLETS` moderator list. The pages only gate what they display; contract roles and server signature checks enforce actual authorization. World moderation is a wallet-signed `MOD` action recorded on the ledger rather than erasing anything. Personal staking and claims belong in the Dollar wallet at `/wallet/#staking`, not admin.
 
@@ -628,7 +651,7 @@ migrates funds. Download a new backup after linking to preserve those public pro
 The built-in address can receive native ETH without any external wallet; existing
 Ethereum conversion/staking still requires an external wallet on its separate screen.
 Public native-ETH reads use per-chain `WALLET_RPC_<chainId>` overrides or the defaults
-in `services/gold-api/native.js`, with a fresh CoinGecko ETH/USD feed. USD estimates
+in `services/gold/native.js`, with a fresh CoinGecko ETH/USD feed. USD estimates
 include priced ETH even if the separate FTHG feed/Gold bridge is unavailable.
 
 Foundation and Gold retain their existing header controls and wallet color themes;

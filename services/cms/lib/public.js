@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const T = require('./text');
 const W = require('./wallet');
 const Members = require('./members');
@@ -9,7 +9,7 @@ const { fetchImage } = require('./linkfetch');
 const { Analytics } = require('./analytics');
 const CmsStore = require('./cms');
 const { Economy } = require('./economy');
-const { isNativeNote, effectiveProgram } = require('../../notes-api/ledger');
+const { isNativeNote, effectiveProgram } = require('../../notes/ledger');
 
 const PUBLIC_TYPES = ['gif', 'jpeg', 'png'];
 const VOTES = ['like', 'dislike', 'none'];
@@ -1065,7 +1065,7 @@ class Curation {
     this.notes = !!notesFile;
     this.ledgerTable = 'qprn_ledger';
     if (notesFile) {
-      const { Notes, migrate } = require('../../notes-api/ledger');
+      const { Notes, migrate } = require('../../notes/ledger');
       const notes = new Notes(notesFile);
       try { migrate(this.db, notes.db, siteKey); }
       catch (error) { this.db.close(); throw error; }

@@ -65,7 +65,7 @@ function normalizeConfiguration(input, existing = {}) {
       if (field.type === "json") {
         const parsed = JSON.parse(value);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) invalid();
-        if (name === "TOKEN_API_SERVICES_JSON") require("../token-api/auth").readTrustedServices(value);
+        if (name === "TOKEN_API_SERVICES_JSON") require("../identity/auth").readTrustedServices(value);
         if (name === "ADMIN_CONFIG_JSON") {
           const allowed = new Set(["brand", "siteKey", "allowSync", "publicBrand", "publicTagline", "cmsHost", "publicHost", "ageGate", "siteManagement", "sampleSites"]);
           if (Object.keys(parsed).some(key => !allowed.has(key))) invalid();
@@ -106,6 +106,6 @@ function assertDatabaseConfiguration(root, env = process.env) {
     || name === "CMS_PASSWORD" || name === "ADMIN_CONFIG" || name === "DB_VAULT_KEY_FILE"
     || name === "SERVER_PROFILE_NETWORK_LIMIT_BPS" || name.startsWith("DEPLOY_") || name.startsWith("TOKEN_LEDGER_"));
   if (require("node:fs").existsSync(require("node:path").join(root, ".env")) || legacy.length)
-    throw new Error(`Legacy application configuration found${legacy.length ? ` (${legacy.join(", ")})` : ""}. Stop the service, migrate a private .env with scripts/init-settings.js --migrate-env, and remove application environment overrides before restarting.`);
+    throw new Error(`Legacy application configuration found${legacy.length ? ` (${legacy.join(", ")})` : ""}. Stop the service, migrate a private .env with scripts/init-settings.js --migrate-env (add --setup for first-run Admin enrollment or legacy SSH-key configuration), and remove application environment overrides before restarting.`);
 }
 module.exports = { fields: Object.freeze(fields), normalizeConfiguration, environmentConfiguration, assertDatabaseConfiguration };

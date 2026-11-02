@@ -1,4 +1,4 @@
-declare module '*services/db-api/sqlite.js' {
+declare module '*services/database/sqlite.js' {
   export interface SqliteStatement {
     all(...parameters: any[]): any[];
     get(...parameters: any[]): any;

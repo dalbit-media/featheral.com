@@ -38,12 +38,12 @@ const CONFIG = {
 const locked = !CONFIG.allowSync;
 const { Telemetry, injectTelemetry } = require('./lib/telemetry');
 const telemetry = new Telemetry(path.join(DATA_DIR, 'telemetry.sqlite'));
-const { Notes } = require('../notes-api/ledger');
+const { Notes } = require('../notes/ledger');
 const notes = new Notes(path.join(DATA_DIR, 'notes.sqlite'));
 const siteManager = CONFIG.siteManagement ? new SiteManager({
   cmsHost: CONFIG.cmsHost, defaultHost: CONFIG.publicHost, defaultKey: CONFIG.siteKey,
 }) : null;
-const { Creation } = require('../notes-api/creation');
+const { Creation } = require('../notes/creation');
 const creation = siteManager ? new Creation(notes, siteManager) : null;
 const deployment = new Deployment({ root: path.resolve(__dirname, '..', '..'), settings: operationsSettings, snapshot: () => ({
   integrated: sitePages.snapshot(),
@@ -160,7 +160,7 @@ const { ServerUsers } = require('./lib/server-users');
 const serverUsers = new ServerUsers({ deployment, settings: operationsSettings });
 const ledgerDirectory = path.resolve(env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers'));
 fs.mkdirSync(ledgerDirectory, { recursive: true });
-const database = require('../db-api/server').createDatabase({
+const database = require('../database/server').createDatabase({
   directory: fs.realpathSync(ledgerDirectory),
   env,
   repository: path.resolve(__dirname, '..', '..'), sites: () => sitePages.hosts,
@@ -209,8 +209,8 @@ app.use('/api/server-profile', serverProfileApi({
 let operationsHandler;
 app.setOperationsHandler = handler => { operationsHandler = handler; };
 app.setCreationPayments = payment => { if (creation) { creation.payment = payment; if (payment) creation.recover().catch(console.error); } };
-const dollarExchange = creation ? new (require('../notes-api/exchange').Exchange)(creation) : null;
-const trading = creation ? new (require('../notes-api/trading').Trading)(creation, dollarExchange) : null;
+const dollarExchange = creation ? new (require('../notes/exchange').Exchange)(creation) : null;
+const trading = creation ? new (require('../notes/trading').Trading)(creation, dollarExchange) : null;
 let dollarWalletReader;
 let portfolioGoldReader;
 let walletSourceReader;
@@ -258,7 +258,7 @@ async function walletPortfolio(holdings, extra) {
     console.error('Portfolio market prices unavailable:', error); marketError = error.message;
     pool = { funded: false, dollars: '0', fthx: 0, priceError: marketError }; markets = [];
   }
-  return { ...require('../notes-api/portfolio').portfolio(holdings, pool, markets, gold, extra), goldError, marketError };
+  return { ...require('../notes/portfolio').portfolio(holdings, pool, markets, gold, extra), goldError, marketError };
 }
 app.setDollarWallet = (reader, settlement) => {
   dollarWalletReader = reader;
@@ -373,7 +373,7 @@ creationRouter.use((req, res, next) => {
 const creationOwner = req => creation.owner(req.get('x-creation-token'));
 creationRouter.get('/economy/reference', wrap(async (req, res) => {
   const origin = req.get('origin');
-  if (origin && !require('../wallet-api/ui').allowedOrigin(origin))
+  if (origin && !require('../wallet/ui').allowedOrigin(origin))
     return res.status(403).json({ error: 'Unsupported valuation reader origin.' });
   if (origin) res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
   res.set('Cache-Control', 'no-store');
@@ -857,7 +857,7 @@ app.get('/api/notes/wallets/:address', wrap((req, res) => {
 }));
 app.get('/api/notes/markets', wrap((req, res) => {
   if (!creation) throw Object.assign(new Error('Note markets require site management to be enabled.'), { status: 503 });
-  res.json({ markets: creation.markets.catalog(Date.now(), true), treasuryFthx: notes.balance(require('../dollar-api/funds').SYSTEM_TREASURY_ACCOUNT) });
+  res.json({ markets: creation.markets.catalog(Date.now(), true), treasuryFthx: notes.balance(require('../notes/game-funds').SYSTEM_TREASURY_ACCOUNT) });
 }));
 app.post('/api/notes/markets/:symbol/fund', wrap((req, res) => {
   if (!creation) throw Object.assign(new Error('Note markets require site management to be enabled.'), { status: 503 });

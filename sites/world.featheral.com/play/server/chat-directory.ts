@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SqliteDatabase } from '../../../../services/db-api/sqlite.js';
+import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { radius } from '../src/engine.ts';
 import type { Game } from '../src/engine.ts';
 import type { ChatDirectory, ChatRoom, ChatSettlement } from '../src/chat.ts';

@@ -14,8 +14,8 @@ export function renderWhitepaper(source: string, language: Language): string {
     return `<h${depth}${id}>${content}</h${depth}>\n`;
   };
   renderer.link = function ({ href, title, tokens }) {
-    const destination = href === './WHITEPAPER.md' ? '/play/whitepaper/?lang=en'
-      : href === './WHITEPAPER.ko.md' ? '/play/whitepaper/?lang=ko' : href;
+    const destination = href === './WHITEPAPER.md' ? '/whitepaper/?lang=en'
+      : href === './WHITEPAPER.ko.md' ? '/whitepaper/?lang=ko' : href;
     return `<a href="${attribute(destination)}"${title ? ` title="${attribute(title)}"` : ''}>${this.parser.parseInline(tokens)}</a>`;
   };
   const table = renderer.table;

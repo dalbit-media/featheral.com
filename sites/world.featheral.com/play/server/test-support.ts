@@ -1,4 +1,4 @@
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { dollarsUnits } from '../src/dollars.ts';
 import type { Account } from './economy.ts';
 import { worldWeekMs } from '../src/environment.ts';

@@ -4,9 +4,9 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const { Wallet } = require("ethers");
-const { Notes } = require("../../notes-api/ledger");
-const { Creation } = require("../../notes-api/creation");
-const { SilverStore } = require("../../notes-api/silver-store");
+const { Notes } = require("../../notes/ledger");
+const { Creation } = require("../../notes/creation");
+const { SilverStore } = require("../../notes/silver-store");
 const approval = require("../../../sites/wallet.featheral.com/site-sign-in");
 const ORIGIN = "http://silver.localhost:8080";
 const productInput = (patch = {}) => ({ title: "Test collectible redemption", brand: "Fixture issuer", description: "An isolated digital redemption fixture.",

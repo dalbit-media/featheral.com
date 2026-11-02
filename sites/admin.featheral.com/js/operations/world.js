@@ -8,13 +8,13 @@ window.FeatheralAdminControllers.world = (root, kit) => {
   let account = "";
   let busy = false;
 
-  // Must stay identical to socialMessage() in services/social-ledger/social.js (MOD branch).
+  // Must stay identical to socialMessage() in services/media/social.js (MOD branch).
   const message = (d) => ["Featheral World social action", "", "Action: MOD", `Author: ${d.w}`, `Moderation: ${d.act}`, `Target: ${d.tg}`, `Nonce: ${d.n}`, `Issued at: ${d.ts}`, "Ledger: Featheral World communication ledger", "", "Signing is free and only authorizes this action on the World ledger."].join("\n");
 
   async function moderate(act, tg) {
     kit.assertActive();
     if (!admin) throw new Error("Connect a moderator wallet first.");
-    if (!confirm(`${act} ${tg}? This signed moderation action will be recorded permanently on the World ledger.`)) return false;
+    if (!confirm(`${act} ${tg}? This signed moderation action will be recorded permanently in the Media feed database.`)) return false;
     const w = ethers.getAddress(account);
     const data = { w, by: w, n: Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join(""), ts: new Date().toISOString(), act, tg };
     kit.assertActive();
@@ -70,10 +70,10 @@ window.FeatheralAdminControllers.world = (root, kit) => {
     });
   });
   gate($("gate"), "world", (ok, acct) => { admin = ok; account = acct; updateButtons(); });
-  load().catch((error) => { $("moderationStatus").textContent = `World admin unavailable: ${error.message}`; });
+  load().catch((error) => { $("moderationStatus").textContent = `Media moderation unavailable: ${error.message}`; });
   window.LedgerSql.mount($("sqlHost"), {
     base: API,
-    title: "World ledger SQL",
+    title: "Media feed SQL",
     examples: [
       { title: "Moderation log", sql: "SELECT * FROM moderation ORDER BY time_ms DESC LIMIT 50" },
       { title: "Hidden posts", sql: "SELECT id, author, text FROM posts WHERE hidden=1 LIMIT 50" },

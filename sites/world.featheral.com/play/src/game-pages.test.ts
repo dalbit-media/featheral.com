@@ -11,7 +11,7 @@ test('all nine game routes resolve directory and built entry URLs', () => {
     assert.equal(gamePage(gamePages[key].path), key);
     assert.equal(gamePage(`${gamePages[key].path}index.html`), key);
   }
-  for (const path of ['/', '/constructor/', '/play/unknown/']) assert.equal(gamePage(path), 'world');
+  for (const path of ['/', '/constructor/', '/unknown/']) assert.equal(gamePage(path), 'world');
 });
 test('community and guide routes have Korean-first refreshable production entries', () => {
   const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
@@ -31,9 +31,9 @@ test('community and guide routes have Korean-first refreshable production entrie
 test('Journal and Help move into Account without losing their direct routes', () => {
   assert.deepEqual(primaryGamePageKeys, ['world', 'home', 'market', 'communicate', 'federation']);
   assert.deepEqual(accountPageKeys, ['journal', 'help']);
-  assert.equal(gamePage('/play/journal/'), 'journal');
-  assert.equal(gamePage('/play/help/'), 'help');
-  assert.equal(gamePage('/play/contacts/'), 'contacts');
+  assert.equal(gamePage('/journal/'), 'journal');
+  assert.equal(gamePage('/help/'), 'help');
+  assert.equal(gamePage('/contacts/'), 'contacts');
   assert.equal(primaryGamePageKeys.includes('contacts'), false);
   assert.equal(gamePages.communicate.label, 'Inbox');
 });
@@ -55,7 +55,7 @@ test('the continuous encyclopedia has unique chapters, real bilingual screenshot
         const screenshot = readFileSync(new URL(`../public/images/guide/${language}/${topic.image}.jpg`, import.meta.url));
         assert.ok(screenshot.length > 2000, topic.image);
         assert.equal(screenshot.readUInt16BE(0), 0xffd8);
-        assert.ok(html.includes(`/play/images/guide/${language}/${topic.image}.jpg`));
+        assert.ok(html.includes(`/images/guide/${language}/${topic.image}.jpg`));
       }
     }
   }

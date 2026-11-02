@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import sqlite from '../../../../services/db-api/sqlite.js';
+import sqlite from '../../../../services/database/sqlite.js';
 import { GameFunds } from './funds.ts';
 import { formatDollars, dollarsUnits, dollarsSlippage } from '../src/dollars.ts';
 import { formatFthg } from '../src/fthg.ts';

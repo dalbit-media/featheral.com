@@ -4,11 +4,11 @@ const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
 const { ethers } = require("ethers");
-const { createDollarApi: createTokenApi } = require("../services/dollar-api/server");
+const { createDollarApi: createTokenApi } = require("../services/notes/dollar");
 const { FthLedger } = require("../services/fth-ledger/ledger");
 const { transferMessage } = require("../services/fth-ledger/transfer");
 const { blockHash } = require("../services/fth-ledger/codec");
-const { profileMessage } = require("../services/token-api/profile");
+const { profileMessage } = require("../services/identity/profile");
 const vm = require("node:vm");
 
 describe("Token API routing", () => {

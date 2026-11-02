@@ -33,7 +33,7 @@ function validateBody(body, widgets, layout = '') {
               throw error('Links/images must use a safe local path, HTTPS URL, anchor or email URL');
             if (item.name === 'src' && !/^(?:\/(?!\/)|https:\/\/)/i.test(item.value)) throw error('Invalid image URL');
           }
-          if (item.name === 'data-site' && !['foundation', 'gold', 'silver', 'app', 'dollar', 'world', 'ledger', 'admin', 'cms', 'x', 'ex', 'notes', 'sites', 'stats', 'wallet'].includes(item.value)) throw error('Unknown site link');
+          if (item.name === 'data-site' && !['foundation', 'gold', 'silver', 'app', 'dollar', 'world', 'media', 'ledger', 'admin', 'cms', 'x', 'ex', 'notes', 'sites', 'stats', 'wallet'].includes(item.value)) throw error('Unknown site link');
           if (item.name === 'target' && item.value !== '_blank') throw error('Only new-window link targets are supported');
           if (item.name === 'id') {
             if (!/^[a-zA-Z][\w-]*$/.test(item.value) || ids.has(item.value) || layout.includes(`id="${item.value}"`)

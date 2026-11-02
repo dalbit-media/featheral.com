@@ -10,11 +10,11 @@ const { ethers } = require("ethers");
 const { FthLedger, walletAccountId } = require("../services/fth-ledger/ledger");
 const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
-const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/dollar-api/funds");
-const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold-api/reserve");
-const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold-api/server");
-const { createDollarApi } = require("../services/dollar-api/server");
-const { activateLiveReserve } = require("../services/gold-api/activation");
+const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/notes/game-funds");
+const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold/reserve");
+const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
+const { createDollarApi } = require("../services/notes/dollar");
+const { activateLiveReserve } = require("../services/gold/activation");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 
@@ -529,7 +529,7 @@ describe("Isolated finite Gold reserve", () => {
     }
     for (const page of ["admin", "conversion"]) {
       const html = fs.readFileSync(page === "admin"
-        ? path.join(__dirname, "..", "sites", "admin.featheral.com", "views", "gold.html")
+        ? path.join(__dirname, "..", "sites", "admin.featheral.com", "pages", "gold.html")
         : path.join(__dirname, "..", "sites", "gold.featheral.com", page, "index.html"), "utf8");
       for (const id of ["sync-state", "origin-flow", "reserve-flow", "reserve-metrics", "reserve-mode", "reserve-transactions", "history-more", "history-status"]) {
         assert.ok(html.includes(`id="${id}"`), `${page}: ${id}`);

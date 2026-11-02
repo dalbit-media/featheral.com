@@ -48,7 +48,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   const fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
     calls.push({ url, body, headers: options.headers });
-    if (url.startsWith('/api/wallet/ui')) return reply(require('../../wallet-api/ui').walletUi(new URLSearchParams({ primary: require('../../wallet-api/ui').primaryFor(`${host}.localhost`),
+    if (url.startsWith('/api/wallet/ui')) return reply(require('../../wallet/ui').walletUi(new URLSearchParams({ primary: require('../../wallet/ui').primaryFor(`${host}.localhost`),
       view, ...(embedded ? { embedded: '1', parentOrigin: 'http://notes.localhost:8080' } : {}),
       ...(selectionNonce ? { selectionNonce, parentOrigin: 'http://gold.localhost:8080' } : {}),
       ...(publicAddress ? { address: publicAddress } : {}), followActive: followActive ? '1' : '0' })));
@@ -486,7 +486,7 @@ test('normal site wallets follow central account switches and refreshes, while e
   assert.deepEqual(pinned.errors, []);
 });
 test('Gold and Dollar retain actual balances and value FTHX and held notes when market discovery fails', async () => {
-  const { portfolio } = require('../../notes-api/portfolio'), unit = 10n ** 18n;
+  const { portfolio } = require('../../notes/portfolio'), unit = 10n ** 18n;
   const ethereum = { balance: '0', chainId: 1, token: '0xba658127d93b17e577e1b8e8995cab3ae7d7c665', checkedAt: new Date().toISOString() };
   const holdings = [{ symbol: 'FTHX', balance: '500000' }, { symbol: 'FTHA', balance: '500000' }];
   const gold = { chain: { id: 1, tokenAddress: '0xba658127d93b17e577e1b8e8995cab3ae7d7c665' },
@@ -709,7 +709,7 @@ test('all sites lead with actual primary holdings even when combined estimates d
     [symbol, { value: '9000000000000000000', unpriced: [] }])),
     usd: '12.34', fthg: '9000000000000000000', pricedFthDollar: '9000000000000000000', unpriced: [], source: 'Test' };
   for (const host of ['featheral', 'foundation', 'gold', 'dollar', 'world', 'notes', 'ex', 'x', 'sites', 'stats', 'wallet', 'community']) {
-    const primary = require('../../wallet-api/ui').primaryFor(`${host}.localhost`);
+    const primary = require('../../wallet/ui').primaryFor(`${host}.localhost`);
     const options = { walletData: { ethereum: { balance: '2000000000000000000' }, portfolio } };
     const ui = await fixture(host, options);
     const balance = primary === 'FTHG' ? '2 FTHG' : primary === 'FTH$' ? '10 FTH$' : '123 FTHX';

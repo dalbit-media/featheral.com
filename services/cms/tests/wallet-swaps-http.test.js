@@ -43,7 +43,7 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
     request.on("error", reject); request.end(body ? JSON.stringify(body) : undefined);
   });
   const wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
-  for (const [address, amount] of [[owner, 1000], [require("../../dollar-api/funds").SYSTEM_TREASURY_ACCOUNT, 1000000]])
+  for (const [address, amount] of [[owner, 1000], [require("../../notes/game-funds").SYSTEM_TREASURY_ACCOUNT, 1000000]])
     creation.db.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,?,'fixture',0,'test')").run(address, amount);
   creation.markets.fund("FTHA", "FUND FTHA 1000000 FTHX 1000000 NOTES");
   const challenge = (await call("/challenge", { address: owner })).body;

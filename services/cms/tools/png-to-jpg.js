@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { open } = require('../../db-api/sqlite');
+const { open } = require('../../database/sqlite');
 const { DATA_DIR } = require('../lib/store');
 const { unserialize, serialize } = require('../lib/phpser');
 

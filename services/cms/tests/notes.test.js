@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { Notes } = require('../../notes-api/ledger');
+const { Notes } = require('../../notes/ledger');
 const { PublicSite } = require('../lib/public');
 
 test('Notes merges legacy balances exactly once and refuses changed legacy writers', t => {

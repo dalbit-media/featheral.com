@@ -14,7 +14,7 @@ async function approveAdminAction(challenge, active) {
 async function mountOperation(key, q, token) {
   const config = OPERATION_VIEWS.find(entry => entry.key === key);
   if (!config) throw new Error("Unknown administration workspace.");
-  const response = await fetch(`/views/${key}.html`, { cache: "no-store" });
+  const response = await fetch(`/pages/${key}.html`, { cache: "no-store" });
   if (!response.ok) throw new Error(`Administration view HTTP ${response.status}`);
   const template = await response.text();
   if (token !== state.seq) return;
