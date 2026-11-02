@@ -42,7 +42,7 @@ function addressList(raw) {
 }
 
 // Profiles remain an independent service; this database owns only social actions.
-function createWorldApi({ env = process.env, sqlite, profiles = null, profileHandler = null, logger = console } = {}) {
+function createWorldApi({ env = require("../operations/runtime").environment(), sqlite, profiles = null, profileHandler = null, logger = console } = {}) {
   if (!sqlite || typeof sqlite.open !== "function") throw new Error("World Feed Database requires an injected managed sqlite opener from services/db-api/sqlite.js.");
   const admins = addressList(env.FEATHERAL_ADMIN_WALLETS);
   const moderators = [...new Set([...addressList(env.WORLD_MODERATORS), ...admins])];

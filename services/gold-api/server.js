@@ -29,7 +29,7 @@ function bridgeAbi() {
   throw new Error("FthgGameBridge ABI is missing. Run `npm run abi`.");
 }
 
-function createGoldApi({ env = process.env, provider, nativeReader, logger = console } = {}) {
+function createGoldApi({ env = require("../operations/runtime").environment(), provider, nativeReader, logger = console } = {}) {
   let reserveEngine = null;
   const nativeBalance = nativeReader || require("./native").createNativeReader({ env, logger });
   const marketPrice = require("./prices").createMarketPriceReader({ logger });

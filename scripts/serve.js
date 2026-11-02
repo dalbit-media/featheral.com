@@ -10,19 +10,21 @@ const { createWorldApi } = require("../services/social-ledger/api");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 const { worldProfileReader } = require("../sites/world.featheral.com/play/server/world-profile.ts");
+const { requestPolicy, configureServer } = require("../services/operations/http");
+const runtimeSettings = require("../services/operations/runtime");
+const env = runtimeSettings.environment();
 
 const root = path.resolve(__dirname, "..");
-const localEnvFile = path.join(root, ".env");
-if (fs.existsSync(localEnvFile)) process.loadEnvFile(localEnvFile);
-const port = Number(process.env.PORT) || 8080;
-const host = process.env.HOST || "127.0.0.1";
-const reserveMode = process.env.GOLD_RESERVE_MODE || "disabled";
+require("../services/operations/configuration").assertDatabaseConfiguration(root);
+const port = Number(env.PORT) || 8080;
+const host = env.HOST || "127.0.0.1";
+const reserveMode = env.GOLD_RESERVE_MODE || "disabled";
 if (!["disabled", "isolated", "live"].includes(reserveMode)) throw new Error("GOLD_RESERVE_MODE supports disabled, isolated or live.");
 let reserveDirectory;
 if (reserveMode === "isolated") {
-  if (!process.env.GOLD_RESERVE_TEST_DIR || host !== "127.0.0.1") throw new Error("Isolated reserves require GOLD_RESERVE_TEST_DIR and loopback binding.");
-  if (!process.env.PORT || !Number.isInteger(port) || port < 1 || port > 65535 || port === 8080) throw new Error("Reserve tests require an explicit separate port, not live port 8080.");
-  reserveDirectory = path.resolve(process.env.GOLD_RESERVE_TEST_DIR);
+  if (!env.GOLD_RESERVE_TEST_DIR || host !== "127.0.0.1") throw new Error("Isolated reserves require GOLD_RESERVE_TEST_DIR and loopback binding.");
+  if (!env.PORT || !Number.isInteger(port) || port < 1 || port > 65535 || port === 8080) throw new Error("Reserve tests require an explicit separate port, not live port 8080.");
+  reserveDirectory = path.resolve(env.GOLD_RESERVE_TEST_DIR);
   const testRoot = path.join(root, "data", "reserve-tests");
   const relative = path.relative(testRoot, reserveDirectory);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -46,20 +48,20 @@ if (reserveMode === "isolated") {
       else if (!info.isFile()) throw new Error("Unexpected isolated reserve directory entry.");
     }
   }
-  const origin = new URL(process.env.APP_ORIGIN || `http://world.localhost:${port}`);
+  const origin = new URL(env.APP_ORIGIN || `http://world.localhost:${port}`);
   if ((!["localhost", "127.0.0.1"].includes(origin.hostname) && !origin.hostname.endsWith(".localhost"))
     || origin.protocol !== "http:" || origin.port !== String(port) || origin.pathname !== "/" || origin.search || origin.hash
     || origin.username || origin.password) throw new Error("Reserve tests require a local HTTP APP_ORIGIN matching the isolated port.");
-  process.env.DOLLAR_GAME_DIR = path.join(reserveDirectory, "game");
-  process.env.FTH_LEDGER_DIR = path.join(reserveDirectory, "dollar");
-  process.env.WORLD_LEDGER_DIR = path.join(reserveDirectory, "world");
-  process.env.FTH_LEDGER_MODE = "writer";
-  process.env.WORLD_LEDGER_MODE = "writer";
+  env.DOLLAR_GAME_DIR = path.join(reserveDirectory, "game");
+  env.FTH_LEDGER_DIR = path.join(reserveDirectory, "dollar");
+  env.WORLD_LEDGER_DIR = path.join(reserveDirectory, "world");
+  env.FTH_LEDGER_MODE = "writer";
+  env.WORLD_LEDGER_MODE = "writer";
   for (const [prefix, directory] of [["FTH_LEDGER", "dollar-writer"], ["WORLD_LEDGER", "world-writer"]]) {
     const signing = gameSigningKey(path.join(reserveDirectory, directory));
-    process.env[`${prefix}_SIGNING_PRIVATE_KEY`] = signing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-    process.env[`${prefix}_WRITER_PUBLIC_KEY`] = signing.publicKey;
-    process.env[`${prefix}_NODE_ID`] = "isolated-reserve-test";
+    env[`${prefix}_SIGNING_PRIVATE_KEY`] = signing.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    env[`${prefix}_WRITER_PUBLIC_KEY`] = signing.publicKey;
+    env[`${prefix}_NODE_ID`] = "isolated-reserve-test";
   }
 }
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json" };
@@ -68,20 +70,20 @@ const sitesRoot = path.join(root, "sites");
 const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats"];
 const cms = require("../services/cms/server");
 const { injectTelemetry } = require("../services/cms/lib/telemetry");
-const gameDirectory = path.resolve(process.env.DOLLAR_GAME_DIR || path.join(root, "data", "dollar-game"));
-const reader = (process.env.FTH_LEDGER_MODE || process.env.TOKEN_LEDGER_MODE) === "reader";
+const gameDirectory = path.resolve(env.DOLLAR_GAME_DIR || path.join(root, "data", "dollar-game"));
+const reader = env.FTH_LEDGER_MODE === "reader";
 const keys = reader ? null : gameSigningKey(gameDirectory);
 if (reserveMode === "live" && reader) throw new Error("Live reserve allocation requires the Dollar writer.");
 const goldKeys = reserveMode === "live" ? gameSigningKey(path.join(root, "data", "gold-reserve"))
   : reserveDirectory ? gameSigningKey(path.join(reserveDirectory, "gold")) : null;
 let store;
-const gold = createGoldApi();
-const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...process.env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
+const gold = createGoldApi({ env });
+const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
   FTH_GOLD_PUBLIC_KEY: reserveMode === "isolated" ? goldKeys?.publicKey : undefined }, beforeLedgerMutation: () => store?.recoverFunds(), exchangeSigningKey: keys?.privateKey });
 if (reserveMode === "live") activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets());
 if (api.ledger.genesis.goldPublicKey && !goldKeys) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
 const reserveEngine = goldKeys ? gold.enableReserve(api.ledger, goldKeys.privateKey, () => store?.recoverFunds()) : null;
-const world = createWorldApi({ fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {
+const world = createWorldApi({ env, fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {
   const original = req.url;
   try { req.url = "/api/v1/notes/profiles"; return await api.handle(req, res); }
   finally { req.url = original; }
@@ -93,7 +95,7 @@ cms.setOperationsHandler(async (req, res) => {
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Unknown administration API route" }));
 });
-const gameApiOrigin = process.env.APP_ORIGIN || `http://world.localhost:${port}`;
+const gameApiOrigin = env.APP_ORIGIN || `http://world.localhost:${port}`;
 if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, process.argv.includes("--dev") ? 20 : 1, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;
@@ -167,7 +169,7 @@ function redirect(res, location, status = 302) {
   res.end();
 }
 async function forwardGame(req, res) {
-  const upstream = process.env.FTH_LEDGER_UPSTREAM_URL || process.env.TOKEN_LEDGER_UPSTREAM_URL;
+  const upstream = env.FTH_LEDGER_UPSTREAM_URL;
   if (!upstream) throw new Error("Reader game requests require the Dollar writer upstream URL.");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
@@ -201,6 +203,7 @@ async function forwardGame(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  if (!requestPolicy(req, res, cms.operationsSettings)) return;
   cms.serverProfile?.recordRequest(req, res);
   try {
     injectTelemetry(res);
@@ -447,6 +450,7 @@ async function start() {
   if (reserveEngine) await reserveEngine.initialize();
   api.start();
   world.start();
+  configureServer(server, cms.operationsSettings);
   server.listen(port, host, () => {
   const local = (site) => `http://${site === "foundation" ? "" : `${site}.`}localhost:${port}/`;
   console.log(`Featheral sites (${api.mode} FTH$ ledger node ${api.nodeId}):`);

@@ -31,6 +31,9 @@ async function fixture(t, passwordConfigured = true) {
   t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   db.journals.transact("sites/app.featheral.com", { requestId: "private-message", changes: [{ key: "message:1", op: "put", expectedRevision: 0, value: "private text" }] });
   db.journals.transact("internal/vault", { requestId: "private-vault", changes: [{ key: "ssh-root", op: "put", expectedRevision: 0, value: { ciphertext: "private ciphertext", at: 1 } }] });
+  db.domain.database("system").transact({ requestId: "private-settings", changes: [
+    { collection: "settings", id: "runtime", op: "put", expectedRevision: 0, value: { ciphertext: "private system ciphertext" } },
+  ] });
   const app = express();
   const deployment = { running: false }, serverUsers = { changing: false };
   app.use("/api/database", db.adminRouter({ passwordConfigured, deployment, serverUsers,
@@ -71,6 +74,8 @@ test("Admin journal browsing authenticates, restricts hosts and excludes private
   assert.equal(records.records.length, 1);
   assert.ok(!JSON.stringify(records).includes("private text"));
   assert.equal((await request("/api/database/records?namespace=internal%2Fvault")).status, 404);
+  assert.equal((await request("/api/database/records?namespace=databases%2Fsystem")).status, 404);
+  assert.ok(!JSON.stringify(summary).includes("databases/system"));
   assert.equal((await request("/api/database/records?namespace=tokens%2Ffths&before=nope")).status, 400);
 });
 test("credential operations require real password configuration, HTTPS except loopback and exact same origin", async t => {

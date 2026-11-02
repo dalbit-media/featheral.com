@@ -468,20 +468,39 @@ describe("Isolated finite Gold reserve", () => {
   it("rejects unsafe isolation paths and exits nonzero when reserve initialization fails", function () {
     this.timeout(15000);
     const root = path.join(__dirname, ".."), isolated = path.join(root, "data", "reserve-tests", `automated-${crypto.randomUUID()}`);
-    const env = { ...process.env, HOST: "127.0.0.1", PORT: "18088", APP_ORIGIN: "http://world.localhost:18088",
+    const repository = path.join(directory, "system-fixture"), bootstrapFile = path.join(directory, "bootstrap.json"), keyFile = path.join(directory, "system.key");
+    fs.mkdirSync(repository);
+    fs.writeFileSync(keyFile, crypto.randomBytes(32).toString("hex"), { mode: 0o600 });
+    fs.writeFileSync(bootstrapFile, JSON.stringify({ keyFile }), { mode: 0o600 });
+    const settings = new (require("../services/operations/settings").OperationsSettings)({ root: repository, bootstrapFile });
+    const runtime = { HOST: "127.0.0.1", PORT: "18088", APP_ORIGIN: "http://world.localhost:18088",
       GOLD_RESERVE_MODE: "isolated", GOLD_API_RPC_URL: "http://127.0.0.1:1" };
-    const unsafe = spawnSync(process.execPath, [path.join(root, "scripts", "serve.js")], { env: { ...env, GOLD_RESERVE_TEST_DIR: path.join(root, "data") }, encoding: "utf8", timeout: 10000 });
+    const preload = path.join(directory, "system-fixture.cjs");
+    fs.writeFileSync(preload, `
+      const { OperationsSettings } = require(${JSON.stringify(path.join(root, "services", "operations", "settings.js"))});
+      const filename = ${JSON.stringify(path.join(root, "services", "operations", "runtime.js"))};
+      require.cache[require.resolve(filename)] = { id: filename, filename, loaded: true,
+        exports: new OperationsSettings(${JSON.stringify({ root: repository, bootstrapFile })}) };
+      const configuration = require(${JSON.stringify(path.join(root, "services", "operations", "configuration.js"))});
+      const check = configuration.assertDatabaseConfiguration;
+      configuration.assertDatabaseConfiguration = () => check(${JSON.stringify(repository)}, {});
+    `);
+    const start = target => {
+      settings.persist({ ...settings.value, revision: settings.value.revision + 1, runtime: { ...runtime, GOLD_RESERVE_TEST_DIR: target } });
+      return spawnSync(process.execPath, ["--require", preload, path.join(root, "scripts", "serve.js")], { encoding: "utf8", timeout: 10000 });
+    };
+    const unsafe = start(path.join(root, "data"));
     assert.notEqual(unsafe.status, 0);
     assert.match(unsafe.stderr, /named directory/);
     try {
-      const failed = spawnSync(process.execPath, [path.join(root, "scripts", "serve.js")], { env: { ...env, GOLD_RESERVE_TEST_DIR: isolated }, encoding: "utf8", timeout: 10000 });
+      const failed = start(isolated);
       assert.equal(failed.status, 1, failed.stderr);
       assert.match(failed.stderr, /Server initialization failed/);
       assert.equal(fs.readFileSync(path.join(isolated, "isolated-reserve.json"), "utf8"), '{"isolatedReserve":true}\n');
       const junction = path.join(isolated, "external");
       fs.symlinkSync(directory, junction, process.platform === "win32" ? "junction" : "dir");
       try {
-        const linked = spawnSync(process.execPath, [path.join(root, "scripts", "serve.js")], { env: { ...env, GOLD_RESERVE_TEST_DIR: isolated }, encoding: "utf8", timeout: 10000 });
+        const linked = start(isolated);
         assert.notEqual(linked.status, 0);
         assert.match(linked.stderr, /cannot contain links/);
       } finally { fs.unlinkSync(junction); }

@@ -1,8 +1,30 @@
-.server-profile-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.server-profile-dashboard { display: grid; gap: 10px; }
+.server-profile-dashboard .card { padding: 12px; margin: 0; min-width: 0; }
+.server-profile-dashboard h2 { font-size: 15px; }
+.server-profile-dashboard .card-head { margin-bottom: 8px; gap: 8px; flex-wrap: wrap; }
+.server-profile-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .server-profile-heading p { margin: 0; }
 .server-profile-heading .row { align-items: center; flex-wrap: wrap; }
-.server-profile-grid { margin-bottom: 16px; }
-.server-profile-risks { display: grid; gap: 8px; }
+.server-profile-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.server-profile-overview { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.server-profile-overview .stat { padding: 9px 10px; min-width: 0; }
+.server-profile-overview .stat .v { font-size: 20px; overflow-wrap: anywhere; }
+.server-profile-overview .stat .l { font-size: 10px; }
+.server-profile-overview .stat .s { font-size: 11px; }
+#operations-settings .server-profile-grid { align-items: start; margin-bottom: 10px; }
+#operations-settings .form-grid { gap: 10px; }
+.server-info { font-size: 12px; color: var(--muted); }
+.server-info summary { cursor: pointer; color: var(--brand); }
+.server-info p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.server-profile-risks { display: grid; gap: 5px; margin-bottom: 8px; }
+.server-risk-detail { border-bottom: 1px solid var(--line); padding: 5px 0; font-size: 12px; }
+.server-risk-detail summary { cursor: pointer; }
+.server-risk-detail summary span { float: right; font-size: 10px; font-weight: 700; }
+.server-risk-detail p { margin: 5px 0; color: var(--muted); }
+.server-risk-detail.healthy summary span { color: var(--ok); }
+.server-risk-detail.warning summary span { color: var(--warn); }
+.server-risk-detail.critical summary span { color: var(--bad); }
+.server-risk-detail.unknown summary span { color: var(--muted); }
 .server-risk { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: start; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; }
 .server-risk > span { font-size: 11px; font-weight: 700; letter-spacing: .04em; }
 .server-risk p { margin: 0; color: var(--muted); }
@@ -15,19 +37,32 @@
 .server-profile-storage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .server-storage-item { display: grid; grid-template-columns: 1fr auto; gap: 1px 8px; border-bottom: 1px solid var(--line); padding: 7px 0; }
 .server-storage-item small { color: var(--muted); grid-column: 1 / -1; }
-.server-profile-chart-card { margin-bottom: 16px; }
 .server-profile-chart { width: 100%; overflow: hidden; }
-.server-profile-chart svg { display: block; width: 100%; height: auto; min-height: 250px; }
+.server-profile-chart svg { display: block; width: 100%; height: auto; min-height: 190px; }
 .server-chart-label, .server-chart-value { fill: var(--muted); font: 12px system-ui, sans-serif; }
 .server-chart-value { fill: var(--ink); font-weight: 600; }
 .server-chart-grid { stroke: var(--line); stroke-width: 1; }
 .server-chart-line { fill: none; stroke: var(--brand); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.server-disk-layout { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.server-disk-donut { width: 120px; max-width: 100%; flex: 0 0 auto; }
+.server-disk-donut circle { fill: none; stroke-width: 20; }
+.server-disk-free { stroke: var(--ok); }
+.server-disk-used { stroke: var(--brand); }
+.server-disk-percent { fill: var(--ink); font: 700 22px system-ui, sans-serif; }
+.server-disk-caption { fill: var(--muted); font: 12px system-ui, sans-serif; }
+.server-disk-details { min-width: 130px; flex: 1; font-size: 12px; }
+.server-disk-details p { margin: 5px 0; }
+.server-disk-details .server-risk { grid-template-columns: 1fr; gap: 2px; padding: 5px 7px; }
+.server-disk-key { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; }
+.server-disk-key.used { background: var(--brand); }
+.server-disk-key.free { background: var(--ok); }
 @media(max-width:850px) {
   .server-profile-grid { grid-template-columns: 1fr; }
+  .server-profile-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .server-profile-heading { flex-direction: column; }
 }
 @media(max-width:560px) {
-  .server-profile-storage { grid-template-columns: 1fr; }
-  .server-profile-chart svg { min-height: 220px; }
+  .server-profile-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .server-profile-chart svg { min-height: 170px; }
   .server-chart-label, .server-chart-value { font-size: 10px; }
 }

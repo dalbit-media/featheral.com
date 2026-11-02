@@ -10,7 +10,7 @@ reviewed Deployment links instead of an empty CMS editor. Managed CMS roots repl
 built-in catalog entries without hiding separate hosted paths. Native applications
 are also included in traffic reporting and deployment hostname review.
 
-The workspace and privileged APIs are protected by the existing `CMS_PASSWORD`; frontend assets contain no authority. The main gateway dispatches authenticated API requests to the original Gold, Dollar and World services; signing, moderator/on-chain roles and wallet confirmations still apply. Writes must come from the admin origin. The standalone CMS service explicitly reports that operational APIs require the main `npm start` server. Backend modules, environment names and private datasets remain under `services/cms/`; an existing old CMS-host page database is reused to preserve its content/themes.
+The workspace and privileged APIs are protected by the Admin password managed in **Settings**; frontend assets contain no authority. The main gateway dispatches authenticated API requests to the original Gold, Dollar and World services; signing, moderator/on-chain roles and wallet confirmations still apply. Writes must come from the admin origin. The standalone CMS service explicitly reports that operational APIs require the main `npm start` server. Backend modules and private datasets remain under `services/cms/`; an existing old CMS-host page database is reused to preserve its content/themes.
 
 CMS and Notes use Node's built-in SQLite with connections created and managed
 through `services/db-api/sqlite.js`. Standalone modules and tools import its
@@ -19,17 +19,33 @@ Standalone CMS shutdown calls `database.sqlite.closeAll()` after service cleanup
 
 Admin's **Server profile** (`#/server-profile`) consolidates protected server
 resource metrics, a one-minute unified chart, risk indicators, cached database /
-ledger / upload / source inventory, Linux account browsing and root-password
-vault actions. `GET /api/server-profile` requires the Admin host, HTTPS (except
-loopback `admin.localhost`), configured `CMS_PASSWORD` and Admin authentication.
+ledger / upload / source inventory and Linux account browsing. Credentials are
+managed separately in **Settings**. `GET /api/server-profile` requires the Admin
+host, HTTPS (except loopback `admin.localhost`) and Admin authentication.
 Storage is scanned at startup and every five minutes; an authenticated same-origin
 `POST /api/server-profile/refresh` requests an early scan. The source inventory
 skips `.git`, `node_modules`, `artifacts`, `cache`, `coverage`, `dist` and `out`;
 those names are still counted inside data, upload and trash trees. Symlinks are
-not followed. Set `SERVER_PROFILE_NETWORK_LIMIT_BPS` to a positive bytes-per-
-second capacity to enable network utilization risk thresholds. Without that
+not followed. Set network capacity in **Settings** to a positive bytes-per-
+second value to enable network utilization risk thresholds. Without that
 setting, only observed HTTP traffic is reported because interface capacity is
 not available from Node's portable OS APIs.
+
+The disk-capacity donut shows in-use and available bytes and percentages for the
+filesystem hosting the service repository (not only the application inventory).
+In-use includes filesystem-reserved space unavailable to the service. Capacity
+samples carry their own timestamp and refresh with storage scans. Net growth is
+the used-space change over up to 24 hours of in-memory samples, collected at least
+five minutes apart. History starts again on process restart, a capacity change or
+a failed capacity sample. Before five minutes of observations, growth risk is
+unknown, unless current utilization already warrants a warning. A positive growth
+rate projects days until available space is exhausted; zero or declining usage
+has no exhaustion estimate. Disk risk is warning at 85% used or projected full in
+30 days, and critical at 95% used or projected full in 7 days. These are linear
+filesystem-wide estimates, not predictions of application-only growth.
+The compact Server profile dashboard puts ten metric overview tiles above disk,
+risk and storage panels. Expandable info boxes hold measurement details and
+thresholds; warning and critical risk explanations remain open by default.
 
 ## Foundation intranet
 
@@ -87,7 +103,7 @@ Retention/deletion is an operator responsibility in this initial release.
 The App manifest supports installation. Its service worker handles push only;
 it does not cache private work or promise offline access. Notifications require
 explicit permission, HTTPS (or localhost), and configured `APP_VAPID_PUBLIC_KEY`,
-`APP_VAPID_PRIVATE_KEY`, and `APP_VAPID_SUBJECT` (see `.env.example` for key generation).
+`APP_VAPID_PRIVATE_KEY` in Admin Settings (generate a matching pair with `npx web-push generate-vapid-keys`; the subject is `https://featheral.com`).
 Only recognized browser push-service endpoints are accepted. Payloads contain
 generic notification text, not message contents. Logout unsubscribes that browser;
 suspending a member removes their subscriptions. iOS notifications require the
@@ -180,11 +196,11 @@ remote release.
 
 The site-page editor opens the homepage first, with separate site/page selectors, full-width title/description/content fields and collapsible widget help. **View published page** opens the selected page at its public URL. The status distinguishes saved content from unsaved changes; use **Publish changes** or Ctrl/Cmd+S to publish. Switching pages or leaving the editor prompts before discarding changes.
 
-**Deploy all sites** uses a digest-bound, expiring review plan followed by SFTP upload and pinned-host-key SSH execution. It is disabled by default and must be enabled in the private server environment, not a CMS form. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment) and [environment example](../../.env.example). Initial private data must be restored from a consistent offline backup on the target; it is never copied from the active writer or added to Git. No deployment occurs merely by reviewing a plan.
+**Deploy all sites** uses a digest-bound, expiring review plan followed by SFTP upload and pinned-host-key SSH execution. It is disabled by default and must be enabled in Admin Settings with origin-wallet approval. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment). Initial private data must be restored from a consistent offline backup on the target; it is never copied from the active writer or added to Git. No deployment occurs merely by reviewing a plan.
 
 This application and its complete local data were moved into the Featheral foundation at `services/cms/`; the old source root is empty. Run `npm start` from the foundation root to serve CMS, X, Exchange and all registered CMS sites through the same gateway as Foundation, Gold, Dollar and World. Root `npm install` includes this CMS workspace. Run `npm run test:cms` from the foundation root for the migrated suite.
 
-Local gateway URLs are `http://admin.localhost:8080/`, `http://x.localhost:8080/` and `http://ex.localhost:8080/`. Existing sample Featheral hosts and new Featheral subdomains also support `.localhost` aliases. CMS preview links on `admin.localhost` keep their local origin. Set `CMS_PASSWORD` before exposing the production CMS; password-free access on `admin.localhost` is restricted to loopback. Imported data and uploads remain in this application's ignored `data/` directory, not in the foundation's ledger data directory.
+Local gateway URLs are `http://admin.localhost:8080/`, `http://x.localhost:8080/` and `http://ex.localhost:8080/`. Existing sample Featheral hosts and new Featheral subdomains also support `.localhost` aliases. CMS preview links on `admin.localhost` keep their local origin. Set Admin access in **Settings** before exposing the production CMS; password-free first-run access on `admin.localhost` is restricted to loopback. Imported data and uploads remain in this application's ignored `data/` directory, not in the foundation's ledger data directory.
 
 For standalone operation, run `npm run start:cms` at the foundation root (default port 5178). Do not run standalone and gateway processes against the same data concurrently. The exchange remains a local demo and its FTH$ is not the foundation's Dollar currency.
 
@@ -192,7 +208,7 @@ Featheral CMS manages local content alongside the stored WordPress data set in `
 
 ## Local mode (default)
 
-`admin.config.json` controls site names and local mode:
+In Admin Settings, `ADMIN_CONFIG_JSON` controls site names and local mode (restart after saving):
 
 ```json
 { "brand": "admin.featheral.com", "siteKey": "qporn-eurasiahosting-com", "allowSync": false, "siteManagement": true, "publicBrand": "x.featheral.com", "cmsHost": "admin.featheral.com", "publicHost": "x.featheral.com", "publicTagline": "Featheral X Media Archiving and Streaming Platform. Share media, support free expression, and earn FTHX.", "ageGate": true }
@@ -207,88 +223,102 @@ Featheral CMS manages local content alongside the stored WordPress data set in `
 
 ### Linux server accounts
 
-`#/server-users` is the Admin-only account browser for the SSH server configured
-by `DEPLOY_TARGET`. It uses `getent passwd` to include system accounts and other
+`#/server-profile` (with the old `#/server-users` alias) is the Admin-only account
+browser for the SSH server configured in **Settings**. It uses `getent passwd` to include system accounts and other
 NSS-provided users, with search and 50-row pagination. Only username, UID, GID,
 home and shell are returned; password fields and personal GECOS fields are not
 exposed. UID 0 is marked as root privileges. This is separate from application
 profiles and App membership; account creation/deletion and permission editing
 are not enabled.
 
-All `/api/server-users` routes require a nonempty `CMS_PASSWORD` and an
-authenticated Admin login, even on localhost. Production requires HTTPS;
-loopback `admin.localhost` may use HTTP for development. SSH credentials and
-the independently verified host-key fingerprint use the deployment environment;
-account browsing does not require `DEPLOY_ENABLED=true` or a TLS-registration
-email. No remote user data is cached in browser storage.
+Account browsing requires configured Admin access, HTTPS (loopback Admin may use
+HTTP), and a fresh origin-wallet approval for the Settings credential. It does not
+require deployment to be enabled or a certificate email. No remote user data is
+cached in browser storage. Root-password changing has been removed from the UI
+and service; the old change/challenge/status endpoints return 404. Existing audit
+files and legacy vault journals are retained without exposing their contents.
 
-Changing the Linux root password also requires the current root password,
-an FTHG origin-wallet signature, `CHANGE ROOT PASSWORD`, and a new password with at least 16 characters, at most
-256 UTF-8 bytes, and no colons or control characters. Keep an independent
-recovery session open. Connect the canonical FTHG origin wallet
-(`0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c`) with the header signing control.
-Admin issues a five-minute, single-use `personal_sign` challenge binding the
-password-change action, Admin origin/session, exact password pair and pinned SSH
-destination. Password binding uses a private, per-process HMAC, not a public
-password hash; challenges expose neither passwords nor their hashes. Modified,
-expired, wrong-wallet and replayed approvals are rejected before SSH.
-Leaving the view or changing wallets while signing prevents submission.
-The wallet private key is never requested or repurposed as a root password.
-Restarting Admin invalidates pending challenges.
+### Operations Settings
 
-After signature verification, the backend freshly authenticates as root, confirms
-UID 0, runs the fixed `/usr/sbin/chpasswd` command with the new password on stdin
-(never in the command line), then verifies a new SSH connection. Existing
-server SSH policy must permit root password login; this feature never enables
-it. Attempts are rate-limited to five per 15 minutes per source address (ten challenge
-requests per 15 minutes), and
-concurrent password changes/deployments are blocked.
+`#/settings` manages Admin access, SSH/sudo, deployment, upload size, HTTP/SSH/job
+timeouts, network capacity and Let's Encrypt registration email, plus runtime
+binding/storage, Admin/moderator wallet authorities, App push/calls, Silver,
+blockchain, RPC, bridge and ledger configuration. Credentials use
+`username:password`; password-only or `:password` means root. Passwords may contain
+colons after the username separator. The same credential is used for SSH and sudo.
+New credentials are checked with a pinned SSH login and, for non-root users, sudo.
+Saving never changes a server password. Secrets are not returned by the API,
+included in commands, logged, or uploaded with releases.
 
-Passwords are not logged, included in plans or stored in an audit record. Private
-audit entries in `services/cms/data/server-users/audit.jsonl` contain time,
-host, action, outcome and optional encrypted-storage confirmation. Failures after submission are explicitly unverified:
-the password may have changed, so check server access before retrying. Navigating
-away does not cancel an in-flight password change. After verified success, a
-configured external vault key enables automatic encrypted storage of the new
-password. Storage failures are reported separately from the verified remote
-change; re-enroll in Database & vault before using stored-credential operations.
-Neither local nor remote environment files are rewritten.
+Run `node scripts/init-settings.js` as the service account to initialize an
+external bootstrap and independent encryption key. The default bootstrap is
+`/etc/featheral/bootstrap.json` on Linux or `%ProgramData%\Featheral\bootstrap.json`
+on Windows; `FEATHERAL_BOOTSTRAP_FILE` may select another absolute external path.
+Private files use 0600 on Unix; restrict Windows ACLs manually to the service
+account. Keep the key outside the repository and ledger backups, backed up
+separately. First-run Settings is only available from loopback Admin; initialize
+Admin access and sign with the origin wallet before exposing the service.
 
-The password card shows a prominent live result above its inputs: **SUCCESS**
-only after both the change and a fresh SSH login are verified, **NOT SUBMITTED**
-for validation/signing failures, or **NOT VERIFIED** when the submitted outcome
-is uncertain. Required-field validation and cancellation also produce feedback.
-**Refresh last recorded result** reads the latest credential-free audit outcome
-and timestamp through the protected `/api/server-users/root-password/status`
-endpoint, including after navigation or a restart. A historical result is labeled
-as such; an interrupted/requested operation never displays as success. If the
-network result is uncertain, keep the recovery session open and independently
-test a new SSH login with the new password before retrying.
+`GET /api/settings` returns redacted values and a revision. `POST
+/api/settings/challenge` binds a change to that revision and Admin origin/session.
+`POST /api/settings` consumes a five-minute single-use origin signature, validates
+limits and verifies a changed credential before atomically persisting
+AES-256-GCM ciphertext in the private `data/system-database/` named system database.
+Admin passwords use
+salted scrypt hashes. Settings changes invalidate outstanding credential approvals
+and deployment plans. HTTPS, host restrictions, same-origin writes, bounded request
+bodies and rate limits protect the API. No credential reveal/export endpoint exists.
+
+Stop an existing writer and take a consistent offline backup before running
+`node scripts/init-settings.js --migrate-env`. This explicitly imports the old
+runtime configuration (including encrypted root-vault credentials when
+configured), verifies database read-back, then removes the migrated `.env` and
+imported legacy Admin JSON. Preserve a customized Admin JSON before upgrading
+and supply its backup path as legacy `ADMIN_CONFIG` during migration. Deployment remains
+disabled until reviewed. Migration refuses legacy SSH-key authentication rather
+than discarding it; re-enroll a password credential in Settings. Keep the original
+external vault key and journals for recovery. For existing encrypted JSON Settings,
+run `node scripts/init-settings.js --migrate-settings` with their original bootstrap
+first. Unknown environment names, conflicting aliases or conflicting saved values
+abort migration without removing source configuration.
+No startup process silently rewrites `.env`; gateway startup refuses a leftover file.
+Process environment no longer overrides application configuration. Only the external
+bootstrap location and ordinary OS/service-manager environment remain external.
+Startup also rejects legacy application variables supplied by a service manager;
+export them to a private migration file and remove the overrides after migration.
+Use `--env-file <absolute-path>` for the real shared file, not its release symlink,
+and `--bootstrap-file <absolute-path>` for an existing external bootstrap.
+
+The Settings API includes grouped runtime field metadata; secret values are always
+blank, with only a configured indicator. Blank secrets retain the saved value;
+explicit Clear removes it. Runtime edits require `APPLY RUNTIME SETTINGS` and origin
+approval. Restart the service afterward; the API/UI reports restart-required state.
+Changing storage paths, writer identities, authorities or reserve mode requires a
+consistent offline backup and review. Live reserve mode can allocate funds on restart.
+Profiles, balances, existing financial identities and other domain data stores are
+preserved. Linux user accounts remain OS-owned; only connection configuration is
+stored in the system database.
+
+Upload limit: 1–1024 MiB; HTTP timeout: 5–3600 seconds; SSH timeout: 5–120 seconds;
+deployment timeout: 60–7200 seconds. CMS body parsers and gateway timeouts use saved
+values. Feature-specific limits may be lower. Nginx body/proxy timeout changes
+apply on the next reviewed deployment. Public ports 80/443 and DNS must reach the
+target for Let's Encrypt. Deployment enables `certbot.timer` and installs an
+Nginx validation/reload hook for automatic certificate renewal.
 
 The single Admin site dropdown includes every core and hosted site individually. Selecting a site opens its primary management workspace, while cards expose service, content/appearance and deployment links as appropriate. `#/operations` lists native service workspaces and application shortcuts. App membership, teams, missions and grants use `#/intranet`; Silver products, encrypted stock and fulfillment use `#/silver`; Notes reward programs, balances and explicit market funding use `#/notes`. Old per-site `note-markets` URLs delegate to that same Notes view, not a second funding implementation. Reserved and already-funded markets cannot be funded, insufficient treasury disables funding, and the exact approval phrase and confirmation remain required.
 
 **All sites**, **Service operations**, **Notes** and **Deployment** remain available while managing a site. Deployment (`#/deployment`) performs a reviewed release to the server; review, exact approval and status remain on that page, not the Sites overview. This does not change deployment permissions, enable remote deployment, synchronize balances or perform Ethereum reconciliation. Public site navigation does not show Admin links; existing administration URLs remain available.
 
-Deployment needs no root password environment variable. Use
-`DEPLOY_TARGET=root@featheral.com:/opt/featheral` and an external
-`DB_VAULT_KEY_FILE`; enroll the current root password through Admin's
-`#/database` view with an origin-wallet signature and a freshly verified SSH
-login. The independent encryption key must remain outside the repository and
-ledger. AES-256-GCM ciphertext lives in the `internal/vault` journal; there is no
-view/export-password endpoint. Every stored-credential deployment and account
-browse needs another action-bound, five-minute, single-use origin approval.
-Alternatively, a restricted SSH deployment user can use an absolute
-`DEPLOY_KEY_FILE`. Legacy password-environment configuration remains supported
-during migration but is no longer in the example. An independently verified `DEPLOY_HOST_KEY_SHA256` and
-`DEPLOY_TLS_EMAIL` are still required. Credentials never appear in review plans,
-shell commands or persisted status. Enter passwords only into the protected
-Admin enrollment/change forms, never chat. Restart to reload environment changes. Root password login must
-already be permitted by server policy; no SSH configuration is changed. Keep
-`DEPLOY_ENABLED=false` until prerequisites have been checked, then generate a fresh
-plan and approve its exact digest. This uploads code and published CMS content
-only. Private databases, balances, signing keys and the remote `.env` remain in
-place; automatic data synchronization and offline-restore management are not
-enabled by setting deployment credentials.
+Deployment reads verified Settings, never operational environment variables.
+Enable it only after checking prerequisites, generate a fresh plan, and sign its
+exact digest with the origin wallet. SFTP uploads code and published content; SSH
+starts a singleton systemd setup job using the approved credential on stdin for
+sudo. The script provisions Node 24, PM2, Nginx and Certbot on Ubuntu/Debian and
+preserves financial data. Before the first release, restore private data,
+encrypted Settings and the original external bootstrap/key on the target. The SSH
+user must own the target and have sudo rights, or be root. Existing SSH policy is
+never relaxed. Credentials and private data are not uploaded or synchronized.
 
 `db.featheral.com` serves the new SQL-free journal service's public staged status.
 Admin `#/database` verifies chains and browses transaction metadata, not private
@@ -441,7 +471,7 @@ Existing hostname-based sites remain manageable in Admin. Public creation suppor
 
 Public requests select the site by hostname; unregistered hostnames do not serve another site's data. On localhost, the selected site's **Public site** link uses `/?site=<key>` to preview it, including its own API requests and browser storage. Preview selection requires CMS access. Adding a site does not configure DNS or TLS; point each hostname at your HTTPS reverse proxy separately.
 
-The app routes `admin.featheral.com` to the CMS and `x.featheral.com` to the public site using the request hostname. Configure DNS and your HTTPS reverse proxy to send both hostnames to this Node server. Set `CMS_PASSWORD` in the server environment before exposing the CMS; the CMS hostname requires HTTP Basic authentication, and CMS write APIs also require authentication. Localhost development remains available without a password.
+The app routes `admin.featheral.com` to the CMS and `x.featheral.com` to the public site using the request hostname. Configure DNS and your HTTPS reverse proxy to send both hostnames to this Node server. Configure Admin access in **Settings** before exposing the CMS; the CMS hostname requires HTTP Basic authentication, and CMS write APIs also require authentication. Password-free first-run access is restricted to loopback.
 
 CMS-managed posts and pages are stored in `cms.sqlite` beside the imported site data. Drafts remain private; published text posts and pages appear in the public site's **Read** section. The **Public themes** screen switches the public site between Featheral, Editorial, and Ocean styles. The selected style is stored with the CMS content.
 
@@ -549,9 +579,9 @@ Swiping is a curation tool, so the stored site ends up with only well-liked post
   Auto tags are marked `auto-tag`. Running the tool again replaces them and keeps hand-made tags. Stop the server before running it. New member posts are tagged on upload with the existing tags their title or description mentions. A full resync replaces the database and drops the tags, so run the tool again afterwards.
 - Votes, rounds and the trash list are stored in `data/<key>/public.sqlite`. Likes and dislikes saved in the browser by older versions are imported once, the first time the site is opened.
 
-Media is cached by the browser for 7 days, so a trashed image can still appear from the cache until then. In `admin.config.json`, `publicBrand` sets the public site name (it defaults to the stored site title), `publicTagline` sets the line under it (it defaults to the stored site description; also used for the page description and the age gate), and `ageGate` (default `true`) shows an 18+ confirmation before any content.
+Media is cached by the browser for 7 days, so a trashed image can still appear from the cache until then. In Settings' `ADMIN_CONFIG_JSON`, `publicBrand` sets the public site name (it defaults to the stored site title), `publicTagline` sets the line under it (it defaults to the stored site description; also used for the page description and the age gate), and `ageGate` (default `true`) shows an 18+ confirmation before any content.
 
-The server listens on `127.0.0.1` by default. Setting `HOST=0.0.0.0` exposes it to other machines, but that also exposes `/admin`, which has no login.
+The server listens on `127.0.0.1` by default. Setting `HOST` to `0.0.0.0` in Settings exposes it to other machines after restart. Configure Admin access first, terminate HTTPS at Nginx, and restrict network access appropriately.
 
 ## Original sync features
 

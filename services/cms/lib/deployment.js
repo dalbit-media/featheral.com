@@ -44,9 +44,11 @@ const digestFiles = (root, files) => {
   return hash.digest('hex');
 };
 class Deployment {
-  constructor({ root, env = process.env, clientFactory = () => new Client(), snapshot = () => ({ integrated: [], managed: [] }), hostnames = () => hosts,
+  constructor({ root, env = require("../../operations/runtime").environment(), settings, clientFactory = () => new Client(), snapshot = () => ({ integrated: [], managed: [] }), hostnames = () => hosts,
     stateDirectory = path.join(root, 'data', 'deployment') }) {
     this.root = root; this.env = env; this.clientFactory = clientFactory;
+    this.settings = settings;
+    this.vault = settings;
     this.snapshot = snapshot;
     this.hostnames = hostnames;
     this.plans = new Map(); this.running = false; this.result = null;
@@ -59,9 +61,9 @@ class Deployment {
     }
   }
   plan() {
-    const config = this.vault && !this.env.DEPLOY_PASSWORD && !this.env.DEPLOY_KEY_FILE
+    const config = this.settings ? this.settings.configuration() : this.vault && !this.env.DEPLOY_PASSWORD && !this.env.DEPLOY_KEY_FILE
       ? { ...this.vault.configuration(), email: this.env.DEPLOY_TLS_EMAIL } : configuration(this.env);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email || '')) throw error(400, 'Set DEPLOY_TLS_EMAIL for HTTPS certificate registration');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.email || '')) throw error(400, 'Set a certificate registration email in Admin Settings.');
     const files = releaseFiles(this.root);
     const digest = digestFiles(this.root, files);
     const content = JSON.stringify(this.snapshot());
@@ -73,13 +75,14 @@ class Deployment {
     this.plans.clear();
     this.plans.set(id, { config, files, digest, content, contentDigest, domains, createdAt });
     return { id, digest, contentDigest, expiresAt: createdAt + 10 * 60_000, target: `${config.username}@${config.host}:${config.directory}`,
-      files: files.length, hosts: domains, enabled: this.env.DEPLOY_ENABLED === 'true', walletApprovalRequired: Boolean(config.vault),
+      files: files.length, hosts: domains, enabled: this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true', walletApprovalRequired: Boolean(config.vault),
+      ...(this.settings ? { settingsRevision: config.settingsRevision, uploadLimitMiB: config.uploadLimitMiB, requestTimeoutSeconds: config.requestTimeoutSeconds, deploymentTimeoutSeconds: config.deploymentTimeoutSeconds } : {}),
       steps: ['Upload current local source and published CMS pages/themes by SFTP (not just committed files).',
-        'Keep .env, signing keys, ledgers, media and CMS databases outside releases; never put them in Git.',
-        'Require pre-provisioned private data and environment for the first deployment; do not create a new economy.',
+        'Keep encrypted Settings, external bootstrap, signing keys, ledgers, media and CMS databases outside releases; never put them in Git.',
+        'Require pre-provisioned private data, encrypted Settings and external bootstrap for the first deployment; do not create a new economy.',
         'Install locked dependencies; build World and export ABIs.',
-        'Check Node 24+, Ubuntu 24.04/Debian 12+, PM2, Nginx, certbot and passwordless restricted sudo.',
-        'Validate Nginx configuration, switch current release, reload PM2 using npm start, enable startup, configure HTTPS.',
+        'Provision Node 24, PM2, Nginx and Certbot on Ubuntu/Debian using the verified SSH/sudo credential.',
+        'Validate Nginx, apply upload/timeout limits, switch release, reload PM2, configure HTTPS and enable certificate renewal.',
         'Health-check all sites; restore the previous code release on failure without rolling back monetary data.'] };
   }
   status() { return { running: this.running, result: this.result }; }
@@ -90,7 +93,8 @@ class Deployment {
     fs.renameSync(temporary, this.statusFile);
   }
   validate(input) {
-    if (this.env.DEPLOY_ENABLED !== 'true') throw error(403, 'Deployment is disabled. Review the plan and set DEPLOY_ENABLED=true server-side to enable it.');
+    if (!(this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true')) throw error(403, 'Deployment is disabled. Review and enable deployment in Admin Settings.');
+    if (this.settings?.busy) throw error(409, 'Wait for the Settings operation.');
     if (this.running) throw error(409, 'Another deployment is running');
     const plan = this.plans.get(input?.planId);
     if (!plan || Date.now() - plan.createdAt > 10 * 60_000 || input?.approval !== `DEPLOY ${plan.digest} ${plan.contentDigest}`) throw error(400, 'Review a fresh plan and provide its exact approval phrase');
@@ -99,7 +103,7 @@ class Deployment {
     if (JSON.stringify([...new Set(this.hostnames())]) !== JSON.stringify(plan.domains)) throw error(409, 'The site list changed after the plan. Generate a new plan.');
     if (plan.config.vault) {
       const current = this.vault.configuration();
-      if (['username', 'host', 'directory', 'port', 'fingerprint'].some(key => current[key] !== plan.config[key]))
+      if (['username', 'host', 'directory', 'port', 'fingerprint', 'settingsRevision'].some(key => current[key] !== plan.config[key]))
         throw error(409, 'The vault SSH target changed after the plan. Generate a new plan.');
     }
     return plan;
@@ -122,7 +126,7 @@ class Deployment {
       client.once('ready', resolve).once('error', reject);
       client.connect({ host: config.host, port: config.port, username: config.username,
         ...(config.keyFile ? { privateKey: fs.readFileSync(config.keyFile) } : { password: config.password }),
-        readyTimeout: 15000,
+        readyTimeout: (config.sshTimeoutSeconds || 15) * 1000,
         hostVerifier: key => {
           const actual = `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
           return actual === config.fingerprint;
@@ -130,15 +134,16 @@ class Deployment {
     }); } catch (err) { client.end(); throw err; }
     return client;
   }
-  async execute(client, command) {
+  async execute(client, command, input = "", timeoutSeconds = 900) {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { client.end(); reject(error(504, 'Remote deployment timed out; inspect the server log before retrying.')); }, 15 * 60_000);
+      const timeout = setTimeout(() => { client.end(); reject(error(504, 'Remote deployment timed out; inspect the server log before retrying.')); }, timeoutSeconds * 1000);
       client.exec(command, (err, stream) => {
       if (err) { clearTimeout(timeout); return reject(err); }
       // Remote output may contain environment values. Do not return it to browsers.
       stream.on('data', () => {}); stream.stderr.on('data', () => {});
       stream.once('error', err => { clearTimeout(timeout); reject(err); });
       stream.once('close', code => { clearTimeout(timeout); code === 0 ? resolve() : reject(error(502, `Remote deployment command failed (exit ${code ?? 'unknown'}). Check the server deployment log.`)); });
+      if (typeof stream.end === 'function') stream.end(input);
     }); });
   }
   async start(input, credential) {
@@ -167,13 +172,20 @@ class Deployment {
       client = await this.connect(plan.config.vault ? { ...plan.config, password: credential.password } : plan.config);
       const releaseId = `release-${Date.now()}-${plan.digest.slice(0, 12)}`;
       const remote = `${plan.config.directory}/releases/${releaseId}`;
-      await this.execute(client, `mkdir -p ${quote(remote)}`);
-      const sftp = await new Promise((resolve, reject) => client.sftp((err, channel) => err ? reject(err) : resolve(channel)));
+      await this.execute(client, `mkdir -p ${quote(remote)}`, "", plan.config.sshTimeoutSeconds || 20);
+      const sftp = await this.transfer(client, callback => client.sftp(callback), plan.config.sshTimeoutSeconds || 20);
       try {
-        await new Promise((resolve, reject) => sftp.fastPut(archive, `${remote}/release.zip`, err => err ? reject(err) : resolve()));
-        await new Promise((resolve, reject) => sftp.fastPut(bootstrap, `${remote}/deploy-release.sh`, err => err ? reject(err) : resolve()));
+        await this.transfer(client, callback => sftp.fastPut(archive, `${remote}/release.zip`, callback), plan.config.deploymentTimeoutSeconds || 900);
+        await this.transfer(client, callback => sftp.fastPut(bootstrap, `${remote}/deploy-release.sh`, callback), plan.config.sshTimeoutSeconds || 20);
       } finally { sftp.end(); }
-      await this.execute(client, `sudo -n systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(plan.config.directory)} ${quote(releaseId)} ${quote(plan.config.email)} ${quote(plan.domains.join(' '))}`);
+      if (this.settings) {
+        const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(plan.config.directory)} ${quote(releaseId)} ${quote(plan.config.email)} ${quote(plan.domains.join(' '))} ${quote(plan.config.uploadLimitMiB)} ${quote(plan.config.requestTimeoutSeconds)}`;
+        const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then printf '%s\\n' "$password" | ${job}; else printf '%s\\n' "$password" | sudo -S -p '' -v && printf '%s\\n' "$password" | sudo -n ${job}; fi`;
+        await this.execute(client, command,
+          credential.password + '\n', plan.config.deploymentTimeoutSeconds);
+      } else {
+        await this.execute(client, `sudo -n systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(plan.config.directory)} ${quote(releaseId)} ${quote(plan.config.email)} ${quote(plan.domains.join(' '))}`);
+      }
       this.result = { success: true, digest: plan.digest, completedAt: Date.now() };
       return this.result;
     } catch (err) {
@@ -182,11 +194,19 @@ class Deployment {
       throw error(err.status || 502, this.result.error);
     } finally {
       client?.end();
+      if (credential) credential.password = '';
       fs.rmSync(archive, { force: true });
       fs.rmSync(bootstrap, { force: true });
       this.running = false;
       this.persistStatus();
     }
+  }
+  transfer(client, operation, seconds) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { client.end(); reject(error(504, 'SFTP transfer timed out. Inspect the target before retrying.')); }, seconds * 1000);
+      try { operation((err, value) => { clearTimeout(timer); err ? reject(err) : resolve(value); }); }
+      catch (err) { clearTimeout(timer); reject(err); }
+    });
   }
 }
 module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles };

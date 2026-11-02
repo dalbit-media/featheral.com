@@ -201,6 +201,7 @@ function renderSidebar(active) {
     ['deployment', DEPLOY_ICON, 'Deployment', hrefFor(['deployment'])]] : isLocal() ? [] : [['home', '⌂', 'Sites & sync', '#/']];
   if (managesSites()) nav.push(['notes', '↔', 'Notes · rewards & markets', '#/notes']);
   if (managesSites()) nav.push(['server-profile', '⚙', 'Server profile', '#/server-profile']);
+  if (managesSites()) nav.push(['settings', '⚙', 'Settings', '#/settings']);
   if (managesSites()) nav.push(['database', '▤', 'Database journals', '#/database']);
   nav.push(['intranet', '◎', 'App · insiders & missions', '#/intranet']);
   nav.push(['silver', '◇', 'Silver · products & codes', '#/silver']);
@@ -275,6 +276,7 @@ async function render() {
     if (parts[0] === 'silver') { state.key = null; return await VIEWS.silver(q, token); }
     if (parts[0] === 'notes') { state.key = null; return await VIEWS.notes(q, token); }
     if (parts[0] === 'server-profile' || parts[0] === 'server-users') { state.key = null; return await VIEWS['server-profile'](q, token); }
+    if (parts[0] === 'settings' && managesSites()) { state.key = null; return await VIEWS.settings(q, token); }
     if (parts[0] === 'database' && managesSites()) { state.key = null; return await VIEWS.database(q, token); }
     if (parts[0] === 'deployment' && managesSites()) { state.key = null; return await VIEWS.deployment(q, token); }
     if (parts[0] === 'site-pages' && parts[1]) { state.key = null; renderSidebar('home'); return await VIEWS['site-pages'](parts[1], q, token); }

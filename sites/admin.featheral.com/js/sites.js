@@ -113,10 +113,10 @@ VIEWS.deployment = async (q, token) => {
     try {
       plan = await api('/api/deployment/plan', { json: {} });
       if (!active()) return;
-      $('#deployment-details').textContent = `${plan.target}\n${plan.files} source files\nExpires: ${new Date(plan.expiresAt).toLocaleString()}\n\n${plan.steps.join('\n')}\n\nApproval: DEPLOY ${plan.digest} ${plan.contentDigest}`;
+      $('#deployment-details').textContent = `${plan.target}\n${plan.files} source files\nExpires: ${new Date(plan.expiresAt).toLocaleString()}${plan.settingsRevision ? `\nSettings revision ${plan.settingsRevision}: upload ${plan.uploadLimitMiB} MiB; HTTP ${plan.requestTimeoutSeconds}s; deployment ${plan.deploymentTimeoutSeconds}s` : ''}\n\n${plan.steps.join('\n')}\n\nApproval: DEPLOY ${plan.digest} ${plan.contentDigest}`;
       $('#deployment-start').disabled = !plan.enabled;
       $('#deployment-approval').disabled = !plan.enabled;
-      $('#deployment-status').textContent = plan.enabled ? 'Review every step, then enter the approval phrase.' : 'Deployment disabled. Set DEPLOY_ENABLED=true server-side only after review.';
+      $('#deployment-status').textContent = plan.enabled ? 'Review every step, then enter the approval phrase.' : 'Deployment disabled. Review and enable deployment in Admin Settings.';
     } catch (error) { if (active()) { $('#deployment-status').textContent = error.message; $('#deployment-start').disabled = true; $('#deployment-approval').disabled = true; } }
     finally { event.currentTarget.disabled = false; }
   });

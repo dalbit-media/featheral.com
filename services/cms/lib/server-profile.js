@@ -8,6 +8,9 @@ const express = require("express");
 
 const SAMPLE_MS = 1000;
 const HISTORY_SIZE = 60;
+const DISK_SAMPLE_MS = 300000;
+const DISK_HISTORY_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "artifacts", "cache", "coverage", "dist", "out"]);
 const DATABASE_FILE = /\.(?:sqlite|sqlite3|db)(?:-(?:wal|shm|journal))?$/i;
 const CATEGORY_NAMES = ["databases", "ledgers", "uploads", "trash", "codebase", "otherData"];
@@ -19,7 +22,7 @@ const percentile = (values, fraction) => {
 };
 
 class ServerProfile {
-  constructor({ root, dataDirectory, externalDirectories = [], networkLimitBytesPerSecond = null, now = Date.now, autoStart = true } = {}) {
+  constructor({ root, dataDirectory, externalDirectories = [], networkLimitBytesPerSecond = null, now = Date.now, statfs = fs.promises.statfs, autoStart = true } = {}) {
     if (!root) throw new TypeError("A repository root is required.");
     this.root = path.resolve(root);
     this.dataDirectory = dataDirectory ? path.resolve(dataDirectory) : null;
@@ -29,6 +32,8 @@ class ServerProfile {
     this.networkLimitBytesPerSecond = Number.isFinite(networkLimitBytesPerSecond) && networkLimitBytesPerSecond > 0
       ? networkLimitBytesPerSecond : null;
     this.now = now;
+    this.statfs = statfs;
+    this.diskSamples = [];
     this.loopDelay = monitorEventLoopDelay({ resolution: 20 });
     this.loopDelay.enable();
     this.history = [];
@@ -47,7 +52,7 @@ class ServerProfile {
       this.sample();
       this.sampleTimer = setInterval(() => this.sample(), SAMPLE_MS);
       this.sampleTimer.unref?.();
-      this.storageTimer = setInterval(() => { this.refreshStorage(); }, 300000);
+      this.storageTimer = setInterval(() => { this.refreshStorage(); }, DISK_SAMPLE_MS);
       this.storageTimer.unref?.();
       this.refreshStorage();
     }
@@ -217,12 +222,14 @@ class ServerProfile {
       }
       let disk;
       try {
-        const stat = await fs.promises.statfs(this.root);
+        const stat = await this.statfs(this.root);
         const totalBytes = Number(stat.blocks) * Number(stat.bsize);
         const freeBytes = Number(stat.bavail) * Number(stat.bsize);
-        disk = { available: true, totalBytes, freeBytes, usedBytes: Math.max(0, totalBytes - freeBytes),
-          usedPct: totalBytes ? Number(((totalBytes - freeBytes) / totalBytes * 100).toFixed(2)) : null };
+        if (!Number.isFinite(totalBytes) || totalBytes <= 0 || !Number.isFinite(freeBytes) || freeBytes < 0 || freeBytes > totalBytes)
+          throw new RangeError("Invalid filesystem capacity.");
+        disk = this.diskSample(totalBytes, freeBytes);
       } catch {
+        this.diskSamples = [];
         disk = { available: false, error: "Filesystem capacity is unavailable on this platform." };
       }
       this.disk = disk;
@@ -238,12 +245,35 @@ class ServerProfile {
     }
   }
 
+  diskSample(totalBytes, freeBytes) {
+    const sampledAt = this.now(), usedBytes = totalBytes - freeBytes;
+    const previous = this.diskSamples.at(-1);
+    if (previous && (previous.totalBytes !== totalBytes || sampledAt <= previous.at)) this.diskSamples = [];
+    this.diskSamples = this.diskSamples.filter(point => point.at >= sampledAt - DISK_HISTORY_MS);
+    const baseline = this.diskSamples[0];
+    const observedMs = baseline ? sampledAt - baseline.at : 0;
+    const growthBytesPerDay = observedMs >= DISK_SAMPLE_MS
+      ? (usedBytes - baseline.usedBytes) / observedMs * DAY_MS : null;
+    const daysUntilFull = growthBytesPerDay > 0 ? freeBytes / growthBytesPerDay : null;
+    if (!this.diskSamples.length || sampledAt - this.diskSamples.at(-1).at >= DISK_SAMPLE_MS)
+      this.diskSamples.push({ at: sampledAt, totalBytes, usedBytes });
+    const usedPct = usedBytes / totalBytes * 100;
+    const severity = usedPct >= 95 || daysUntilFull !== null && daysUntilFull <= 7 ? "critical"
+      : usedPct >= 85 || daysUntilFull !== null && daysUntilFull <= 30 ? "warning"
+      : growthBytesPerDay === null ? "unknown" : "healthy";
+    return { available: true, sampledAt, totalBytes, freeBytes, usedBytes,
+      usedPct: Number(usedPct.toFixed(2)), freePct: Number((freeBytes / totalBytes * 100).toFixed(2)),
+      growthBytesPerDay, growthObservedSeconds: observedMs / 1000, daysUntilFull, severity };
+  }
+
   risks(metrics) {
     const risks = [];
     const disk = this.disk;
     if (disk.available && disk.usedPct !== null) {
-      const severity = disk.usedPct >= 95 ? "critical" : disk.usedPct >= 85 ? "warning" : "healthy";
-      risks.push({ key: "disk", severity, message: `${disk.usedPct}% of the filesystem is used; ${Math.round(disk.freeBytes / 1024 ** 3 * 10) / 10} GB is available.` });
+      const forecast = disk.growthBytesPerDay === null ? "Growth forecast is collecting at least five minutes of history."
+        : disk.daysUntilFull !== null ? `Estimated full in ${disk.daysUntilFull.toFixed(1)} days at ${(disk.growthBytesPerDay / 1024 ** 3).toFixed(2)} GiB/day net growth.`
+        : "No net disk growth observed; time to full is not projected.";
+      risks.push({ key: "disk", severity: disk.severity, message: `${disk.usedPct}% of the filesystem is used; ${Math.round(disk.freeBytes / 1024 ** 3 * 10) / 10} GiB is available. ${forecast}` });
     } else risks.push({ key: "disk", severity: "unknown", message: disk.error });
     const heapPct = metrics.heapLimitBytes ? metrics.heapUsedBytes / metrics.heapLimitBytes * 100 : null;
     const memoryPct = metrics.memoryTotalBytes ? (metrics.memoryTotalBytes - metrics.memoryFreeBytes) / metrics.memoryTotalBytes * 100 : null;
@@ -264,7 +294,7 @@ class ServerProfile {
     const networkPct = this.networkLimitBytesPerSecond ? bytesPerSecond / this.networkLimitBytesPerSecond * 100 : null;
     const networkSeverity = networkPct === null ? "unknown" : networkPct >= 95 ? "critical" : networkPct >= 80 ? "warning" : "healthy";
     risks.push({ key: "network", severity: networkSeverity, message: networkPct === null
-      ? `HTTP response traffic ${formatRate(bytesPerSecond)} average; set SERVER_PROFILE_NETWORK_LIMIT_BPS to assess configured capacity.`
+      ? `HTTP response traffic ${formatRate(bytesPerSecond)} average; set network capacity in Admin Settings to assess utilization.`
       : `HTTP response traffic ${formatRate(bytesPerSecond)} average, ${networkPct.toFixed(1)}% of configured capacity.` });
     return risks;
   }
@@ -313,7 +343,7 @@ function serverProfileApi({ service, cmsAuth, passwordConfigured, adminHost = "a
     const secure = req.secure || req.get("x-forwarded-proto") === "https";
     const local = req.hostname === "admin.localhost" && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
     if (!secure && !local) return res.status(403).json({ error: "Server profile requires HTTPS." });
-    if (!passwordConfigured && !local) return res.status(503).json({ error: "Set CMS_PASSWORD before using the server profile." });
+    if (!(typeof passwordConfigured === "function" ? passwordConfigured() : passwordConfigured) && !local) return res.status(503).json({ error: "Configure Admin access in Settings before using the server profile." });
     cmsAuth(req, res, next);
   });
   router.get("/", (_req, res) => res.json(service.snapshot()));

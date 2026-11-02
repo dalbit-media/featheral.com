@@ -12,6 +12,19 @@ The service also exposes `database.domain` for token-, site-, and
 database-scoped native file journals. Its document API is available during
 phased migrations, independently of the SQLite connection API.
 
+Runtime configuration uses `SystemDatabase` and the same domain/journal API in
+the fixed private `data/system-database/` directory, namespace `databases/system`,
+collection `settings`, document `runtime`. It is separate from the configurable
+public/domain journal directory to prevent configuration bootstrap cycles or
+exposure through database browsing routes. The document is an authenticated
+AES-256-GCM envelope; journal hash chaining alone does not encrypt secrets.
+Admin passwords inside the envelope are salted scrypt hashes. Recoverable
+SSH/service secrets are encrypted, never irreversibly hashed or returned.
+Writes use optimistic revisions and durable journal publication. Deployment
+shared-data links resolve to the original real directory before journal opening.
+Back up this private database and preserve its original external bootstrap/key.
+Configuration migration does not relocate existing domain stores or change balances.
+
 `database.profiles` is the authoritative store for wallet profile metadata.
 It preserves the latest username, avatar, bio and signed-update proof while
 keeping these non-currency records out of the FTH$ daily-file ledger. Existing

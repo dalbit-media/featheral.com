@@ -73,7 +73,7 @@ function serviceRequestHeaders(serviceId, privateKey, method, requestPath, body 
   };
 }
 
-function createDollarApi({ env = process.env, ledger: suppliedLedger, profiles: suppliedProfiles, provider: suppliedProvider, gold: suppliedGold, logger = console, beforeLedgerMutation = () => {}, exchangeSigningKey } = {}) {
+function createDollarApi({ env = require("../operations/runtime").environment(), ledger: suppliedLedger, profiles: suppliedProfiles, provider: suppliedProvider, gold: suppliedGold, logger = console, beforeLedgerMutation = () => {}, exchangeSigningKey } = {}) {
   // FTH_LEDGER_* names are canonical; TOKEN_LEDGER_* names are still accepted for existing deployments.
   const setting = (name) => env[`FTH_LEDGER_${name}`] ?? env[`TOKEN_LEDGER_${name}`] ?? "";
   const nodeId = setting("NODE_ID") || "local-node";

@@ -138,36 +138,94 @@ Admin **Sites** lists Foundation, Gold, Dollar, World and Admin alongside X/Exch
 
 World and Admin retain revision-checked plain-text blocks bound to their native application templates with stable `data-cms-copy` keys. World gameplay, wallets, profiles and feeds, plus conversion/wallet/explorer applications and APIs, are unchanged. X, Exchange and other registered sites retain their existing full CMS editor.
 
-Administration uses native views in `sites/admin.featheral.com/views/` and scoped controllers in `js/operations/`, not embedded legacy consoles. Foundation overview/access, Gold reserve/token safety, Dollar liquidity/rewards/ledger and World moderation share the Admin shell and one persistent signing-wallet control. All core and hosted sites are individually selectable; API-provided management links open the appropriate operations, App intranet, Silver marketplace, Notes rewards/markets or content workspace. `#/notes` consolidates market funding; existing `#/set/<key>/note-markets` links remain compatible. Legacy `/operations/<service>/` URLs redirect to native `#/operations/<service>` routes. Existing wallet role checks, signed message bytes, ledger formats and transaction confirmations remain unchanged. `admin.featheral.com` authenticates the workspace and forwards protected `/api/v1/*` requests to the owning Gold/Dollar/World services without parsing away request bodies. API writes also require the admin origin. `CMS_PASSWORD` remains the environment setting; CMS backend/private data remain in `services/cms/`. The old CMS-host content database is reused if present, preserving edits and themes.
+Administration uses native views in `sites/admin.featheral.com/views/` and scoped controllers in `js/operations/`, not embedded legacy consoles. Foundation overview/access, Gold reserve/token safety, Dollar liquidity/rewards/ledger and World moderation share the Admin shell and one persistent signing-wallet control. All core and hosted sites are individually selectable; API-provided management links open the appropriate operations, App intranet, Silver marketplace, Notes rewards/markets or content workspace. `#/notes` consolidates market funding; existing `#/set/<key>/note-markets` links remain compatible. Legacy `/operations/<service>/` URLs redirect to native `#/operations/<service>` routes. Existing wallet role checks, signed message bytes, ledger formats and transaction confirmations remain unchanged. `admin.featheral.com` authenticates the workspace and forwards protected `/api/v1/*` requests to the owning Gold/Dollar/World services without parsing away request bodies. API writes also require the admin origin. Admin access and operations configuration are managed in **Settings**; CMS backend/private data remain in `services/cms/`. The old CMS-host content database is reused if present, preserving edits and themes.
 
 The retired `cms.featheral.com` / `cms.localhost` hostnames redirect to Admin, and product `/admin/` URLs redirect to their matching unified console. Cross-site links point directly to Admin. Deployment plans/Nginx hosts now include `admin.featheral.com`; remote DNS/TLS changes still require reviewed deployment.
 
-**Deploy all sites** first generates an expiring review plan covering current local code, published CMS content/themes, all configured hostnames and a digest-bound approval phrase. SFTP uploads a release; SSH runs `scripts/deploy-release.sh`. Deployment is disabled unless `DEPLOY_ENABLED=true` is explicitly configured server-side. This task does not perform a remote deployment.
+**Settings** (`#/settings`) manages SSH/sudo credentials, deployment, Admin access,
+upload limits, HTTP/SSH/deployment timeouts, network capacity and certificate email,
+plus server binding/storage, Admin and moderator wallets, App push/TURN, Silver
+encryption, ledger identities/replication and blockchain/RPC/bridge configuration.
+Enter `username:password`; password-only or `:password` means `root`. One password
+is used for SSH and sudo. Saving a credential verifies SSH and sudo access; it does
+not change the server password. Secrets are encrypted in
+the private system database at `data/system-database/` and are never returned by the Settings API.
+Admin passwords use salted scrypt hashes. Settings changes, deployments and account
+reads retain single-use origin-wallet approval and pinned SSH host verification.
 
-Copy the deployment settings from `.env.example` into the private root `.env`: `DEPLOY_TARGET` (this installation: `root@featheral.com:/opt/featheral`), independently verified `DEPLOY_HOST_KEY_SHA256` and `DEPLOY_TLS_EMAIL`. **No root password is required in the environment.** Create an independent server encryption key outside the repository and ledger backups with `node scripts/init-db-vault.js <absolute-key-path>`; set `DB_VAULT_KEY_FILE` to that path, then use Admin **Database & vault** (`#/database`) to sign, verify and enroll the current root SSH password. Stored credentials require a fresh origin-wallet approval for each reviewed deployment or server-account browse. Alternatively, configure an absolute `DEPLOY_KEY_FILE` for a restricted deployment user. Legacy password-environment installations remain compatible during migration, but the example no longer contains that setting. Optional `DEPLOY_PORT` defaults to 22. Passwords never appear in shell commands, release archives, review plans or persisted deployment status. Root SSH policy must already permit password authentication; the application does not enable it. Restart the gateway after environment changes. The SSH user must own the deployment directory and have the reviewed noninteractive sudo privileges. The target must be Ubuntu/Debian with **Node 24+** already installed; DNS and HTTPS must be provisioned for every reviewed hostname. Provision the external vault key separately on each server, never in the release archive.
+Initialize once with `node scripts/init-settings.js` using the service account.
+The external bootstrap defaults to `/etc/featheral/bootstrap.json` on Linux or
+`%ProgramData%\Featheral\bootstrap.json` on Windows. It points to a separate private
+encryption key. An optional `FEATHERAL_BOOTSTRAP_FILE` selects another absolute
+external bootstrap location. Keep both outside the repository and ledger backups,
+restrict Windows ACLs to the service account, and back up the key separately.
+From loopback `admin.localhost`, set an Admin password of at least 16 bytes in
+Settings and sign with the origin wallet before exposing Admin.
 
-Before the **first** deployment, restore a consistent **offline backup** into `<target>/shared/data/` (Gold/Dollar/World keys, ledgers and game saves) and `<target>/shared/cms-data/` (all CMS databases, registry and uploads), and provision `<target>/shared/.env` with the original signing/reserve configuration and a nonempty `CMS_PASSWORD`. Raw private databases/media are deliberately **not** copied from a running writer or committed to Git. Without these prerequisites deployment stops; it never creates a replacement economy or silently discards X content. Subsequent releases symlink the same private state.
+Existing installations should stop the writer, keep an offline backup, then run
+`node scripts/init-settings.js --migrate-env` before restarting. This explicitly
+imports all supported runtime configuration, Admin access and operations settings,
+including an existing encrypted root vault or legacy password. After a successful
+database read-back, it removes the migrated `.env` and any imported Admin config.
+Unrecognized names and conflicting aliases/database values stop migration without
+removing the source file. Review any customized old Admin JSON before upgrading;
+set `ADMIN_CONFIG` to its backup path to import it as `ADMIN_CONFIG_JSON`.
+If encrypted JSON Settings were already configured, first run
+`node scripts/init-settings.js --migrate-settings` with their original bootstrap/key.
+Deployment is disabled after migration. SSH-key installations must re-enroll a
+password credential; migration refuses to discard them. Existing balances,
+profiles, domain data stores, signing identities and legacy vault journals are
+preserved, not regenerated or relocated. Linux accounts remain OS-managed.
+Runtime changes require typing `APPLY RUNTIME SETTINGS`, wallet approval and a
+service restart. Back up data and keys before changing ledger paths, authorities
+or reserve mode; enabling live reserves can allocate funds on restart.
+The system database location is fixed to avoid a configuration-path bootstrap loop.
+Only the external bootstrap/key location remains outside the database; operating
+system environment such as `PATH`, `HOME` and `NODE_ENV` is not application config.
+Application process environment no longer overrides saved configuration.
+Startup refuses leftover application environment variables too. Export existing
+service-manager values to a private migration file and remove those overrides
+after migration. Use `--env-file <absolute-path>` for a real shared environment
+file (not a symlink); `--bootstrap-file <absolute-path>` selects the existing
+bootstrap. PM2 may retain old environment values: recreate the service from its
+ecosystem file without those overrides after stopping the writer.
+Binding port changes also need a reviewed deployment to update Nginx's upstream
+and health checks. Nginx deployment supports loopback or wildcard `HOST` bindings.
 
-Admin **Server users** (`#/server-users`) browses the configured Linux server's
-accounts with search and pagination, including system accounts, without exposing
-password/GECOS fields. Root-password changes require an actual Admin login
-(`CMS_PASSWORD`, no local bypass), a single-use FTHG origin-wallet signature,
-current root-password verification, exact confirmation, and a fresh SSH login
-with the new password after the change. Approval expires after five minutes and
-binds the Admin origin/session, password pair and pinned SSH destination. The
-wallet private key stays inside the wallet and must never be used as a password.
-Production uses HTTPS and pinned SSH host keys. Passwords travel to `chpasswd`
-on stdin, never in commands or logs; private audit records contain no credentials.
-Keep a recovery session open. With the external vault key configured, a verified
-new password is stored encrypted automatically; no password environment update
-is needed. If vault storage fails, success feedback explicitly distinguishes the
-verified SSH change from the unstored credential and directs you to re-enroll.
-No account creation/deletion or automatic environment rewrite
-is performed. See the [server-account workflow](services/cms/README.md#linux-server-accounts).
+**Deploy all sites** generates an expiring, digest-bound review plan before SFTP
+uploads the release and SSH launches `scripts/deploy-release.sh`. Enable deployment
+in Settings only after reviewing the target, fingerprint, certificate email and
+prerequisites. The SSH account must own the deployment directory and have sudo
+rights, or be root. Root password login must already be permitted; SSH policy is
+never relaxed. The script provisions Node 24 when absent, PM2, Nginx and Certbot on
+Ubuntu/Debian. Let’s Encrypt requires public DNS and ports 80/443 for every host.
+
+Before the **first** deployment, restore a consistent **offline backup** into
+`<target>/shared/data/` (including the private system database, original keys,
+ledgers and game saves) and `<target>/shared/cms-data/`. Provision the original
+external bootstrap and encryption key separately on the target. Migrate legacy
+`<target>/shared/.env` before deployment; releases do not load or symlink it. Private
+databases, media, keys and credentials are not uploaded or committed. Deployment
+stops when Settings/private-state prerequisites are missing; it never creates a
+replacement economy.
+
+Admin **Server profile** (`#/server-profile`, old `#/server-users` alias) browses
+Linux accounts with wallet approval, search and pagination, without exposing
+password/GECOS fields. Root-password changing has been removed completely; old
+change/challenge/status endpoints return 404. See the
+[server-account workflow](services/cms/README.md#linux-server-accounts).
 
 SSH launches the setup through a single remote `featheral-deployment` systemd job, so restarting CMS during self-deployment does not terminate setup or permit concurrent remote jobs. CMS records status locally; if its process restarts mid-deployment, it reports that the result is unknown and directs the operator to inspect `systemctl status featheral-deployment` and the deployment log before retrying.
 
-The script installs Nginx, unzip, curl and Certbot via apt; installs PM2 6 when absent; runs locked npm installs, ABI export and the World build; starts **one** writer through `npm start`; saves PM2 state and its systemd startup service; validates the managed Nginx virtual host and configures HTTPS. Existing unrelated Nginx sites are not removed, and an existing unmanaged Featheral config requires manual review. Failed activation restores the previous code/configuration, **not** monetary data. Inspect `<target>/shared/logs/deployment.log` if a deployment fails or times out. No guarantee of remote readiness is made until a reviewed deployment completes its health checks.
+The script runs locked npm installs, ABI export and the World build; starts **one**
+writer through `npm start`; saves PM2 state/startup; validates Nginx and configures
+HTTPS. It applies the upload/body limit and proxy timeout from the reviewed Settings
+revision. `certbot.timer` renews certificates automatically; a deployment hook
+validates and reloads Nginx after renewal. Existing unrelated virtual hosts are
+preserved. Failed activation restores prior code/configuration, **not** monetary
+data. Inspect `<target>/shared/logs/deployment.log` and the remote systemd job before
+retrying failures/timeouts. Local timeout/limit changes apply after save; Nginx
+changes require another reviewed deployment. Feature-specific limits may be lower.
 
 ### File-ledger migration (staged)
 
@@ -176,14 +234,14 @@ Its in-process database API lives in `services/db-api`. It centrally opens and
 closes the built-in Node SQLite connections used by existing domain modules;
 no third-party database driver is used. Public `GET /api/v1/db/status` reports
 the migration stage without exposing records.
-Admin **Database & vault** verifies and inspects metadata for per-token and
+Admin **Database journals** verifies and inspects metadata for per-token and
 per-site journals through `/api/database`. Vault records are excluded from
 all browse endpoints. Token folders map FTHG/FTH$/FTHX/FTHS to
 `tokens/fthg`, `tokens/fth-dollar`, `tokens/fthx`, `tokens/fths`;
 site folders use `sites/<hostname>`. Each stream uses
 `<year>/<UTC-date>/<16-digit-sequence>.json` under `data/file-ledgers`
-(override with `DB_LEDGER_DIR`). Credential ciphertext uses the separate
-`internal/vault` stream.
+(override with `DB_LEDGER_DIR`). Legacy credential ciphertext remains in the
+separate `internal/vault` stream; new operations credentials live in Settings.
 
 This is **not a completed native-file site-storage migration**. Existing Notes,
 CMS, App, Silver, telemetry and World stores remain SQL-backed, but connections
@@ -216,7 +274,7 @@ The former `qporn.eurasiahosting.com` project was moved (not copied) into `servi
 
 `npm install` installs the CMS workspace alongside foundation dependencies. `npm start` builds World and runs all sites through the gateway on port 8080. `npm run test:cms` runs the migrated tests. `npm run start:cms` optionally runs just the CMS service on port 5178; do not run both processes against the same CMS data simultaneously.
 
-Set `CMS_PASSWORD` in the environment or root `.env` before exposing `admin.featheral.com`; the production CMS host remains password-protected even over a loopback proxy. `admin.localhost` permits password-free development only from loopback when no password is configured. Its public preview links retain the local port and require CMS access. The gateway routes registered CMS sites (including existing sample sites and newly registered hosts); Featheral subdomains also have `.localhost` aliases. Adding sites does not configure DNS or TLS. Existing Foundation, Gold, Dollar and World hosts take precedence over CMS registrations.
+Set the Admin password in **Settings** before exposing `admin.featheral.com`; the production CMS host remains password-protected even over a loopback proxy. `admin.localhost` permits password-free first-run access only from loopback when no password is configured. Its public preview links retain the local port and require CMS access. The gateway routes registered CMS sites (including existing sample sites and newly registered hosts); Featheral subdomains also have `.localhost` aliases. Adding sites does not configure DNS or TLS. Existing Foundation, Gold, Dollar and World hosts take precedence over CMS registrations.
 
 The X age gate and disabled live syncing are preserved. **Exchange assets, including its demo FTH$, are local simulations, separate from the Foundation Dollar ledger, with no real funds, deposits or bridge.** See the [CMS documentation](services/cms/README.md) for site management, content and API details.
 
@@ -277,7 +335,7 @@ Conversion explains eligibility and previews amounts before free message signatu
 2. `npm install`
 3. `npm ci --prefix sites/world.featheral.com/play`
 4. `npm test`
-5. Copy `services/token-api/.env.example` to the repository-root `.env` and configure only the settings needed for the environment. `npm start` loads that optional file, compiles the source, exports ABI-only artifacts for both contracts, builds the Featheral game, and serves the ecosystem sites plus their APIs at the local URLs above (set `PORT` to change; `*.localhost` resolves to 127.0.0.1 in current browsers). For production, set `APP_ORIGIN` to the exact public HTTPS origin of `world.featheral.com`. The API defaults to `FTH_LEDGER_MODE=unconfigured`, which runs a standalone local FTH$ writer under `data/fth-ledger/local-node/` for development.
+5. Initialize the external bootstrap with `node scripts/init-settings.js`, then configure runtime/service values in Admin **Settings**. Do not create an environment file. `npm start` compiles the source, exports ABI-only artifacts for both contracts, builds the Featheral game, and serves the ecosystem sites plus their APIs at the local URLs above (change `PORT` in Settings, then restart; `*.localhost` resolves to 127.0.0.1 in current browsers). For production, set `APP_ORIGIN` to the exact public HTTPS origin of `world.featheral.com` in Settings. The API defaults to `FTH_LEDGER_MODE=unconfigured`, which runs a standalone local FTH$ writer under `data/fth-ledger/local-node/` for development. Existing installations must migrate configuration offline first; startup refuses a leftover `.env`.
 6. Browse public contract stats and wallet balances without connecting. To administer either contract, connect a wallet with its relevant on-chain role on Ethereum Mainnet using the wallet icon in the admin header. There is no network selector: the site always uses Mainnet and asks the wallet to switch to it on connect. Transactions are signed by the connected wallet; the admin/API does not handle wallet private keys.
 
 Run `npm run abi` to regenerate the ABI-only admin artifacts after contract source changes. The existing FTHG token has no deployment workflow; the separate, explicitly authorized game-bridge deployment is documented below.
@@ -337,9 +395,9 @@ Production rollout requires separate authorization, a reviewed genesis or append
 
 With explicit operator authorization and an offline backup, `GOLD_RESERVE_MODE=live` activates an existing **unused, zero-supply** Dollar writer. A `GOLD_POLICY` block, signed by its existing genesis-authorized game key, pins the new Gold authority and market targets without rewriting genesis or resetting settlements. Previously issued ledgers are refused rather than silently migrated. Gold keys persist under `data/gold-reserve/`; back them up with the Dollar journal and game database. Restarting replays the policy and preserves the cap. Live mode automatically funds markets on first eligible use; players obtain FTH$ by selling owned resources, not by receiving grants. Ethereum submission remains disabled, and redemption still requires confirmed backing.
 
-FTH$ balances live in the native layer-3 ledger described below. Configure exactly one `FTH_LEDGER_MODE=writer`; other nodes use `FTH_LEDGER_MODE=reader`. Service authentication, ledger signing keys, node URLs, RPC, bridge address, CORS origins, ledger directory, and confirmation count are configured through the process environment; `services/token-api/.env.example` lists supported variables (legacy `TOKEN_LEDGER_*` names are still read as fallbacks). `npm start` loads the repository-root `.env`; the standalone bridge deployment command requires its variables in the invoking process environment or secret manager. Local `.env` files and the entire `data/` directory are ignored by Git.
+FTH$ balances live in the native layer-3 ledger described below. Configure exactly one `FTH_LEDGER_MODE=writer`; other nodes use `FTH_LEDGER_MODE=reader`. Service authentication, ledger signing keys, node URLs, RPC, bridge address, CORS origins, ledger directory and confirmation count are managed in Admin Settings and encrypted in the private system database. Offline migration canonicalizes legacy `TOKEN_LEDGER_*` names and rejects conflicting values. Startup and the standalone bridge command use database configuration, not `.env` or process overrides. The entire `data/` directory remains ignored by Git.
 
-To deploy the separate bridge, configure `TOKEN_API_RPC_URL`, `TOKEN_API_GAME_SERVICE_ADDRESS`, and `BRIDGE_DEPLOYER_PRIVATE_KEY` in a protected local environment, then run `npm run deploy:bridge`. Review the deployment and its constructor addresses before signing; this command sends a permanent Mainnet transaction and is not run by `npm start`. After deployment, configure `TOKEN_API_BRIDGE_ADDRESS`, set the writer's `FTH_LEDGER_SIGNING_PRIVATE_KEY` (and each reader's `FTH_LEDGER_WRITER_PUBLIC_KEY`) plus the game service keys, start the API, deposit only the desired actual FTHG reserve, and initialize the pool with the matching FTH$ budget already approved by the game ledger. Use `npm run generate:service-keys` to create Ed25519 service keypairs; register public keys in `TOKEN_API_SERVICES_JSON` and keep private keys in service secret managers. Do not expose a writer directly to the internet; terminate TLS and configure firewalling, request-rate limits, monitoring, and backups at the deployment edge.
+To deploy the separate bridge, configure `TOKEN_API_RPC_URL`, `TOKEN_API_GAME_SERVICE_ADDRESS`, and `BRIDGE_DEPLOYER_PRIVATE_KEY` in Admin Settings, then run `npm run deploy:bridge`. Review the deployment and its constructor addresses before signing; this command sends a permanent Mainnet transaction and is not run by `npm start`. After deployment, configure `TOKEN_API_BRIDGE_ADDRESS`, set the writer's `FTH_LEDGER_SIGNING_PRIVATE_KEY` (and each reader's `FTH_LEDGER_WRITER_PUBLIC_KEY`) plus the game service keys, start the API, deposit only the desired actual FTHG reserve, and initialize the pool with the matching FTH$ budget already approved by the game ledger. Use `npm run generate:service-keys` to create Ed25519 service keypairs; register public keys in `TOKEN_API_SERVICES_JSON` and keep private keys in service secret managers. Do not expose a writer directly to the internet; terminate TLS and configure firewalling, request-rate limits, monitoring, and backups at the deployment edge.
 
 ## FTH$ layer-3 ledger
 

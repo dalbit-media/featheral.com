@@ -17,7 +17,8 @@ function managementFor(site) {
     links.push({ label: "Native Notes & markets", href: "#/notes" });
   if (!site.path && hostname === "stats.featheral.com") links.push({ label: "Network & site traffic", href: "#/overview" });
   if (site.builtin && hostname === "admin.featheral.com") links.push({ label: "All sites & deployment", href: "#/" });
-  if (site.builtin && hostname === "db.featheral.com") links.push({ label: "Ledgers & encrypted credentials", href: "#/database" });
+  if (site.builtin && hostname === "db.featheral.com") links.push({ label: "Database journals", href: "#/database" });
+  if (site.builtin && hostname === "admin.featheral.com") links.push({ label: "Server & service settings", href: "#/settings" });
   if (site.builtin && hostname === "wallet.featheral.com") links.push({ label: "Service operations", href: "#/operations" });
   if (site.contentEditable !== false) links.push({ label: "Content & appearance",
     href: site.builtin ? `#/site-pages/${encoded}` : `#/set/${encodeURIComponent(site.key)}/cms-content` });

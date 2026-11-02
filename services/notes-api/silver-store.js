@@ -13,7 +13,7 @@ const wallet = value => {
   return value.toLowerCase();
 };
 class SilverStore {
-  constructor(notes, markets, env = process.env, now = Date.now) {
+  constructor(notes, markets, env = require("../operations/runtime").environment(), now = Date.now) {
     this.notes = notes; this.db = notes.db; this.markets = markets; this.now = now;
     if (env.SILVER_CODE_KEY && !/^[a-f0-9]{64}$/i.test(env.SILVER_CODE_KEY)) throw fail(503, "SILVER_CODE_KEY must be 32 bytes encoded as 64 hex characters.");
     this.key = env.SILVER_CODE_KEY ? Buffer.from(env.SILVER_CODE_KEY, "hex") : null;

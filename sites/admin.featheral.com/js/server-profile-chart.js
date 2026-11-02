@@ -37,7 +37,38 @@
     return () => clearInterval(timer);
   }
 
-  const api = { renderServerProfileChart, startServerProfilePolling };
+  function renderServerDiskChart(disk) {
+    if (!disk.available) return `<p class="muted">${escapeHtml(disk.error)}</p>`;
+    const bytes = value => {
+      const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+      const index = value > 0 ? Math.min(units.length - 1, Math.max(0, Math.floor(Math.log(value) / Math.log(1024)))) : 0;
+      return `${(value / 1024 ** index).toFixed(1)} ${units[index]}`;
+    };
+    const usedPct = disk.usedBytes / disk.totalBytes * 100;
+    const freePct = 100 - usedPct;
+    const description = `In use ${bytes(disk.usedBytes)} (${usedPct.toFixed(1)}%); free available ${bytes(disk.freeBytes)} (${freePct.toFixed(1)}%); total ${bytes(disk.totalBytes)}.`;
+    const severity = ["healthy", "warning", "critical", "unknown"].includes(disk.severity) ? disk.severity : "unknown";
+    const growth = disk.growthBytesPerDay;
+    const forecast = growth === null || growth === undefined
+      ? "Collecting history: at least five minutes between capacity samples are needed."
+      : `Net growth: ${growth < 0 ? "-" : ""}${bytes(Math.abs(growth))}/day over ${(disk.growthObservedSeconds / 3600).toFixed(1)} hours. ${
+        disk.daysUntilFull !== null ? `Estimated full in ${disk.daysUntilFull.toFixed(1)} days.`
+          : "No net growth observed; no time-to-full projection."}`;
+    return `<div class="server-disk-layout">
+      <svg class="server-disk-donut" viewBox="0 0 160 160" role="img" aria-label="${escapeHtml(description)}">
+        <circle class="server-disk-free" cx="80" cy="80" r="60"/>
+        <circle class="server-disk-used" cx="80" cy="80" r="60" pathLength="100" stroke-dasharray="${usedPct} ${100 - usedPct}" transform="rotate(-90 80 80)"/>
+        <text class="server-disk-percent" x="80" y="78" text-anchor="middle">${usedPct.toFixed(1)}%</text>
+        <text class="server-disk-caption" x="80" y="96" text-anchor="middle">in use</text>
+      </svg>
+      <div class="server-disk-details"><p><span class="server-disk-key used"></span><b>In use</b> ${bytes(disk.usedBytes)} (${usedPct.toFixed(1)}%)</p>
+        <p><span class="server-disk-key free"></span><b>Free available</b> ${bytes(disk.freeBytes)} (${freePct.toFixed(1)}%)</p>
+        <p class="muted">Total capacity: ${bytes(disk.totalBytes)}</p>
+        <div class="server-risk ${severity}"><span>${severity.toUpperCase()}</span><p>${escapeHtml(forecast)}</p></div>
+      </div></div>`;
+  }
+
+  const api = { renderServerProfileChart, renderServerDiskChart, startServerProfilePolling };
   if (typeof module === "object" && module.exports) module.exports = api;
   if (typeof window === "object") window.ServerProfileCharts = api;
 })();

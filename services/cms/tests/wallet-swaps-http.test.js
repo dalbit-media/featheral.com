@@ -11,6 +11,8 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   const load = vm.runInThisContext(`(function(require,__dirname,module){${fs.readFileSync(serverFile, "utf8")}\nreturn {app,creation,dollarExchange};})`, { filename: serverFile });
   const { app, creation, dollarExchange } = load(name => {
     const dependency = realRequire(name);
+    if (name === "../operations/configuration") return { ...dependency, assertDatabaseConfiguration() {} };
+    if (name === "../operations/runtime") return Object.assign(Object.create(dependency), { environment: () => ({ ADMIN_CONFIG_JSON: '{"siteManagement":true}' }) });
     if (name === "./lib/store") return { ...dependency, DATA_DIR: root, listLibrary: () => [],
       readJson: (file, fallback) => file.endsWith("admin.config.json") ? { siteManagement: true } : dependency.readJson(file, fallback) };
     if (name === "./lib/sites") return { ...dependency, SiteManager: class extends dependency.SiteManager {

@@ -7,7 +7,7 @@ const NETWORKS = [
   { name: "zkSync Era", chainId: 324, rpc: "https://mainnet.era.zksync.io" },
   { name: "Linea", chainId: 59144, rpc: "https://rpc.linea.build" },
 ];
-function createNativeReader({ fetchRpc = fetch, env = process.env, clock = Date.now, logger = console } = {}) {
+function createNativeReader({ fetchRpc = fetch, env = require("../operations/runtime").environment(), clock = Date.now, logger = console } = {}) {
   const cache = new Map(), pending = new Map();
   let price, priceAt = 0, pricePending;
   async function ethPrice() {

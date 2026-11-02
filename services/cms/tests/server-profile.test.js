@@ -70,6 +70,109 @@ test("HTTP instrumentation bounds history and measures declared ingress, respons
   }
 });
 
+test("disk samples expose capacity, net growth and time to full through the profile API payload", async t => {
+  let now = 1000000, available = 80;
+  const profile = new ServerProfile({ root: __dirname, autoStart: false, now: () => now,
+    statfs: async () => ({ blocks: 100, bsize: 1024 ** 3, bavail: available }) });
+  t.after(() => profile.close());
+  await profile.refreshStorage();
+  let disk = profile.snapshot().disk;
+  assert.equal(disk.totalBytes, 100 * 1024 ** 3);
+  assert.equal(disk.usedBytes, 20 * 1024 ** 3);
+  assert.equal(disk.freeBytes, 80 * 1024 ** 3);
+  assert.equal(disk.usedPct, 20);
+  assert.equal(disk.freePct, 80);
+  assert.equal(disk.sampledAt, now);
+  assert.equal(disk.growthBytesPerDay, null);
+  assert.equal(disk.daysUntilFull, null);
+  assert.equal(disk.severity, "unknown");
+  assert.match(profile.snapshot().risks.find(risk => risk.key === "disk").message, /collecting/);
+  now += 300000;
+  available = 79;
+  await profile.refreshStorage();
+  disk = profile.snapshot().disk;
+  assert.equal(disk.growthBytesPerDay, 288 * 1024 ** 3);
+  assert.equal(disk.growthObservedSeconds, 300);
+  assert.equal(disk.daysUntilFull, 79 / 288);
+  assert.equal(disk.severity, "critical");
+  assert.equal(profile.snapshot().risks.find(risk => risk.key === "disk").severity, "critical");
+});
+
+test("disk risk honors exact growth and utilization thresholds without inventing forecasts", t => {
+  let now = 0;
+  const profile = new ServerProfile({ root: __dirname, autoStart: false, now: () => now });
+  t.after(() => profile.close());
+  const forecast = days => {
+    profile.diskSamples = [];
+    now = 0;
+    profile.diskSample(1000, days * 10 + 10);
+    now = 86400000;
+    return profile.diskSample(1000, days * 10);
+  };
+  assert.equal(forecast(7).severity, "critical");
+  assert.equal(forecast(7.01).severity, "warning");
+  assert.equal(forecast(30).severity, "warning");
+  assert.equal(forecast(30.01).severity, "healthy");
+  profile.diskSamples = [];
+  now = 0;
+  profile.diskSample(1000, 501);
+  now = 86400000;
+  assert.equal(profile.diskSample(1000, 500).severity, "healthy");
+  for (const [free, severity] of [[5, "critical"], [15, "warning"], [15.01, "unknown"]]) {
+    profile.diskSamples = [];
+    assert.equal(profile.diskSample(100, free).severity, severity);
+  }
+  profile.diskSamples = [];
+  now = 0;
+  profile.diskSample(100, 50);
+  now = 299999;
+  assert.equal(profile.diskSample(100, 49).growthBytesPerDay, null);
+  now = 300000;
+  const flat = profile.diskSample(100, 50);
+  assert.equal(flat.growthBytesPerDay, 0);
+  assert.equal(flat.daysUntilFull, null);
+  assert.equal(flat.severity, "healthy");
+  now = 600000;
+  const declining = profile.diskSample(100, 60);
+  assert.ok(declining.growthBytesPerDay < 0);
+  assert.equal(declining.daysUntilFull, null);
+  assert.equal(declining.severity, "healthy");
+  assert.equal(profile.diskSample(200, 150).growthBytesPerDay, null);
+  profile.diskSamples = [];
+  assert.equal(profile.diskSample(100, 0).severity, "critical");
+});
+
+test("disk growth history is bounded to 24 hours and resets after gaps, clock changes and capacity failures", async t => {
+  let now = 0, fail = false, blocks = 100;
+  const profile = new ServerProfile({ root: __dirname, autoStart: false, now: () => now,
+    statfs: async () => {
+      if (fail) throw new Error("unavailable");
+      return { blocks, bsize: 1024, bavail: 50 };
+    } });
+  t.after(() => profile.close());
+  for (let index = 0; index <= 400; index++) {
+    now = index * 300000;
+    profile.diskSample(100, 50);
+  }
+  assert.equal(profile.diskSamples.length, 289);
+  now += 86400001;
+  assert.equal(profile.diskSample(100, 40).growthBytesPerDay, null);
+  now -= 1000;
+  assert.equal(profile.diskSample(100, 30).growthBytesPerDay, null);
+  fail = true;
+  await profile.refreshStorage();
+  assert.equal(profile.snapshot().disk.available, false);
+  assert.equal(profile.diskSamples.length, 0);
+  assert.equal(profile.snapshot().risks.find(risk => risk.key === "disk").severity, "unknown");
+  fail = false;
+  now += 300000;
+  await profile.refreshStorage();
+  assert.equal(profile.snapshot().disk.growthBytesPerDay, null);
+  blocks = 0;
+  await profile.refreshStorage();
+  assert.equal(profile.snapshot().disk.available, false);
+});
+
 test("profile API requires an authenticated Admin host and protects storage refresh with same-origin checks", async t => {
   const app = express(), service = { snapshot: () => ({ protected: true }), refreshes: 0, refreshStorage() { this.refreshes++; } };
   const cmsAuth = (req, res, next) => req.get("authorization") === "Basic YWRtaW46cGFzcw==" ? next() : res.sendStatus(401);

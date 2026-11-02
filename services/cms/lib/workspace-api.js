@@ -3,7 +3,7 @@ const express = require("express");
 const crypto = require("node:crypto");
 const { Workspace } = require("../../notes-api/workspace");
 const fail = (status, message) => Object.assign(new Error(message), { status });
-function workspaceApi({ notes, markets, cmsAuth, profileReader, env = process.env, pushTransport }) {
+function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require("../../operations/runtime").environment(), pushTransport }) {
   const workspace = new Workspace(notes, markets, profileReader), router = express.Router(), limits = new Map();
   const webPush = pushTransport || require("web-push");
   const pushEnabled = !!(env.APP_VAPID_PUBLIC_KEY && env.APP_VAPID_PRIVATE_KEY);

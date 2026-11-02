@@ -364,9 +364,5 @@ pre.text { background: #fbfbfd; border: 1px solid var(--line); border-radius: 10
 .deployment-status{padding:14px;border:1px solid var(--line);border-radius:10px;background:#f6f8fc;overflow-wrap:anywhere}.deployment-status p{margin:6px 0 0}
 .deployment-page .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px}
 #nav .ic svg{display:block}
-.root-password-feedback{padding:16px;border:2px solid var(--line);border-radius:8px;overflow-wrap:anywhere;font-weight:600}
-.root-password-feedback.success{border-color:var(--ok);background:#ecfdf5;color:#065f46}
-.root-password-feedback.error{border-color:var(--bad);background:#fef2f2;color:#991b1b}
-.root-password-feedback.pending{border-color:var(--warn);background:#fffbeb;color:#92400e}
 #server-root-record{overflow-wrap:anywhere}
 @media(max-width:640px){.deployment-intro{gap:12px}.deployment-icon{width:48px;height:48px}.deployment-page .grid{grid-template-columns:minmax(0,1fr)}}

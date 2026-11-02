@@ -17,17 +17,23 @@ const { SitePages } = require('./lib/site-pages');
 const { ServerProfile, serverProfileApi } = require('./lib/server-profile');
 const sitePages = new SitePages({ root: path.resolve(__dirname, '..', '..'), dataDir: DATA_DIR });
 const { Deployment } = require('./lib/deployment');
+const operationsSettings = require('../operations/runtime');
+const env = operationsSettings.environment();
+require('../operations/configuration').assertDatabaseConfiguration(path.resolve(__dirname, '..', '..'));
+const { requestPolicy, configureServer } = require('../operations/http');
 
-const PORT = +process.env.PORT || 5178;
-const HOST = process.env.HOST || '127.0.0.1';
-const CMS_PASSWORD = process.env.CMS_PASSWORD || '';
+const PORT = +env.PORT || 5178;
+const HOST = env.HOST || '127.0.0.1';
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 // The stored dataset is the permanent local backbone; loading other sites is disabled unless allowSync is true.
 const CONFIG = {
   brand: 'admin.featheral.com', siteKey: null, allowSync: false, publicBrand: 'x.featheral.com', publicTagline: null,
   cmsHost: 'admin.featheral.com', publicHost: 'x.featheral.com', ageGate: true, siteManagement: false,
-  ...readJson(process.env.ADMIN_CONFIG || path.join(__dirname, 'admin.config.json'), {}),
+  ...(env.ADMIN_CONFIG_JSON ? JSON.parse(env.ADMIN_CONFIG_JSON) : {
+    siteKey: 'qporn-eurasiahosting-com', siteManagement: true, sampleSites: false,
+    publicTagline: 'Featheral X Media Archiving and Streaming Platform. Share media, support free expression, and earn FTHX.',
+  }),
 };
 const locked = !CONFIG.allowSync;
 const { Telemetry, injectTelemetry } = require('./lib/telemetry');
@@ -39,7 +45,7 @@ const siteManager = CONFIG.siteManagement ? new SiteManager({
 }) : null;
 const { Creation } = require('../notes-api/creation');
 const creation = siteManager ? new Creation(notes, siteManager) : null;
-const deployment = new Deployment({ root: path.resolve(__dirname, '..', '..'), snapshot: () => ({
+const deployment = new Deployment({ root: path.resolve(__dirname, '..', '..'), settings: operationsSettings, snapshot: () => ({
   integrated: sitePages.snapshot(),
   managed: (siteManager?.records || []).map(record => {
     const store = new CmsStore(path.join(DATA_DIR, record.key, 'cms.sqlite'));
@@ -67,6 +73,9 @@ function invalidateSite(key) {
   dropSite(key);
 }
 const app = express();
+app.use((req, res, next) => {
+  if (requestPolicy(req, res, operationsSettings)) next();
+});
 app.use((req, res, next) => { injectTelemetry(res); next(); });
 app.use((req, res, next) => {
   if (!['sites.featheral.com', 'sites.localhost'].includes(req.hostname)) return next();
@@ -126,24 +135,21 @@ const localRequest = (req) => ['localhost', '127.0.0.1', '::1'].includes(hostNam
   ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
 function cmsAuth(req, res, next) {
   if (req.cmsAuthorized) return next();
-  const password = CMS_PASSWORD;
-  if (!password) {
+  if (!operationsSettings.adminConfigured()) {
     const localCms = ['admin.localhost', 'notes.localhost'].includes(req.hostname) &&
       ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
     if (localCms || (localRequest(req) && hostName(req) !== String(CONFIG.cmsHost).toLowerCase())) {
       req.cmsAuthorized = true;
       return next();
     }
-    return res.status(503).json({ error: 'Set CMS_PASSWORD before exposing the CMS outside localhost' });
+    return res.status(503).json({ error: 'Set an Admin password in Settings on localhost before exposing the CMS.' });
   }
   const [scheme, encoded] = String(req.get('authorization') || '').split(' ');
   let supplied = '';
   if (scheme === 'Basic' && encoded) {
     try { supplied = Buffer.from(encoded, 'base64').toString('utf8').split(':').slice(1).join(':'); } catch { supplied = ''; }
   }
-  const given = Buffer.from(supplied);
-  const expected = Buffer.from(password);
-  if (given.length === expected.length && crypto.timingSafeEqual(given, expected)) {
+  if (operationsSettings.authenticate(supplied)) {
     req.cmsAuthorized = true;
     return next();
   }
@@ -151,41 +157,54 @@ function cmsAuth(req, res, next) {
 }
 app.use((req, res, next) => hostName(req) === String(CONFIG.cmsHost).toLowerCase() ? cmsAuth(req, res, next) : next());
 const { ServerUsers } = require('./lib/server-users');
-const serverUsers = new ServerUsers({ deployment, auditFile: path.join(DATA_DIR, 'server-users', 'audit.jsonl') });
+const serverUsers = new ServerUsers({ deployment, settings: operationsSettings });
+const ledgerDirectory = path.resolve(env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers'));
+fs.mkdirSync(ledgerDirectory, { recursive: true });
 const database = require('../db-api/server').createDatabase({
-  directory: path.resolve(process.env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers')),
+  directory: fs.realpathSync(ledgerDirectory),
+  env,
   repository: path.resolve(__dirname, '..', '..'), sites: () => sitePages.hosts,
-  verifyCredential: async config => {
-    const client = await serverUsers.connect(config);
-    try { if ((await serverUsers.command(client, 'id -u')).trim() !== '0') throw Object.assign(new Error('Credential must authenticate a root SSH session.'), { status: 403 }); }
-    finally { client.end(); }
-  },
+  credentialVault: operationsSettings,
 });
+operationsSettings.isBusy = () => deployment.running;
+operationsSettings.verifyCredential = async config => {
+  const client = await serverUsers.connect(config);
+  try {
+    const uid = (await serverUsers.command(client, 'id -u')).trim();
+    if (!/^\d+$/.test(uid)) throw Object.assign(new Error('SSH server returned an invalid user ID.'), { status: 502 });
+    if (uid !== '0') await serverUsers.command(client, "sudo -S -p '' -- true", config.password + '\n');
+  } finally { client.end(); config.password = ''; }
+};
 serverUsers.vault = database.vault;
 deployment.vault = database.vault;
 app.database = database;
 app.use('/api/database', database.adminRouter({
-  cmsAuth, passwordConfigured: Boolean(CMS_PASSWORD), deployment, serverUsers, adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), deployment, serverUsers, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 app.use('/api/v1/db', (req, res, next) => ['db.featheral.com', 'db.localhost'].includes(req.hostname)
   ? database.publicRouter(req, res, next) : res.sendStatus(404));
 app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
-  service: serverUsers, cmsAuth, passwordConfigured: Boolean(CMS_PASSWORD), adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  service: serverUsers, cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
+app.use('/api/settings', require('../operations/api').settingsApi({ settings: operationsSettings, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase() }));
+app.operationsSettings = operationsSettings;
 const serverProfile = new ServerProfile({
   root: path.resolve(__dirname, '..', '..'),
   dataDirectory: DATA_DIR,
   externalDirectories: [
-    { directory: process.env.DB_LEDGER_DIR, category: 'ledgers' },
-    { directory: process.env.FTH_LEDGER_DIR, category: 'ledgers' },
-    { directory: process.env.WORLD_LEDGER_DIR, category: 'ledgers' },
-    { directory: process.env.DOLLAR_GAME_DIR, category: 'otherData' },
+    { directory: env.DB_LEDGER_DIR, category: 'ledgers' },
+    { directory: env.FTH_LEDGER_DIR, category: 'ledgers' },
+    { directory: env.WORLD_LEDGER_DIR, category: 'ledgers' },
+    { directory: env.DOLLAR_GAME_DIR, category: 'otherData' },
   ].filter(entry => entry.directory),
-  networkLimitBytesPerSecond: Number(process.env.SERVER_PROFILE_NETWORK_LIMIT_BPS),
+  networkLimitBytesPerSecond: operationsSettings.value.networkLimitBytesPerSecond,
+});
+operationsSettings.listeners.add(() => {
+  serverProfile.networkLimitBytesPerSecond = operationsSettings.value.networkLimitBytesPerSecond || null;
 });
 app.serverProfile = serverProfile;
 app.use('/api/server-profile', serverProfileApi({
-  service: serverProfile, cmsAuth, passwordConfigured: Boolean(CMS_PASSWORD), adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  service: serverProfile, cmsAuth, passwordConfigured: () => operationsSettings.adminConfigured(), adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 let operationsHandler;
 app.setOperationsHandler = handler => { operationsHandler = handler; };
@@ -277,7 +296,7 @@ app.use('/api/notes', (req, res, next) => {
   next();
 });
 app.use('/api/public', (req, res, next) => req.query.site ? cmsAuth(req, res, next) : next());
-app.use(express.json({ limit: '10mb' }));
+app.use((req, res, next) => express.json({ limit: operationsSettings.value.uploadLimitMiB * 1024 ** 2 })(req, res, next));
 const sitesRoot = path.resolve(__dirname, '..', '..', 'sites');
 const cmsFrontend = path.join(sitesRoot, 'admin.featheral.com');
 const publicFrontend = path.join(sitesRoot, 'x.featheral.com');
@@ -670,10 +689,10 @@ app.post('/api/public/wallet/deposit/request', wrap((req, res) => res.json(publi
 app.post('/api/public/wallet/deposit', wrap((req, res) => res.json(publicSite(req).deposit(walletToken(req), req.body?.signature))));
 app.post('/api/public/posts/:id/tip', wrap((req, res) => res.json(publicSite(req).tip(req.params.id, walletToken(req), req.body?.amount))));
 // New member post: the body is the (browser-compressed) JPEG or GIF; text fields come in the query.
-const rawImage = express.raw({ type: () => true, limit: '16mb' });
+const rawImage = (req, res, next) => express.raw({ type: () => true, limit: operationsSettings.value.uploadLimitMiB * 1024 ** 2 })(req, res, next);
 app.post('/api/public/posts', (req, res, next) => rawImage(req, res, (err) => {
   if (!err) return next();
-  fail(res, Object.assign(new Error(err.type === 'entity.too.large' ? 'That file is too large — GIFs can be up to 15 MB, images up to 8 MB' : err.message), { status: err.status || 400 }));
+  fail(res, Object.assign(new Error(err.type === 'entity.too.large' ? `Upload exceeds the configured ${operationsSettings.value.uploadLimitMiB} MiB limit.` : err.message), { status: err.status || 400 }));
 }), wrap((req, res) => {
   const { title, description, source, video } = req.query;
   res.json(publicSite(req).createPost(walletToken(req), Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), { title, description, source, video }));
@@ -1127,6 +1146,7 @@ if (require.main === module) {
   const server = app.listen(PORT, HOST, () => console.log(
     `CMS: https://${CONFIG.cmsHost}/ · Public media site: https://${CONFIG.publicHost}/ · Local: http://${HOST}:${PORT}/admin and http://${HOST}:${PORT}/`,
   ));
+  configureServer(server, operationsSettings);
   const shutdown = () => server.close(() => { app.close(); process.exit(0); });
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);

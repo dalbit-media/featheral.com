@@ -8,7 +8,7 @@ const { fail } = require("./journal");
 const { sshTarget } = require("./ssh-target");
 const STREAM = "internal/vault", KEY = "ssh-root";
 class CredentialVault {
-  constructor({ journals, env = process.env, repository, verifyCredential, approvals = new OriginApprovals() }) {
+  constructor({ journals, env = require("../operations/runtime").environment(), repository, verifyCredential, approvals = new OriginApprovals() }) {
     this.journals = journals; this.env = env; this.repository = path.resolve(repository);
     this.verifyCredential = verifyCredential; this.approvals = approvals; this.busy = false;
   }

@@ -41,10 +41,7 @@ async function startServer(t, config, cmsPassword, registryFile) {
   const configFile = path.join(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'admin-config-')), 'admin.config.json');
   writeJson(configFile, config);
   const previous = process.env.ADMIN_CONFIG;
-  const previousPassword = process.env.CMS_PASSWORD;
   process.env.ADMIN_CONFIG = configFile;
-  if (cmsPassword === undefined) delete process.env.CMS_PASSWORD;
-  else process.env.CMS_PASSWORD = cmsPassword;
   let app;
   let siteManager;
   const factory = Object.assign(() => {
@@ -59,6 +56,13 @@ async function startServer(t, config, cmsPassword, registryFile) {
   try {
     closeCaches = loadServer(Object.assign((name) => {
       if (name === 'express') return factory;
+      if (name === '../operations/configuration') return { assertDatabaseConfiguration() {} };
+      if (name === '../operations/runtime') return {
+        environment: () => ({ ADMIN_CONFIG_JSON: JSON.stringify(config) }),
+        value: { networkLimitBytesPerSecond: 0, uploadLimitMiB: 16, requestTimeoutSeconds: 90 },
+        listeners: new Set(), adminConfigured: () => Boolean(cmsPassword),
+        authenticate: password => Boolean(cmsPassword) && password === cmsPassword,
+      };
       if (name === '../notes-api/ledger') {
         const module = realRequire(name);
         return { ...module, Notes: class extends module.Notes {
@@ -87,7 +91,6 @@ async function startServer(t, config, cmsPassword, registryFile) {
     }, { resolve: realRequire.resolve }), path.dirname(serverFile), { exports: {} });
   } finally {
     if (previous === undefined) delete process.env.ADMIN_CONFIG; else process.env.ADMIN_CONFIG = previous;
-    if (previousPassword === undefined) delete process.env.CMS_PASSWORD; else process.env.CMS_PASSWORD = previousPassword;
     fs.rmSync(path.dirname(configFile), { recursive: true, force: true });
   }
   const server = http.createServer(app);
@@ -542,7 +545,7 @@ test('local mode serves only the configured data set and disables loading sites'
     request.on('error', reject);
   });
   assert.equal(serverUsers.status, 503);
-  assert.match(serverUsers.body.error, /CMS_PASSWORD/);
+  assert.match(serverUsers.body.error, /Settings/);
   assert.equal((await fetch(base + '/media/another-site/a.jpg')).status, 404);
   assert.equal((await fetch(base + '/media/only-this-site/missing.jpg', { redirect: 'manual' })).status, 404);
   assert.ok((await (await fetch(base + '/api/library')).json()).every((m) => m.key === 'only-this-site'));
