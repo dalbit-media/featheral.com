@@ -5,6 +5,7 @@ const path = require("node:path");
 const { ethers } = require("ethers");
 const { createReserveEngine } = require("./reserve");
 const { assertFreshSignature } = require("../identity/profile");
+const { createMarketPriceReader, VALUATION_POOL } = require("./prices");
 
 function reconciliationMessage({ txHash, logIndex, issuedAt }, genesisHash) {
   return ["Featheral Gold reserve reconciliation", `Ledger: ${genesisHash}`, "Chain ID: 1",
@@ -32,11 +33,13 @@ function bridgeAbi() {
 function createGoldApi({ env = require("../operations/runtime").environment(), provider, nativeReader, logger = console } = {}) {
   let reserveEngine = null;
   const nativeBalance = nativeReader || require("./native").createNativeReader({ env, logger });
-  const marketPrice = require("./prices").createMarketPriceReader({ logger });
   const rpcUrl = env.GOLD_API_RPC_URL || env.TOKEN_API_RPC_URL || "https://ethereum-rpc.publicnode.com";
   const rpcRequest = new ethers.FetchRequest(rpcUrl);
   rpcRequest.timeout = 8000;
   const readProvider = provider || new ethers.JsonRpcProvider(rpcRequest, CHAIN_ID);
+  const marketPrice = createMarketPriceReader({ provider: readProvider, logger,
+    ethUsd: typeof nativeBalance.ethPrice === "function" ? nativeBalance.ethPrice
+      : require("./native").createNativeReader({ env, logger }).ethPrice });
   const configuredBridge = env.GOLD_API_BRIDGE_ADDRESS || env.TOKEN_API_BRIDGE_ADDRESS || "";
   const configuredService = env.TOKEN_API_GAME_SERVICE_ADDRESS || "";
   if (configuredBridge && !ethers.isAddress(configuredBridge)) throw new Error("Gold bridge address is invalid.");
@@ -242,6 +245,7 @@ function createGoldApi({ env = require("../operations/runtime").environment(), p
         ethereumStatus: "not-checked", checkedAt: new Date().toISOString(),
       });
       if (req.method === "GET" && route === "/stats") return reply(200, await stats());
+      if (req.method === "GET" && route === "/valuation") return reply(200, { pool: VALUATION_POOL, market: await marketPrice() });
       const wallet = route.match(/^\/wallets\/(0x[0-9a-fA-F]{40})$/);
       if (req.method === "GET" && wallet) return reply(200, { address: ethers.getAddress(wallet[1]), fthg: (await token.balanceOf(wallet[1])).toString(), chainId: CHAIN_ID });
       const nativeWallet = route.match(/^\/native\/wallets\/(0x[0-9a-fA-F]{40})$/);

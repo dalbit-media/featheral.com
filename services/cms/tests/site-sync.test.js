@@ -7,7 +7,7 @@ const os = require("node:os");
 const { DatabaseSync } = require("node:sqlite");
 const { snapshot, hash, runtimePaths } = require("../../operations/site-sync-snapshot");
 const { MARKER, readReplica, replicaEnvironment, allowReplicaRequest } = require("../../operations/replica");
-const { prepareBackup, installSnapshot, restoreBackup, verifySnapshot } = require("../../../scripts/restore-site-sync");
+const { prepareBackup, installSnapshot, restoreBackup, returnStaged, verifySnapshot } = require("../../../scripts/restore-site-sync");
 const { SiteSync } = require("../lib/site-sync");
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-site-sync-"));
@@ -81,8 +81,48 @@ test("tampered snapshot and backup fail before changing target files", t => {
   fs.appendFileSync(upload, "tampered");
   assert.throws(() => prepareBackup(f.target, output, path.join(f.directory, "bad-backup")), /checksum/);
   assert(!fs.existsSync(path.join(f.directory, "bad-backup")));
+  fs.writeFileSync(upload, "source upload");
+  installSnapshot(f.target, output, backup, prepared);
   fs.appendFileSync(path.join(backup, "cms", "site", "uploads", "photo.txt"), "tampered");
   assert.throws(() => restoreBackup(prepared.roots, backup, prepared.state), /Backup checksum/);
+  assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt"), "utf8"), "source upload");
+});
+test("install moves staged files without extra copies, skips identical targets and returns staging on rollback", t => {
+  const f = fixture(t), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "backup");
+  const manifest = snapshot(f.root, output, {});
+  const same = manifest.entries.find(entry => entry.name !== "cms/site/uploads/photo.txt" && /\/uploads\//.test(entry.name))
+    || manifest.entries.find(entry => entry.name.startsWith("data/") && !/\.sqlite$/.test(entry.name));
+  const [kind, ...parts] = same.name.split("/");
+  const sameTarget = path.join(f.target, ...(kind === "cms" ? ["services", "cms", "data"] : ["data"]), ...parts);
+  fs.mkdirSync(path.dirname(sameTarget), { recursive: true });
+  fs.copyFileSync(path.join(output, ...same.name.split("/")), sameTarget);
+  const targetUpload = path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt");
+  const oldInode = fs.statSync(targetUpload).ino;
+  const prepared = prepareBackup(f.target, output, backup);
+  assert(prepared.state.records.some(record => record.name === same.name && record.unchanged));
+  assert(!fs.existsSync(path.join(backup, ...same.name.split("/"))));
+  const stagedUpload = path.join(output, "cms", "site", "uploads", "photo.txt");
+  const stagedInode = fs.statSync(stagedUpload).ino;
+  installSnapshot(f.target, output, backup, prepared);
+  assert(!fs.existsSync(stagedUpload));
+  assert.equal(fs.statSync(targetUpload).ino, stagedInode);
+  assert.equal(fs.statSync(path.join(backup, "cms", "site", "uploads", "photo.txt")).ino, oldInode);
+  assert(fs.existsSync(path.join(output, ...same.name.split("/"))));
+  returnStaged(prepared, output);
+  restoreBackup(prepared.roots, backup, prepared.state);
+  assert.equal(fs.readFileSync(stagedUpload, "utf8"), "source upload");
+  assert.equal(fs.readFileSync(targetUpload, "utf8"), "target overlapping upload");
+  assert.equal(fs.statSync(targetUpload).nlink, 1);
+  verifySnapshot(output);
+});
+test("receiver refuses insufficient measured backup/install space before creating a backup or replacing records", t => {
+  const f = fixture(t), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "low-space-backup");
+  snapshot(f.root, output, {});
+  const original = fs.statfsSync;
+  fs.statfsSync = () => ({ bavail: 1n, bsize: 4096n });
+  try { assert.throws(() => prepareBackup(f.target, output, backup), /Insufficient target space/); }
+  finally { fs.statfsSync = original; }
+  assert(!fs.existsSync(backup));
   assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt"), "utf8"), "target overlapping upload");
 });
 test("unsupported external storage and traversal are explicitly rejected", t => {
@@ -150,7 +190,7 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
   let uploaded = Buffer.alloc(0);
   const client = { end() { ended = true; }, sftp(callback) { callback(null, {
     lstat(_remote, callback) { callback(Object.assign(new Error("Missing"), { code: 2 })); },
-    open(remote, flags, mode, callback) { assert.equal(flags, "wx"); assert.equal(mode, 0o600); transfers.push({ remote }); callback(null, Buffer.from("handle")); },
+    open(remote, flags, mode, callback) { assert.equal(flags, "wx"); assert.equal(mode, 0o600); uploaded = Buffer.alloc(0); transfers.push({ remote }); callback(null, Buffer.from("handle")); },
     write(_handle, chunk, offset, length, position, callback) {
       assert.equal(position, uploaded.length); uploaded = Buffer.concat([uploaded, chunk.subarray(offset, offset + length)]); callback();
     },
@@ -160,7 +200,9 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
     async connect(config) { assert.equal(config.password, target.password); assert.equal(config.fingerprint, target.fingerprint); return client; },
     async execute(_client, command, input, _timeout, _onPhase, onLog) {
       commands.push({ command, input });
-      if (commands.length === 2) {
+      if (command.startsWith("df -Pk")) onLog("999999999");
+      if (command.includes("sha256sum <")) onLog(require("node:crypto").createHash("sha256").update(uploaded).digest("hex") + "  -");
+      if (command.includes("systemd-run")) {
         onLog("FEATHERAL_SYNC:backup"); assert.equal(service.status().progress.percent, 80);
         onLog("FEATHERAL_SYNC:health"); assert.equal(service.status().progress.percent, 95);
         onLog("password=ssh-secret"); onLog("Private value ssh-secret");
@@ -183,11 +225,14 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
   const restored = new SiteSync({ root: f.root, settings, deployment });
   assert.deepEqual(restored.status().logs, service.status().logs);
   assert.equal(restored.status().progress.percent, 100);
-  assert.equal(transfers.length, 1);
+  assert.equal(transfers.at(-1).remote.endsWith("/manifest.json"), true);
+  const names = transfers.map(entry => entry.remote);
+  assert(names.findIndex(name => name.includes("/uploads/")) > names.findIndex(name => name.endsWith("wallet-profiles.sqlite")));
+  assert(!names.some(name => name.endsWith(".zip")));
   assert(!commands.some(item => item.command.includes("ssh-secret")));
-  assert.equal(commands[1].input, "ssh-secret\n");
-  assert.match(commands[1].command, /sha256sum --check/); assert.match(commands[1].command, /systemd-run/);
-  assert.match(commands[1].command, /restore-site-sync/);
+  const apply = commands.find(item => item.command.includes("systemd-run"));
+  assert.equal(apply.input, "ssh-secret\n");
+  assert.match(apply.command, /sha256sum --check/); assert.match(apply.command, /restore-site-sync/);
 });
 test("shared sync captures and launches in one request without separate wallet approval", async t => {
   const f = fixture(t);
@@ -470,26 +515,31 @@ test("paused upload offers Continue transfer without requesting another snapshot
 function resumableFixture(t) {
   const f = fixture(t), crypto = require("node:crypto");
   const data = crypto.randomBytes(1024 * 1024 + 71), id = crypto.randomUUID();
-  const directory = path.join(f.root, "data", "site-sync", id), archive = path.join(directory, "snapshot.zip");
-  fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(archive, data);
+  const directory = path.join(f.root, "data", "site-sync", id), archive = path.join(directory, "snapshot", "manifest.json");
+  fs.mkdirSync(path.dirname(archive), { recursive: true });
+  fs.writeFileSync(path.join(directory, "snapshot", "payload.bin"), data);
+  fs.writeFileSync(archive, JSON.stringify({ entries: [{ name: "payload.bin", bytes: data.length, hash: crypto.createHash("sha256").update(data).digest("hex") }] }));
   const target = { id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral",
     fingerprint: "SHA256:fixture", password: "ssh-secret", sshTimeoutSeconds: 1, deploymentTimeoutSeconds: 1 };
   const binding = { id, site: "gold", target: target.id, host: target.host, port: target.port,
-    directory: target.directory, fingerprint: target.fingerprint, digest: hash(archive), revision: 1 };
-  const state = { remote: null, writes: [], commands: [], delay: 0, failAt: null, stall: false, ended: 0, applied: 0 };
+    directory: target.directory, fingerprint: target.fingerprint, digest: hash(archive), revision: 1, transport: "files-v1" };
+  const state = { remote: null, manifest: null, writes: [], commands: [], delay: 0, failAt: null, stall: false, ended: 0, applied: 0 };
   const settings = { value: { revision: 1 }, deploymentTargets: () => [{ ...target }] };
   const sftp = {
-    lstat(_remote, callback) {
-      if (state.remote === null) callback(Object.assign(new Error("Missing"), { code: 2 }));
-      else callback(null, { size: state.remote.length, isFile: () => true });
+    lstat(remote, callback) {
+      const value = remote.endsWith("/manifest.json") ? state.manifest : state.remote;
+      if (value === null) callback(Object.assign(new Error("Missing"), { code: 2 }));
+      else callback(null, { size: value.length, isFile: () => true });
     },
-    open(_remote, flags, mode, callback) {
+    open(remote, flags, mode, callback) {
       assert.equal(mode, 0o600);
+      if (remote.endsWith("/manifest.json")) { state.manifest = Buffer.alloc(0); callback(null, Buffer.from("manifest")); return; }
       if (flags === "wx") { assert.equal(state.remote, null); state.remote = Buffer.alloc(0); }
       else assert.equal(flags, "r+");
       callback(null, Buffer.from("handle"));
     },
     write(_handle, buffer, offset, length, position, callback) {
+      if (_handle.toString() === "manifest") { state.manifest = Buffer.concat([state.manifest, buffer.subarray(offset, offset + length)]); callback(); return; }
       assert(length <= 256 * 1024);
       state.writes.push({ position, length });
       if (state.stall) return;
@@ -509,13 +559,17 @@ function resumableFixture(t) {
     connect: async () => client,
     execute: async (_client, command, _input, _timeout, _onPhase, onLog) => {
       state.commands.push(command);
-      if (command.includes("sha256sum <")) onLog(crypto.createHash("sha256").update(state.remote).digest("hex") + "  -");
+      if (command.startsWith("df -Pk")) onLog("999999999");
+      if (command.includes("find . -type f") && state.remote) onLog(`${state.remote.length}\tpayload.bin`);
+      if (command.includes("sha256sum <")) onLog(crypto.createHash("sha256").update(command.includes("/manifest.json") ? state.manifest : state.remote).digest("hex") + "  -");
       if (command.includes("systemd-run")) {
         assert.deepEqual(state.remote, data);
         state.applied++; onLog("FEATHERAL_SYNC:health");
       }
     } };
   const service = new SiteSync({ root: f.root, settings, deployment });
+  // Receiver upload is exercised end to end in site-sync-sftp.test.js; this fixture models one payload file.
+  service.receiverBundle = () => ({ files: [], digest: "0".repeat(64) });
   return { ...f, data, archive, directory, target, binding, state, settings, deployment, service, sftp,
     plan: { directory, archive, binding } };
 }
@@ -531,7 +585,7 @@ test("interrupted transfer resumes exact acknowledged and partial bytes after re
   assert.throws(() => f.service.available(), /waiting to continue/);
   assert.equal(f.state.applied, 0);
   f.service.result.phase = "transferring"; f.service.result.running = true; f.service.persist();
-  const restarted = new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment });
+  const restarted = Object.assign(new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment }), { receiverBundle: f.service.receiverBundle });
   assert.equal(restarted.status().phase, "paused");
   f.settings.value.revision++; f.target.deploymentTimeoutSeconds = 2;
   f.state.failAt = null; f.state.writes = [];
@@ -543,6 +597,30 @@ test("interrupted transfer resumes exact acknowledged and partial bytes after re
   assert.equal(f.state.applied, 1); assert.equal(restarted.status().phase, "complete");
   assert.equal(restarted.status().progress.percent, 100);
   assert(!fs.existsSync(f.directory));
+});
+test("insufficient target space stops before opening any upload and preserves the frozen snapshot for recovery", async t => {
+  const f = resumableFixture(t), execute = f.deployment.execute;
+  f.deployment.execute = async (...args) => {
+    if (args[1].startsWith("df -Pk")) args[5]("1");
+    else await execute(...args);
+  };
+  f.service.launch(f.plan); await f.service.transferTask;
+  assert.equal(f.state.remote, null); assert.equal(f.state.writes.length, 0); assert.equal(f.state.applied, 0);
+  assert.equal(f.service.status().phase, "paused");
+  assert(fs.existsSync(f.archive));
+  assert(f.service.status().logs.some(entry => entry.message.includes("Insufficient target disk space")));
+});
+test("a legacy paused ZIP can be replaced by a newly reviewed file snapshot without deleting old staging or running target commands", async t => {
+  const f = resumableFixture(t);
+  delete f.binding.transport;
+  f.settings.environment = () => ({});
+  f.service.result = { phase: "paused", id: f.binding.id, binding: f.binding, resumable: true, site: "gold", logs: [] };
+  assert.throws(() => f.service.resume({ site: "gold" }), /previous paused transfer used a ZIP/);
+  const review = await f.service.plan({ site: "gold" }, { session: "admin", origin: "https://admin.example" });
+  assert.equal(review.transport, "files-v1");
+  assert(fs.existsSync(f.directory));
+  assert.equal(f.state.commands.length, 0); assert.equal(f.state.writes.length, 0);
+  assert.equal(fs.existsSync(path.join(f.service.plans.get(review.id).directory, "snapshot.zip")), false);
 });
 test("active upload outlives the timeout while acknowledged blocks keep resetting its stall timer", async t => {
   const f = resumableFixture(t);
@@ -577,18 +655,18 @@ test("resume refuses changed targets, missing or changed archives, corrupt prefi
   f.target.id = "shared";
   delete f.settings.value.siteServers;
   fs.renameSync(f.archive, f.archive + ".saved");
-  assert.throws(() => f.service.resume({ site: "gold" }), /archive is missing/);
+  assert.throws(() => f.service.resume({ site: "gold" }), /manifest is missing/);
   fs.renameSync(f.archive + ".saved", f.archive);
   f.state.writes = []; f.state.remote[0] ^= 1;
   f.service.resume({ site: "gold" }); await f.service.transferTask;
   assert.equal(f.service.status().phase, "paused"); assert.equal(f.state.writes.length, 0);
-  assert(f.service.status().logs.some(entry => entry.message.includes("partial archive checksum")));
+  assert(f.service.status().logs.some(entry => entry.message.includes("prefix differs")));
   fs.writeFileSync(f.archive, Buffer.alloc(f.data.length));
   f.service.resume({ site: "gold" }); await f.service.transferTask;
   assert.equal(f.state.writes.length, 0);
-  assert(f.service.status().logs.some(entry => entry.message.includes("source archive checksum changed")));
+  assert(f.service.status().logs.some(entry => entry.message.includes("source manifest checksum changed")));
   f.service.result.phase = "applying"; f.service.result.running = true; f.service.result.resumable = false; f.service.persist();
-  const restarted = new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment });
+  const restarted = Object.assign(new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment }), { receiverBundle: f.service.receiverBundle });
   assert.equal(restarted.status().phase, "uncertain");
   assert.throws(() => restarted.resume({ site: "gold" }), /Unconfirmed target jobs/);
   assert.equal(f.state.applied, 0);
@@ -664,7 +742,7 @@ test("step timing reports measured upload ETA, freezes paused time and preserves
   now += 60000;
   assert.equal(f.service.status().steps[1].elapsedSeconds, elapsed);
   assert.equal(f.service.status().steps[1].remainingSeconds, null);
-  const restored = new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment, now: () => now });
+  const restored = Object.assign(new SiteSync({ root: f.root, settings: f.settings, deployment: f.deployment, now: () => now }), { receiverBundle: f.service.receiverBundle });
   assert.equal(restored.result.timings[f.target.host].capture, 21);
   assert.equal(restored.status().steps[1].status, "paused");
 });
@@ -677,7 +755,8 @@ test("upload ETA samples only bytes sent during this resumed attempt", async t =
   f.service.now = () => now;
   const write = f.sftp.write;
   f.sftp.write = (...args) => { now += 1000; write(...args); };
-  await f.service.upload({ end() {} }, f.sftp, { ...f.plan, resume: true }, "snapshot.zip", f.target);
+  await f.service.upload({ end() {} }, f.sftp, { archive: path.join(f.directory, "snapshot", "payload.bin"),
+    binding: { digest: require("node:crypto").createHash("sha256").update(f.data).digest("hex") } }, "payload.bin", f.target);
   assert.equal(f.service.result.uploadSample.transferredBytes, f.data.length);
   assert(f.service.result.uploadSample.bytesPerSecond <= 256 * 1024);
   assert.equal(f.service.status().steps[0].remainingSeconds, 0);
@@ -699,4 +778,31 @@ test("per-step UI shows progress and ETA on compact text lines without individua
   assert(!html.includes("<div"));
   assert(!html.includes("\n"));
   f.context.viewCleanup();
+});
+
+test("reset clears verified target staging and every retained local snapshot without touching target data", async t => {
+  const f = fixture(t);
+  const target = { id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral", fingerprint: "SHA256:shared", password: "ssh-secret" };
+  const settings = { value: { revision: 1 }, environment: () => ({}), deploymentTargets: () => [{ ...target }] };
+  let ended = 0, commands = [];
+  const deployment = { running: false, sites: () => [{ key: "gold", status: "ready" }], connect: async () => ({ end() { ended++; } }) };
+  const service = new SiteSync({ root: f.root, settings, deployment,
+    command: async (_client, command) => { commands.push(command); return '{"removed":2,"removedBytes":96,"remaining":0}\n'; } });
+  assert.throws(() => service.pause({ site: "gold" }), /Only an uploading transfer can be paused/);
+  for (const id of ["956b8f51-ca5e-446d-a8a9-e7f188f56ecd", "0ae2ca02-0000-4000-8000-000000000000"])
+    fs.mkdirSync(path.join(service.directory, id, "snapshot"), { recursive: true });
+  service.result = { running: false, phase: "paused", site: "gold", resumable: true, logs: [], binding: { id: "956b8f51-ca5e-446d-a8a9-e7f188f56ecd" } };
+  service.running = true;
+  await assert.rejects(service.reset({ site: "gold" }), /Pause the current transfer/);
+  service.running = false;
+  const status = await service.reset({ site: "gold" });
+  assert.equal(status.phase, "not-applied"); assert.equal(status.resumable, false); assert.equal(status.running, false);
+  assert.match(status.message, /Removed 2 target staging folder\(s\) \(96 bytes\) and 2 local snapshot\(s\)/);
+  assert.equal(commands.length, 1); assert.match(commands[0], /^node -e /); assert.match(commands[0], /\/srv\/featheral/);
+  assert.equal(ended, 1);
+  assert.deepEqual(fs.readdirSync(service.directory).filter(name => fs.statSync(path.join(service.directory, name)).isDirectory()), []);
+  assert.ok(fs.existsSync(path.join(service.directory, "source-id")));
+  assert.throws(() => service.resume({ site: "gold" }), /no paused upload/);
+  service.command = async () => '{"removed":0,"removedBytes":0,"remaining":1}';
+  await assert.rejects(service.reset({ site: "gold" }), /could not be verified/);
 });

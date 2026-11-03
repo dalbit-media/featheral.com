@@ -38,7 +38,7 @@ function createNativeReader({ fetchRpc = fetch, env = require("../operations/run
     if (result.error || typeof result.result !== "string" || !/^0x[0-9a-f]{1,64}$/i.test(result.result)) throw new Error(`${network.name}: ${result.error?.message || "Invalid RPC result"}`);
     return result.result;
   }
-  return async address => {
+  const reader = async address => {
     if (!/^0x[0-9a-f]{40}$/i.test(address)) throw new Error("Invalid native ETH wallet address.");
     address = address.toLowerCase();
     if (cache.has(address) && clock() - cache.get(address).at < 30000) return cache.get(address).value;
@@ -66,5 +66,7 @@ function createNativeReader({ fetchRpc = fetch, env = require("../operations/run
       return value;
     } finally { pending.delete(address); }
   };
+  reader.ethPrice = ethPrice;
+  return reader;
 }
 module.exports = { createNativeReader, NETWORKS };

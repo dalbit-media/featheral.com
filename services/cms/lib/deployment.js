@@ -2,15 +2,70 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
-const { pipeline } = require('node:stream/promises');
 const { Client } = require('ssh2');
-const yazl = require('yazl');
+const { Writable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { hosts } = require('./site-pages');
 const { sshTarget } = require('../../database/ssh-target');
 const { StringDecoder } = require('node:string_decoder');
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+async function fileHash(file, bytes) {
+  const digest = crypto.createHash('sha256');
+  if (bytes !== 0) for await (const chunk of fs.createReadStream(file, bytes === undefined ? {} : { end: bytes - 1 })) digest.update(chunk);
+  return digest.digest('hex');
+}
+async function remoteHash(deployment, client, remote, seconds) {
+  let digest;
+  await deployment.execute(client, `sha256sum < ${quote(remote)}`, '', seconds, undefined,
+    line => { if (/^[a-f0-9]{64}\s+\*?-\s*$/.test(line)) digest = line.slice(0, 64); });
+  if (!digest) throw error(409, 'Target did not return a file checksum.');
+  return digest;
+}
+async function checkSpace(deployment, client, directory, bytes, seconds) {
+  let available;
+  await deployment.execute(client, `df -Pk ${quote(directory)} | tail -1 | awk '{print $4}'`, '', seconds, undefined,
+    line => { if (/^\d+$/.test(line.trim())) available = Number(line.trim()) * 1024; });
+  if (!Number.isSafeInteger(available)) throw error(409, 'Target free disk space could not be verified. No transfer started.');
+  if (available < bytes) throw error(409, `Insufficient target disk space: need at least ${bytes} bytes, available ${available}. Retained files and backups were not deleted.`);
+}
+async function uploadFile({ deployment, client, sftp, file, remote, bytes, digest, target, report = () => {}, signal }) {
+  const seconds = target.sshTimeoutSeconds || 20, timeout = target.deploymentTimeoutSeconds || 900;
+  if (signal?.aborted) throw signal.reason;
+  if (fs.statSync(file).size !== bytes || await fileHash(file) !== digest) throw error(409, 'Source file changed after review. No bytes were sent.');
+  const attrs = await deployment.transfer(client, callback => sftp.lstat(remote, (err, stat) =>
+    err?.code === 2 ? callback(null, null) : callback(err, stat)), seconds);
+  const offset = attrs?.size || 0;
+  if (attrs && (!attrs.isFile() || !Number.isSafeInteger(attrs.size) || attrs.size < 0 || attrs.size > bytes))
+    throw error(409, 'Target partial file has an invalid type or size. Refusing to overwrite it.');
+  if (attrs && await remoteHash(deployment, client, remote, timeout) !== await fileHash(file, offset))
+    throw error(409, 'Target file prefix differs from the reviewed source. Refusing to append or overwrite.');
+  report(offset);
+  if (attrs && offset === bytes) return;
+  const handle = await deployment.transfer(client, callback => sftp.open(remote, attrs ? 'r+' : 'wx', 0o600, callback), seconds);
+  let position = offset, timer;
+  const destination = new Writable({ write(chunk, _encoding, callback) {
+    if (signal?.aborted) return callback(signal.reason);
+    sftp.write(handle, chunk, 0, chunk.length, position, err => {
+      if (destination.destroyed) return;
+      if (!err) { position += chunk.length; reset(); report(position); }
+      callback(err);
+    });
+  } });
+  const reset = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { destination.destroy(error(504, 'File upload stalled. Retry to continue from its verified prefix.')); client.end(); }, timeout * 1000);
+  };
+  try { reset(); await pipeline(fs.createReadStream(file, { start: offset, highWaterMark: 256 * 1024 }), destination); }
+  finally {
+    clearTimeout(timer);
+    // Pausing closes the handle cleanly; every acknowledged block is a verified-resumable prefix.
+    if (signal?.aborted) await deployment.transfer(client, callback => sftp.close(handle, callback), seconds).catch(() => {});
+    else if (!destination.errored) await deployment.transfer(client, callback => sftp.close(handle, callback), seconds);
+  }
+  if (await remoteHash(deployment, client, remote, timeout) !== digest) throw error(409, 'Uploaded file checksum failed. Activation was not started.');
+}
 function redactServerLog(text, secrets = []) {
   for (const secret of secrets.filter(Boolean).sort((a, b) => b.length - a.length))
     text = text.split(secret).join('[REDACTED]');
@@ -28,7 +83,7 @@ const installerSteps = {
   'node-install': 'Installing Node 24.',
   'node-check': 'Verifying Node 24 or newer.',
   'private-data': 'Checking private storage. Existing installations require restored data; brand-new installations require empty directories.',
-  extract: 'Extracting the uploaded release ZIP.',
+  extract: 'Verifying the individually uploaded release files. No archive extraction.',
   'legacy-env': 'Checking for an unmigrated shared .env. Migrate it into Settings before deployment.',
   'link-data': 'Linking the existing private data into the release.',
   dependencies: 'Installing locked dependencies.',
@@ -96,8 +151,13 @@ function releaseFiles(root) {
   }).sort();
 }
 const digestFiles = (root, files) => {
-  const hash = crypto.createHash('sha256');
-  for (const file of files) hash.update(file).update('\0').update(fs.readFileSync(path.join(root, ...file.split('/'))));
+  const hash = crypto.createHash('sha256'), buffer = Buffer.alloc(1024 * 1024);
+  for (const file of files) {
+    hash.update(file).update('\0');
+    const fd = fs.openSync(path.join(root, ...file.split('/')), 'r');
+    try { let bytes; while ((bytes = fs.readSync(fd, buffer, 0, buffer.length, null))) hash.update(buffer.subarray(0, bytes)); }
+    finally { fs.closeSync(fd); }
+  }
   return hash.digest('hex');
 };
 class Deployment {
@@ -147,7 +207,8 @@ class Deployment {
       targetDigest, targets: targets.map(({ password, keyFile, ...target }) => target),
       files: files.length, hosts: domains, enabled: this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true', walletApprovalRequired: Boolean(config.vault),
       ...(this.settings ? { settingsRevision: config.settingsRevision, uploadLimitMiB: config.uploadLimitMiB, requestTimeoutSeconds: config.requestTimeoutSeconds, deploymentTimeoutSeconds: config.deploymentTimeoutSeconds } : {}),
-      steps: ['Upload the same Git-tracked working-tree ZIP and published CMS pages/themes to every reviewed server; untracked files are excluded.',
+      steps: ['Upload reviewed Git-tracked source and published CMS metadata one file at a time; no ZIP or compression. Retry reuses verified files and partial prefixes.',
+        'Database/media replication remains a separately reviewed Site Sync: database entries transfer and verify first, then uploads. Complete required replica sync before activating dependent sites.',
         'Use each server’s own SSH credential; configure Nginx/HTTPS only for the hostnames assigned to that server. Point their DNS A/AAAA records to that server before deployment.',
         'Deploy separate servers first and the shared administration server last. A DB-only target runs no financial writers or other site services.',
         'Keep encrypted Settings, external bootstrap, signing keys, ledgers, media and CMS databases outside releases; never put them in Git.',
@@ -288,34 +349,39 @@ class Deployment {
       throw error(403, 'Origin-wallet approval is required for every deployment target.');
     this.plans.delete(input.planId); this.running = true; this.result = null; this.logs = [];
     const temporary = this.stateDirectory;
-    const archive = path.join(temporary, `${crypto.randomUUID()}.zip`);
-    const bootstrap = archive + '.sh';
+    const prepared = path.join(temporary, crypto.randomUUID());
     const results = [];
     try {
       fs.mkdirSync(temporary, { recursive: true });
-      this.log('Preparing the reviewed Git-tracked release archive.');
-      const zip = new yazl.ZipFile();
-      const captured = crypto.createHash('sha256');
+      fs.mkdirSync(prepared, { mode: 0o700 });
+      this.log('Preparing the reviewed file manifest. No compression or release ZIP.');
+      const transfers = [];
       for (const file of plan.files) {
-        const buffer = fs.readFileSync(path.join(this.root, ...file.split('/')));
-        captured.update(file).update('\0').update(buffer);
-        const deployed = file.endsWith('.sh') ? Buffer.from(buffer.toString('utf8').replace(/\r\n/g, '\n')) : buffer;
-        zip.addBuffer(deployed, file);
-        if (file === 'scripts/deploy-release.sh') fs.writeFileSync(bootstrap, deployed, { mode: 0o600 });
+        let local = path.join(this.root, ...file.split('/'));
+        if (file.endsWith('.sh')) {
+          const deployed = fs.readFileSync(local, 'utf8').replace(/\r\n/g, '\n');
+          local = path.join(prepared, ...file.split('/'));
+          fs.mkdirSync(path.dirname(local), { recursive: true });
+          fs.writeFileSync(local, deployed, { mode: 0o600 });
+        }
+        transfers.push({ name: file, file: local, bytes: fs.statSync(local).size, hash: await fileHash(local) });
       }
-      if (captured.digest('hex') !== plan.digest) throw error(409, 'Source changed while preparing the archive. Review a new plan.');
-      zip.addBuffer(Buffer.from(plan.content), '.cms-published.json');
-      zip.addBuffer(Buffer.from(JSON.stringify({ files: plan.files })), '.deployment-source.json');
-      const writing = pipeline(zip.outputStream, fs.createWriteStream(archive, { mode: 0o600 }));
-      zip.end(); await writing;
-      this.log('Release archive ready; the same ZIP will be sent to every target.');
-      const releaseId = `release-${Date.now()}-${plan.digest.slice(0, 12)}`;
+      if (digestFiles(this.root, plan.files) !== plan.digest) throw error(409, 'Source changed while preparing the file manifest. Review a new plan.');
+      for (const [name, content] of [['.cms-published.json', plan.content], ['.deployment-source.json', JSON.stringify({ files: plan.files })]]) {
+        const file = path.join(prepared, name);
+        fs.writeFileSync(file, content, { mode: 0o600 });
+        transfers.push({ name, file, bytes: Buffer.byteLength(content), hash: await fileHash(file) });
+      }
+      const manifestFile = path.join(prepared, '.deployment-files.json');
+      fs.writeFileSync(manifestFile, JSON.stringify(transfers.map(({ name, bytes, hash }) => ({ name, bytes, hash }))), { mode: 0o600 });
+      transfers.push({ name: '.deployment-files.json', file: manifestFile, bytes: fs.statSync(manifestFile).size, hash: await fileHash(manifestFile) });
+      const releaseId = `release-0-${crypto.createHash('sha256').update(plan.digest + plan.contentDigest + plan.targetDigest).digest('hex').slice(0, 12)}`;
       const targets = [...plan.targets].sort((a, b) => Number(a.id === 'shared') - Number(b.id === 'shared'));
       for (const target of targets) {
         this.result = { success: false, targets: results, currentTarget: target.host, message: 'Deployment in progress; not yet verified.' };
         this.persistStatus();
         try {
-          await this.deployTarget(target, credentials.find(item => item.id === target.id), archive, bootstrap, releaseId);
+          await this.deployTarget(target, credentials.find(item => item.id === target.id), transfers, releaseId);
           results.push({ host: target.host, hosts: target.hosts, success: true });
           this.log(`${target.host}: deployment and HTTPS health checks verified.`);
         } catch (err) {
@@ -335,13 +401,12 @@ class Deployment {
     } finally {
       for (const item of credentials) item.password = '';
       if (credential && !Array.isArray(credential)) credential.password = '';
-      fs.rmSync(archive, { force: true });
-      fs.rmSync(bootstrap, { force: true });
+      if (fs.existsSync(prepared)) fs.rmSync(prepared, { recursive: true });
       this.running = false;
       this.persistStatus();
     }
   }
-  async deployTarget(config, credential, archive, bootstrap, releaseId) {
+  async deployTarget(config, credential, transfers, releaseId) {
     if (this.siteSync?.running) throw error(409, 'Wait for the current site sync.');
     let client;
     try {
@@ -349,11 +414,17 @@ class Deployment {
       client = await this.connect(config.vault ? { ...config, password: credential.password } : config);
       const remote = `${config.directory}/releases/${releaseId}`;
       await this.execute(client, `mkdir -p ${quote(remote)}`, "", config.sshTimeoutSeconds || 20);
+      await checkSpace(this, client, remote, transfers.reduce((sum, file) => sum + file.bytes, 0) + 512 * 1024 * 1024, config.sshTimeoutSeconds || 20);
       const sftp = await this.transfer(client, callback => client.sftp(callback), config.sshTimeoutSeconds || 20);
-      this.log(`${config.host}: uploading the release ZIP and Linux installer over SFTP.`);
+      this.log(`${config.host}: uploading ${transfers.length} files individually. Verified existing files are skipped.`);
       try {
-        await this.transfer(client, callback => sftp.fastPut(archive, `${remote}/release.zip`, callback), config.deploymentTimeoutSeconds || 900);
-        await this.transfer(client, callback => sftp.fastPut(bootstrap, `${remote}/deploy-release.sh`, callback), config.sshTimeoutSeconds || 20);
+        let count = 0;
+        for (const entry of transfers) {
+          const destination = `${remote}/${entry.name}`;
+          await this.execute(client, `mkdir -p ${quote(destination.slice(0, destination.lastIndexOf('/')))}`, "", config.sshTimeoutSeconds || 20);
+          await uploadFile({ deployment: this, client, sftp, file: entry.file, remote: destination, bytes: entry.bytes, digest: entry.hash, target: config });
+          this.log(`${config.host}: verified file ${++count}/${transfers.length}: ${entry.name}`);
+        }
       } finally { sftp.end(); }
       this.log(`${config.host}: running setup, build, PM2, Nginx, certificates and health checks. Server output follows (credentials redacted).`);
       const secrets = [config.password, credential?.password, this.env.DEPLOY_PASSWORD,
@@ -361,7 +432,7 @@ class Deployment {
         ...Object.values(this.settings?.value.siteServers || {}).map(profile => profile.credential?.password),
         ...require('../../operations/configuration').fields.filter(field => field.secret).flatMap(field => [this.settings?.value.runtime?.[field.name], this.env[field.name]])];
       const onLog = line => this.log(`${config.host}: ${redactServerLog(line, secrets)}`);
-      const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(config.directory)} ${quote(releaseId)} ${quote(config.email)} ${quote(config.hosts.join(' '))}${this.settings ? ` ${quote(config.uploadLimitMiB)} ${quote(config.requestTimeoutSeconds)} ${quote(config.id === 'shared')}` : ''}`;
+      const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/scripts/deploy-release.sh')} ${quote(config.directory)} ${quote(releaseId)} ${quote(config.email)} ${quote(config.hosts.join(' '))}${this.settings ? ` ${quote(config.uploadLimitMiB)} ${quote(config.requestTimeoutSeconds)} ${quote(config.id === 'shared')}` : ''}`;
       if (this.settings) {
         const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then printf '%s\\n' "$password" | ${job}; else printf '%s\\n' "$password" | sudo -S -p '' -v && printf '%s\\n' "$password" | sudo -n ${job}; fi`;
         await this.execute(client, command, credential.password + '\n', config.deploymentTimeoutSeconds, (phase, exitCode) => this.logPhase(config.host, phase, exitCode), onLog);
@@ -379,4 +450,4 @@ class Deployment {
     });
   }
 }
-module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles, redactServerLog };
+module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles, redactServerLog, uploadFile, fileHash, checkSpace };

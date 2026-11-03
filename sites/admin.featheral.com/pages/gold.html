@@ -19,6 +19,13 @@
     </div>
     <button id="history-more" class="btn" type="button" hidden>Load older transactions</button>
   </section>
+  <section class="reserve-panel" aria-labelledby="valuation-title">
+    <div class="reserve-toolbar"><h2 id="valuation-title">FTHG valuation pool</h2><span class="reserve-badge confirmed" title="Fixed in the Gold API release; not editable here">Read-only setting</span></div>
+    <p class="muted">Every FTHG, FTH$, FTHX and FTHS USD estimate derives from this Uniswap pool's spot price × ETH/USD. Until the pool has price data, the labeled 1 FTHG = $0.01 reference applies.</p>
+    <p><a id="valuation-link" href="https://app.uniswap.org/explore/pools/ethereum/0x3f1f8a9867d8f4a59f206b9644fafe05e9546323c0219dd1352187bbb5738fdd" target="_blank" rel="noopener noreferrer">Open pool on Uniswap ↗</a></p>
+    <p id="valuation-status" class="status" role="status">Loading valuation pool...</p>
+    <div id="valuation-metrics" class="reserve-metrics"></div>
+  </section>
   <section class="reserve-panel" aria-labelledby="safety-title">
     <h2 id="safety-title">Essential token safety</h2>
     <p class="muted">The token has a fixed supply. Metadata, pause and compliance controls affect the deployed Ethereum contract, not the reserve conversion rate. Every write checks its actual on-chain role, simulates, and requires wallet confirmation.</p>

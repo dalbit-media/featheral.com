@@ -18,6 +18,24 @@ const { initialize, initializeNewInstallation, migrateEnvironment } = require(".
 const context = { origin: "http://admin.localhost", session: "fixture-admin" };
 const password = "fixture-server-password:with:colons";
 const adminPassword = "fixture-admin-password-long";
+// In-memory resumable SFTP target matching the per-file deployment uploader.
+function fakeRemote(files, onUpload = () => {}) {
+  return {
+    reply(command, stream) {
+      if (command.startsWith("df -Pk")) stream.emit("data", Buffer.from("999999999\n"));
+      if (command.startsWith("sha256sum <")) {
+        const remote = command.slice("sha256sum < '".length, -1);
+        stream.emit("data", Buffer.from(crypto.createHash("sha256").update(files.get(remote)).digest("hex") + "  -\n"));
+      }
+    },
+    sftp: {
+      lstat(_remote, done) { done(Object.assign(new Error("missing"), { code: 2 })); },
+      open(remote, _flags, _mode, done) { files.set(remote, Buffer.alloc(0)); done(null, remote); },
+      write(remote, chunk, offset, length, _position, done) { files.set(remote, Buffer.concat([files.get(remote), chunk.subarray(offset, offset + length)])); done(); },
+      close(remote, done) { onUpload(remote, files.get(remote)); done(); }, end() {},
+    },
+  };
+}
 function fixture(t, options = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-settings-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -94,7 +112,7 @@ test("automatic installation is wallet-bound and separate DB deploys before the 
   deployment.deployTarget = async (target, ...args) => { modes.push({ id: target.id, arguments: args.length }); };
   deployment.launch({ ...input, challengeId: challenge.challengeId, signature: await f.wallet.signMessage(challenge.message) }, context);
   while (deployment.running) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.deepEqual(modes, [{ id: site, arguments: 4 }, { id: "shared", arguments: 4 }]);
+  assert.deepEqual(modes, [{ id: site, arguments: 3 }, { id: "shared", arguments: 3 }]);
   assert.equal(deployment.result.success, true);
 });
 test("automatic managed-site review binds published content and rejects retired manual installation controls", async t => {
@@ -577,6 +595,7 @@ test("Settings HTTP API enforces host, TLS, authentication, origin, bounded bodi
 test("Settings-backed deployment sends credentials only over stdin, uses SFTP, and applies the reviewed limits", async t => {
   const f = fixture(t); await f.save({ ...f.input, settings: { ...f.input.settings, enabled: true, uploadLimitMiB: 32, requestTimeoutSeconds: 120 } });
   const commands = [], sent = [], uploads = [];
+  const remote = fakeRemote(new Map(), target => uploads.push(target));
   class Client extends EventEmitter {
     connect(config) {
       assert.equal(config.password, password); assert.equal(config.username, "deploy");
@@ -586,6 +605,7 @@ test("Settings-backed deployment sends credentials only over stdin, uses SFTP, a
       commands.push(command);
       const stream = new EventEmitter(); stream.stderr = new EventEmitter();
       stream.end = input => { sent.push(input); process.nextTick(() => {
+        remote.reply(command, stream);
         if (command.includes("systemd-run")) {
           stream.emit("data", Buffer.from("Installing packages\n" + password.slice(0, 10)));
           stream.emit("data", Buffer.from(password.slice(10) + "\n"));
@@ -595,7 +615,7 @@ test("Settings-backed deployment sends credentials only over stdin, uses SFTP, a
       }); };
       callback(null, stream);
     }
-    sftp(callback) { callback(null, { fastPut(source, target, done) { uploads.push(target); done(); }, end() {} }); }
+    sftp(callback) { callback(null, remote.sftp); }
     end() {}
   }
   const deployment = new Deployment({ root: path.resolve(__dirname, "..", "..", ".."), settings: f.settings,
@@ -608,7 +628,8 @@ test("Settings-backed deployment sends credentials only over stdin, uses SFTP, a
   const result = await deployment.start(input, credential);
   assert.equal(result.success, true);
   assert.ok(credential.every(target => target.password === ""));
-  assert.equal(uploads.length, 2);
+  assert.equal(uploads.length, plan.files + 3);
+  assert(!uploads.some(target => target.endsWith(".zip")));
   assert.match(commands.at(-1), /systemd-run --wait --pipe --collect/);
   assert.match(commands.at(-1), /sudo -S -p '' -v/);
   assert.match(commands.at(-1), /'32' '120'/);
@@ -632,17 +653,16 @@ test("one reviewed Git-tracked archive deploys to shared and DB servers with ind
     connect(config) {
       this.host = config.host; connections.push({ host: config.host, password: config.password, username: config.username });
       assert.equal(config.password, config.host === "db.featheral.com" ? dbPassword : password);
+      this.remote = fakeRemote(new Map(), (target, bytes) => uploads.push({ host: config.host, target, bytes }));
       process.nextTick(() => this.emit("ready"));
     }
     exec(command, callback) {
       commands.push({ host: this.host, command });
       const stream = new EventEmitter(); stream.stderr = new EventEmitter();
-      stream.end = input => { sent.push({ host: this.host, input }); process.nextTick(() => stream.emit("close", 0)); };
+      stream.end = input => { sent.push({ host: this.host, input }); process.nextTick(() => { this.remote.reply(command, stream); stream.emit("close", 0); }); };
       callback(null, stream);
     }
-    sftp(callback) { callback(null, { fastPut: (source, target, done) => {
-      uploads.push({ host: this.host, target, bytes: fs.readFileSync(source) }); done();
-    }, end() {} }); }
+    sftp(callback) { callback(null, this.remote.sftp); }
     end() {}
   }
   const deployment = new Deployment({ root: path.resolve(__dirname, "../../.."), settings: f.settings, clientFactory: () => new Client(),
@@ -660,17 +680,14 @@ test("one reviewed Git-tracked archive deploys to shared and DB servers with ind
   assert.equal(result.success, true);
   assert.deepEqual(connections.map(connection => connection.host), [site, "featheral.com"]);
   assert.ok(connections.every(connection => connection.username === "root"));
-  const archives = uploads.filter(upload => upload.target.endsWith(".zip"));
-  assert.equal(archives.length, 2); assert.deepEqual(archives[0].bytes, archives[1].bytes);
+  const files = host => new Map(uploads.filter(upload => upload.host === host)
+    .map(upload => [upload.target.replace(/^.*\/releases\/[^/]+\//, ""), upload.bytes]));
+  const dbFiles = files(site), sharedFiles = files("featheral.com");
+  assert(!uploads.some(upload => upload.target.endsWith(".zip")));
+  assert.deepEqual([...dbFiles.keys()].sort(), [...sharedFiles.keys()].sort());
+  for (const [name, bytes] of dbFiles) assert.deepEqual(bytes, sharedFiles.get(name), name);
   assert.ok(uploads.filter(upload => upload.target.endsWith(".sh")).every(upload => !upload.bytes.includes(13)), "Linux shell uploads normalize Windows CRLF");
-  const zip = archives[0].bytes, entry = zip.lastIndexOf(Buffer.from("scripts/deploy-release.sh")) - 46;
-  assert.equal(zip.readUInt32LE(entry), 0x02014b50);
-  assert.equal(zip.readUInt16LE(entry + 10), 8);
-  const local = zip.readUInt32LE(entry + 42), size = zip.readUInt32LE(entry + 20);
-  const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
-  const archivedScript = require("node:zlib").inflateRawSync(zip.subarray(start, start + size));
-  assert.deepEqual(archivedScript, uploads.find(upload => upload.target.endsWith(".sh")).bytes, "Archive and bootstrap contain the exact same Linux shell bytes");
-  assert.ok(archives[0].bytes.includes(Buffer.from("sites/db.featheral.com/index.html")));
+  assert.ok(dbFiles.has("sites/db.featheral.com/index.html"));
   const dbCommand = commands.find(entry => entry.host === site && entry.command.includes("systemd-run")).command;
   const sharedCommand = commands.find(entry => entry.host === "featheral.com" && entry.command.includes("systemd-run")).command;
   assert.match(dbCommand, /'db.featheral.com'/); assert.match(dbCommand, /'false'/);
@@ -682,7 +699,7 @@ test("one reviewed Git-tracked archive deploys to shared and DB servers with ind
   assert.equal(result.targets.length, 2);
   assert.ok(!JSON.stringify(deployment.status()).includes(dbPassword));
   assert.ok(!JSON.stringify(deployment.status()).includes(password));
-  assert.ok(deployment.status().logs.some(entry => entry.message.includes("uploading")));
+  assert.ok(deployment.status().logs.some(entry => /verified file \d+\/\d+/.test(entry.message)));
   assert.match(deployment.status().logs.at(-1).message, /All deployment targets verified/);
 });
 test("multi-target failures preserve per-server results and reject changed assignments before any SSH use", async t => {

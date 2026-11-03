@@ -1,5 +1,12 @@
 # Featheral Admin (CMS & operations)
 
+The small bottom-right app build label starts at `v.01` and remains visible across
+Admin views. `npm run build` (or `npm run build:world`, also used by startup and
+deployment) increments it after the World/app build succeeds: `v.02`, `v.03`, etc.
+The generated `sites/admin.featheral.com/js/build-version.js` is the persistent
+counter and deployed label; retain it between builds. Failed builds do not advance
+it. Direct `node scripts/serve.js` runs do not count as builds.
+
 The unified administration frontend is `sites/admin.featheral.com/`, served at **admin.featheral.com** (`admin.localhost:8080` locally). Foundation overview/access, Gold reserve/token safety, Dollar liquidity/rewards/ledger and World moderation are native views, not iframe consoles. Templates live in `views/`, scoped controllers in `js/operations/`; one signing-wallet control persists across navigation. Tab deep links use `#/operations/<service>?tab=<tab>` and preserve drafts while switching tabs. Leaving a view disposes its wallet listeners and blocks stale signatures/submissions. Product `/admin/` routes, legacy `/operations/<service>/` URLs and the retired CMS hostname redirect to the matching native entry. Old console scripts and their standalone styling were removed; ethers is served locally.
 
 The Sites overview includes all fourteen core hosts, including Database, App, Silver and the central Wallet,
@@ -37,7 +44,7 @@ credentials keep the saved value; switching to Shared retains the independent
 profile for later use.
 
 All sites share the default server until assigned to a separate server. Reviewed
-**Settings → Deployment** uploads the same Git-tracked working-tree ZIP to every target,
+**Settings → Deployment** uploads the same Git-tracked working-tree files individually to every target,
 using each target's own encrypted SSH/sudo credential. Nginx/TLS and the gateway
 are scoped to assigned hostnames; set DNS A/AAAA records accordingly beforehand.
 Separate targets deploy before the shared Admin server. A DB-only target starts
@@ -104,21 +111,35 @@ after every acknowledged block. Data is streamed in bounded 256 KiB blocks.
 The same setting still limits the target apply job's total execution time.
 
 If upload disconnects or stalls, the operation becomes **paused**, retains the
-exact source ZIP and remote partial ZIP, and offers **Continue transfer**.
+exact frozen source files and remote partial files, and offers **Continue transfer**.
 Continue uses the original site/server assignment, pinned key and snapshot digest;
-it verifies the whole local archive and the remote prefix SHA256 before writing
-from the target's actual byte offset. Already verified bytes are not sent again.
+it verifies each local file and remote prefix SHA256 before writing
+from that file's actual byte offset. Completed verified files are skipped.
 Upload resume survives source restarts and does not require another snapshot or
 wallet signature. Credentials come from the saved connection; changing timeout
 settings does not invalidate the original snapshot, but changing the target does.
-Source archives remain private until confirmed completion or rollback. A paused
+Source snapshots remain private until confirmed completion or rollback. A paused
 upload prevents starting a different snapshot. Do not edit or delete its staging
 files. Invalid target prefixes are explicitly rejected, never silently overwritten.
 
 An interruption after target apply begins remains **uncertain** and requires the
 signed receipt check below, not upload resume. Versions before resume support
-deleted the local ZIP on failure; those uploads cannot resume without the original
-frozen archive. Check their target status, then start one new snapshot.
+used a ZIP; those retained ZIP transfers are not accepted by the new file uploader.
+A ZIP transfer paused before apply may be replaced with a fresh reviewed
+file-transfer snapshot; old staging is retained, never automatically deleted.
+An uncertain apply still requires its signed target receipt check before another
+snapshot. Check target jobs before recovering any unconfirmed operation.
+Do not delete old snapshots, target staging or backups blindly.
+
+**Pause** stops an uploading transfer after the current SFTP block; every file
+already uploaded is recorded in a local journal and every acknowledged block of
+the interrupted file stays on the target as a checksum-verified prefix.
+**Continue transfer** lists the target staging once, skips journaled files whose
+size matches, verifies the partial file's prefix and appends only the rest.
+**Reset transfer** (paused, not-applied, rolled-back or complete) refuses while a
+target sync job, lock or unfinished install receipt exists; otherwise it removes
+every target `shared/site-sync/*` staging folder and every retained local
+snapshot. Live target databases, uploads and `shared/sync-backups` are untouched.
 
 The fixed, ten-minute snapshot includes installation SQLite databases, native
 Dollar/World and database/CMS journals, site registries, upload indexes and uploads
@@ -134,18 +155,41 @@ CMS journal identities are retained across different installation paths and OSes
 Separate-server approval binds the snapshot SHA256, site/target, pinned SSH key,
 Settings revision, Admin origin, wallet and session. Shared-server sync checks the
 saved shared assignment and Settings revision before capture and revalidates the
-snapshot binding before transfer. The source sends the frozen ZIP with SFTP;
-credentials go only to SSH and sudo stdin. The Linux target verifies ZIP paths,
+snapshot binding before transfer. The source sends database/journal/registry and
+metadata files first, verifying each checksum before sending media/upload files.
+No compression, ZIP creation or extraction is used. The complete manifest is
+sent last; database replacement happens only after all referenced files arrive,
+so the active target never sees a partially transferred snapshot.
+Credentials go only to SSH and sudo stdin. The Linux target verifies file paths,
 checksums and databases before stopping its exact PM2 application. A verified,
 retained backup precedes database replacement and removal of superseded journal
 records/WAL files. Uploads are overlaid: matching files use the source version;
 target-only uploads, credentials, signing keys and unrelated files stay. This is
 not a deletion mirror, DB merge, continuous replication or writer failover.
 
-Sync archives bypass Nginx over SSH/SFTP, so HTTP upload size and proxy timeouts
+Sync files bypass Nginx over SSH/SFTP, so HTTP upload size and proxy timeouts
 do not limit sync transfers. Managed Nginx configurations stream HTTP request
 bodies (`proxy_request_buffering off`) rather than spooling entire uploads to
 disk, while retaining the configured upload size and request timeout limits.
+
+Before transfer, target free space is checked only for the snapshot bytes not yet
+staged plus 512 MiB headroom; already uploaded files and resumed prefixes count as
+staged. Staging is the only full copy: the receiver renames staged files into place
+on the same filesystem, hard-links the replaced originals into the retained
+rollback backup, and leaves byte-identical target files untouched without backing
+them up. Rollback moves installed files back into staging (so a retry re-uploads
+nothing) and restores each original through a verified temporary copy. Before
+backup and replacement the receiver measures any cross-filesystem copies plus the
+largest single file and refuses if space is short. Existing backups and staging are
+never removed to make room. The receiver (`restore-site-sync.js` with its snapshot
+and replica helpers) is uploaded with every sync into the staging folder and its
+SHA256 is checked on the target before it runs, so an older target release does
+not need a deployment first; only its `services/operations/settings.js` is used.
+Frozen source files still need local snapshot space, but no second giant ZIP.
+Deployment also checks source-file bytes plus 512 MiB headroom; dependency/build
+space can exceed that allowance. An insufficient or unknown space result fails
+explicitly before uploading. Completed release transfers use a digest-based
+release directory so retries can skip verified files and resume partial prefixes.
 New and existing managed hosts receive this setting on the next reviewed deployment.
 
 `data/site-sync-replica.json` persistently forces native readers, disables upstream
@@ -377,7 +421,7 @@ remote release.
 
 The site-page editor opens the homepage first, with separate site/page selectors, full-width title/description/content fields and collapsible widget help. **View published page** opens the selected page at its public URL. The status distinguishes saved content from unsaved changes; use **Publish changes** or Ctrl/Cmd+S to publish. Switching pages or leaving the editor prompts before discarding changes.
 
-**Deploy all sites** uses a digest-bound, expiring review plan covering every server and hostname assignment, followed by SFTP upload and pinned-host-key SSH execution with per-server credentials. It is disabled by default and must be enabled in Admin Settings with origin-wallet approval. Every target receives the same Git-tracked source archive; untracked files are excluded and the tracked inventory is retained for later deployments from extracted releases. Status preserves per-target outcomes; failures stop the batch without rolling back other servers. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment). Initial full-stack private data must be restored from a consistent offline backup; a fresh DB-only host does not need financial data or root credentials copied from the shared server. No deployment occurs merely by reviewing a plan.
+**Deploy all sites** uses a digest-bound, expiring review plan covering every server and hostname assignment, followed by SFTP upload and pinned-host-key SSH execution with per-server credentials. It is disabled by default and must be enabled in Admin Settings with origin-wallet approval. Every target receives the same Git-tracked source files individually, without compression; untracked files are excluded and the tracked inventory is retained for later deployments from installed releases. Status preserves per-target outcomes; failures stop the batch without rolling back other servers. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment). Initial full-stack private data must be restored from a consistent offline backup; a fresh DB-only host does not need financial data or root credentials copied from the shared server. No deployment occurs merely by reviewing a plan.
 
 This application and its complete local data were moved into the Featheral foundation at `services/cms/`; the old source root is empty. Run `npm start` from the foundation root to serve CMS, X, Exchange and all registered CMS sites through the same gateway as Foundation, Gold, Dollar and World. Root `npm install` includes this CMS workspace. Run `npm run test:cms` from the foundation root for the migrated suite.
 
@@ -456,7 +500,7 @@ automatically pins the host key only after success; later connections must match
 Saving never changes a server password. Secrets are not returned by the API,
 included in commands, logged, or uploaded with releases.
 The console polls persisted progress, including individual APT updates/installations,
-Node setup, private-data checks, extraction, dependencies, build, PM2, Nginx and HTTPS.
+Node setup, private-data checks, file verification, dependencies, build, PM2, Nginx and HTTPS.
 Installer errors include the failed step and exit code in both the console and
 per-server result (for example `apt-update (exit 100)` or `private-data (exit 1)`).
 Installer stdout and stderr stream into the same console alongside fixed diagnostic
@@ -702,7 +746,7 @@ The exchange service journals the phases `prepared`→`paying`→`paid`→`settl
 
 World's new **Authorize World budget** signs `separateWorldFunds: true` on `/api/dollar/game/wallet/link`; the exact message comes from `/wallet/funds/authorization`. Existing legacy direct-wallet sessions stay unchanged until opt-in. Authorization moves no funds and retains the deterministic World guest account. Same-origin `/world-funds.html` uses authenticated `GET /wallet/funds`, CSRF-protected `POST /wallet/funds/prepare`, `/complete` and `/cancel` (all under `/api/dollar/game`). Deposits sign exact native Dollar transfers; withdrawals sign the World account, exact base-unit amount, fixed authorized destination, request ID and origin. Parameters are immutable per owner/request ID. Persisted deposit signatures and balanced withdrawal journals recover lost receipts without another debit. Conflicting deposit nonces require a refreshed preparation and signature; unsigned preparations can be discarded. Gameplay uses only World funds in separate mode. Existing legacy guest-transfer signatures remain supported but cannot authorize separate-mode changes.
 
-`GET /api/creation/wallet` includes a portfolio for native FTH$ and note holdings. Public `GET /api/creation/wallet/portfolio/:account` values a read-only World account's native FTH$ only. Funded FTHX/community-note spot ratios require authoritative matching reserves and no pending routed settlement; unpriced assets are listed separately. Gold supplies verified mainnet bridge ratios for FTHG estimates. Its timeout-bounded USD lookup prefers the deepest liquid Ethereum Uniswap FTHG base-token pair reported by DEX Screener. With no valid pair or a feed error, it publishes the labeled temporary **1 FTHG = $0.01** reference, including `fallback: true` and `marketError`; this is not a market quote. Results are cached for one minute before retrying; successful DEX results replace the reference automatically. Consumers require a source timestamp no older than five minutes. Internal USD estimates still require verified Gold conversion ratios; FTH$ is not USD. Neither the separate World budget nor legacy duplicate accounts are added to the connected-wallet subtotal.
+`GET /api/creation/wallet` includes a portfolio for native FTH$ and note holdings. Public `GET /api/creation/wallet/portfolio/:account` values a read-only World account's native FTH$ only. Funded FTHX/community-note spot ratios require authoritative matching reserves and no pending routed settlement; unpriced assets are listed separately. Gold supplies verified mainnet bridge ratios for FTHG estimates. Its timeout-bounded USD lookup reads the read-only Uniswap v4 ETH/FTHG valuation pool (`VALUATION_POOL` in `services/gold/prices.js`) via StateView and multiplies its spot price by ETH/USD. With an uninitialized or liquidity-free pool, or a read error, it publishes the labeled temporary **1 FTHG = $0.01** reference, including `fallback: true` and `marketError`; this is not a market quote. Results are cached for one minute before retrying; successful pool results replace the reference automatically. Consumers require a source timestamp no older than five minutes. Internal USD estimates still require verified Gold conversion ratios; FTH$ is not USD. Neither the separate World budget nor legacy duplicate accounts are added to the connected-wallet subtotal.
 
 Portfolio assets and native ETH entries expose exact 18-decimal USD base units as `usdValue`; mainnet FTHG uses `ethereumUsdValue`. Wallet rows show USD and primary-currency estimates beneath each asset balance, scaling combined wallet/custody valuations to the actual held portion. Totals remain below the available balance. USD estimates display four decimal places; primary-currency estimates use at most four. Both round using integer arithmetic; positive values below that precision show `<$0.0001` or `<0.0001` in the primary currency. Missing prices stay unavailable. Native ETH USD values retain their independent feed rather than inheriting the FTHG reference label.
 

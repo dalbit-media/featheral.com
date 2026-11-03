@@ -90,6 +90,7 @@ h1 { font-size: 24px; } h2 { font-size: 18px; } h3 { font-size: 15px; } h4 { fon
 .sidebar-foot { margin-top: auto; padding: 14px 18px; font-size: 11px; color: #6b7390; }
 
 main { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+#admin-build-version { flex: none; padding: 3px max(10px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)); color: var(--muted); font: 10px/1.4 var(--mono); text-align: right; }
 #topbar { display: flex; align-items: center; gap: 12px; padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--line); min-height: 56px; }
 #crumbs { font-size: 14px; color: var(--muted); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #crumbs b { color: var(--ink); }

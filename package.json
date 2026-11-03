@@ -6,7 +6,9 @@
   "scripts": {
     "prestart": "node scripts/export-abi.js && npm run build:world",
     "start": "node scripts/serve.js",
+    "build": "npm run build:world",
     "build:world": "npm run build --prefix sites/world.featheral.com/play",
+    "postbuild:world": "node scripts/build-admin-version.js",
     "build:logos": "node scripts/build-site-logos.js",
     "compile": "hardhat compile",
     "abi": "node scripts/export-abi.js",

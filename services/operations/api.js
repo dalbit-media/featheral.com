@@ -44,6 +44,8 @@ function settingsApi({ settings, siteSync, cmsAuth, adminHost = "admin.featheral
   router.post("/sites/:site", run((input, ctx, req) => settings.saveSite(req.params.site, input, ctx, req.settingsSite.path ? "" : req.settingsSite.hostname)));
   if (siteSync) {
     router.post("/sites/:site/sync/resume", run((input, _ctx, req) => siteSync.resume({ ...input, site: req.params.site })));
+    router.post("/sites/:site/sync/pause", run((_input, _ctx, req) => siteSync.pause({ site: req.params.site })));
+    router.post("/sites/:site/sync/reset", run((_input, _ctx, req) => siteSync.reset({ site: req.params.site })));
     router.post("/sites/:site/sync/shared/start", run((input, ctx, req) => siteSync.startShared({ ...input, site: req.params.site }, ctx)));
     router.post("/sites/:site/sync/plan", run((_input, ctx, req) => siteSync.plan({ site: req.params.site }, ctx)));
     router.post("/sites/:site/sync/challenge", run((input, ctx, req) => siteSync.challenge({ ...input, site: req.params.site }, ctx)));

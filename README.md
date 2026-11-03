@@ -303,7 +303,7 @@ All sites default to the shared server. To use different root passwords for
 3. Point DB's DNS A/AAAA records to the DB server; keep the other hosts on the
    shared server. This workflow does not modify your DNS provider's records.
 4. In **Settings → Deployment**, review both targets/hostname lists, enter the approval
-   phrase and sign. Both servers receive the **same ZIP** of Git-tracked
+   phrase and sign. Both servers receive the same individually transferred Git-tracked
    working-tree files (tracked edits included; untracked files excluded), plus
    the published CMS snapshot. Each connection uses its own encrypted credential.
 
@@ -317,12 +317,18 @@ disabled Gold reserves; deployment refuses to start duplicate financial writers.
 Separate assignments apply to whole hostnames, not hosted-site paths. Sites
 using the same SSH server should remain on Shared rather than duplicate targets.
 
-The archive records its Git-tracked inventory so later Admin deployments from
-an extracted release still exclude newly introduced/untracked files, without
+The release records its Git-tracked inventory so later Admin deployments from
+a deployed release still exclude newly introduced/untracked files, without
 shipping `.git`. Status records each target's verified/failed outcome. A failed
 target stops the batch; previously verified servers are not rolled back across
 servers. Never retry a partially completed rollout without reviewing its logs.
-Shell scripts use LF line endings in both the ZIP and uploaded installer so
+No compression or ZIP is used. Each file is checksum-verified, completed files
+are skipped on retry, and partial files resume from verified prefixes. Disk-space
+preflight fails explicitly without deleting old staging or backups.
+Database/media replication uses the separately reviewed Site Sync workflow:
+database and metadata entries transfer first, then media files individually;
+the target stays unchanged until the full snapshot and backup are verified.
+Shell scripts use LF line endings in the transferred files and installer so
 releases prepared on Windows also run on Linux.
 
 Before the **first** deployment, restore a consistent **offline backup** into
@@ -446,7 +452,7 @@ Gold's reserve admin is publicly linked in its header; token writes remain role-
 
 ## FTHG site and admin
 
-- `sites/gold.featheral.com/` is the FTHG landing page. It shows live Mainnet statistics without a wallet: supply, estimated USD value, holders, transfers, supply distribution across the fixed wallets, the FTHG/FTH$ rate and bridge status, recent transfers, and top holders. Gold uses a labeled temporary **1 FTHG = $0.01** estimate until an Ethereum Uniswap estimate is available.
+- `sites/gold.featheral.com/` is the FTHG landing page. It shows live Mainnet statistics without a wallet: supply, estimated USD value, holders, transfers, supply distribution across the fixed wallets, the FTHG/FTH$ rate and bridge status, recent transfers, and top holders. Gold uses a labeled temporary **1 FTHG = $0.01** estimate until the read-only Uniswap v4 ETH/FTHG valuation pool has price data.
 - `sites/gold.featheral.com/admin/` is a static admin for managing that existing contract. Read-only stats use a public Ethereum Mainnet RPC without wallet connection; transactions require an authorized wallet. The contract address is fixed, and there is no token deployment workflow.
 - The admin artifact contains the contract ABI and verification metadata only; it does not contain deployment bytecode.
 
@@ -654,11 +660,17 @@ opening reference **1 FTH$ = 100 FTHX**. This is not a swap quote or a USD peg.
 Once funded, estimates automatically use current verified Exchange reserve ratios;
 completed trades move those ratios. Pending settlements, invalid reserves and price
 reader failures never fall back to the opening reserve reference. Gold's USD reader
-prefers a positive, liquid Ethereum Uniswap FTHG base-token pair from DEX Screener,
-choosing the deepest USD-liquidity pair. If none is available or the lookup fails,
+uses one read-only valuation pool, fixed in `services/gold/prices.js` and shown in
+Gold admin: Uniswap v4 ETH/FTHG pool
+[`0x3f1f…8fdd`](https://app.uniswap.org/explore/pools/ethereum/0x3f1f8a9867d8f4a59f206b9644fafe05e9546323c0219dd1352187bbb5738fdd)
+(0.25% fee, tick spacing 25, no hooks; the key is verified against the pool ID at startup).
+It reads the pool's spot price and in-range liquidity from Uniswap's StateView at one
+block and multiplies by the ETH/USD feed. Every FTHG, FTH$, FTHX and FTHS USD estimate
+derives from that value. If the pool is uninitialized, has no in-range liquidity, or the
+pool or ETH/USD read fails,
 it publishes the explicitly labeled temporary **1 FTHG = $0.01** reference.
-The lookup is retried after a one-minute cache; successful DEX estimates replace
-the reference automatically. Neither price is a redemption guarantee or swap quote.
+The lookup is retried after a one-minute cache; successful pool estimates replace
+the reference automatically. `GET /api/v1/gold/valuation` returns the setting and current estimate. Neither price is a redemption guarantee or swap quote.
 Internal assets still require verified Gold conversion ratios; native ETH keeps
 its independent live USD feed.
 Wallet portfolio totals sit below the available balance. Each asset shows smaller

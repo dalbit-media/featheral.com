@@ -54,6 +54,36 @@ function copyVerified(source, target) {
   const fd = fs.openSync(target, "r+");
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
+function sameDevice(file, directory) {
+  let current = directory;
+  while (!fs.existsSync(current)) current = path.dirname(current);
+  return fs.statSync(file).dev === fs.statSync(current).dev;
+}
+// Same-filesystem moves need no extra space; a cross-device move copies, verifies and then removes the source.
+function moveVerified(source, target, digest) {
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  try { fs.renameSync(source, target); }
+  catch (error) {
+    if (error.code !== "EXDEV") throw error;
+    const temporary = `${target}.sync-${process.pid}`;
+    copyVerified(source, temporary);
+    fs.renameSync(temporary, target);
+    fs.unlinkSync(source);
+  }
+  fs.chmodSync(target, 0o600);
+  if (digest) assert(hash(target) === digest, "Storage move verification failed.");
+}
+// Backups hard-link the old inode when possible; installs replace targets by rename, so the backup is never modified.
+function linkBackup(source, backup) {
+  fs.mkdirSync(path.dirname(backup), { recursive: true, mode: 0o700 });
+  try { fs.linkSync(source, backup); }
+  catch (error) { if (!["EXDEV", "EPERM", "ENOTSUP", "EOPNOTSUPP"].includes(error.code)) throw error; copyVerified(source, backup); }
+}
+function writeReplace(file, content) {
+  const temporary = `${file}.sync-${process.pid}`;
+  fs.writeFileSync(temporary, content, { mode: 0o600, flush: true });
+  fs.renameSync(temporary, file);
+}
 function journalFiles(directory, relative = "") {
   if (!fs.existsSync(directory)) return [];
   const files = [];
@@ -78,15 +108,46 @@ function prepareBackup(root, snapshotDirectory, backupDirectory) {
   for (const entry of manifest.entries) if (/\.(?:db|sqlite3?)$/i.test(entry.name))
     for (const suffix of ["-wal", "-shm", "-journal"]) touched.add(entry.name + suffix);
   touched.add(`data/${MARKER}`);
+  const entries = new Map(manifest.entries.map(entry => [entry.name, entry]));
+  const backupParent = path.dirname(backupDirectory), unchanged = new Set(), required = new Map();
+  const reserve = (directory, bytes) => {
+    const device = fs.statSync(directory).dev;
+    const current = required.get(device) || { directory, bytes: 64 * 1024 * 1024 };
+    current.bytes += bytes; required.set(device, current);
+  };
+  reserve(backupParent, 0);
+  for (const name of touched) {
+    const file = destination(roots, name), entry = entries.get(name);
+    if (!fs.existsSync(file)) continue;
+    const stat = fs.lstatSync(file);
+    assert(stat.isFile() && stat.nlink === 1, "Target storage contains an unsupported file.");
+    if (entry && stat.size === entry.bytes && hash(file) === entry.hash) { unchanged.add(name); continue; }
+    if (!sameDevice(file, backupParent)) reserve(backupParent, stat.size);
+  }
+  let largest = 0;
+  for (const entry of manifest.entries) {
+    if (unchanged.has(entry.name)) continue;
+    const target = destination(roots, entry.name), staged = within(snapshotDirectory, entry.name);
+    let parent = path.dirname(target);
+    while (!fs.existsSync(parent)) parent = path.dirname(parent);
+    if (!sameDevice(staged, parent)) reserve(parent, entry.bytes);
+    largest = Math.max(largest, entry.bytes);
+  }
+  // A rollback restores one file at a time through a temporary copy.
+  for (const directory of Object.values(roots)) reserve(directory, 0);
+  for (const { directory, bytes } of required.values()) {
+    const disk = fs.statfsSync(directory, { bigint: true });
+    assert(disk.bavail * disk.bsize >= BigInt(bytes + largest),
+      "Insufficient target space for the measured rollback backup and installation. No target records were replaced.");
+  }
   fs.mkdirSync(backupDirectory, { recursive: false, mode: 0o700 });
   const records = [];
   for (const name of touched) {
+    if (unchanged.has(name)) { records.push({ name, unchanged: true }); continue; }
     const file = destination(roots, name);
     if (fs.existsSync(file)) {
-      const stat = fs.lstatSync(file);
-      assert(stat.isFile() && stat.nlink === 1, "Target storage contains an unsupported file.");
       const backup = path.join(backupDirectory, ...name.split("/"));
-      copyVerified(file, backup);
+      linkBackup(file, backup);
       records.push({ name, existed: true, hash: hash(backup) });
     } else records.push({ name, existed: false });
   }
@@ -98,25 +159,42 @@ function restoreBackup(roots, backupDirectory, state) {
   for (const record of state.records) if (record.existed)
     assert(hash(within(backupDirectory, record.name)) === record.hash, "Backup checksum mismatch. Keep the target stopped.");
   for (const record of state.records) {
+    if (record.unchanged) continue;
     const target = destination(roots, record.name);
-    if (record.existed) copyVerified(within(backupDirectory, record.name), target);
-    else if (fs.existsSync(target)) fs.unlinkSync(target);
+    if (record.existed) {
+      const temporary = `${target}.sync-${process.pid}`;
+      copyVerified(within(backupDirectory, record.name), temporary);
+      fs.renameSync(temporary, target);
+    } else if (fs.existsSync(target)) fs.unlinkSync(target);
+  }
+}
+// Move installed files back into staging before rollback so a retry reuses the uploaded bytes.
+function returnStaged(prepared, snapshotDirectory) {
+  const unchanged = new Set(prepared.state.records.filter(record => record.unchanged).map(record => record.name));
+  for (const entry of prepared.manifest.entries) {
+    if (unchanged.has(entry.name)) continue;
+    const staged = within(snapshotDirectory, entry.name), target = destination(prepared.roots, entry.name);
+    if (fs.existsSync(staged) || !fs.existsSync(target) || hash(target) !== entry.hash) continue;
+    try { moveVerified(target, staged, entry.hash); } catch (error) { console.error("Could not return staged file:", entry.name, error.message); }
   }
 }
 function installSnapshot(root, snapshotDirectory, backupDirectory, prepared) {
   const { manifest, roots, state } = prepared || prepareBackup(root, snapshotDirectory, backupDirectory);
-  for (const entry of manifest.entries) assert(hash(within(snapshotDirectory, entry.name)) === entry.hash, "Snapshot changed after backup; target was not changed.");
+  const unchanged = new Set(state.records.filter(record => record.unchanged).map(record => record.name));
+  const changed = manifest.entries.filter(entry => !unchanged.has(entry.name));
+  for (const entry of changed) assert(hash(within(snapshotDirectory, entry.name)) === entry.hash, "Snapshot changed after backup; target was not changed.");
   state.phase = "installing";
   fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(state), { mode: 0o600, flush: true });
+  const names = new Set(manifest.entries.map(entry => entry.name));
   for (const record of state.records) {
-    if (record.name === `data/${MARKER}` || manifest.entries.some(entry => entry.name === record.name)) continue;
+    if (record.unchanged || record.name === `data/${MARKER}` || names.has(record.name)) continue;
     const target = destination(roots, record.name);
     if (fs.existsSync(target)) fs.unlinkSync(target);
   }
-  for (const entry of manifest.entries) copyVerified(within(snapshotDirectory, entry.name), destination(roots, entry.name));
+  for (const entry of changed) moveVerified(within(snapshotDirectory, entry.name), destination(roots, entry.name), entry.hash);
   const marker = { version: 1, readOnly: true, syncedAt: manifest.createdAt, runtime: manifest.runtime,
     publicKeys: manifest.publicKeys, sourceCMS: manifest.sourceCMS };
-  fs.writeFileSync(path.join(roots.data, MARKER), JSON.stringify(marker), { mode: 0o600, flush: true });
+  writeReplace(path.join(roots.data, MARKER), JSON.stringify(marker));
   return { manifest, roots, state };
 }
 async function run(root, snapshotDirectory, backupDirectory, sourceId) {
@@ -139,7 +217,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   assert(apps.length === 1 && apps[0].pm2_env.status === "online", "The target Featheral application must be online before sync.");
   assert(fs.realpathSync(apps[0].pm2_env.pm_cwd) === release, "PM2 is not running this target's current release. Deploy or repair it before syncing.");
   process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
-  const { OperationsSettings } = require("../services/operations/settings");
+  const { OperationsSettings } = require(path.join(release, "services", "operations", "settings"));
   const port = Number(new OperationsSettings({ root: release }).environment().PORT || 8080);
   assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid target HTTP port.");
   const lock = path.join(root, "shared", "site-sync.lock");
@@ -176,7 +254,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
     if (stopped) {
       console.log("FEATHERAL_SYNC:rollback");
       if (started) command("stop", "featheral");
-      if (prepared) restoreBackup(prepared.roots, backupDirectory, prepared.state);
+      if (prepared) { returnStaged(prepared, snapshotDirectory); restoreBackup(prepared.roots, backupDirectory, prepared.state); }
       command("restart", "featheral");
       rollbackConfirmed = true;
       console.log("Previous target state restored and application restarted.");
@@ -218,4 +296,4 @@ if (require.main === module) {
   const operation = process.argv[2] === "--recover" ? recover(...process.argv.slice(3)) : run(...process.argv.slice(2));
   operation.catch(error => { console.error(error.message); process.exitCode = 1; });
 }
-module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, targetRoots, run };
+module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, returnStaged, targetRoots, run };

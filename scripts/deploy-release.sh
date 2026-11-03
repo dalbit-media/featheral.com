@@ -50,7 +50,7 @@ phase "$step"
 as_root apt-get update
 step=apt-install
 phase "$step"
-as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gnupg nginx unzip curl certbot python3-certbot-nginx
+as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gnupg nginx curl certbot python3-certbot-nginx
 if ! command -v node >/dev/null || ! node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'; then
   step=node-repository
   phase "$step"
@@ -98,8 +98,25 @@ else
 fi
 step=extract
 phase "$step"
-unzip -q "$release/release.zip" -d "$release"
-rm "$release/release.zip"
+node - "$release" <<'VERIFY_RELEASE'
+const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
+const root = process.argv[2], entries = JSON.parse(fs.readFileSync(path.join(root, ".deployment-files.json"), "utf8"));
+if (!Array.isArray(entries) || !entries.length) throw new Error("Missing reviewed file manifest.");
+for (const entry of entries) {
+  if (typeof entry.name !== "string" || entry.name.startsWith("/") || entry.name.includes("\\") || entry.name.split("/").some(part => !part || part === "." || part === ".."))
+    throw new Error("Invalid release file path.");
+  let file = root;
+  for (const part of entry.name.split("/")) {
+    file = path.join(file, part);
+    if (fs.lstatSync(file).isSymbolicLink()) throw new Error("Linked release files are forbidden.");
+  }
+  if (!fs.statSync(file).isFile() || fs.statSync(file).size !== entry.bytes) throw new Error("Release file size mismatch.");
+  const digest = crypto.createHash("sha256"), fd = fs.openSync(file, "r"), buffer = Buffer.alloc(1024 * 1024);
+  try { let size; while ((size = fs.readSync(fd, buffer, 0, buffer.length, null))) digest.update(buffer.subarray(0, size)); }
+  finally { fs.closeSync(fd); }
+  if (digest.digest("hex") !== entry.hash) throw new Error("Release file checksum mismatch.");
+}
+VERIFY_RELEASE
 node -e 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],JSON.stringify({hosts:process.argv[2].split(" "),primary:process.argv[3]==="true",uploadLimitMiB:Number(process.argv[4]),requestTimeoutSeconds:Number(process.argv[5])}),{mode:0o600})' "$release/.deployment-hosts.json" "$hostnames" "$primary" "$upload_mib" "$request_timeout"
 step=legacy-env
 phase "$step"

@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { portfolio } = require('../../notes/portfolio');
-const { createMarketPriceReader } = require('../../gold/prices');
+const { createMarketPriceReader, VALUATION_POOL } = require('../../gold/prices');
 const unit = 10n ** 18n;
 function openingGold() {
   return { chain: { id: 1, tokenAddress: '0xba658127d93b17e577e1b8e8995cab3ae7d7c665' }, checkedAt: new Date().toISOString(),
@@ -244,41 +244,59 @@ test('portfolio values all priced notes through actual FTHX/Dollar reserves and 
   assert.equal(portfolio(holdings, pool, markets, { ...gold, checkedAt: new Date(Date.now() - 61000).toISOString() }).fthg, null);
   assert.equal(portfolio(holdings, pool, markets, { ...gold, usdMarket: { ...gold.usdMarket, updatedAt: new Date(Date.now() - 301000).toISOString() } }).usd, null);
 });
-test('Gold prefers liquid Ethereum Uniswap estimates and otherwise publishes the labeled $0.01 reference', async () => {
+function poolProvider(state) {
+  const { ethers } = require('ethers');
+  const iface = new ethers.Interface(['function getSlot0(bytes32) view returns (uint160,int24,uint24,uint24)', 'function getLiquidity(bytes32) view returns (uint128)']);
+  return { calls: 0, async getBlockNumber() { if (state.offline) throw new Error('RPC offline'); return 26337500; },
+    async call(tx) {
+      this.calls++;
+      assert.equal(tx.to.toLowerCase(), VALUATION_POOL.stateView.toLowerCase());
+      const call = iface.parseTransaction({ data: tx.data });
+      assert.equal(call.args[0], VALUATION_POOL.poolId);
+      return call.name === 'getSlot0' ? iface.encodeFunctionResult('getSlot0', [state.sqrt, 177284, 0, 2500])
+        : iface.encodeFunctionResult('getLiquidity', [state.liquidity]);
+    } };
+}
+test('Gold values FTHG from the read-only Uniswap v4 ETH/FTHG pool and otherwise publishes the labeled $0.01 reference', async () => {
+  const { ethers } = require('ethers');
   const now = 1793570000000, token = '0xba658127d93b17e577e1b8e8995cab3ae7d7c665';
-  const pair = { chainId: 'ethereum', dexId: 'uniswap', baseToken: { address: token },
-    pairAddress: '0x' + '11'.repeat(20), priceUsd: '0.02', liquidity: { usd: 100 } };
-  for (const [data, valid] of [
-    [[pair], true], [[], false], [{}, false],
-    ...[{ chainId: 'base' }, { dexId: 'sushiswap' }, { baseToken: { address: 'wrong' } },
-      { priceUsd: '0' }, { priceUsd: '-1' }, { priceUsd: 2 }, { priceUsd: 'NaN' }, { priceUsd: '1e100' },
-      { liquidity: { usd: 0 } }, { liquidity: { usd: Infinity } }, { pairAddress: 'wrong' }]
-      .map(change => [[{ ...pair, ...change }], false]),
+  assert.equal(VALUATION_POOL.poolId, '0x3f1f8a9867d8f4a59f206b9644fafe05e9546323c0219dd1352187bbb5738fdd');
+  assert.equal(VALUATION_POOL.currency1, ethers.getAddress(token));
+  assert.ok(Object.isFrozen(VALUATION_POOL), 'pool setting is read-only');
+  // sqrtPriceX96 = sqrt(50,000,000 FTHG/ETH) * 2^96.
+  const sqrt = 7071n * 2n ** 96n, eth = { usdPerEth: String(2000n * unit) };
+  const expected = (2000n * unit * 2n ** 192n / (sqrt * sqrt)).toString();
+  for (const [state, ethUsd, valid] of [
+    [{ sqrt, liquidity: 10n }, async () => eth, true],
+    [{ sqrt: 0n, liquidity: 10n }, async () => eth, false],
+    [{ sqrt, liquidity: 0n }, async () => eth, false],
+    [{ sqrt, liquidity: 10n, offline: true }, async () => eth, false],
+    [{ sqrt, liquidity: 10n }, async () => ({ usdPerEth: null, error: 'ETH down' }), false],
+    [{ sqrt, liquidity: 10n }, undefined, false],
   ]) {
-    let calls = 0;
-    const errors = [];
-    const read = createMarketPriceReader({ clock: () => now, logger: { error: (...args) => errors.push(args) },
-      fetchPrice: async url => { calls++; assert.equal(url, `https://api.dexscreener.com/token-pairs/v1/ethereum/${token}`); return { ok: true, json: async () => data }; } });
+    const errors = [], provider = poolProvider(state);
+    const read = createMarketPriceReader({ provider, ethUsd, clock: () => now, logger: { error: (...args) => errors.push(args) } });
     const result = await read();
     assert.equal(result.fallback, !valid);
     assert.equal(result.error, null);
     assert.equal(result.token, token);
+    assert.equal(result.pool, VALUATION_POOL.poolId);
     assert.equal(result.updatedAt, new Date(now).toISOString());
-    if (valid) assert.equal(result.usdPerFthg, '20000000000000000');
-    else {
+    if (valid) {
+      assert.equal(result.usdPerFthg, expected);
+      assert.equal(result.fthgPerEth, (sqrt * sqrt * unit / 2n ** 192n).toString());
+      assert.match(result.source, /Uniswap v4/);
+    } else {
       assert.equal(result.usdPerFthg, '10000000000000000');
       assert.match(result.source, /1 FTHG = \$0.01/);
       assert.ok(result.marketError); assert.equal(errors.length, 1);
     }
-    assert.deepEqual(await read(), result); assert.equal(calls, 1);
+    const calls = provider.calls;
+    assert.deepEqual(await read(), result); assert.equal(provider.calls, calls, 'cached for one minute');
   }
-  let time = now, available = false, calls = 0;
-  const read = createMarketPriceReader({ clock: () => time, logger: { error() {} },
-    fetchPrice: async () => {
-      calls++;
-      if (!available) throw new Error('DEX offline');
-      return { ok: true, json: async () => [{ ...pair, priceUsd: '0.03', liquidity: { usd: 10 } }, pair] };
-    } });
+  let time = now;
+  const state = { sqrt, liquidity: 0n };
+  const read = createMarketPriceReader({ provider: poolProvider(state), ethUsd: async () => eth, clock: () => time, logger: { error() {} } });
   const fallback = await read();
   assert.equal(fallback.fallback, true);
   const gold = { ...openingGold(), usdMarket: { ...fallback, updatedAt: new Date().toISOString() } };
@@ -286,23 +304,16 @@ test('Gold prefers liquid Ethereum Uniswap estimates and otherwise publishes the
     { funded: false, dollars: '0', fthx: 0, version: 0 }, [], gold);
   assert.equal(value.fthg, String(unit));
   assert.equal(value.usdValue, '10000000000000000');
-  assert.equal(value.assets[0].usdValue, '10000000000000000');
   assert.match(value.source, /Temporary indicative reference/);
-  available = true;
-  time += 60001;
-  const dex = await read();
-  assert.equal(dex.fallback, false);
-  assert.equal(dex.usdPerFthg, '20000000000000000', 'use deepest eligible pool, not highest price');
-  assert.match(dex.source, /Uniswap/);
-  assert.equal(calls, 2);
-  available = false; time += 60001;
-  assert.equal((await read()).fallback, true, 'feed failure returns to the explicit reference, not a stale DEX quote');
-  const precise = createMarketPriceReader({ clock: () => now, logger: { error() {} },
-    fetchPrice: async () => ({ ok: true, json: async () => [{ ...pair, priceUsd: '0.001234567890123456' }] }) });
-  assert.equal((await precise()).usdPerFthg, '1234567890123456');
-  const unavailable = createMarketPriceReader({ clock: () => now, logger: { error() {} },
-    fetchPrice: async () => ({ ok: false, status: 503 }) });
-  assert.equal((await unavailable()).marketError, 'FTHG market feed HTTP 503');
+  state.liquidity = 5n; time += 60001;
+  const live = await read();
+  assert.equal(live.fallback, false);
+  assert.equal(live.usdPerFthg, expected);
+  const priced = portfolio([{ symbol: 'FTHX', balance: '1000000' }], { funded: false, dollars: '0', fthx: 0, version: 0 }, [],
+    { ...openingGold(), usdMarket: { ...live, updatedAt: new Date().toISOString() } });
+  assert.equal(priced.usdValue, expected, 'every currency derives from the pool FTHG value');
+  state.offline = true; time += 60001;
+  assert.equal((await read()).fallback, true, 'pool failure returns to the explicit reference, not a stale quote');
 });
 test('portfolio retains arbitrary integer precision and never prices reserved notes', () => {
   const huge = 10n ** 55n + 17n;

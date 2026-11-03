@@ -2,31 +2,20 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const yazl = require("yazl");
-const { Writable } = require("node:stream");
-const { pipeline } = require("node:stream/promises");
 const { snapshot, hash, exclusions, safeName } = require("../../operations/site-sync-snapshot");
 const { readReplica } = require("../../operations/replica");
-const { redactServerLog } = require("./deployment");
+const { redactServerLog, uploadFile, checkSpace, fileHash } = require("./deployment");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const quote = value => `'${String(value).replace(/'/g, "'\\''")}'`;
 const action = "SYNC REVIEWED DATABASES AND UPLOADS";
 const syncSteps = [
-  ["capture", "Capture source snapshot", 2], ["compress", "Compress archive", 15],
+  ["capture", "Capture source snapshot", 2], ["compress", "Prepare file manifest (no compression)", 15],
   ["digest", "Verify source digest", 25], ["connect", "Connect and check target", 30],
-  ["upload", "Upload archive", 35], ["verify", "Verify and extract target archive", 72],
+  ["upload", "Transfer databases first, then uploads", 35], ["verify", "Verify target files", 72],
   ["stop", "Stop target", 78], ["backup", "Back up target", 80],
   ["install", "Install snapshot", 85], ["restart", "Restart target", 92],
   ["health", "Verify read-only health", 95],
 ];
-async function archiveHash(file, bytes) {
-  const digest = crypto.createHash("sha256");
-  if (bytes !== 0) {
-    const options = bytes === undefined ? {} : { end: bytes - 1 };
-    for await (const chunk of fs.createReadStream(file, options)) digest.update(chunk);
-  }
-  return digest.digest("hex");
-}
 class SiteSync {
   constructor({ root, settings, deployment, command, busy = () => false, now = Date.now }) {
     this.root = root; this.settings = settings; this.deployment = deployment; this.command = command; this.busy = busy; this.now = now;
@@ -87,7 +76,7 @@ class SiteSync {
     if (!steps) return;
     let step = steps.find(step => step.id === id);
     if (!step && ["rollback", "resume-check"].includes(id)) {
-      step = { id, label: id === "rollback" ? "Restore target backup" : "Verify retained archive and target prefix",
+      step = { id, label: id === "rollback" ? "Restore target backup" : "Verify retained files and target prefixes",
         status: "pending", elapsedMs: 0 };
       steps.push(step);
     }
@@ -132,11 +121,12 @@ class SiteSync {
     if (phase === "complete") this.result.progress = { percent: 100, stage: "Complete" };
     this.log(message);
   }
-  available() {
+  available({ replaceLegacyPaused = false } = {}) {
     if (readReplica(this.root)) throw fail(403, "A read-only replica cannot be used as a sync source.");
     if (this.running || this.deployment.running || this.busy()) throw fail(409, "Wait for the current server operation.");
     if (this.result?.phase === "uncertain") throw fail(409, "The previous sync is unconfirmed. Verify the target job and recover it before starting another sync.");
-    if (this.result?.phase === "paused") throw fail(409, "A frozen snapshot is waiting to continue. Resume that transfer before starting a new sync.");
+    if (this.result?.phase === "paused" && !(replaceLegacyPaused && this.result.binding?.transport !== "files-v1"))
+      throw fail(409, "A frozen snapshot is waiting to continue. Resume that transfer before starting a new sync.");
   }
   target(siteKey, passwords = false) {
     const sites = this.deployment.sites(), site = sites.find(site => site.key === siteKey && (!site.status || site.status === "ready"));
@@ -154,7 +144,8 @@ class SiteSync {
     }
   }
   async plan(input, context) {
-    this.available(); this.prune();
+    this.available({ replaceLegacyPaused: true }); this.prune();
+    const legacyPaused = this.result?.phase === "paused" && this.result.binding?.transport !== "files-v1" ? this.result.id : null;
     if (this.plans.size >= 2) throw fail(429, "Two snapshots are already awaiting approval. Wait for them to expire.");
     const target = this.target(input.site), revision = this.settings.value.revision;
     const id = crypto.randomUUID(), directory = path.join(this.directory, id);
@@ -165,19 +156,16 @@ class SiteSync {
         expectedSeconds: timings[target.host]?.[id] ?? null })),
       message: "Preparing a fixed source snapshot. No target transfer has started." };
     this.progress(2, "Capturing consistent source databases, journals and uploads.");
+    if (legacyPaused) this.log(`Previous ZIP transfer ${legacyPaused} was paused before apply. Its staging files are retained, not deleted. This is a fresh file-transfer snapshot requiring review.`);
     try {
       await new Promise(resolve => setImmediate(resolve));
       fs.mkdirSync(directory, { mode: 0o700 });
       const manifest = snapshot(this.root, path.join(directory, "snapshot"), this.settings.environment());
-      this.progress(15, `Verified source snapshot: ${manifest.entries.length} files, ${manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0)} bytes. Compressing archive.`);
-      const archive = path.join(directory, "snapshot.zip"), zip = new yazl.ZipFile();
-      const writing = pipeline(zip.outputStream, fs.createWriteStream(archive, { mode: 0o600 }));
-      for (const entry of manifest.entries) zip.addFile(path.join(directory, "snapshot", ...entry.name.split("/")), entry.name);
-      zip.addFile(path.join(directory, "snapshot", "manifest.json"), "manifest.json");
-      zip.end(); await writing;
-      this.progress(25, `Archive ready: ${fs.statSync(archive).size} bytes. Computing SHA256.`);
+      this.progress(15, `Verified source snapshot: ${manifest.entries.length} files. No compression or archive is created.`);
+      const archive = path.join(directory, "snapshot", "manifest.json");
+      this.progress(25, "Computing the manifest SHA256. Database entries transfer before uploaded files.");
       const binding = { id, site: input.site, target: target.id, host: target.host, port: target.port,
-        directory: target.directory, fingerprint: target.fingerprint, revision, digest: hash(archive) };
+        directory: target.directory, fingerprint: target.fingerprint, revision, digest: hash(archive), transport: "files-v1" };
       const plan = { directory, archive, binding, context, expires: this.now() + 10 * 60000,
         review: { ...binding, expiresAt: new Date(this.now() + 10 * 60000).toISOString(),
           files: manifest.entries.length, bytes: manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0),
@@ -218,7 +206,7 @@ class SiteSync {
     return this.launch(plan);
   }
   async startShared(input, context) {
-    this.available();
+    this.available({ replaceLegacyPaused: true });
     if (input.revision !== this.settings.value.revision) throw fail(409, "Settings changed. Reload before starting sync.");
     if (this.target(input.site).id !== "shared") throw fail(400, "Separate server sync requires snapshot review and wallet approval.");
     const review = await this.plan(input, context);
@@ -237,11 +225,15 @@ class SiteSync {
     return this.runTransfer(plan, target);
   }
   runTransfer(plan, target) {
+    this.pauseController = new AbortController();
     this.transferTask = this.execute(plan, target).catch(error => {
-      console.error("Site sync failed:", error.status || error.code || 500);
-      this.log(`ERROR: ${error.message}`, [target.password]);
+      const paused = this.pauseController.signal.aborted && this.result.phase === "transferring";
+      console.error("Site sync failed:", paused ? "paused" : error.status || error.code || 500);
+      if (paused) this.finish("paused", "Paused by Admin. Verified files and the partial file's prefix are retained. Continue transfer to resume where it stopped.");
+      else this.log(`ERROR: ${error.message}`, [target.password]);
+      if (paused) return;
       if (this.result.phase === "transferring") {
-        this.finish("paused", "Upload paused. The frozen snapshot and target partial file are retained. Continue transfer to retry from the verified target offset.");
+        this.finish("paused", "Upload paused. Frozen files and verified target prefixes are retained. Continue transfer to skip completed files and resume the interrupted file.");
       } else {
         this.result.resumable = false;
         this.finish("uncertain", "Sync was not confirmed. Inspect the target's featheral-site-sync systemd job and shared/sync-backups before retrying. No success is assumed.");
@@ -263,19 +255,73 @@ class SiteSync {
       this.persist();
     }
   }
+  // The receiver travels with the snapshot (checksum-verified), so the target needs no new release before syncing.
+  receiverBundle() {
+    const names = ["scripts/restore-site-sync.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js"];
+    const files = names.map(name => {
+      const file = path.join(__dirname, "..", "..", "..", ...name.split("/"));
+      return { name, path: file, bytes: fs.statSync(file).size, hash: hash(file) };
+    });
+    return { files, digest: crypto.createHash("sha256").update(files.map(file => `${file.name}:${file.hash}`).join("\n")).digest("hex") };
+  }
+  pause(input) {
+    if (!this.running || this.result?.phase !== "transferring" || this.result.site !== input.site || !this.pauseController)
+      throw fail(409, "Only an uploading transfer can be paused. Target verification and install cannot be interrupted.");
+    if (!this.pauseController.signal.aborted) {
+      this.pauseController.abort(fail(409, "Paused by Admin."));
+      this.log("Pause requested. Stopping after the current block; uploaded bytes are kept.");
+    }
+    return this.status();
+  }
+  async reset(input) {
+    if (readReplica(this.root)) throw fail(403, "A read-only replica cannot be used as a sync source.");
+    if (this.running || this.deployment.running || this.busy()) throw fail(409, "Pause the current transfer or wait for the server operation first.");
+    if (this.result?.phase === "uncertain") throw fail(409, "The previous sync is unconfirmed. Recheck the target status before resetting.");
+    if (!this.command) throw fail(503, "Target command transport is unavailable.");
+    const target = this.target(input.site, true);
+    if (!/^\/[a-zA-Z0-9/_.-]+$/.test(target.directory) || target.directory === "/" || target.directory.split("/").includes(".."))
+      throw fail(400, "Invalid saved target directory.");
+    this.running = true;
+    let client;
+    try {
+      client = await this.deployment.connect(target);
+      const code = `const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path');
+const root=${JSON.stringify(target.directory)},base=root+'/shared/site-sync',backups=root+'/shared/sync-backups';
+const active=cp.spawnSync('systemctl',['is-active','--quiet','featheral-site-sync.service']);
+if(!active.error&&active.status===0)throw new Error('A target sync job is still running.');
+if(fs.existsSync(root+'/shared/site-sync.lock'))throw new Error('The target sync lock requires backup recovery.');
+const size=p=>{const s=fs.lstatSync(p);return s.isDirectory()&&!s.isSymbolicLink()?fs.readdirSync(p).reduce((n,e)=>n+size(path.join(p,e)),0):s.size;};
+let removedBytes=0,removed=0;
+if(fs.existsSync(base)){if(fs.lstatSync(base).isSymbolicLink())throw new Error('Linked staging path.');
+for(const id of fs.readdirSync(base)){const state=backups+'/'+id+'/state.json';
+if(fs.existsSync(state)&&!['complete','rolled-back'].includes(JSON.parse(fs.readFileSync(state,'utf8')).phase))throw new Error('Sync '+id+' has an unfinished install receipt. Recover its backup first.');}
+for(const id of fs.readdirSync(base)){const dir=path.join(base,id);removedBytes+=size(dir);fs.rmSync(dir,{recursive:true,force:true});removed++;}}
+console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?fs.readdirSync(base).length:0}));`;
+      const receipt = JSON.parse((await this.command(client, `node -e ${quote(code)}`)).trim().split("\n").pop());
+      if (receipt.remaining !== 0) throw fail(502, "Target staging cleanup could not be verified.");
+      let localRemoved = 0;
+      for (const entry of fs.readdirSync(this.directory, { withFileTypes: true }))
+        if (entry.isDirectory() && !this.plans.has(entry.name)) { this.cleanupSnapshot(entry.name); localRemoved++; }
+      this.result = { running: false, phase: "not-applied", site: input.site, host: target.host, timings: this.result?.timings,
+        logs: this.result?.logs || [], steps: [], resumable: false, progress: { percent: 0, stage: "Reset — ready for a new snapshot" } };
+      this.finish("not-applied", `Transfer reset. Removed ${receipt.removed} target staging folder(s) (${receipt.removedBytes} bytes) and ${localRemoved} local snapshot(s). Target databases and uploads were not changed.`);
+      return this.status();
+    } finally { this.running = false; client?.end(); target.password = ""; }
+  }
   resume(input) {
     if (readReplica(this.root)) throw fail(403, "A read-only replica cannot be used as a sync source.");
     if (this.running || this.deployment.running || this.busy()) throw fail(409, "Wait for the current server operation.");
     if (this.result?.phase !== "paused" || !this.result.resumable || this.result.site !== input.site)
       throw fail(409, "There is no paused upload for this site. Unconfirmed target jobs require a status check, not upload resume.");
     const binding = this.result.binding;
+    if (binding?.transport !== "files-v1") throw fail(409, "The previous paused transfer used a ZIP. Prepare a new file-transfer snapshot; old staging is retained. Unconfirmed target jobs still require a receipt check.");
     if (!binding || !safeName(binding.id) || binding.id.includes("/")) throw fail(500, "Invalid retained snapshot identifier.");
     const target = this.target(input.site, true);
     for (const key of ["host", "port", "directory", "fingerprint"])
       if (target[key] !== binding[key]) throw fail(409, "Restore the original target connection before continuing this snapshot.");
     if (target.id !== binding.target) throw fail(409, "Restore the original server assignment before continuing this snapshot.");
-    const directory = path.join(this.directory, binding.id), archive = path.join(directory, "snapshot.zip");
-    if (!fs.existsSync(archive)) throw fail(409, "The frozen source archive is missing. This upload cannot be resumed safely.");
+    const directory = path.join(this.directory, binding.id), archive = path.join(directory, "snapshot", "manifest.json");
+    if (!fs.existsSync(archive)) throw fail(409, "The frozen source manifest is missing. Legacy ZIP transfers cannot be continued by this uploader.");
     this.running = true;
     this.result.running = true; this.result.phase = "transferring"; delete this.result.finishedAt;
     this.result.message = "Continuing the retained snapshot. Verifying its digest and the target prefix before uploading remaining bytes.";
@@ -285,78 +331,28 @@ class SiteSync {
     return this.runTransfer({ binding, directory, archive, resume: true }, target);
   }
   async upload(client, sftp, plan, remote, target) {
-    const totalBytes = fs.statSync(plan.archive).size;
-    if (plan.resume) {
-      this.log("Verifying the retained source archive SHA256.");
-      if (await archiveHash(plan.archive) !== plan.binding.digest) throw fail(409, "Retained source archive checksum changed. Refusing to resume.");
-    }
-    const attrs = await this.deployment.transfer(client, callback => sftp.lstat(remote, (error, stat) => {
-      if (error?.code === 2) callback(null, null);
-      else callback(error, stat);
-    }), target.sshTimeoutSeconds);
-    const offset = attrs ? attrs.size : 0;
-    if (attrs && (!attrs.isFile() || !Number.isSafeInteger(attrs.size) || attrs.size < 0 || attrs.size > totalBytes))
-      throw fail(409, "Target partial archive has an invalid type or size. Refusing to overwrite it.");
-    if (offset > 0) {
-      this.log(`Verifying ${offset} previously uploaded bytes before continuing.`);
-      let remoteDigest;
-      await this.deployment.execute(client, `sha256sum < ${quote(remote)}`, "", target.deploymentTimeoutSeconds, undefined,
-        line => { if (/^[a-f0-9]{64}\s+-\s*$/.test(line)) remoteDigest = line.slice(0, 64); else this.log(line, [target.password]); });
-      if (!remoteDigest || remoteDigest !== await archiveHash(plan.archive, offset))
-        throw fail(409, "Target partial archive checksum does not match the frozen snapshot. Refusing to append.");
-    }
-    let sampleAt = this.now(), sampleBytes = offset;
-    const report = transferredBytes => {
+    const fileBytes = fs.statSync(plan.archive).size, totalBytes = plan.totalBytes ?? fileBytes, base = plan.completedBytes || 0;
+    let sampleAt = this.now(), sampleBytes = null, updated = 0;
+    const report = fileTransferred => {
+      const transferredBytes = base + fileTransferred;
       const now = this.now(), elapsed = (now - sampleAt) / 1000;
       this.result.uploadSample = { at: now, transferredBytes, totalBytes,
-        bytesPerSecond: elapsed > 0 ? (transferredBytes - sampleBytes) / elapsed : null };
+        bytesPerSecond: elapsed > 0 && sampleBytes !== null ? (transferredBytes - sampleBytes) / elapsed : null };
       sampleAt = now; sampleBytes = transferredBytes;
       this.progress(35 + Math.floor(35 * transferredBytes / Math.max(1, totalBytes)),
-        `Uploading snapshot: ${transferredBytes} / ${totalBytes} bytes.`, { transferredBytes, totalBytes });
+        `Transferring ${plan.name || "file"}: ${transferredBytes} / ${totalBytes} bytes.`, { transferredBytes, totalBytes });
     };
-    report(offset);
-    this.log(`Continuing at byte ${offset}. Upload stall timeout: ${target.deploymentTimeoutSeconds || 900}s; there is no total upload time limit.`);
-    if (offset === totalBytes) { this.log("Archive already fully uploaded and verified; no bytes need retransmitting."); return; }
-    const handle = await this.deployment.transfer(client, callback => sftp.open(remote, attrs ? "r+" : "wx", 0o600, callback), target.sshTimeoutSeconds);
-    let timer, transferredBytes = offset, updated = 0;
-    const destination = new Writable({
-      write: (chunk, _encoding, callback) => {
-        sftp.write(handle, chunk, 0, chunk.length, transferredBytes, error => {
-          if (destination.destroyed) return;
-          if (!error) {
-            transferredBytes += chunk.length;
-            resetTimer();
-            if (this.now() - updated >= 500 || transferredBytes === totalBytes) {
-              updated = this.now(); report(transferredBytes);
-            }
-          }
-          callback(error);
-        });
-      },
-    });
-    const resetTimer = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        destination.destroy(fail(504, "SFTP upload stalled. Continue transfer to retry the retained snapshot."));
-        client.end();
-      }, (target.deploymentTimeoutSeconds || 900) * 1000);
-    };
-    try {
-      resetTimer();
-      await pipeline(fs.createReadStream(plan.archive, { start: offset, highWaterMark: 256 * 1024 }), destination);
-    } finally {
-      clearTimeout(timer);
-      if (!destination.errored) {
-        await this.deployment.transfer(client, callback => sftp.close(handle, callback), target.sshTimeoutSeconds);
-      }
-    }
+    await uploadFile({ deployment: this.deployment, client, sftp, file: plan.archive, remote, bytes: fileBytes,
+      digest: plan.binding.digest, target, signal: this.pauseController?.signal, report: bytes => {
+        if (sampleBytes === null || this.now() - updated >= 500 || bytes === fileBytes) { updated = this.now(); report(bytes); }
+      } });
   }
   async execute(plan, target) {
     let client;
     try {
       client = await this.deployment.connect(target);
       const onLog = line => {
-        const stages = { verify: [75, "Verifying target archive and databases."], stop: [78, "Stopping target application."],
+        const stages = { verify: [75, "Verifying target files and databases."], stop: [78, "Stopping target application."],
           backup: [80, "Creating checksum-verified target backup."], install: [85, "Installing databases and overlaying uploads."],
           restart: [92, "Restarting target as a read-only replica."], health: [95, "Waiting for read-only health verification."],
           rollback: [95, "Restoring the verified backup after failure.", { step: "rollback" }] };
@@ -366,19 +362,59 @@ class SiteSync {
       };
       const remote = `${target.directory}/shared/site-sync/${plan.binding.id}`;
       this.progress(32, "SSH connected. Checking target release and staging directories.");
-      await this.deployment.execute(client, `umask 077; test -f ${quote(target.directory + "/current/scripts/restore-site-sync.js")} && mkdir -p ${quote(remote)} ${quote(target.directory + "/shared/sync-backups")}`, "", target.sshTimeoutSeconds, undefined, onLog);
+      await this.deployment.execute(client, `umask 077; test -f ${quote(target.directory + "/current/services/operations/settings.js")} && mkdir -p ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups")}`, "", target.sshTimeoutSeconds, undefined, onLog);
+      if (await fileHash(plan.archive) !== plan.binding.digest) throw fail(409, "Retained source manifest checksum changed. Refusing to resume.");
+      const manifest = JSON.parse(fs.readFileSync(plan.archive, "utf8"));
+      const total = manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0);
+      // One listing replaces a per-file round trip: sizes identify complete, partial and missing staged files.
+      const remoteSizes = new Map();
+      await this.deployment.execute(client, `cd ${quote(remote + "/snapshot")} && find . -type f -printf '%s\\t%P\\n'`, "", target.deploymentTimeoutSeconds, undefined,
+        line => { const match = /^(\d+)\t(.+)$/.exec(line); if (match) remoteSizes.set(match[2], Number(match[1])); });
+      const sizes = new Map(manifest.entries.map(entry => [entry.name, entry.bytes]));
+      const staged = [...remoteSizes].reduce((sum, [name, bytes]) => sum + Math.min(bytes, sizes.get(name) ?? 0), 0);
+      // Staging is the only full copy: the receiver renames staged files into place and hard-links rollback backups,
+      // then measures any cross-filesystem bytes itself before replacing anything.
+      await checkSpace(this.deployment, client, remote, Math.max(0, total - staged) + 512 * 1024 * 1024, target.sshTimeoutSeconds);
+      const receiver = this.receiverBundle(), receiverDirectory = `${remote}/receiver-${receiver.digest.slice(0, 16)}`;
+      const journal = path.join(plan.directory, "uploaded.txt");
+      const verified = new Set(fs.existsSync(journal) ? fs.readFileSync(journal, "utf8").split("\n").filter(Boolean) : []);
+      const isUpload = entry => /(?:^|\/)(?:uploads|media)\//i.test(entry.name);
+      const entries = [...manifest.entries].sort((a, b) => Number(isUpload(a)) - Number(isUpload(b)) || a.name.localeCompare(b.name));
+      for (const entry of entries) if (!safeName(entry.name)) throw fail(409, "Invalid manifest file path.");
+      const directories = new Set([...entries.map(entry => `snapshot/${entry.name}`), ...receiver.files.map(file => `${path.posix.basename(receiverDirectory)}/${file.name}`)]
+        .map(name => path.posix.dirname(name)));
+      await this.deployment.execute(client, `umask 077; cd ${quote(remote)} && xargs -0 mkdir -p --`, [...directories].join("\0"), target.deploymentTimeoutSeconds);
       const sftp = await this.deployment.transfer(client, callback => client.sftp(callback), target.sshTimeoutSeconds);
-      try { await this.upload(client, sftp, plan, `${remote}/snapshot.zip`, target); }
+      try {
+        for (const file of receiver.files)
+          await uploadFile({ deployment: this.deployment, client, sftp, file: file.path, remote: `${receiverDirectory}/${file.name}`,
+            bytes: file.bytes, digest: file.hash, target, signal: this.pauseController.signal });
+        let completed = 0, completedBytes = 0, skipped = 0;
+        for (const entry of entries) {
+          if (this.pauseController.signal.aborted) throw this.pauseController.signal.reason;
+          if (verified.has(entry.name) && remoteSizes.get(entry.name) === entry.bytes) {
+            completed++; completedBytes += entry.bytes; skipped++;
+            continue;
+          }
+          if (skipped) { this.log(`Skipped ${skipped} files already verified on the target.`); skipped = 0; }
+          this.log(`${isUpload(entry) ? "Upload" : "Database/metadata"} ${completed + 1}/${entries.length}: ${entry.name}`);
+          await this.upload(client, sftp, { archive: path.join(plan.directory, "snapshot", ...entry.name.split("/")), binding: { digest: entry.hash },
+            totalBytes: total, completedBytes, name: entry.name }, `${remote}/snapshot/${entry.name}`, target);
+          fs.appendFileSync(journal, entry.name + "\n", { mode: 0o600 });
+          completed++;
+          completedBytes += entry.bytes;
+        }
+        if (skipped) this.log(`Skipped ${skipped} files already verified on the target.`);
+        await this.upload(client, sftp, plan, `${remote}/snapshot/manifest.json`, target);
+      }
       finally { sftp.end(); }
       if (!safeName(plan.binding.id)) throw fail(500, "Invalid sync identifier.");
       const script = [
         "set -euo pipefail", "umask 077",
         `cd ${quote(remote)}`, "echo FEATHERAL_SYNC:verify",
-        `printf '%s\\n' ${quote(plan.binding.digest + "  snapshot.zip")} | sha256sum --check`,
-        `node -e ${quote(`const {execFileSync}=require('node:child_process');const {safeName}=require(${JSON.stringify(target.directory + "/current/services/operations/site-sync-snapshot.js")});const names=execFileSync('unzip',['-Z1','snapshot.zip'],{encoding:'utf8',maxBuffer:16777216}).trim().split('\\n');if(names.some(n=>!safeName(n)||!(/^(?:manifest\\.json|(?:data|cms)\\/)/.test(n))))process.exit(1);`)}`,
-        "mkdir snapshot", "unzip -qq snapshot.zip -d snapshot",
-        `node ${quote(target.directory + "/current/scripts/restore-site-sync.js")} ${quote(target.directory)} ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups/" + plan.binding.id)} ${quote(this.sourceId)}`,
-        "rm snapshot.zip",
+        `printf '%s\\n' ${quote([`${plan.binding.digest}  snapshot/manifest.json`,
+          ...receiver.files.map(file => `${file.hash}  ${path.posix.basename(receiverDirectory)}/${file.name}`)].join("\n"))} | sha256sum --check --quiet`,
+        `node ${quote(receiverDirectory + "/scripts/restore-site-sync.js")} ${quote(target.directory)} ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups/" + plan.binding.id)} ${quote(this.sourceId)}`,
       ].join("\n");
       const launcher = `systemd-run --wait --pipe --collect --unit=featheral-site-sync --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash -c ${quote(script)}`;
       const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then ${launcher}; else printf '%s\\n' "$password" | sudo -S -p '' -v && sudo -n ${launcher}; fi`;

@@ -17,6 +17,28 @@ window.FeatheralAdminControllers.gold = (root, kit) => {
   let reserve = null, actual = null, busy = false, safetyBusy = false, generation = 0, permissions = {};
   const reloadHistory = view.history();
   function status(id, text, failed = false) { $(id).textContent = text; $(id).dataset.error = String(failed); }
+  async function valuation() {
+    try {
+      const response = await fetch("/api/v1/gold/valuation", { cache: "no-store", signal: AbortSignal.timeout(15000) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Valuation HTTP ${response.status}`);
+      const { pool, market } = data;
+      const card = (label, value, note) => {
+        const item = document.createElement("div"), parts = [["span", label], ["strong", value], ["small", note]];
+        item.className = "reserve-metric";
+        item.append(...parts.map(([tag, text]) => Object.assign(document.createElement(tag), { textContent: text })));
+        return item;
+      };
+      const usd = Number(ethers.formatUnits(market.usdPerFthg, 18));
+      $("valuation-link").href = pool.url;
+      $("valuation-metrics").replaceChildren(
+        card("FTHG value", `$${usd.toLocaleString("en-US", { maximumSignificantDigits: 4 })}`, market.fallback ? "Temporary $0.01 reference" : "Pool spot × ETH/USD"),
+        card("Pool price", market.fthgPerEth ? `${Number(ethers.formatUnits(market.fthgPerEth, 18)).toLocaleString("en-US", { maximumFractionDigits: 2 })} FTHG / ETH` : "No price data", market.block ? `Mainnet block ${market.block.toLocaleString("en-US")}` : market.marketError || ""),
+        card("Pair", `${pool.symbol0} / ${pool.symbol1}`, `${pool.protocol} · ${pool.fee / 10000}% fee · tick spacing ${pool.tickSpacing}`),
+        card("Pool ID", `${pool.poolId.slice(0, 10)}…${pool.poolId.slice(-8)}`, pool.poolId));
+      status("valuation-status", market.fallback ? `Using the $0.01 reference: ${market.marketError}` : `Live pool estimate checked ${new Date(market.updatedAt).toLocaleTimeString()}.`, market.fallback);
+    } catch (error) { status("valuation-status", error.message, true); }
+  }
   async function refresh(verify = false) {
     if (busy) return;
     busy = true; $("refresh").disabled = true; $("verify-balances").disabled = true;
@@ -85,7 +107,7 @@ window.FeatheralAdminControllers.gold = (root, kit) => {
     } catch (error) { status("safety-status", error.shortMessage || error.message, true); }
     finally { safetyBusy = false; await safety(true); }
   }
-  $("refresh").addEventListener("click", () => refresh());
+  $("refresh").addEventListener("click", () => { refresh(); valuation(); });
   $("verify-balances").addEventListener("click", () => refresh(true));
   $("safety-refresh").addEventListener("click", () => safety());
   $("token-pause").addEventListener("click", () => write("pause", [], "pause", "Pause all FTHG transfers."));
@@ -121,4 +143,5 @@ window.FeatheralAdminControllers.gold = (root, kit) => {
   kit.listen("featheral:wallet", () => safety());
   refresh();
   safety();
+  valuation();
 };

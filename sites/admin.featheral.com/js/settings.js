@@ -151,10 +151,10 @@ VIEWS["site-server"] = async (key, _q, token) => {
   </section>
   <section class="card form-grid">
     <div class="card-head"><h2>Sync databases &amp; uploads</h2><span class="muted small">One-time source &rarr; target</span></div>
-    <p>Selecting this site chooses its saved server, but sync includes the <b>entire installation's databases, journals and uploads</b>. Deploy the current sync-capable release to the target first.</p>
+    <p>Selecting this site chooses its saved server, but sync includes the <b>entire installation's databases, journals and uploads</b>. Databases upload first, then each upload file one by one. The checksum-verified sync receiver travels with the snapshot.</p>
     <p class="note">The target is stopped briefly. A checksum-verified backup is required before replacing its databases and journal history. Source files overwrite matching uploads; target-only uploads and unrelated data remain. Server Settings, Admin/SSH credentials and signing keys are not copied. The target restarts as a read-only snapshot; the source remains the writer.</p>
     <p class="muted small">Preparing a consistent snapshot can briefly pause source requests. Shared-server sync starts in one click using the saved connection, without a separate review or wallet approval. Separate servers require snapshot review and Admin-wallet approval. Custom storage outside this installation's data directories is not supported.</p>
-    <div class="row"><button id="site-sync-review" type="button" class="btn">Prepare sync review</button><button id="site-sync-refresh" type="button" class="btn">Refresh status</button><button id="site-sync-resume" type="button" class="btn primary" hidden>Continue transfer</button><button id="site-sync-check" type="button" class="btn" hidden>Sign &amp; recheck target status</button></div>
+    <div class="row"><button id="site-sync-review" type="button" class="btn">Prepare sync review</button><button id="site-sync-refresh" type="button" class="btn">Refresh status</button><button id="site-sync-resume" type="button" class="btn primary" hidden>Continue transfer</button><button id="site-sync-pause" type="button" class="btn" hidden>Pause transfer</button><button id="site-sync-reset" type="button" class="btn danger" hidden>Reset transfer</button><button id="site-sync-check" type="button" class="btn" hidden>Sign &amp; recheck target status</button></div>
     <div id="site-sync-plan" class="form-grid" hidden></div>
     <label id="site-sync-confirmation"><input id="site-sync-confirm" type="checkbox" disabled> Replace target databases after backup and make the target read-only.</label>
     <button id="site-sync-start" type="button" class="btn primary" disabled>Sign &amp; sync to target</button>
@@ -171,7 +171,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
   const form = $("#site-server-form"), button = $("#site-server-save"), feedback = $("#site-server-feedback");
   const controller = new AbortController(), hash = location.hash, endpoint = `/api/settings/sites/${encodeURIComponent(key)}`;
   const active = () => token === state.seq && !controller.signal.aborted && location.hash === hash;
-  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncCanResume = false, syncPlan = null, syncTimer, loaded = false, sharedSync = false, fields = [], saved = "";
+  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncCanResume = false, syncCanPause = false, syncCanReset = false, syncPlan = null, syncTimer, loaded = false, sharedSync = false, fields = [], saved = "";
   const snapshot = () => JSON.stringify(Object.fromEntries(new FormData(form)));
   const dirty = () => loaded && snapshot() !== saved;
   const beforeUnload = event => { if (dirty()) { event.preventDefault(); event.returnValue = ""; } };
@@ -218,6 +218,9 @@ VIEWS["site-server"] = async (key, _q, token) => {
     syncStart.disabled = !loaded || syncing || saving || syncBlocked || dirty() || (!sharedSync && (!syncPlan || !syncConfirm.checked));
     $("#site-sync-resume").hidden = !syncCanResume;
     $("#site-sync-resume").disabled = !loaded || syncing || saving || dirty() || !syncCanResume;
+    $("#site-sync-pause").hidden = !syncCanPause;
+    $("#site-sync-reset").hidden = !syncCanReset;
+    $("#site-sync-reset").disabled = !loaded || syncing || saving || !syncCanReset;
   }
   function clearSyncPlan() {
     syncPlan = null; $("#site-sync-plan").hidden = true; syncConfirm.checked = false; syncConfirm.disabled = true; syncStart.disabled = true;
@@ -234,6 +237,8 @@ VIEWS["site-server"] = async (key, _q, token) => {
       renderSyncProgress(result);
       syncBlocked = result.running || result.phase === "uncertain" || result.phase === "paused";
       syncCanResume = !result.running && result.phase === "paused" && result.resumable && result.site === key;
+      syncCanPause = result.running && result.phase === "transferring" && result.site === key;
+      syncCanReset = !result.running && ["paused", "not-applied", "rolled-back", "complete"].includes(result.phase);
       updateSyncControls();
       $("#site-sync-check").hidden = result.phase !== "uncertain" || result.site !== key;
       if (result.running || syncing) syncTimer = setTimeout(refreshSync, 2000);
@@ -245,6 +250,24 @@ VIEWS["site-server"] = async (key, _q, token) => {
     }
   }
   $("#site-sync-refresh").addEventListener("click", refreshSync);
+  $("#site-sync-pause").addEventListener("click", async () => {
+    if (!active() || !syncCanPause) return;
+    $("#site-sync-pause").disabled = true;
+    try { await api(`${endpoint}/sync/pause`, { json: {} }); syncStatus.textContent = "Pausing after the current block..."; }
+    catch (error) { if (active()) syncStatus.textContent = `Pause not confirmed: ${error.message}`; }
+    finally { $("#site-sync-pause").disabled = false; if (active()) refreshSync(); }
+  });
+  $("#site-sync-reset").addEventListener("click", async () => {
+    if (!active() || syncing || saving || !syncCanReset) return;
+    if (!confirm("Delete the frozen local snapshot and every staged upload on the target? Target databases and uploads are not changed.")) return;
+    syncing = true; updateSyncControls();
+    try {
+      syncStatus.textContent = "Removing target staging and local snapshots...";
+      const result = await api(`${endpoint}/sync/reset`, { json: {} });
+      if (active()) { renderSyncProgress(result); await refreshSync(); }
+    } catch (error) { if (active()) syncStatus.textContent = `Reset not confirmed: ${error.message}`; }
+    finally { syncing = false; if (active()) updateSyncControls(); }
+  });
   $("#site-sync-resume").addEventListener("click", async () => {
     if (!active() || !loaded || syncing || saving || dirty() || !syncCanResume) return;
     syncing = true; form.inert = true; updateSyncControls();
