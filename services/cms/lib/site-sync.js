@@ -3,12 +3,30 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const yazl = require("yazl");
+const { Writable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const { snapshot, hash, exclusions, safeName } = require("../../operations/site-sync-snapshot");
 const { readReplica } = require("../../operations/replica");
+const { redactServerLog } = require("./deployment");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const quote = value => `'${String(value).replace(/'/g, "'\\''")}'`;
 const action = "SYNC REVIEWED DATABASES AND UPLOADS";
+const syncSteps = [
+  ["capture", "Capture source snapshot", 2], ["compress", "Compress archive", 15],
+  ["digest", "Verify source digest", 25], ["connect", "Connect and check target", 30],
+  ["upload", "Upload archive", 35], ["verify", "Verify and extract target archive", 72],
+  ["stop", "Stop target", 78], ["backup", "Back up target", 80],
+  ["install", "Install snapshot", 85], ["restart", "Restart target", 92],
+  ["health", "Verify read-only health", 95],
+];
+async function archiveHash(file, bytes) {
+  const digest = crypto.createHash("sha256");
+  if (bytes !== 0) {
+    const options = bytes === undefined ? {} : { end: bytes - 1 };
+    for await (const chunk of fs.createReadStream(file, options)) digest.update(chunk);
+  }
+  return digest.digest("hex");
+}
 class SiteSync {
   constructor({ root, settings, deployment, command, busy = () => false, now = Date.now }) {
     this.root = root; this.settings = settings; this.deployment = deployment; this.command = command; this.busy = busy; this.now = now;
@@ -22,23 +40,103 @@ class SiteSync {
     this.result = fs.existsSync(this.statusFile) ? JSON.parse(fs.readFileSync(this.statusFile, "utf8")) : null;
     if (this.result?.running) {
       if (this.result.phase === "preparing") this.finish("not-applied", "Snapshot preparation was interrupted. No target transfer was started.");
+      else if (this.result.phase === "transferring" && this.result.resumable)
+        this.finish("paused", "Upload interrupted by source restart. Continue transfer to resume the retained snapshot.");
       else this.finish("uncertain", "Source restarted during sync. Inspect the target job and backup before retrying.");
     }
   }
-  status() { return { ...(this.result || { phase: "idle" }), running: this.running }; }
+  status() {
+    const result = this.result || { phase: "idle", logs: [], progress: { percent: 0, stage: "Idle" } };
+    const steps = (result.steps || []).map(step => {
+      const elapsedSeconds = ((step.elapsedMs || 0) + (step.startedAt !== null && step.startedAt !== undefined
+        ? Math.max(0, this.now() - step.startedAt) : 0)) / 1000;
+      let remainingSeconds = null, percent = step.status === "complete" ? 100 : null, estimate = null;
+      if (step.status === "running") {
+        const sample = result.uploadSample;
+        if (step.id === "upload" && sample && this.now() - sample.at <= 10000) {
+          percent = sample.totalBytes ? Math.floor(100 * sample.transferredBytes / sample.totalBytes) : 100;
+          if (sample.bytesPerSecond > 0) {
+            remainingSeconds = Math.ceil((sample.totalBytes - sample.transferredBytes) / sample.bytesPerSecond);
+            estimate = "measured";
+          }
+        } else if (step.id !== "upload" && step.expectedSeconds > elapsedSeconds) {
+          remainingSeconds = Math.ceil(step.expectedSeconds - elapsedSeconds);
+          percent = Math.min(99, Math.floor(100 * elapsedSeconds / step.expectedSeconds));
+          estimate = "historical";
+        }
+      } else if (step.status === "pending" && step.expectedSeconds > 0) {
+        remainingSeconds = Math.ceil(step.expectedSeconds); estimate = "historical";
+      } else if (step.status === "complete") remainingSeconds = 0;
+      return { ...step, elapsedSeconds: Math.floor(elapsedSeconds), remainingSeconds, percent, estimate };
+    });
+    return { ...result, steps, running: this.running };
+  }
+  completeStep() {
+    const step = this.result.steps?.find(step => step.status === "running");
+    if (!step) return;
+    step.elapsedMs = (step.elapsedMs || 0) + Math.max(0, this.now() - step.startedAt);
+    step.startedAt = null; step.status = "complete";
+    if (step.id !== "upload" && step.elapsedMs > 0) {
+      this.result.timings ||= {};
+      this.result.timings[this.result.host] ||= {};
+      this.result.timings[this.result.host][step.id] = step.elapsedMs / 1000;
+    }
+  }
+  beginStep(id) {
+    const steps = this.result.steps;
+    if (!steps) return;
+    let step = steps.find(step => step.id === id);
+    if (!step && ["rollback", "resume-check"].includes(id)) {
+      step = { id, label: id === "rollback" ? "Restore target backup" : "Verify retained archive and target prefix",
+        status: "pending", elapsedMs: 0 };
+      steps.push(step);
+    }
+    if (!step || step.status === "running" || step.status === "complete") return;
+    if (id === "rollback") {
+      const previous = steps.find(step => step.status === "running");
+      if (previous) {
+        previous.elapsedMs = (previous.elapsedMs || 0) + Math.max(0, this.now() - previous.startedAt);
+        previous.startedAt = null; previous.status = "interrupted";
+      }
+    } else this.completeStep();
+    step.status = "running"; step.startedAt = this.now();
+  }
+  log(message, secrets = []) {
+    const logs = this.result.logs || [];
+    logs.push({ at: this.now(), message: redactServerLog(String(message), secrets).slice(0, 4096) });
+    this.result.logs = logs.slice(-200);
+    this.persist();
+  }
+  progress(percent, stage, details = {}) {
+    const id = details.step || [...syncSteps].reverse().find(step => percent >= step[2])?.[0];
+    if (id) this.beginStep(id);
+    this.result.progress = { percent, stage, ...details };
+    this.log(stage);
+  }
   persist() {
     const temp = this.statusFile + ".tmp";
     fs.writeFileSync(temp, JSON.stringify(this.result), { mode: 0o600 });
     fs.renameSync(temp, this.statusFile);
   }
   finish(phase, message) {
+    if (["complete", "review-ready"].includes(phase)) this.completeStep();
+    else {
+      const step = this.result?.steps?.find(step => step.status === "running");
+      if (step) {
+        step.elapsedMs = (step.elapsedMs || 0) + Math.max(0, this.now() - step.startedAt);
+        step.startedAt = null; step.status = phase === "paused" ? "paused" : "interrupted";
+      }
+    }
     this.running = false; this.result = { ...this.result, running: false, phase, message, finishedAt: new Date(this.now()).toISOString() };
-    this.persist();
+    if (["complete", "rolled-back", "not-applied", "uncertain"].includes(phase)) this.result.resumable = false;
+    if (phase === "complete") this.result.progress = { percent: 100, stage: "Complete" };
+    this.log(message);
   }
   available() {
     if (readReplica(this.root)) throw fail(403, "A read-only replica cannot be used as a sync source.");
     if (this.running || this.deployment.running || this.busy()) throw fail(409, "Wait for the current server operation.");
     if (this.result?.phase === "uncertain") throw fail(409, "The previous sync is unconfirmed. Verify the target job and recover it before starting another sync.");
+    if (this.result?.phase === "paused") throw fail(409, "A frozen snapshot is waiting to continue. Resume that transfer before starting a new sync.");
   }
   target(siteKey, passwords = false) {
     const sites = this.deployment.sites(), site = sites.find(site => site.key === siteKey && (!site.status || site.status === "ready"));
@@ -61,17 +159,23 @@ class SiteSync {
     const target = this.target(input.site), revision = this.settings.value.revision;
     const id = crypto.randomUUID(), directory = path.join(this.directory, id);
     this.running = true;
-    this.result = { running: true, phase: "preparing", site: input.site, host: target.host,
+    const timings = this.result?.timings || {};
+    this.result = { running: true, phase: "preparing", site: input.site, host: target.host, logs: [], timings,
+      steps: syncSteps.map(([id, label]) => ({ id, label, status: "pending", startedAt: null, elapsedMs: 0,
+        expectedSeconds: timings[target.host]?.[id] ?? null })),
       message: "Preparing a fixed source snapshot. No target transfer has started." };
-    this.persist();
+    this.progress(2, "Capturing consistent source databases, journals and uploads.");
     try {
+      await new Promise(resolve => setImmediate(resolve));
       fs.mkdirSync(directory, { mode: 0o700 });
       const manifest = snapshot(this.root, path.join(directory, "snapshot"), this.settings.environment());
+      this.progress(15, `Verified source snapshot: ${manifest.entries.length} files, ${manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0)} bytes. Compressing archive.`);
       const archive = path.join(directory, "snapshot.zip"), zip = new yazl.ZipFile();
       const writing = pipeline(zip.outputStream, fs.createWriteStream(archive, { mode: 0o600 }));
       for (const entry of manifest.entries) zip.addFile(path.join(directory, "snapshot", ...entry.name.split("/")), entry.name);
       zip.addFile(path.join(directory, "snapshot", "manifest.json"), "manifest.json");
       zip.end(); await writing;
+      this.progress(25, `Archive ready: ${fs.statSync(archive).size} bytes. Computing SHA256.`);
       const binding = { id, site: input.site, target: target.id, host: target.host, port: target.port,
         directory: target.directory, fingerprint: target.fingerprint, revision, digest: hash(archive) };
       const plan = { directory, archive, binding, context, expires: this.now() + 10 * 60000,
@@ -87,7 +191,7 @@ class SiteSync {
       return plan.review;
     } catch (error) {
       if (fs.existsSync(directory)) fs.rmSync(directory, { recursive: true });
-      this.finish("not-applied", "Snapshot preparation failed. No target transfer was started.");
+      this.finish("not-applied", `Snapshot preparation failed (${error.code || error.name}). No target transfer was started.`);
       throw error;
     } finally { this.running = false; }
   }
@@ -125,36 +229,151 @@ class SiteSync {
     const target = this.target(plan.binding.site, true);
     this.plans.delete(plan.binding.id); this.running = true;
     this.result = { running: true, phase: "transferring", site: plan.binding.site, host: target.host, id: plan.binding.id,
-      binding: plan.binding,
+      steps: this.result?.steps, timings: this.result?.timings,
+      logs: this.result?.logs || [], progress: { percent: 30, stage: "Connecting to the saved pinned SSH target." },
+      binding: plan.binding, resumable: true,
       startedAt: new Date(this.now()).toISOString(), message: "Transferring the snapshot; target data is not changed until verification and backup." };
-    this.persist();
-    this.execute(plan, target).catch(error => {
+    this.progress(30, `Connecting to ${target.host}:${target.port} with pinned host-key verification.`);
+    return this.runTransfer(plan, target);
+  }
+  runTransfer(plan, target) {
+    this.transferTask = this.execute(plan, target).catch(error => {
       console.error("Site sync failed:", error.status || error.code || 500);
-      this.finish("uncertain", "Sync was not confirmed. Inspect the target's featheral-site-sync systemd job and shared/sync-backups before retrying. No success is assumed.");
+      this.log(`ERROR: ${error.message}`, [target.password]);
+      if (this.result.phase === "transferring") {
+        this.finish("paused", "Upload paused. The frozen snapshot and target partial file are retained. Continue transfer to retry from the verified target offset.");
+      } else {
+        this.result.resumable = false;
+        this.finish("uncertain", "Sync was not confirmed. Inspect the target's featheral-site-sync systemd job and shared/sync-backups before retrying. No success is assumed.");
+      }
     }).finally(() => {
       target.password = "";
-      try { fs.rmSync(plan.directory, { recursive: true }); }
-      catch (error) {
-        console.error("Site sync snapshot cleanup failed:", error.code || 500);
-        this.result.message += " Local snapshot cleanup failed; an operator must remove the retained staging directory.";
-        this.persist();
-      }
+      if (this.result.phase === "paused" || this.result.phase === "uncertain") return;
+      this.result.resumable = false;
+      this.cleanupSnapshot(plan.binding.id);
     });
     return this.status();
+  }
+  cleanupSnapshot(id) {
+    if (!safeName(id) || id.includes("/")) throw fail(500, "Invalid retained snapshot identifier.");
+    try { fs.rmSync(path.join(this.directory, id), { recursive: true, force: true }); }
+    catch (error) {
+      console.error("Site sync snapshot cleanup failed:", error.code || 500);
+      this.result.message += " Local snapshot cleanup failed; an operator must remove the retained staging directory.";
+      this.persist();
+    }
+  }
+  resume(input) {
+    if (readReplica(this.root)) throw fail(403, "A read-only replica cannot be used as a sync source.");
+    if (this.running || this.deployment.running || this.busy()) throw fail(409, "Wait for the current server operation.");
+    if (this.result?.phase !== "paused" || !this.result.resumable || this.result.site !== input.site)
+      throw fail(409, "There is no paused upload for this site. Unconfirmed target jobs require a status check, not upload resume.");
+    const binding = this.result.binding;
+    if (!binding || !safeName(binding.id) || binding.id.includes("/")) throw fail(500, "Invalid retained snapshot identifier.");
+    const target = this.target(input.site, true);
+    for (const key of ["host", "port", "directory", "fingerprint"])
+      if (target[key] !== binding[key]) throw fail(409, "Restore the original target connection before continuing this snapshot.");
+    if (target.id !== binding.target) throw fail(409, "Restore the original server assignment before continuing this snapshot.");
+    const directory = path.join(this.directory, binding.id), archive = path.join(directory, "snapshot.zip");
+    if (!fs.existsSync(archive)) throw fail(409, "The frozen source archive is missing. This upload cannot be resumed safely.");
+    this.running = true;
+    this.result.running = true; this.result.phase = "transferring"; delete this.result.finishedAt;
+    this.result.message = "Continuing the retained snapshot. Verifying its digest and the target prefix before uploading remaining bytes.";
+    delete this.result.uploadSample;
+    this.beginStep("resume-check");
+    this.log(this.result.message);
+    return this.runTransfer({ binding, directory, archive, resume: true }, target);
+  }
+  async upload(client, sftp, plan, remote, target) {
+    const totalBytes = fs.statSync(plan.archive).size;
+    if (plan.resume) {
+      this.log("Verifying the retained source archive SHA256.");
+      if (await archiveHash(plan.archive) !== plan.binding.digest) throw fail(409, "Retained source archive checksum changed. Refusing to resume.");
+    }
+    const attrs = await this.deployment.transfer(client, callback => sftp.lstat(remote, (error, stat) => {
+      if (error?.code === 2) callback(null, null);
+      else callback(error, stat);
+    }), target.sshTimeoutSeconds);
+    const offset = attrs ? attrs.size : 0;
+    if (attrs && (!attrs.isFile() || !Number.isSafeInteger(attrs.size) || attrs.size < 0 || attrs.size > totalBytes))
+      throw fail(409, "Target partial archive has an invalid type or size. Refusing to overwrite it.");
+    if (offset > 0) {
+      this.log(`Verifying ${offset} previously uploaded bytes before continuing.`);
+      let remoteDigest;
+      await this.deployment.execute(client, `sha256sum < ${quote(remote)}`, "", target.deploymentTimeoutSeconds, undefined,
+        line => { if (/^[a-f0-9]{64}\s+-\s*$/.test(line)) remoteDigest = line.slice(0, 64); else this.log(line, [target.password]); });
+      if (!remoteDigest || remoteDigest !== await archiveHash(plan.archive, offset))
+        throw fail(409, "Target partial archive checksum does not match the frozen snapshot. Refusing to append.");
+    }
+    let sampleAt = this.now(), sampleBytes = offset;
+    const report = transferredBytes => {
+      const now = this.now(), elapsed = (now - sampleAt) / 1000;
+      this.result.uploadSample = { at: now, transferredBytes, totalBytes,
+        bytesPerSecond: elapsed > 0 ? (transferredBytes - sampleBytes) / elapsed : null };
+      sampleAt = now; sampleBytes = transferredBytes;
+      this.progress(35 + Math.floor(35 * transferredBytes / Math.max(1, totalBytes)),
+        `Uploading snapshot: ${transferredBytes} / ${totalBytes} bytes.`, { transferredBytes, totalBytes });
+    };
+    report(offset);
+    this.log(`Continuing at byte ${offset}. Upload stall timeout: ${target.deploymentTimeoutSeconds || 900}s; there is no total upload time limit.`);
+    if (offset === totalBytes) { this.log("Archive already fully uploaded and verified; no bytes need retransmitting."); return; }
+    const handle = await this.deployment.transfer(client, callback => sftp.open(remote, attrs ? "r+" : "wx", 0o600, callback), target.sshTimeoutSeconds);
+    let timer, transferredBytes = offset, updated = 0;
+    const destination = new Writable({
+      write: (chunk, _encoding, callback) => {
+        sftp.write(handle, chunk, 0, chunk.length, transferredBytes, error => {
+          if (destination.destroyed) return;
+          if (!error) {
+            transferredBytes += chunk.length;
+            resetTimer();
+            if (this.now() - updated >= 500 || transferredBytes === totalBytes) {
+              updated = this.now(); report(transferredBytes);
+            }
+          }
+          callback(error);
+        });
+      },
+    });
+    const resetTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        destination.destroy(fail(504, "SFTP upload stalled. Continue transfer to retry the retained snapshot."));
+        client.end();
+      }, (target.deploymentTimeoutSeconds || 900) * 1000);
+    };
+    try {
+      resetTimer();
+      await pipeline(fs.createReadStream(plan.archive, { start: offset, highWaterMark: 256 * 1024 }), destination);
+    } finally {
+      clearTimeout(timer);
+      if (!destination.errored) {
+        await this.deployment.transfer(client, callback => sftp.close(handle, callback), target.sshTimeoutSeconds);
+      }
+    }
   }
   async execute(plan, target) {
     let client;
     try {
       client = await this.deployment.connect(target);
+      const onLog = line => {
+        const stages = { verify: [75, "Verifying target archive and databases."], stop: [78, "Stopping target application."],
+          backup: [80, "Creating checksum-verified target backup."], install: [85, "Installing databases and overlaying uploads."],
+          restart: [92, "Restarting target as a read-only replica."], health: [95, "Waiting for read-only health verification."],
+          rollback: [95, "Restoring the verified backup after failure.", { step: "rollback" }] };
+        const marker = /^FEATHERAL_SYNC:([a-z]+)$/.exec(line);
+        if (marker && stages[marker[1]]) this.progress(...stages[marker[1]]);
+        else this.log(line, [target.password]);
+      };
       const remote = `${target.directory}/shared/site-sync/${plan.binding.id}`;
-      await this.deployment.execute(client, `umask 077; test -f ${quote(target.directory + "/current/scripts/restore-site-sync.js")} && mkdir -p ${quote(remote)} ${quote(target.directory + "/shared/sync-backups")}`, "", target.sshTimeoutSeconds);
+      this.progress(32, "SSH connected. Checking target release and staging directories.");
+      await this.deployment.execute(client, `umask 077; test -f ${quote(target.directory + "/current/scripts/restore-site-sync.js")} && mkdir -p ${quote(remote)} ${quote(target.directory + "/shared/sync-backups")}`, "", target.sshTimeoutSeconds, undefined, onLog);
       const sftp = await this.deployment.transfer(client, callback => client.sftp(callback), target.sshTimeoutSeconds);
-      try { await this.deployment.transfer(client, callback => sftp.fastPut(plan.archive, `${remote}/snapshot.zip`, callback), target.deploymentTimeoutSeconds); }
+      try { await this.upload(client, sftp, plan, `${remote}/snapshot.zip`, target); }
       finally { sftp.end(); }
       if (!safeName(plan.binding.id)) throw fail(500, "Invalid sync identifier.");
       const script = [
         "set -euo pipefail", "umask 077",
-        `cd ${quote(remote)}`,
+        `cd ${quote(remote)}`, "echo FEATHERAL_SYNC:verify",
         `printf '%s\\n' ${quote(plan.binding.digest + "  snapshot.zip")} | sha256sum --check`,
         `node -e ${quote(`const {execFileSync}=require('node:child_process');const {safeName}=require(${JSON.stringify(target.directory + "/current/services/operations/site-sync-snapshot.js")});const names=execFileSync('unzip',['-Z1','snapshot.zip'],{encoding:'utf8',maxBuffer:16777216}).trim().split('\\n');if(names.some(n=>!safeName(n)||!(/^(?:manifest\\.json|(?:data|cms)\\/)/.test(n))))process.exit(1);`)}`,
         "mkdir snapshot", "unzip -qq snapshot.zip -d snapshot",
@@ -163,8 +382,9 @@ class SiteSync {
       ].join("\n");
       const launcher = `systemd-run --wait --pipe --collect --unit=featheral-site-sync --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash -c ${quote(script)}`;
       const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then ${launcher}; else printf '%s\\n' "$password" | sudo -S -p '' -v && sudo -n ${launcher}; fi`;
-      this.result.phase = "applying"; this.result.message = "Target verifies checksums, stops the app, backs up affected data, installs and checks read-only health."; this.persist();
-      await this.deployment.execute(client, command, target.password + "\n", target.deploymentTimeoutSeconds);
+      this.result.phase = "applying"; this.result.resumable = false; this.result.message = "Target verifies checksums, stops the app, backs up affected data, installs and checks read-only health."; this.persist();
+      this.progress(72, "Upload complete. Starting independent target verification and restore job.");
+      await this.deployment.execute(client, command, target.password + "\n", target.deploymentTimeoutSeconds, undefined, onLog);
       this.finish("complete", "Snapshot synchronized. Target read-only health was confirmed; verified backup retained on the target.");
     } finally { client?.end(); }
   }
@@ -199,6 +419,7 @@ class SiteSync {
       else if (receipt.phase === "rolled-back") this.finish("rolled-back", "Target receipt confirms the previous sync failed and its verified backup was restored.");
       else if (receipt.phase === null) this.finish("not-applied", "Target is online with no active sync, lock or install receipt. The previous sync did not apply data.");
       else throw fail(409, "The target receipt requires manual backup recovery. No new sync is allowed.");
+      this.cleanupSnapshot(binding.id);
       return this.status();
     } finally { client?.end(); target.password = ""; this.running = false; }
   }

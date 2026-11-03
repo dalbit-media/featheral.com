@@ -134,6 +134,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   for (const file of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
     assert(fs.readFileSync(path.join(release, file), "utf8").includes("replica"), "Deploy the sync-capable release to the target first.");
   verifySnapshot(snapshotDirectory);
+  console.log("Snapshot checksums and database integrity verified.");
   const apps = JSON.parse(command("jlist")).filter(app => app.name === "featheral");
   assert(apps.length === 1 && apps[0].pm2_env.status === "online", "The target Featheral application must be online before sync.");
   assert(fs.realpathSync(apps[0].pm2_env.pm_cwd) === release, "PM2 is not running this target's current release. Deploy or repair it before syncing.");
@@ -145,12 +146,19 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   fs.writeFileSync(lock, backupDirectory, { flag: "wx", mode: 0o600 });
   let prepared, stopped = false, started = false, rollbackConfirmed = false;
   try {
+    console.log("FEATHERAL_SYNC:stop");
     command("stop", "featheral"); stopped = true;
+    console.log("FEATHERAL_SYNC:backup");
     prepared = prepareBackup(release, snapshotDirectory, backupDirectory);
+    console.log(`Verified backup ready: ${prepared.state.records.length} affected files.`);
+    console.log("FEATHERAL_SYNC:install");
     installSnapshot(release, snapshotDirectory, backupDirectory, prepared);
+    console.log("FEATHERAL_SYNC:restart");
     command("restart", "featheral"); started = true;
+    console.log("FEATHERAL_SYNC:health");
     let healthy = false;
     for (let attempt = 0; attempt < 30; attempt++) {
+      console.log(`Read-only health check ${attempt + 1}/30.`);
       try {
         const response = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(2000) });
         if (response.ok && response.headers.get("x-featheral-replica") === "read-only") { healthy = true; break; }
@@ -166,10 +174,12 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   } catch (error) {
     console.error("Sync failed:", error.message);
     if (stopped) {
+      console.log("FEATHERAL_SYNC:rollback");
       if (started) command("stop", "featheral");
       if (prepared) restoreBackup(prepared.roots, backupDirectory, prepared.state);
       command("restart", "featheral");
       rollbackConfirmed = true;
+      console.log("Previous target state restored and application restarted.");
       if (prepared) {
         prepared.state.phase = "rolled-back";
         fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });

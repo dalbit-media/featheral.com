@@ -154,16 +154,24 @@ VIEWS["site-server"] = async (key, _q, token) => {
     <p>Selecting this site chooses its saved server, but sync includes the <b>entire installation's databases, journals and uploads</b>. Deploy the current sync-capable release to the target first.</p>
     <p class="note">The target is stopped briefly. A checksum-verified backup is required before replacing its databases and journal history. Source files overwrite matching uploads; target-only uploads and unrelated data remain. Server Settings, Admin/SSH credentials and signing keys are not copied. The target restarts as a read-only snapshot; the source remains the writer.</p>
     <p class="muted small">Preparing a consistent snapshot can briefly pause source requests. Shared-server sync starts in one click using the saved connection, without a separate review or wallet approval. Separate servers require snapshot review and Admin-wallet approval. Custom storage outside this installation's data directories is not supported.</p>
-    <div class="row"><button id="site-sync-review" type="button" class="btn">Prepare sync review</button><button id="site-sync-refresh" type="button" class="btn">Refresh status</button><button id="site-sync-check" type="button" class="btn" hidden>Sign &amp; recheck target status</button></div>
+    <div class="row"><button id="site-sync-review" type="button" class="btn">Prepare sync review</button><button id="site-sync-refresh" type="button" class="btn">Refresh status</button><button id="site-sync-resume" type="button" class="btn primary" hidden>Continue transfer</button><button id="site-sync-check" type="button" class="btn" hidden>Sign &amp; recheck target status</button></div>
     <div id="site-sync-plan" class="form-grid" hidden></div>
     <label id="site-sync-confirmation"><input id="site-sync-confirm" type="checkbox" disabled> Replace target databases after backup and make the target read-only.</label>
     <button id="site-sync-start" type="button" class="btn primary" disabled>Sign &amp; sync to target</button>
     <p id="site-sync-status" role="status" aria-live="polite"></p>
+    <label for="site-sync-progress" id="site-sync-progress-label">Idle</label>
+    <progress id="site-sync-progress" class="site-sync-progress" max="100" value="0" aria-labelledby="site-sync-progress-label"></progress>
+    <p class="muted small">Progress is stage-based; upload progress uses transferred bytes. Completion requires verified target health.</p>
+    <ul id="site-sync-steps" class="site-sync-steps small" aria-label="Sync step progress"></ul>
+    <p class="muted small">Upload ETA uses recent transfer speed. Other ETAs and percentages use previous step timings for this target, when available; estimates may change. Unmeasured steps show Estimating...</p>
+    <p class="muted small">Interrupted uploads retain the frozen snapshot. Continue transfer verifies the target's existing bytes and sends only the remainder. The saved deployment timeout limits upload stalls, not total upload duration.</p>
+    <h3>Sync detail log</h3>
+    <pre id="site-sync-log" class="deployment-console" tabindex="0" aria-label="Sync detail log">No sync activity yet.</pre>
   </section>`, token);
   const form = $("#site-server-form"), button = $("#site-server-save"), feedback = $("#site-server-feedback");
   const controller = new AbortController(), hash = location.hash, endpoint = `/api/settings/sites/${encodeURIComponent(key)}`;
   const active = () => token === state.seq && !controller.signal.aborted && location.hash === hash;
-  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncPlan = null, syncTimer, loaded = false, sharedSync = false, fields = [], saved = "";
+  let revision = 0, saving = false, syncing = false, syncBlocked = false, syncCanResume = false, syncPlan = null, syncTimer, loaded = false, sharedSync = false, fields = [], saved = "";
   const snapshot = () => JSON.stringify(Object.fromEntries(new FormData(form)));
   const dirty = () => loaded && snapshot() !== saved;
   const beforeUnload = event => { if (dirty()) { event.preventDefault(); event.returnValue = ""; } };
@@ -171,12 +179,45 @@ VIEWS["site-server"] = async (key, _q, token) => {
   viewCleanup = () => { controller.abort(); clearTimeout(syncTimer); window.removeEventListener("beforeunload", beforeUnload); form.reset(); };
   leaveView = () => !saving && !syncing && (!dirty() || confirm("Discard unsaved site settings?"));
   const syncStatus = $("#site-sync-status"), syncReview = $("#site-sync-review"), syncStart = $("#site-sync-start"), syncConfirm = $("#site-sync-confirm");
+  function renderSyncProgress(result) {
+    const progress = result.progress || { percent: 0, stage: result.phase || "Idle" };
+    $("#site-sync-progress").value = progress.percent;
+    $("#site-sync-progress-label").textContent = `${progress.percent}% - ${progress.stage}`;
+    const duration = seconds => {
+      if (seconds === null || seconds === undefined) return "Estimating...";
+      if (seconds < 60) return `${Math.ceil(seconds)}s`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.ceil(seconds % 60)}s`;
+      return `${Math.floor(seconds / 3600)}h ${Math.ceil((seconds % 3600) / 60)}m`;
+    };
+    $("#site-sync-steps").innerHTML = (result.steps || []).map(step => {
+      const label = `${step.label}: ${step.status}`;
+      const remaining = ["paused", "interrupted"].includes(step.status) ? "Paused / awaiting confirmation"
+        : step.remainingSeconds === null ? "Estimating..." : duration(step.remainingSeconds);
+      const measured = step.estimate === "historical" ? " (estimate from previous run)" : step.estimate === "measured" ? " (recent speed)" : "";
+      return `<li><b>${esc(label)}</b> &middot; ${step.percent === null ? "Progress not yet measured" : `${esc(step.percent)}%`}${esc(measured)} &middot; elapsed ${esc(duration(step.elapsedSeconds))} &middot; remaining ${esc(remaining)}</li>`;
+    }).join("");
+    const console = $("#site-sync-log");
+    const follow = console.scrollHeight - console.scrollTop - console.clientHeight < 48;
+    const text = (result.logs || []).map(entry => `${new Date(entry.at).toLocaleTimeString()} ${entry.message}`).join("\n") || "No sync activity yet.";
+    if (console.textContent !== text) {
+      console.textContent = text;
+      if (follow) console.scrollTop = console.scrollHeight;
+    }
+  }
+  function showSyncPreparation() {
+    renderSyncProgress({ progress: { percent: 0, stage: "Requesting source snapshot preparation." },
+      logs: [{ at: Date.now(), message: "Sync requested. Waiting for source snapshot preparation..." }] });
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(refreshSync, 250);
+  }
   function updateSyncControls() {
     syncReview.hidden = sharedSync;
     syncReview.disabled = !loaded || syncing || saving || syncBlocked;
     $("#site-sync-confirmation").hidden = sharedSync;
     syncStart.textContent = sharedSync ? "Sync to shared server" : "Sign & sync to target";
     syncStart.disabled = !loaded || syncing || saving || syncBlocked || dirty() || (!sharedSync && (!syncPlan || !syncConfirm.checked));
+    $("#site-sync-resume").hidden = !syncCanResume;
+    $("#site-sync-resume").disabled = !loaded || syncing || saving || dirty() || !syncCanResume;
   }
   function clearSyncPlan() {
     syncPlan = null; $("#site-sync-plan").hidden = true; syncConfirm.checked = false; syncConfirm.disabled = true; syncStart.disabled = true;
@@ -190,13 +231,34 @@ VIEWS["site-server"] = async (key, _q, token) => {
       const result = await api(`${endpoint}/sync`, { signal: controller.signal, cache: "no-store" });
       if (!active()) return;
       syncStatus.textContent = `${result.host ? `${result.host}: ` : ""}${result.phase}${result.message ? ` - ${result.message}` : ""}`;
-      syncBlocked = result.running || result.phase === "uncertain";
+      renderSyncProgress(result);
+      syncBlocked = result.running || result.phase === "uncertain" || result.phase === "paused";
+      syncCanResume = !result.running && result.phase === "paused" && result.resumable && result.site === key;
       updateSyncControls();
       $("#site-sync-check").hidden = result.phase !== "uncertain" || result.site !== key;
-      if (result.running) syncTimer = setTimeout(refreshSync, 2000);
-    } catch (error) { if (active()) syncStatus.textContent = `Sync status unavailable: ${error.message}`; }
+      if (result.running || syncing) syncTimer = setTimeout(refreshSync, 2000);
+    } catch (error) {
+      if (active()) {
+        syncStatus.textContent = `Sync status unavailable: ${error.message}. Retrying...`;
+        syncTimer = setTimeout(refreshSync, 2000);
+      }
+    }
   }
   $("#site-sync-refresh").addEventListener("click", refreshSync);
+  $("#site-sync-resume").addEventListener("click", async () => {
+    if (!active() || !loaded || syncing || saving || dirty() || !syncCanResume) return;
+    syncing = true; form.inert = true; updateSyncControls();
+    try {
+      syncStatus.textContent = "Continuing the frozen snapshot; verifying previously uploaded bytes...";
+      clearTimeout(syncTimer); syncTimer = setTimeout(refreshSync, 250);
+      const result = await api(`${endpoint}/sync/resume`, { json: {} });
+      if (active()) { renderSyncProgress(result); await refreshSync(); }
+      else toast("Continue transfer submitted. Check Settings for confirmed status.");
+    } catch (error) {
+      if (active()) syncStatus.textContent = `Continue transfer not confirmed: ${error.message}`;
+      else toast(error.message);
+    } finally { syncing = false; if (active()) { form.inert = false; updateSyncControls(); } }
+  });
   $("#site-sync-check").addEventListener("click", async () => {
     if (!active() || syncing || saving || dirty()) return;
     syncing = true;
@@ -216,6 +278,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
     syncing = true; syncReview.disabled = true; form.inert = true; clearSyncPlan();
     try {
       syncStatus.textContent = "Preparing and verifying the source snapshot. No target transfer has started...";
+      showSyncPreparation();
       const review = await api(`${endpoint}/sync/plan`, { json: {}, signal: controller.signal });
       if (!active()) return;
       syncPlan = review;
@@ -238,6 +301,7 @@ VIEWS["site-server"] = async (key, _q, token) => {
     try {
       if (sharedSync) {
         syncStatus.textContent = "Preparing the snapshot and starting sync to the saved shared server...";
+        showSyncPreparation();
         submitted = true;
         await api(`${endpoint}/sync/shared/start`, { json: { revision } });
         if (active()) { clearSyncPlan(); await refreshSync(); }

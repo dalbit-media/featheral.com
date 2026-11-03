@@ -80,6 +80,46 @@ there is no separate review, replacement checkbox or wallet approval. For a
 separate server, prepare a review, confirm database replacement and sign with
 the Admin wallet. Reviewing never connects to or changes the target.
 
+The sync panel polls while snapshot preparation or transfer is pending and shows
+a stage-based progress bar, byte-counted SFTP upload progress and a timestamped
+detail log. Target verification, backup, installation, restart, health probes and
+rollback output appear live. The latest 200 redacted log lines and progress are
+persisted across page reloads and server restarts; only confirmed success reaches
+100%. Snapshot capture itself briefly blocks source requests while writers pause.
+
+Each step shows progress, elapsed time and remaining-time estimate on one compact
+text line, without individual progress bars or animated sections.
+Upload percent is the actual byte fraction; ETA uses recent acknowledged-block
+throughput and becomes unknown after ten seconds without a progress update.
+Resume resets rate sampling so time spent paused or verifying is not counted as
+transfer time. Other step estimates use the last measured duration for the same
+target; these are labeled historical estimates, not measured completion counts.
+First-run steps and steps exceeding their historical duration show **Estimating...**
+without a measured percentage. Paused/interrupted steps freeze elapsed time and
+do not display a running ETA. Step timings persist alongside the sync status.
+
+Uploads have no total-duration limit. The saved `deploymentTimeoutSeconds`
+(default 900 seconds) is an **inactivity timeout** for SFTP sync uploads; it resets
+after every acknowledged block. Data is streamed in bounded 256 KiB blocks.
+The same setting still limits the target apply job's total execution time.
+
+If upload disconnects or stalls, the operation becomes **paused**, retains the
+exact source ZIP and remote partial ZIP, and offers **Continue transfer**.
+Continue uses the original site/server assignment, pinned key and snapshot digest;
+it verifies the whole local archive and the remote prefix SHA256 before writing
+from the target's actual byte offset. Already verified bytes are not sent again.
+Upload resume survives source restarts and does not require another snapshot or
+wallet signature. Credentials come from the saved connection; changing timeout
+settings does not invalidate the original snapshot, but changing the target does.
+Source archives remain private until confirmed completion or rollback. A paused
+upload prevents starting a different snapshot. Do not edit or delete its staging
+files. Invalid target prefixes are explicitly rejected, never silently overwritten.
+
+An interruption after target apply begins remains **uncertain** and requires the
+signed receipt check below, not upload resume. Versions before resume support
+deleted the local ZIP on failure; those uploads cannot resume without the original
+frozen archive. Check their target status, then start one new snapshot.
+
 The fixed, ten-minute snapshot includes installation SQLite databases, native
 Dollar/World and database/CMS journals, site registries, upload indexes and uploads
 under `data/` and `services/cms/data/`. SQLite snapshots consolidate committed WAL
@@ -148,6 +188,8 @@ The Settings API is `GET /api/settings/sites/:key/sync`. Authenticated, same-ori
 `revision` and starts only a saved shared target. Separate review and signed mutation
 routes `/sync/plan`, `/sync/challenge`, `/sync/start`, `/sync/check/challenge` and
 `/sync/check`. Deployment/Settings and sync cannot run concurrently.
+Authenticated same-origin `POST /api/settings/sites/:key/sync/resume` continues
+only a paused upload belonging to that site.
 
 The workspace and privileged APIs require a wallet-signed Admin session from the origin wallet (`0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c`) or Dollar reserve wallet (`0x706CCb6109046a6a4A08dbAD4444A46408703ccb`). Connecting an address alone is insufficient: sign the five-minute single-use, browser/origin-bound challenge. Admin passwords, HTTP Basic and localhost bypasses are not accepted. Host-only HttpOnly/SameSite=Strict session cookies expire after eight hours; sign-out, wallet changes and server restarts require sign-in again. Production requires HTTPS. Frontend assets contain no authority. The main gateway dispatches authenticated API requests to the original Gold, Dollar and World services; signing, moderator/on-chain roles and wallet confirmations still apply. Writes must come from the admin origin. The standalone CMS service explicitly reports that operational APIs require the main `npm start` server. Backend modules and private datasets remain under `services/cms/`; an existing old CMS-host page database is reused to preserve its content/themes.
 
