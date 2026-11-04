@@ -1,0 +1,31 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path');
+const sharp = require('sharp');
+const { mediaPreview } = require('../lib/media-preview');
+
+test('previews fit within 320px, never enlarge originals, share pending work and invalidate changed files', async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'featheral-media-preview-'));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'neutral.png');
+  await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#42697a' } }).png().toFile(file);
+  const results = await Promise.all(Array.from({ length: 10 }, () => mediaPreview(file)));
+  assert(results.every(value => value === results[0]), 'concurrent requests share one bounded render');
+  const metadata = await sharp(results[0]).metadata();
+  assert.equal(metadata.format, 'webp');
+  assert.equal(metadata.width, 320);
+  assert.equal(metadata.height, 240);
+  assert(results[0].length < 100 * 1024);
+  await sharp({ create: { width: 80, height: 60, channels: 3, background: '#d8e6ab' } }).png().toFile(file);
+  const changed = await mediaPreview(file);
+  assert.notDeepEqual(changed, results[0]);
+  assert.equal((await sharp(changed).metadata()).width, 80);
+  const gif = path.join(dir, 'neutral.gif'), frames = Buffer.alloc(32 * 64 * 3, 120);
+  frames.fill(220, 32 * 32 * 3);
+  await sharp(frames, { raw: { width: 32, height: 64, channels: 3, pageHeight: 32 } }).gif({ delay: [100, 100], loop: 0 }).toFile(gif);
+  assert.equal((await sharp(gif, { animated: true }).metadata()).pages, 2);
+  const still = await sharp(await mediaPreview(gif)).metadata();
+  assert.equal(still.height, 32);
+  assert.equal(still.pages || 1, 1, 'fallbacks contain a single frame, not another hidden animation');
+  await assert.rejects(mediaPreview(path.join(dir, 'missing.png')), { code: 'ENOENT' });
+});

@@ -34,7 +34,7 @@ function fixture(t) {
     pub.store.db.prepare('UPDATE votes SET at=? WHERE post_id=?').run(id * 1000, id);
   }
   t.after(() => { pub.close(); dropSite(key); fs.rmSync(dir, { recursive: true, force: true }); });
-  return { get pub() { return pub; }, reopen() { pub.close(); pub = new PublicSite(getSite(key), { brand: 'Test' }); return pub; } };
+  return { dir, get pub() { return pub; }, reopen() { pub.close(); pub = new PublicSite(getSite(key), { brand: 'Test' }); return pub; } };
 }
 async function login(pub, wallet = Wallet.createRandom()) {
   const challenge = pub.walletNonce(wallet.address);
@@ -60,6 +60,62 @@ test('liked timeline sorts by latest surviving like, defaults to 24 and pages de
   pub.store.db.prepare('UPDATE votes SET at=30000 WHERE post_id=29').run();
   assert.deepEqual(pub.liked({ limit: 2 }).items.map(item => item.id), [30, 29], 'timestamp ties use post ID');
   assert.throws(() => pub.liked({ sort: 'random' }), { status: 400 });
+});
+
+test('public Trash includes first-round deletions and net-disliked posts without moving later-round media', t => {
+  const f = fixture(t), pub = f.pub;
+  fs.mkdirSync(path.join(f.dir, 'uploads'), { recursive: true });
+  fs.writeFileSync(path.join(f.dir, 'uploads', '1.jpg'), 'neutral-fixture');
+  fs.writeFileSync(path.join(f.dir, 'uploads', '2.jpg'), 'neutral-fixture');
+  pub.vote(1, 'jpeg', 'dislike');
+  assert.equal(pub.curation(1, 'jpeg').deleted, true);
+  assert.equal(pub.curation(1, 'jpeg').canRestore, true);
+  assert.equal(pub.publicMediaFile(1, 'jpeg'), path.join(f.dir, 'trash', '1.jpg'));
+  assert.equal(pub.comments(1).total, 0, 'trashed published media retain readable comments');
+  pub.store.db.prepare("INSERT OR REPLACE INTO rounds(type,round) VALUES ('jpeg',2)").run();
+  pub.vote(2, 'jpeg', 'dislike');
+  pub.store.setVote(2, 'png', 2, 'dislike');
+  pub.vote(3, 'jpeg', 'dislike');
+  const trash = pub.publicTrash({ limit: 1 });
+  assert.equal(trash.total, 2, 'tied likes/dislikes and ordinary liked posts do not enter Trash');
+  assert.equal(trash.items[0].id, 1);
+  assert.equal(trash.items[0].canRestore, false, 'a previous round deletion is not publicly restored');
+  assert.equal(pub.publicTrash({ offset: 1 }).items[0].id, 2);
+  assert.equal(fs.existsSync(path.join(f.dir, 'uploads', '2.jpg')), true);
+  assert.throws(() => pub.vote(2, 'jpeg', 'like', '', 1), { status: 409 }, 'stale viewer rounds cannot accidentally vote');
+  assert.throws(() => pub.publicMediaFile(999, 'jpeg'), { status: 404 });
+  pub.site.memo.publicIds.delete(1);
+  assert(!pub.publicTrash().items.some(item => item.id === 1), 'unpublished/private posts stay hidden even when in curation trash');
+  assert.throws(() => pub.publicMediaFile(1, 'jpeg'), { status: 404 });
+});
+
+test('viewer round-one dislike, undo and like restore media without advancing rounds', t => {
+  const f = fixture(t), pub = f.pub;
+  fs.mkdirSync(path.join(f.dir, 'uploads'), { recursive: true });
+  const file = path.join(f.dir, 'uploads', '1.jpg');
+  fs.writeFileSync(file, 'neutral-fixture');
+  pub.vote(1, 'jpeg', 'dislike', '', 1);
+  assert(!fs.existsSync(file));
+  assert.equal(pub.publicTrash().items[0].id, 1);
+  pub.vote(1, 'jpeg', 'none', '', 1);
+  assert(fs.existsSync(file));
+  assert.equal(pub.publicTrash().total, 0);
+  pub.vote(1, 'jpeg', 'dislike', '', 1);
+  pub.vote(1, 'jpeg', 'like', '', 1);
+  assert.equal(pub.curation(1, 'jpeg').vote, 'like');
+  assert.equal(pub.publicTrash().total, 0);
+  assert.equal(pub.store.round('jpeg'), 1);
+});
+
+test('Gallery viewers retain the thumbs deck instead of accidentally voting in the still-image round', t => {
+  const { pub } = fixture(t);
+  pub.site.memo.thumbIds = new Set([1]);
+  pub.store.setRound('thumbs', 2);
+  const post = pub.thumbList({}).items[0];
+  assert.equal(post.deck, 'thumbs');
+  assert.equal(pub.curation(post.id, post.deck).round, 2);
+  assert.equal(pub.vote(post.id, post.deck, 'dislike', '', 2).deleted, false);
+  assert.equal(pub.store.round('jpeg'), 1);
 });
 
 test('wallet folders persist across sessions, enforce ownership and never alter votes or rounds', async t => {

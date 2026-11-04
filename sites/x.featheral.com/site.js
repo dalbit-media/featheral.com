@@ -293,6 +293,7 @@ async function render() {
     }
     if (parts[0] === 'read') { setTab('read'); return readListView(q); }
     if (parts[0] === 'liked') { setTab('liked'); return await likedView(q); }
+    if (parts[0] === 'trash') { setTab('trash'); return await trashView(); }
     if (parts[0] === 'thumbs') { setTab('thumbs'); return thumbsView(q); }
     if (parts[0] === 'trending') { setTab('trending'); return trendingView(q); }
     if (parts[0] === 'post') { setTab('post'); return postView(); }
@@ -530,11 +531,13 @@ function swipeView(type) {
     const el = item && stack.querySelector(`.card.top[data-id="${item.id}"]`);
     if (!el || state.busy || $('.viewer')) return;
     setLive(el, false);
+    let changed = false;
     openViewer([item], 0, {
       focus: !!wallet.address,
       onCount: (v) => { const b = $('.cbtn b', el); if (b) b.textContent = fmtNum(v.comments || 0); },
       onEarned: (v) => { const b = $('.by', el); if (b) b.textContent = `🦊 ${short(v.author)} · 🪙 ${fmtNum(v.earned)}`; },
-      onClose: () => { if (el.isConnected && el.classList.contains('top')) setLive(el, true); },
+      onVote: () => { changed = true; },
+      onClose: () => { if (!disposed && changed) render(); else if (el.isConnected && el.classList.contains('top')) setLive(el, true); },
     });
   }
 
@@ -738,7 +741,7 @@ async function readerView(id, q, bySlug = false) {
 }
 
 // ---------- liked ----------
-function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, minWidth = 150, groupBy = null } = {}) {
+function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, minWidth = 150, groupBy = null, originalSize = false, previews = false } = {}) {
   const mounted = new Map();
   const headings = new Map();
   const constrained = navigator.connection?.saveData || /^(slow-)?2g$/.test(navigator.connection?.effectiveType || '');
@@ -749,6 +752,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     const tile = mounted.get(index);
     if (!tile) return;
     const img = tile.el.querySelector('img');
+    clearTimeout(tile.timeout);
     img.onload = img.onerror = null;
     img.removeAttribute('src');
     tile.el.remove();
@@ -762,7 +766,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     const visible = [...mounted.values()].filter(tile => inViewport(tile)
       || (tile.state === 'ready' && tile.position.y + tile.position.h > -bounds.top - 160
         && tile.position.y < innerHeight - bounds.top + 160));
-    const priority = tile => tile.state === 'ready' ? 0 : tile.state === 'loading' ? 1 : 2;
+    const priority = tile => tile.mode !== 'preview' && tile.state === 'ready' ? 0 : tile.state === 'loading' ? 1 : 2;
     visible.sort((a, b) => priority(a) - priority(b)
       || Number(inViewport(b)) - Number(inViewport(a))
       || Math.abs(a.position.y + a.position.h / 2 + bounds.top - innerHeight / 2)
@@ -771,27 +775,33 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     let bytes = 0, pixels = 0, gifs = 0;
     for (const tile of visible) {
       const m = tile.item.media, size = m.size || 1024 * 1024;
+      if (previews && !originalSize && m.type !== 'gif') continue;
       const area = (m.width || 1024) * (m.height || 1024);
-      if (wanted.size && (bytes + size > 24 * 1024 * 1024 || pixels + area > 24 * 1024 * 1024
+      const budget = (previews ? 16 : 24) * 1024 * 1024;
+      if (wanted.size && (bytes + size > budget || pixels + area > budget
         || (m.type === 'gif' && gifs >= (constrained ? 1 : 2)))) continue;
       if (wanted.size >= 24) break;
       wanted.add(tile); bytes += size; pixels += area;
       if (m.type === 'gif') gifs++;
     }
     for (const tile of mounted.values()) {
-      if (!wanted.has(tile)) {
+      const mode = wanted.has(tile) ? 'original' : previews && visible.includes(tile) ? 'preview' : '';
+      if (!mode || mode !== tile.mode) {
         const img = tile.el.querySelector('img');
+        clearTimeout(tile.timeout);
         img.onload = img.onerror = null;
         img.removeAttribute('src');
         tile.loadId++;
         tile.state = '';
         tile.el.dataset.mediaState = 'paused';
       }
+      tile.mode = mode;
     }
-    for (const tile of wanted) if (!tile.state) tile.el.dataset.mediaState = 'queued';
+    const admitted = [...wanted, ...visible.filter(tile => tile.mode === 'preview')];
+    for (const tile of admitted) if (!tile.state) tile.el.dataset.mediaState = 'queued';
     if (scrolling) return;
     let active = [...mounted.values()].filter(tile => tile.state === 'loading').length;
-    for (const tile of wanted) {
+    for (const tile of admitted) {
       if (active >= limit) break;
       if (tile.state) continue;
       tile.state = 'loading'; tile.el.dataset.mediaState = 'loading'; active++;
@@ -799,13 +809,24 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
       const loadId = ++tile.loadId;
       const settle = state => {
         if (stopped || mounted.get(tile.position.index) !== tile || tile.state !== 'loading' || tile.loadId !== loadId) return;
+        clearTimeout(tile.timeout);
         tile.state = state; tile.el.dataset.mediaState = state;
+        if (state === 'error') {
+          img.removeAttribute('src');
+          tile.el.setAttribute?.('aria-label', 'Preview failed. Select to retry.');
+          tile.el.tabIndex = 0;
+        } else {
+          tile.el.setAttribute?.('aria-label', `Open ${tile.item.title || 'media'} with comments`);
+        }
         schedule();
       };
       img.onload = () => settle('ready');
       img.onerror = () => settle('error');
       img.decoding = 'async'; img.fetchPriority = 'low';
-      img.src = tile.item.media.url;
+      img.src = tile.mode === 'preview'
+        ? publicUrl(`/api/public/posts/${tile.item.id}/preview?type=${encodeURIComponent(tile.item.deck || tile.item.media.type)}`)
+        : tile.item.media.url.startsWith('/api/') ? publicUrl(tile.item.media.url) : tile.item.media.url;
+      if (previews) tile.timeout = setTimeout(() => settle('error'), 20000);
     }
   }
   function paint() {
@@ -854,7 +875,22 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     if (stopped || !grid.clientWidth) return;
     const width = Math.floor(grid.clientWidth);
     if (!append) rowCache = {};
-    if (justified) positions = justifyRows(grid, items, width, 6, { maxH, cache: rowCache });
+    if (originalSize) {
+      positions = []; groups = [];
+      let y = 0, previous = null;
+      const availableHeight = Math.max(120, innerHeight - 200);
+      items.forEach((item, index) => {
+        const group = groupBy?.(item);
+        if (group && group.key !== previous) {
+          groups.push({ ...group, y }); y += 42; previous = group.key;
+        }
+        const nw = item.media.width || Math.min(width, 640), nh = item.media.height || 480;
+        const scale = Math.min(1, width / nw, availableHeight / nh), w = nw * scale, h = nh * scale;
+        positions.push({ index, x: (width - w) / 2, y, w, h });
+        y += h + 88;
+      });
+      grid.style.height = `${y}px`;
+    } else if (justified) positions = justifyRows(grid, items, width, 6, { maxH, cache: rowCache });
     else {
       const columns = Math.max(1, Math.floor((width + 8) / (minWidth + 8))), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
       positions = []; groups = [];
@@ -879,6 +915,22 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     else schedule();
   }
   window.addEventListener('scroll', onScroll, { passive: true });
+  const retryPreview = event => {
+    if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+    const el = event.target.closest('[data-media-state="error"]');
+    const tile = [...mounted.values()].find(value => value.el === el);
+    if (!tile) return;
+    event.preventDefault(); event.stopPropagation();
+    tile.state = ''; schedule();
+  };
+  if (previews) {
+    grid.addEventListener('click', retryPreview, true);
+    grid.addEventListener('keydown', retryPreview, true);
+  }
+  const onResize = () => {
+    if (!resizeFrame) resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; layout(); });
+  };
+  window.addEventListener('resize', onResize);
   document.addEventListener('visibilitychange', visibility);
   let width = 0;
   const resize = new ResizeObserver(() => {
@@ -895,6 +947,11 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
   }, close() {
     stopped = true; clearTimeout(timer); cancelAnimationFrame(frame); cancelAnimationFrame(resizeFrame); resize.disconnect();
     window.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', onResize);
+    if (previews) {
+      grid.removeEventListener('click', retryPreview, true);
+      grid.removeEventListener('keydown', retryPreview, true);
+    }
     document.removeEventListener('visibilitychange', visibility);
     for (const index of mounted.keys()) release(index);
     clearHeadings();
@@ -943,12 +1000,12 @@ async function likedView(q = {}) {
   $('#liked-folder').onchange = e => navigate({ collection: e.target.value });
   gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('div');
-    tile.className = 'tile'; tile.title = v.title;
+    tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
     tile.innerHTML = `<button class="liked-open" aria-label="Open ${esc(v.title)} with comments"><img alt="">${ytBadge(v)}
       <span>${esc(v.title)}<br>♥ ${fmtNum(v.likes)} · 💬 ${fmtNum(v.comments)} · ${esc(likedDate(v).label)}</span></button>
       <button class="btn liked-save" data-folders aria-label="Organize ${esc(v.title)} in folders">Folders</button>`;
     return tile;
-  }, { minWidth: 320, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
+  }, { originalSize: true, previews: true, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
   function loadMore() {
     if (disposed || !more) return Promise.resolve();
     if (!pending) pending = fetchPage().then(() => {
@@ -1067,7 +1124,7 @@ async function likedView(q = {}) {
           gallery.pause(false);
           if (!disposed && more) { paging?.unobserve($('#liked-more')); paging?.observe($('#liked-more')); }
         }
-      }, hasMore: () => more, loadMore,
+      }, hasMore: () => more, loadMore, onVote: () => { refreshOnClose = true; },
       organize: v => organize(v).catch(error => { if (!disposed) toast(error.message); }),
     });
   });
@@ -1151,7 +1208,7 @@ function thumbsView(q) {
   const items = [];
   let total = Infinity; let round = 1; let busy = false; let end = false; let advancing = false; let disposed = false; let closeViewer = null;
   const request = new AbortController();
-  const gallery = mediaGrid(grid, items, tileFor, { justified: true });
+  const gallery = mediaGrid(grid, items, tileFor, { justified: true, previews: true });
 
   function roundLabel() {
     $('#t-round').textContent = round === 1 ? 'Round 1 · 👎 deletes right away' : `Round ${fmtNum(round)} · 👍 👎 are counted, nothing is deleted`;
@@ -1246,7 +1303,8 @@ function thumbsView(q) {
     const b = e.target.closest('[data-vote]');
     if (b) return vote(v, b.dataset.vote);
     closeViewer?.(); gallery.pause(true);
-    closeViewer = openViewer(items, items.indexOf(v), { onClose: () => gallery.pause(false) });
+    let changed = false;
+    closeViewer = openViewer(items, items.indexOf(v), { onVote: () => { changed = true; }, onClose: () => { if (!disposed && changed) render(); else gallery.pause(false); } });
   });
   const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) (end ? nextRound() : more()); }, { rootMargin: '1200px 0px' });
   io.observe($('#t-more'));
@@ -1294,7 +1352,7 @@ function trendingView(q) {
   const items = [];
   let busy = false; let end = false; let disposed = false; let closeViewer = null;
   const request = new AbortController();
-  const gallery = mediaGrid(grid, items, tileFor, { justified: true, maxH: Math.max(220, Math.round(innerHeight * 0.45)) });
+  const gallery = mediaGrid(grid, items, tileFor, { justified: true, previews: true, maxH: Math.max(220, Math.round(innerHeight * 0.45)) });
 
   // Tag chips: the trending tags, then "More tags" pages through every other tag (most active first).
   // While searching, the chips are the tags whose names match.
@@ -1384,7 +1442,8 @@ function trendingView(q) {
     if (!v) return;
     if (e.target.closest('[data-vote]')) return like(v);
     closeViewer?.(); gallery.pause(true);
-    closeViewer = openViewer(items, items.indexOf(v), { onClose: () => gallery.pause(false) });
+    let changed = false;
+    closeViewer = openViewer(items, items.indexOf(v), { onVote: () => { changed = true; }, onClose: () => { if (!disposed && changed) render(); else gallery.pause(false); } });
   });
   const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) more(); }, { rootMargin: '1200px 0px' });
   io.observe($('#t-more'));
@@ -1393,34 +1452,97 @@ function trendingView(q) {
   more();
 }
 
+async function trashView() {
+  let disposed = false, pending = null, more = true, offset = 0, closeViewer = null, changed = false;
+  const items = [], request = new AbortController();
+  view().innerHTML = `<section class="read liked-timeline"><h1>Trash <span class="count" id="trash-count"></span></h1>
+    <p class="m">Trashed posts and posts with more dislikes than likes. A round-1 dislike moves a post to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
+    <p class="m" id="trash-status" role="status"></p><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
+  const grid = $('.grid', view());
+  const gallery = mediaGrid(grid, items, v => {
+    const tile = document.createElement('button');
+    tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
+    tile.setAttribute('aria-label', `Open ${v.title} with comments`);
+    tile.innerHTML = `<img alt=""><span>${esc(v.title)}<br>${v.deleted ? 'Trashed' : 'More dislikes than likes'} · ♥ ${fmtNum(v.likes)} · 👎 ${fmtNum(v.dislikes)}</span>`;
+    return tile;
+  }, { originalSize: true, previews: true });
+  async function fetchPage() {
+    $('#trash-more').disabled = true;
+    $('#trash-status').textContent = 'Loading Trash...';
+    try {
+      const r = await api(`/api/public/trash?${new URLSearchParams({ offset, limit: 24 })}`, { signal: request.signal });
+      if (disposed) return;
+      const known = new Set(items.map(item => item.id));
+      items.push(...r.items.filter(item => !known.has(item.id)));
+      offset = r.offset + r.items.length; more = offset < r.total && r.items.length > 0;
+      $('#trash-count').textContent = fmtNum(r.total);
+      $('#trash-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : 'Trash is empty.';
+      $('#trash-more').hidden = !more;
+      gallery.layout();
+    } catch (error) {
+      if (!disposed) { $('#trash-status').textContent = error.message; throw error; }
+    } finally { if (!disposed) $('#trash-more').disabled = false; }
+  }
+  function loadMore() {
+    if (disposed || !more) return Promise.resolve();
+    if (!pending) pending = fetchPage().then(() => {
+      if (!disposed && more && !closeViewer) { paging.unobserve($('#trash-more')); paging.observe($('#trash-more')); }
+    }).finally(() => { pending = null; });
+    return pending;
+  }
+  const paging = new IntersectionObserver(entries => {
+    if (!disposed && !closeViewer && entries.some(entry => entry.isIntersecting))
+      loadMore().catch(error => { if (!disposed) toast(error.message); });
+  }, { rootMargin: '600px 0px' });
+  paging.observe($('#trash-more'));
+  $('#trash-more').onclick = () => loadMore().catch(error => toast(error.message));
+  grid.addEventListener('click', event => {
+    const tile = event.target.closest('.tile');
+    if (!tile) return;
+    closeViewer?.(); gallery.pause(true);
+    closeViewer = openViewer(items, +tile.dataset.i, {
+      hasMore: () => more, loadMore, onVote: () => { changed = true; },
+      onClose: () => {
+        closeViewer = null;
+        if (disposed) return;
+        if (changed) render();
+        else { gallery.pause(false); if (more) { paging.unobserve($('#trash-more')); paging.observe($('#trash-more')); } }
+      },
+    });
+  });
+  cleanup = () => { disposed = true; request.abort(); paging.disconnect(); gallery.close(); closeViewer?.(); };
+  await loadMore();
+}
+
 // Full-screen viewer for a list of posts; ← → step through them, Esc closes. The image is shown at its
 // original pixel size (scaled down only when it does not fit), with the post's comments beside it.
 // `opts.onCount(v)` runs whenever v.comments changes; `opts.focus` puts the cursor in the comment box.
 function openViewer(list, i, opts = {}) {
   const box = document.createElement('div');
   box.className = 'viewer';
-  let seq = 0; let closed = false;
+  let seq = 0; let closed = false; let curation = null; let voting = false;
   // Keeps a gallery tile's 💬 badge (or the caller's own counter) in step with the comments shown here.
   const badge = (v) => {
     opts.onCount?.(v);
     if (!v.el) return;
     let b = $('.tc', v.el);
-    if (!b) $('span', v.el).insertAdjacentHTML('afterend', statsBadge(v));
+    if (!b && v.el.classList.contains('mtile')) $('span', v.el).insertAdjacentHTML('afterend', statsBadge(v));
     tileStats(v);
   };
   const show = () => {
     const v = list[i];
+    curation = null;
     $('.vmedia img', box)?.removeAttribute('src');
     const dims = v.media.width && v.media.height ? `${v.media.width}×${v.media.height}` : '';
     box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">${i + 1} / ${fmtNum(list.length)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${dims ? `${dims} · ` : ''}${esc(fmtBytes(v.media.size))}</span>
       ${opts.organize ? '<button class="btn" data-organize>Folders</button>' : ''}
       <button class="btn" data-prev aria-label="Previous media" ${i ? '' : 'disabled'}>←</button><button class="btn" data-next aria-label="Next media" ${i < list.length - 1 || opts.hasMore?.() ? '' : 'disabled'}>→</button><button class="btn" data-close aria-label="Close media">✕</button></div>
       <div class="vbody">
-        <div class="vmedia">${v.video ? `<figure><div class="ytbox"></div><figcaption>▶ YouTube video · <a href="${esc(ytWatch(v.video))}" target="_blank" rel="noopener noreferrer">open on YouTube ↗</a></figcaption></figure>` : `<figure><img src="${esc(v.media.url)}" alt=""${v.media.width ? ` width="${v.media.width}" height="${v.media.height}"` : ''}>
+        <div class="vmedia">${v.video ? `<figure><div class="ytbox"></div><figcaption>▶ YouTube video · <a href="${esc(ytWatch(v.video))}" target="_blank" rel="noopener noreferrer">open on YouTube ↗</a></figcaption></figure>` : `<figure><img src="${esc(v.media.url.startsWith('/api/') ? publicUrl(v.media.url) : v.media.url)}" alt=""${v.media.width ? ` width="${v.media.width}" height="${v.media.height}"` : ''}>
           <figcaption id="v-size">${dims ? `Original size ${dims}` : ''}</figcaption></figure>`}
           ${v.description ? `<p class="vdesc">${esc(v.description)}</p>` : ''}
           ${v.tags?.length ? `<div class="vtags">${v.tags.map((t) => `<a data-close href="${href(['trending'], { tag: t.id })}" title="Trending posts tagged ${esc(t.name)}">#${esc(t.name)}</a>`).join('')}</div>` : ''}</div>
-        <aside class="vside">${authorHtml(v)}<h3>💬 Comments <span class="count" id="c-count"></span></h3>
+        <aside class="vside">${authorHtml(v)}<div class="viewer-votes" id="v-votes" role="group" aria-label="Post votes"><div class="count" role="status">Loading votes...</div></div><h3>💬 Comments <span class="count" id="c-count"></span></h3>
           <div class="clist" id="c-list"><div class="loading">Loading…</div></div>
           <form class="cform" id="c-form"></form></aside>
       </div>`;
@@ -1434,10 +1556,48 @@ function openViewer(list, i, opts = {}) {
       $('#v-size', box).textContent = `Original size ${img.naturalWidth}×${img.naturalHeight}${scaled ? ` · shown at ${Math.round(img.clientWidth / img.naturalWidth * 100)}% to fit` : ''}`;
     };
     if (img && img.complete) fit(); else img?.addEventListener('load', fit, { once: true });
+    img?.addEventListener('error', () => {
+      if (closed || $('.vmedia img', box) !== img) return;
+      $('#v-size', box).innerHTML = 'Media could not load. <button class="btn" data-retry-media>Retry media</button>';
+    });
     paintForm();
-    loadComments(v, ++seq);
-    countView(v, (x) => { if (list[i] === x && !closed) { const e = $('#v-views', box); if (e) e.textContent = `👁 ${fmtNum(x.views)}`; } opts.onViews?.(x); });
+    loadComments(v, ++seq); loadCuration(v, seq);
+    if (!v.deleted) countView(v, (x) => { if (list[i] === x && !closed) { const e = $('#v-views', box); if (e) e.textContent = `👁 ${fmtNum(x.views)}`; } opts.onViews?.(x); });
   };
+  function paintVotes() {
+    if (!curation || closed) return;
+    const disabled = voting || !curation.canRestore ? 'disabled' : '';
+    $('#v-votes', box).innerHTML = `<div class="row"><button class="btn" data-viewer-vote="like" aria-pressed="${curation.vote === 'like'}" ${disabled}>♥ Like ${fmtNum(curation.likes)}</button>
+      <button class="btn" data-viewer-vote="dislike" aria-pressed="${curation.vote === 'dislike'}" ${disabled}>👎 Dislike ${fmtNum(curation.dislikes)}</button></div>
+      <div class="count" role="status">${curation.deleted ? 'In Trash. Undo this dislike or like to restore, when available.' : curation.round === 1 ? 'Round 1: a dislike moves this post to Trash.' : `Round ${fmtNum(curation.round)}: dislikes are counted; this post stays available.`}${!curation.canRestore ? ' Restore this post through Admin.' : ''}</div>`;
+  }
+  async function loadCuration(v, my) {
+    try {
+      const state = await api(`/api/public/posts/${v.id}/curation?type=${encodeURIComponent(v.deck || v.media.type)}`);
+      if (closed || my !== seq) return;
+      curation = state; Object.assign(v, { vote: state.vote, likes: state.likes, dislikes: state.dislikes, deleted: state.deleted });
+      paintVotes(); paintForm();
+    } catch (error) {
+      if (!closed && my === seq) $('#v-votes', box).innerHTML = `<div class="count" role="alert">${esc(error.message)}</div><button class="btn" data-retry-votes>Retry votes</button>`;
+    }
+  }
+  async function vote(kind) {
+    if (voting || !curation?.canRestore) return;
+    const v = list[i], my = seq, next = curation.vote === kind ? 'none' : kind;
+    voting = true; paintVotes();
+    try {
+      const result = await api('/api/public/vote', { json: { id: v.id, type: curation.type, round: curation.round, vote: next } });
+      Object.assign(v, { likes: result.likes, dislikes: result.dislikes, vote: next === 'none' ? null : next, deleted: result.deleted });
+      v.media.url = `/api/public/posts/${v.id}/media?type=${encodeURIComponent(result.type)}`;
+      if (next === 'like') rewardNote(result);
+      opts.onVote?.(v, result);
+      if (closed || my !== seq) return;
+      curation = { ...curation, ...result, vote: v.vote };
+      paintForm();
+      toast(result.deleted ? 'Moved to Trash' : next === 'none' ? 'Vote undone' : next === 'like' ? 'Liked' : 'Disliked');
+    } catch (error) { if (!closed) { toast(error.message); await loadCuration(v, my); } }
+    finally { voting = false; if (!closed && my === seq) paintVotes(); }
+  }
   // Member posts: who posted it, what it earned, and tip buttons.
   function authorHtml(v) {
     if (!v.author) return '';
@@ -1480,6 +1640,7 @@ function openViewer(list, i, opts = {}) {
   function paintForm() {
     const f = $('#c-form', box);
     if (!f) return;
+    if (list[i].deleted) { f.innerHTML = '<p class="count">Restore this post before adding comments.</p>'; return; }
     f.innerHTML = wallet.address
       ? `<textarea id="c-text" rows="3" maxlength="2000" placeholder="Write a comment as ${esc(short(wallet.address))}…"></textarea>
         <div class="crow"><span class="count">Ctrl+Enter to post</span><button class="btn primary" type="submit">Post</button></div>`
@@ -1509,7 +1670,7 @@ function openViewer(list, i, opts = {}) {
   }
   let stepping = false, swipe = null;
   const step = async d => {
-    if (closed || stepping) return;
+    if (closed || stepping || voting) return;
     stepping = true;
     try {
       const j = i + d;
@@ -1531,7 +1692,7 @@ function openViewer(list, i, opts = {}) {
     if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
   });
   box.addEventListener('pointercancel', () => { swipe = null; });
-  const onWallet = () => { paintForm(); const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadComments(list[i], ++seq); };
+  const onWallet = () => { paintForm(); const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadComments(list[i], ++seq); loadCuration(list[i], seq); };
   const close = () => { if (closed) return; closed = true; seq++; $('.vmedia img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); };
   const onKey = (e) => {
     if (document.querySelector('dialog[open]')) return;
@@ -1546,6 +1707,13 @@ function openViewer(list, i, opts = {}) {
     else if (e.target.closest('[data-prev]')) step(-1);
     else if (e.target.closest('[data-next]')) step(1);
     else if (e.target.closest('[data-organize]')) opts.organize?.(list[i]);
+    else if (e.target.closest('[data-viewer-vote]')) vote(e.target.closest('[data-viewer-vote]').dataset.viewerVote);
+    else if (e.target.closest('[data-retry-votes]')) loadCuration(list[i], seq);
+    else if (e.target.closest('[data-retry-media]')) {
+      const img = $('.vmedia img', box);
+      img.removeAttribute('src'); img.src = list[i].media.url.startsWith('/api/') ? publicUrl(list[i].media.url) : list[i].media.url;
+      $('#v-size', box).textContent = 'Loading media...';
+    }
     else if (e.target.closest('[data-connect]')) connectWallet();
     else if (e.target.closest('[data-tip]')) { const b = e.target.closest('[data-tip]'); tip(+b.dataset.tip, b); }
     else if (e.target.closest('[data-cdel]')) {

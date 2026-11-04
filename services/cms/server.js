@@ -637,12 +637,26 @@ app.get('/api/public/texts/:id', wrap((req, res) => {
 }));
 app.post('/api/public/vote', wrap((req, res) => {
   const { id, type, vote } = req.body || {};
-  res.json(publicSite(req).vote(id, String(type || ''), vote, walletToken(req)));
+  res.json(publicSite(req).vote(id, String(type || ''), vote, walletToken(req), req.body?.round));
 }));
 app.get('/api/public/round', wrap((req, res) => res.json(publicSite(req).status(String(req.query.type || '')))));
 app.post('/api/public/round', wrap((req, res) => res.json(publicSite(req).nextRound(String(req.body?.type || '')))));
 app.post('/api/public/import', wrap((req, res) => res.json(publicSite(req).importVotes(req.body?.votes))));
 app.get('/api/public/liked', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).liked(req.query, walletToken(req)))));
+app.get('/api/public/trash', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).publicTrash(req.query))));
+app.get('/api/public/posts/:id/curation', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).curation(req.params.id, req.query.type))));
+app.get('/api/public/posts/:id/media', wrap((req, res) => {
+  const file = publicSite(req).publicMediaFile(req.params.id, req.query.type);
+  res.set('Cache-Control', 'no-store');
+  if (/\.(svg|html?|xml)$/i.test(file)) res.set('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
+  res.sendFile(path.basename(file), { root: path.dirname(file) });
+}));
+app.get('/api/public/posts/:id/preview', wrap(async (req, res) => {
+  const { mediaPreview } = require('./lib/media-preview');
+  const file = publicSite(req).publicMediaFile(req.params.id, req.query.type);
+  const buffer = await mediaPreview(file);
+  res.set('Cache-Control', 'private, max-age=60').type('webp').send(buffer);
+}));
 app.use('/api/public/collections', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();

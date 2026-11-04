@@ -11,6 +11,7 @@ function fixture(items, options = {}, connection = {}) {
   let serial = 0, top = 0, created = 0, requests = 0;
   const grid = {
     children: [], style: {}, clientWidth: 1000,
+    addEventListener() {}, removeEventListener() {},
     getBoundingClientRect: () => ({ top }),
     append(el) { this.children.push(el); },
   };
@@ -24,6 +25,7 @@ function fixture(items, options = {}, connection = {}) {
     cancelAnimationFrame: id => frames.delete(id),
     setTimeout: fn => { timers.set(++serial, fn); return serial; }, clearTimeout: id => timers.delete(id),
     ResizeObserver: class { observe() {} disconnect() {} },
+    publicUrl: value => value, encodeURIComponent,
   });
   vm.runInContext(controller + rows, context);
   const gallery = context.mediaGrid(grid, items, value => {
@@ -194,15 +196,20 @@ test('justified layout preserves original row selection without quadratic list c
   for (const p of positions) assert(p.x >= 0 && p.x + p.w <= 1000 && p.h > 0 && p.h <= 240);
 });
 
-test('Liked uses large cards and windowed date headings without increasing media budgets', () => {
+test('Liked original-size timeline never enlarges or crops and reflows to screen height', () => {
   const items = Array.from({ length: 240 }, (_, i) => item(i));
-  const f = fixture(items, { minWidth: 320, groupBy: v => ({ key: String(Math.floor(v.id / 24)), label: 'Date' }) });
+  items[0] = item(0, { width: 4000, height: 3000 });
+  const f = fixture(items, { originalSize: true, groupBy: v => ({ key: String(Math.floor(v.id / 24)), label: 'Date' }) });
   f.gallery.layout(); f.flush();
   const tiles = f.grid.children.filter(el => el.img);
-  assert(tiles.length <= 9);
-  assert(tiles.every(el => /width:328px/.test(el.style.cssText)));
+  assert(tiles.length <= 4);
+  assert(tiles.some(el => /width:800px;height:600px/.test(el.style.cssText)));
+  assert(tiles.some(el => /width:160px;height:120px/.test(el.style.cssText)), 'small originals are never enlarged');
   assert.equal(f.grid.children.filter(el => !el.img).length, 1);
   assert.equal(f.active().length, 2);
+  f.context.innerHeight = 600;
+  f.handlers.get('resize')(); f.flush(); f.flush();
+  assert(f.grid.children.some(el => /height:400px/.test(el.style.cssText)), 'height-only screen changes update fitting');
   f.scroll(3600); f.settleScroll();
   assert(f.grid.children.filter(el => !el.img).length <= 2);
   f.gallery.pause(true); assert.equal(f.grid.children.length, 0);
@@ -229,13 +236,51 @@ test('pagination reflows only unfinished lookahead rows with exact full-layout g
   assert.deepEqual(resized, context.justifyRows({ style: {} }, items, 600, 6, { maxH: 240 }));
 });
 
-test('all three routes use the bounded grid and only viewers directly load original sources', () => {
+test('all four routes use the bounded grid and leave image requests to its scheduler', () => {
   const routes = source.slice(source.indexOf('async function likedView('), source.indexOf('function openViewer('));
-  assert.equal((routes.match(/mediaGrid\(grid,/g) || []).length, 3);
-  assert.equal((routes.match(/gallery\.close\(\)/g) || []).length, 2);
-  assert.equal((routes.match(/signal: request.signal/g) || []).length, 6);
+  assert.equal((routes.match(/mediaGrid\(grid,/g) || []).length, 4);
+  assert.equal((routes.match(/previews: true/g) || []).length, 4);
+  assert.equal((routes.match(/gallery\.close\(\)/g) || []).length, 3);
+  assert.equal((routes.match(/signal: request.signal/g) || []).length, 7);
   assert.doesNotMatch(routes, /loading="lazy"/);
   assert.equal((routes.match(/<img src=/g) || []).length, 0, 'all routes leave source loading to the bounded grid and shared viewer');
+});
+
+test('every visible Trending tile gets a bounded preview while at most two GIFs animate', () => {
+  const items = Array.from({ length: 200 }, (_, id) => item(id, { type: 'gif' }));
+  const f = fixture(items, { previews: true });
+  f.gallery.layout(); f.flush();
+  for (let i = 0; i < 50; i++) f.complete();
+  const visible = f.grid.children.filter(el => {
+    const [, top, height] = /top:([\d.]+)px.*height:([\d.]+)px/.exec(el.style.cssText);
+    return +top < 800 && +top + +height > 0;
+  });
+  assert(visible.length > 2);
+  assert(visible.every(el => el.img.src && el.dataset.mediaState === 'ready'));
+  assert.equal(f.loaded().filter(el => el.img.src.startsWith('/media/')).length, 2);
+  assert(f.loaded().filter(el => el.img.src.includes('/preview?')).length > 2);
+  assert.equal(f.active().length, 0);
+  assert(f.loaded().length <= 80);
+  const first = visible.find(el => el.img.src.includes('/preview?'));
+  const old = first.img.src;
+  f.scroll(20);
+  assert.equal(first.img.src, old, 'static previews also survive small scrolls');
+  f.gallery.close();
+  assert.equal(f.timers.size, 0, 'request deadlines are cleared on cleanup');
+});
+
+test('a stalled preview request expires, frees the queue and ignores late completion', () => {
+  const f = fixture(Array.from({ length: 200 }, (_, id) => item(id)), { previews: true });
+  f.gallery.layout(); f.flush();
+  const tile = f.active()[0], late = tile.img.onload;
+  for (const fn of [...f.timers.values()]) fn();
+  f.flush();
+  assert.equal(tile.dataset.mediaState, 'error');
+  assert(!tile.img.src);
+  late(); f.flush();
+  assert.equal(tile.dataset.mediaState, 'error');
+  assert(f.active().length > 0, 'remaining visible requests can proceed');
+  f.gallery.close();
 });
 
 test('Liked infinite paging deduplicates requests, rearms after success and stops on errors or route exit', async () => {

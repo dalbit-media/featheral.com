@@ -396,6 +396,18 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   for (const slug of ['api', '../escape', 'Bad name', '', 'x'.repeat(64)]) {
     assert.throws(() => provision(input(slug)), /Free website names/);
   }
+  const image = await require('sharp')({ create: { width: 800, height: 600, channels: 3, background: '#42697a' } }).png().toBuffer();
+  fs.writeFileSync(path.join(first.data.localDir, 'uploads', 'neutral.png'), image);
+  const post = { ID: 1, post_type: 'post', post_status: 'publish', post_title: 'Neutral landscape', post_content: '',
+    post_excerpt: '', post_date: '2026-01-01', post_author: 0, post_parent: 0, post_mime_type: '', comment_count: 0 };
+  new (require('../lib/sync').SyncRunner)().writeDb(path.join(first.data.localDir, 'db.sqlite'), first.data.key, {
+    posts: new Map([[1, post], [2, { ...post, ID: 2, post_status: 'draft' }],
+      [101, { ...post, ID: 101, post_type: 'attachment', post_status: 'inherit', post_parent: 1, post_mime_type: 'image/png' }]]),
+    postmeta: [[101, '_wp_attached_file', 'neutral.png'], [101, '_wp_attachment_metadata',
+      require('../lib/phpser').serialize({ file: 'neutral.png', filesize: image.length, width: 800, height: 600, sizes: {} })]],
+    terms: new Map(), rels: [], comments: [], users: new Map(), usermeta: [], options: {}, raw: [],
+  }, { contentFormat: 'rendered', api: { siteUrl: first.data.siteUrl, requests: 0 }, manifest: { key: first.data.key } });
+  writeJson(path.join(first.data.localDir, 'uploads-index.json'), [{ path: 'neutral.png', size: image.length, ext: 'png', image: true }]);
   const prefix = first.data.path;
   assert.equal((await request(prefix)).location, prefix + '/');
   const shell = await request(prefix + '/');
@@ -428,6 +440,28 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   assert.equal(liked.data.sort, 'recent');
   assert.equal(liked.data.limit, 24);
   assert.equal(liked.headers['cache-control'], 'no-store');
+  const trashResponse = await request(prefix + '/api/public/trash');
+  assert.equal(trashResponse.status, 200);
+  assert.equal(trashResponse.data.limit, 24);
+  assert.equal(trashResponse.data.total, 0);
+  assert.equal(trashResponse.headers['cache-control'], 'no-store');
+  assert.equal((await request(prefix + '/api/public/posts/999999/curation?type=jpeg')).status, 404);
+  assert.equal((await request(prefix + '/api/public/posts/999999/media?type=jpeg')).status, 404);
+  assert.equal((await request(prefix + '/api/public/posts/999999/preview?type=jpeg')).status, 404);
+  assert.equal((await request(prefix + '/api/public/posts/1/curation?type=png')).data.round, 1);
+  const thumbnail = await request(prefix + '/api/public/posts/1/preview?type=png');
+  assert.equal(thumbnail.status, 200);
+  assert.match(thumbnail.headers['content-type'], /image\/webp/);
+  assert.equal((await request(second.data.path + '/api/public/posts/1/preview?type=png')).status, 404);
+  assert.equal((await request(prefix + '/api/public/posts/2/curation?type=png')).status, 404);
+  assert.equal((await request(prefix + '/api/public/vote', { id: 1, type: 'png', round: 1, vote: 'dislike' })).data.deleted, true);
+  assert.equal((await request(prefix + '/api/public/trash')).data.items[0].id, 1);
+  const movedMedia = await request(prefix + '/api/public/posts/1/media?type=png');
+  assert.equal(movedMedia.status, 200);
+  assert.match(movedMedia.headers['content-type'], /image\/png/);
+  assert.equal((await request(prefix + '/api/public/posts/1/preview?type=png')).status, 200);
+  assert.equal((await request(prefix + '/api/public/vote', { id: 1, type: 'png', round: 1, vote: 'none' })).data.deleted, false);
+  assert.equal((await request(prefix + '/api/public/trash')).data.total, 0);
   assert.equal((await request(prefix + '/api/public/collections')).status, 401);
   const wallet = require('ethers').Wallet.createRandom();
   const nonce = await request(prefix + '/api/public/wallet/nonce', { address: wallet.address });

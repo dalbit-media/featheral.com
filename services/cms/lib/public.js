@@ -314,13 +314,14 @@ class PublicSite {
 
   // like: +1 and keep. dislike: −1; in round 1 this also moves the post with its media to the trash,
   // from round 2 on it is only recorded. none: undo this round's vote. `type` may also be 'thumbs'.
-  vote(id, type, vote, token = '') {
+  vote(id, type, vote, token = '', expectedRound) {
     id = +id;
     if (type !== 'thumbs') this.checkType(type);
     if (!VOTES.includes(vote)) throw httpError(400, 'Invalid vote');
     const known = type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type];
     if (!isPublished(this.site, id) || !known) throw httpError(404, 'Post not found');
     const round = this.store.round(type);
+    if (expectedRound !== undefined && expectedRound !== round) throw httpError(409, 'The round changed. Reopen this post before voting.');
     const existing = this.store.vote(id, type, round);
     const trashed = this.store.trashRow(id);
     const ownTrash = trashed && trashed.type === type && trashed.round === round;
@@ -486,7 +487,7 @@ class PublicSite {
 
   comments(id) {
     id = +id;
-    if (!isPublic(this.site, id)) throw httpError(404, 'Post not found');
+    if (!isPublished(this.site, id)) throw httpError(404, 'Post not found');
     // Comments synced from WordPress (read-only) come first, then wallet comments left here.
     let wp = [];
     try {
@@ -576,7 +577,7 @@ class PublicSite {
       const c = counts.get(id) || { likes: 0, dislikes: 0 };
       return {
         ...memberFields(members.get(id)),
-        id, title: T.decodeEntities(r?.post_title || '') || 'Untitled', description: r ? describe(r) : '', date: r?.post_date, media: mainMedia(this.site, id),
+        id, title: T.decodeEntities(r?.post_title || '') || 'Untitled', description: r ? describe(r) : '', date: r?.post_date, media: mainMedia(this.site, id), deck: 'thumbs',
         vote: mine.get(id) || null, likes: c.likes, dislikes: c.dislikes, comments: talk.get(id) || 0, views: seen.get(id) || 0,
       };
     });
@@ -639,6 +640,56 @@ class PublicSite {
         comments: comments.get(r.post_id) || 0, views: viewed.get(r.post_id) || 0, media: this.likedMedia(r), deck: r.type,
       })),
     };
+  }
+
+  curation(id, type) {
+    id = +id;
+    if (!isPublished(this.site, id)) throw httpError(404, 'Post not found');
+    if (!type) type = this.galleryPosts().get(id)?.deck;
+    if (type !== 'thumbs') this.checkType(type);
+    if (!(type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]))
+      throw httpError(404, 'Media not found');
+    const round = this.store.round(type);
+    const counts = this.store.counts([id]).get(id) || { likes: 0, dislikes: 0 };
+    const trash = this.store.trashRow(id);
+    return { id, type, round, vote: this.store.vote(id, type, round), ...counts, deleted: !!trash,
+      canRestore: !trash || (trash.type === type && trash.round === round) };
+  }
+
+  publicMediaFile(id, type) {
+    const state = this.curation(id, type);
+    const media = state.type === 'thumbs' ? mainMedia(this.site, +id)
+      : { ...this.site.postMetrics().get(+id).imageBest[state.type], type: state.type };
+    const prefix = this.site.mediaBase + '/';
+    if (!media.url?.startsWith(prefix)) throw httpError(404, 'Local media not found');
+    const relative = media.url.slice(prefix.length).split('/').map(decodeURIComponent).join('/');
+    const trash = this.store.trashRow(+id);
+    const directory = trash?.files.includes(relative) ? this.trashDir : this.uploadsDir;
+    const file = inside(directory, relative);
+    if (!file || !fs.existsSync(file)) throw httpError(404, 'Media file not found');
+    return file;
+  }
+
+  publicTrash(q = {}) {
+    const trash = new Map(this.store.trashRows().map(row => [row.post_id, row]));
+    const counts = this.store.activity();
+    const all = [...this.galleryPosts()].filter(([id]) => isPublished(this.site, id)
+      && (trash.has(id) || (counts.get(id)?.dislikes || 0) > (counts.get(id)?.likes || 0)));
+    all.sort(([a], [b]) => Number(trash.has(b)) - Number(trash.has(a))
+      || (trash.get(b)?.at || 0) - (trash.get(a)?.at || 0)
+      || (counts.get(b)?.dislikes || 0) - (counts.get(a)?.dislikes || 0) || b - a);
+    const offset = clampInt(q.offset, 0, all.length, 0), limit = clampInt(q.limit, 1, 200, 24);
+    const slice = all.slice(offset, offset + limit), ids = slice.map(([id]) => id);
+    const rows = postRows(this.site, ids), comments = this.commentCounts(ids), members = this.store.memberInfo(ids);
+    return { total: all.length, offset, limit, items: slice.map(([id, entry]) => {
+      const owner = trash.get(id)?.type;
+      const type = owner === 'thumbs' || PUBLIC_TYPES.includes(owner) ? owner : entry.deck;
+      const state = this.curation(id, type), media = this.likedMedia({ post_id: id, type });
+      if (state.deleted) media.url = `/api/public/posts/${id}/media?type=${encodeURIComponent(state.type)}`;
+      return { ...memberFields(members.get(id)), ...state, deck: state.type, title: T.decodeEntities(rows.get(id)?.post_title || '') || 'Untitled',
+        description: rows.get(id) ? describe(rows.get(id)) : '', media, comments: comments.get(id) || 0,
+        trashedAt: trash.get(id)?.at || null };
+    }) };
   }
 
   ownedCollection(address, id) {
