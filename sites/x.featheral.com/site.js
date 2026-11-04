@@ -15,6 +15,11 @@ const hostedSite = document.querySelector('meta[name=site-key]')?.content;
 const siteBase = document.querySelector('meta[name=site-base]')?.content || '';
 if (location.hostname === 'x.featheral.com' || location.hostname === 'x.localhost')
   document.body.dataset.standalone = 'x';
+const walletEnabled = document.body.dataset.standalone !== 'x';
+if (!walletEnabled) {
+  $('header')?.setAttribute('data-no-central-wallet', '');
+  $('#wallet')?.remove();
+} else if ($('#wallet')) $('#wallet').hidden = false;
 const storageKey = (key) => previewSite || hostedSite ? `site:${previewSite || hostedSite}:${key}` : key;
 function publicUrl(url) {
   if (!previewSite) return url.startsWith('/api/') ? siteBase + url : url;
@@ -37,7 +42,7 @@ async function api(url, opts = {}) {
 // ---------- Ethereum wallet sign-in ----------
 // The wallet signs a one-time message (no transaction, no gas); the server checks the signature and
 // returns a session token used to post comments.
-let wallet = (() => { try { return JSON.parse(localStorage.getItem(storageKey('wallet'))) || {}; } catch { return {}; } })();
+let wallet = (() => { if (!walletEnabled) return {}; try { return JSON.parse(localStorage.getItem(storageKey('wallet'))) || {}; } catch { return {}; } })();
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '');
 function setWallet(w) {
   wallet = w || {};
@@ -67,6 +72,7 @@ async function refreshBalance() {
   try { const r = await api('/api/public/wallet/me'); setBalance(r.balance); return r.balance; } catch { return null; }
 }
 async function connectWallet() {
+  if (!walletEnabled) { toast('Wallet features are temporarily unavailable on Featheral X.'); return false; }
   try {
     if (!window.FeatheralWallet) throw new Error('Central wallet is loading or unavailable. Reload and retry.');
     const authorization = await window.FeatheralWallet.authenticate(address => api('/api/public/wallet/nonce', { json: { address } }));
@@ -88,6 +94,7 @@ async function disconnectWallet() {
 
 // ---------- Shared FTHX wallet ----------
 async function openWalletPanel() {
+  if (!walletEnabled) { toast('Wallet features are temporarily unavailable on Featheral X.'); return; }
   if (window.FeatheralWallet) {
     window.FeatheralWallet.open({ primary: 'FTHX', address: wallet.address, compact: true });
     const dialog = document.getElementById('featheral-central-wallet');
@@ -108,6 +115,7 @@ async function openWalletPanel() {
 
 // After a like: the server reports any community-note reward.
 function rewardNote(r) {
+  if (!walletEnabled) return;
   const w = r?.reward;
   if (!w) return;
   if (w.balance != null) setBalance(w.balance);
@@ -345,7 +353,13 @@ async function render() {
     if (parts[0] === 'trash') { setTab('trash'); return await trashView(); }
     if (parts[0] === 'thumbs') { setTab('thumbs'); return thumbsView(q); }
     if (parts[0] === 'trending') { setTab('trending'); return trendingView(q); }
-    if (parts[0] === 'post') { setTab('post'); return postView(); }
+    if (parts[0] === 'post') {
+      if (!walletEnabled) {
+        view().innerHTML = '<section class="read"><h1>Posting is temporarily unavailable</h1><p>Wallet features are paused on Featheral X. You can still browse, vote and read existing comments.</p><a class="btn" href="#/">Back to Discover</a></section>';
+        return;
+      }
+      setTab('post'); return postView();
+    }
     setTab('swipe');
     return swipeView('mix');
   } catch (e) {
@@ -785,7 +799,7 @@ async function readerView(id, q, bySlug = false) {
   const landing = projectPage && id === 'fthx';
   const hasPage = (slug) => info.pages?.some((page) => page.slug === slug);
   const actions = projectPage ? `<div class="project-actions">
-    <a class="btn primary" href="#/post">Share media</a><a class="btn" href="#/">Explore Featheral X</a>
+    ${walletEnabled ? '<a class="btn primary" href="#/post">Share media</a>' : ''}<a class="btn" href="#/">Explore Featheral X</a>
     ${hasPage(landing ? 'fthx-whitepaper' : 'fthx') ? `<a class="btn" href="#/page/${landing ? 'fthx-whitepaper' : 'fthx'}">${landing ? 'Read the whitepaper' : 'About FTHX'}</a>` : ''}
   </div>` : '';
   view().innerHTML = `<section class="reader${projectPage ? ' project-page' : ''}${landing ? ' project-landing' : ''}">
@@ -1647,6 +1661,7 @@ function openViewer(list, i, opts = {}) {
   // Member posts: who posted it, what it earned, and tip buttons.
   function authorHtml(v) {
     if (!v.author) return '';
+    if (!walletEnabled) return `<div class="vauthor">Posted by <b title="${esc(v.author)}">${esc(short(v.author))}</b></div>`;
     const own = wallet.address === v.author;
     const tips = info?.token?.tips || [1, 5, 25];
     return `<div class="vauthor"><div>Posted by <b title="${esc(v.author)}">🦊 ${esc(short(v.author))}</b> · <span id="v-earned">🪙 ${fmtNum(v.earned || 0)} FTHX earned</span></div>
@@ -1686,6 +1701,7 @@ function openViewer(list, i, opts = {}) {
   function paintForm() {
     const f = $('#c-form', box);
     if (!f) return;
+    if (!walletEnabled) { f.innerHTML = '<p class="count">Comments are read-only while wallet features are paused.</p>'; return; }
     if (list[i].deleted) { f.innerHTML = '<p class="count">Restore this post before adding comments.</p>'; return; }
     f.innerHTML = wallet.address
       ? `<textarea id="c-text" rows="3" maxlength="2000" placeholder="Write a comment as ${esc(short(wallet.address))}…"></textarea>
@@ -2145,14 +2161,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[data-feature]').forEach((link) => { link.hidden = !settings?.[link.dataset.feature]; });
   document.querySelectorAll('[data-media-tab]').forEach((link) => { link.hidden = settings?.homepage !== 'media'; });
   $('[data-tab="home"]').hidden = settings?.homepage === 'media';
-  $('#fab').hidden = settings?.homepage !== 'media';
+  $('#fab').hidden = !walletEnabled || settings?.homepage !== 'media';
   $('.logo').title = info.tagline || info.brand;
   document.querySelector('meta[name=description]')?.setAttribute('content', info.tagline || info.brand);
   paintWallet();
-  $('#wallet').addEventListener('click', openWalletPanel);
+  $('#wallet')?.addEventListener('click', openWalletPanel);
   if (wallet.token) refreshBalance().then((b) => { if (b == null && wallet.token) api('/api/public/wallet/me').catch(() => setWallet(null)); });
   // Switching accounts in the wallet ends the session of the account that signed in.
-  window.ethereum?.on?.('accountsChanged', (accounts) => {
+  if (walletEnabled) window.ethereum?.on?.('accountsChanged', (accounts) => {
     if (wallet.address && (accounts?.[0] || '').toLowerCase() !== wallet.address.toLowerCase()) { setWallet(null); toast('Wallet account changed — connect again to comment'); }
   });
   await gate();

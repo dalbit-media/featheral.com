@@ -70,7 +70,7 @@ body[data-standalone="x"] #gate h2 { font-size: 32px; letter-spacing: -1px; }
     height: var(--top); flex-wrap: wrap; align-content: space-between;
     padding: calc(10px + env(safe-area-inset-top)) 16px 0; gap: 6px 12px;
   }
-  body[data-standalone="x"] header.top .logo { font-size: 21px; max-width: calc(100% - 115px); }
+  body[data-standalone="x"] header.top .logo { font-size: 21px; max-width: 100%; }
   body[data-standalone="x"] .logo .mark { width: 34px; height: 34px; }
   body[data-standalone="x"] .logo .sub { display: none; }
   body[data-standalone="x"] header.top > :is(.wallet, .central-wallet-button) { margin-left: auto; }

@@ -183,7 +183,7 @@
   document.addEventListener("featheral:site-ready", () => apply());
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => apply());
   else apply();
-  if (current !== "wallet" && current !== "admin" && !document.querySelector('script[data-central-wallet-loader]')) {
+  if (current !== "wallet" && current !== "admin" && current !== "x" && !document.querySelector('script[data-central-wallet-loader]')) {
     const script = document.createElement("script"); script.dataset.centralWalletLoader = "true";
     script.src = url("wallet", "/embed.js");
     script.onerror = () => {

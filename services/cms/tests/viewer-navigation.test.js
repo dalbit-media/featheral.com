@@ -18,7 +18,7 @@ function fixture(list, opts = {}, apiOverride) {
       addEventListener: (key, fn) => handlers.set(key, fn), removeEventListener: key => handlers.delete(key),
     },
     $: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); },
-    esc: String, fmtNum: String, fmtBytes: String, TYPE_LABEL: { jpeg: 'JPG' }, wallet: {}, info: {},
+    esc: String, fmtNum: String, fmtBytes: String, TYPE_LABEL: { jpeg: 'JPG' }, walletEnabled: true, wallet: {}, info: {},
     countView: value => views.push(value.id), toast: message => calls.push({ error: message }),
     rewardNote() {}, publicUrl: String, encodeURIComponent,
     api: async (url, options) => {

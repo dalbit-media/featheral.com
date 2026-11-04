@@ -441,7 +441,7 @@
       address: root.dataset.walletAddress,
     });
     const header = document.querySelector("body > header, #app > header, header.topbar");
-    if (header && !location.hostname.startsWith("admin.") && !header.hasAttribute("data-no-central-wallet")) {
+    if (header && !["x.featheral.com", "x.localhost"].includes(location.hostname) && !location.hostname.startsWith("admin.") && !header.hasAttribute("data-no-central-wallet")) {
       let button = header.querySelector("[data-central-wallet]") || header.querySelector(".wallet-icon, #wallet");
       if (!button) {
         button = document.createElement("button"); button.type = "button"; button.dataset.centralWallet = "true";

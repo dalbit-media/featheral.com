@@ -116,16 +116,43 @@ test("wallet icon actions have accessible labels and retain visible network safe
     "address input must override legacy ID margins so the inline copy icon stays centered");
   assert.doesNotMatch(css, /\[data-embedded=true\]\s+#local-wallet\s*\{display:none/);
 });
-test("X uses the central FTHX wallet without site top-ups, provider bridging or a second wallet layout", async () => {
+test("X hides wallet controls without loading saved sessions or changing other CMS hosts", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../../sites/x.featheral.com/site.js"), "utf8");
+  for (const [hostname, enabled] of [["x.featheral.com", false], ["x.localhost", false], ["sites.featheral.com", true]]) {
+    let removed = false, suppressed = false, reads = 0;
+    const button = { hidden: true, remove() { removed = true; } };
+    const context = vm.createContext({ location: { hostname }, document: { body: { dataset: {} } },
+      $: selector => selector === "header" ? { setAttribute() { suppressed = true; } } : button,
+      localStorage: { getItem() { reads++; return '{"token":"retained-session"}'; } }, storageKey: String });
+    vm.runInContext(source.slice(source.indexOf("if (location.hostname ==="), source.indexOf("const storageKey =")), context);
+    vm.runInContext(source.slice(source.indexOf("let wallet ="), source.indexOf("const short =")), context);
+    assert.equal(vm.runInContext("walletEnabled", context), enabled);
+    assert.equal(removed, !enabled); assert.equal(suppressed, !enabled);
+    assert.equal(reads, enabled ? 1 : 0);
+    if (enabled) assert.equal(button.hidden, false);
+  }
+  assert.match(source, /if \(!walletEnabled\) \{ f.innerHTML = '<p class="count">Comments are read-only/);
+  assert.match(source, /if \(!walletEnabled\) return `<div class="vauthor">Posted by/);
+  assert.match(source, /#fab'\)\.hidden = !walletEnabled/);
+  const links = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
+  assert.match(links, /current !== "admin" && current !== "x"/);
+  const embed = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/embed.js"), "utf8");
+  assert.match(embed, /!\["x.featheral.com", "x.localhost"\]\.includes\(location.hostname\)/);
+});
+
+test("shared CMS wallet remains available when enabled but is paused on standalone X", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../sites/x.featheral.com/site.js"), "utf8");
   const snippet = source.slice(source.indexOf("async function openWalletPanel()"), source.indexOf("// After a like:"));
   const calls = [], root = { style: {} }, dialog = { querySelector: selector => selector === '[data-wallet-root]' ? root : null, append() {} };
   const context = vm.createContext({ window: { FeatheralWallet: { open: config => calls.push(config) } },
     document: { getElementById: () => dialog, createElement: () => ({ dataset: {}, style: {}, addEventListener() {} }) },
-    wallet: { address: "0x1111111111111111111111111111111111111111" } });
+    walletEnabled: true, toast() {}, wallet: { address: "0x1111111111111111111111111111111111111111" } });
   vm.runInContext(snippet, context); await context.openWalletPanel();
   assert.equal(calls[0].primary, "FTHX"); assert.equal(calls[0].compact, true); assert.equal(calls[0].address, context.wallet.address);
   assert.equal(root.style.height, 'calc(100% - 64px)');
+  context.walletEnabled = false;
+  await context.openWalletPanel();
+  assert.equal(calls.length, 1, "paused X never opens the wallet");
   assert.doesNotMatch(source, /function addFthx|className = 'wpanel'|wallet\/deposit\/request/);
   assert.match(source, /addEventListener\('click', openWalletPanel\)/);
   let applied = 0;
@@ -279,7 +306,7 @@ test("community, creation and trading sign-ins reuse central authorization witho
   const window = { FeatheralWallet: { async authenticate(challenge) { await challenge(address); return authorization; } } };
   const social = fs.readFileSync(path.join(__dirname, "../../../sites/x.featheral.com/site.js"), "utf8");
   let socialAccount;
-  const context = { window, api: async (url, input) => {
+  const context = { window, walletEnabled: true, api: async (url, input) => {
     calls.push({ url, input }); return url.endsWith("/nonce") ? { message: "standard challenge" } : { ...authorization, token: "social-only" };
   }, setWallet: account => { socialAccount = account; }, toast() {}, short: value => value, refreshBalance() {} };
   vm.runInNewContext(social.slice(social.indexOf("async function connectWallet()"), social.indexOf("async function disconnectWallet()")), context);
