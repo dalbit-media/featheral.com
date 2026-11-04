@@ -244,7 +244,10 @@ test('category keyword chips preserve search, sort and category, reset paging an
   assert.match(html, /Clear keyword filter/);
   assert.match(context.readingKeywords([], { category: '6' }), /No keywords yet/);
   assert.match(context.readingKeywords([], { category: '6', tag: '999' }), /Clear keyword filter/);
-  assert.match(context.readingKeywords([], { category: '6' }, true), /data-more-keywords>Show more keywords/);
+  assert.match(context.readingKeywords([], { category: '6' }, true), /class="chip more" data-more-keywords>Show more<\/button><\/nav>/);
+  assert.match(context.readingKeywords([{ id: 8, name: 'Sample', count: 15 }], {}), /aria-label="Reading keywords"/);
+  assert.match(html, /title="15 readings"/);
+  assert.doesNotMatch(html, /<h2|class="count">15/);
   assert.doesNotMatch(context.readingKeywords([], { category: '6' }), /data-more-keywords>/);
   const list = source.slice(source.indexOf('async function readListView('), source.indexOf('async function readerView('));
   assert.match(list, /sort, category, tag, \.\.\.patch/);
@@ -252,7 +255,7 @@ test('category keyword chips preserve search, sort and category, reset paging an
   assert.match(list, /sort, category, tag, page: r\.page \+ 1/);
 });
 
-test('category views start with search and load more keywords without dropping filters or hiding errors', async () => {
+test('Read and category views start with search and sort, and page compact keywords without banners or hidden errors', async () => {
   const nodes = new Map(), calls = [];
   const node = selector => {
     if (!nodes.has(selector)) nodes.set(selector, { innerHTML: '', textContent: '', hidden: false, addEventListener() {}, focus() {} });
@@ -276,7 +279,8 @@ test('category views start with search and load more keywords without dropping f
   vm.runInContext(source.slice(source.indexOf('function readingKeywords('), source.indexOf('async function readerView(')), context);
   await context.readListView({ category: '10', tag: '2', q: 'sample', sort: 'newest' });
   assert.match(root.innerHTML, /^\s*<section[^>]*>\s*<div class="tools reading-tools"/);
-  assert.doesNotMatch(root.innerHTML, /reading-heading|reading-pages|FTHX/);
+  assert.doesNotMatch(root.innerHTML, /reading-heading|reading-pages|reading-filter|FTHX/);
+  assert.match(root.innerHTML, /<select id="sort">/);
   assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 40);
   fail = true;
   await node('[data-more-keywords]').onclick();
@@ -293,8 +297,14 @@ test('category views start with search and load more keywords without dropping f
   assert(calls.some(url => url.includes('keywordOffset=80')));
   context.cleanup();
   await context.readListView({});
-  assert.match(root.innerHTML, /reading-heading/);
-  assert.match(root.innerHTML, /FTHX/);
+  assert.match(root.innerHTML, /^\s*<section[^>]*>\s*<div class="tools reading-tools"/);
+  assert.doesNotMatch(root.innerHTML, /reading-heading|reading-pages|reading-filter|FTHX/);
+  assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 40);
+  await node('[data-more-keywords]').onclick();
+  assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 80);
+  const globalPage = new URL(calls.at(-1), 'http://example.test');
+  assert.equal(globalPage.searchParams.get('category'), '');
+  assert.equal(globalPage.searchParams.get('keywordOffset'), '40');
   context.cleanup();
   await context.readListView({ category: '10' });
   hold = true;
@@ -305,6 +315,45 @@ test('category views start with search and load more keywords without dropping f
   resume();
   await pending;
   assert.equal(node('#reading-keywords').innerHTML, before, 'disposed requests never repaint');
+});
+
+test('Trending fills the final tag row with a trailing Show more and refits on resize', () => {
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(source.indexOf('function fitTagRow('), source.indexOf('// Photos with a GIF')), context);
+  let width = 460;
+  const chips = Array.from({ length: 130 }, (_, i) => ({ width: 44 + (i % 5) * 11, hidden: false }));
+  const button = { width: 90 };
+  function positions() {
+    let x = 0, y = 0;
+    const result = new Map();
+    for (const chip of [...chips, button]) {
+      if (chip.hidden) continue;
+      if (x && x + chip.width > width) { x = 0; y += 30; }
+      result.set(chip, { x, y });
+      x += chip.width + 6;
+    }
+    return result;
+  }
+  for (const chip of [...chips, button]) Object.defineProperty(chip, 'offsetTop', { get: () => positions().get(chip)?.y });
+  const container = { querySelectorAll: () => chips, querySelector: () => button };
+  for (const nextWidth of [460, 1100, 320, 720]) {
+    width = nextWidth;
+    const visible = context.fitTagRow(container, 41);
+    assert(visible >= 35 && visible < chips.length);
+    assert.equal(button.offsetTop, chips[visible - 1].offsetTop, 'Show more stays at the end of the last populated row');
+    const last = positions().get(button);
+    assert(last.x + button.width <= width);
+    assert(last.x + button.width + 6 + chips[visible].width + 6 > width, 'no additional tag fits before Show more');
+    assert(chips.slice(visible).every(chip => chip.hidden), 'overflow tags are hidden');
+  }
+  const before = context.fitTagRow(container, 41);
+  assert(context.fitTagRow(container, 81) > before);
+  const trend = source.slice(source.indexOf('function trendingView('), source.indexOf('async function trashView('));
+  assert.match(trend, /tagLimit = 40/);
+  assert.match(trend, /limit: 80/);
+  assert.match(trend, /tagLimit \+= 40/);
+  assert.match(trend, /new ResizeObserver/);
+  assert.match(trend, /tagResize\.disconnect\(\)/);
 });
 
 test('reading thumbnails use lazy bounded previews, site scoping, and reject invalid media', () => {

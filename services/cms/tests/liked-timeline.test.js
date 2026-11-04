@@ -143,7 +143,11 @@ test('category keywords count all kept readings before search and paging and sta
   assert.equal(pub.textList({ category: '10', tag: '999' }).total, 0);
   assert.equal(pub.textList({ category: '10', tag: '60' }).total, 0, 'ambiguous fragments are not public filter keywords');
   assert.deepEqual(pub.textList({ category: '999' }).keywords, []);
-  assert.deepEqual(pub.textList({}).keywords, []);
+  const allKeywords = [{ id: 30, name: 'Alpha', count: 3 }, { id: 40, name: 'Beta', count: 1 }];
+  assert.deepEqual(pub.textList({}).keywords, allKeywords);
+  assert.equal(pub.textList({}).keywordTotal, 2);
+  assert.deepEqual(pub.textList({ q: 'Post 2', tag: '30' }).keywords, allKeywords, 'Read keeps the global keyword overview while searching or filtering');
+  assert.deepEqual(pub.textList({ tag: '40' }).items.map(row => row.id), [1]);
   assert.throws(() => pub.textList({ tag: 'bad' }), { status: 400 });
   assert.throws(() => pub.textList({ category: '9007199254740992' }), { status: 400 });
   pub.vote(1, 'read', 'dislike');
@@ -166,6 +170,10 @@ test('category keywords start with forty, page through all tags and retain a sel
   assert.equal(top.length, 40);
   assert.deepEqual(top.map(tag => tag.id), Array.from({ length: 40 }, (_, i) => 100 + i));
   assert.equal(pub.textList({ category: '10' }).keywordTotal, 85);
+  assert.equal(pub.textList({}).keywords.length, 40);
+  assert.equal(pub.textList({}).keywordTotal, 85);
+  assert.equal(pub.textList({ keywordOffset: '80' }).keywords.length, 5);
+  assert.deepEqual(pub.textList({ tag: '184' }).keywords.map(tag => tag.id), [...top.map(tag => tag.id), 184]);
   assert.deepEqual(pub.textList({ category: '10', tag: '184' }).keywords.map(tag => tag.id), [...top.map(tag => tag.id), 184]);
   const second = pub.textList({ category: '10', keywordOffset: '40' }).keywords;
   assert.equal(second.length, 40);

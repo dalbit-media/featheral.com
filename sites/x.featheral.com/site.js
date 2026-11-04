@@ -792,14 +792,14 @@ function swipeView(type) {
 // ---------- reading ----------
 function readingKeywords(keywords, q, more = false) {
   const link = tag => href(['read'], { q: q.q || '', sort: q.sort || 'longest', category: q.category, tag });
-  return `<section class="reading-keywords" aria-labelledby="reading-keywords-title"><h2 id="reading-keywords-title">Top keywords</h2>
-    ${keywords.length ? `<nav class="ttags" aria-label="Category keywords">
-      <a class="chip ${q.tag ? '' : 'on'}" ${q.tag ? '' : 'aria-current="true"'} href="${link('')}">All keywords</a>
+  return `<section class="reading-keywords">
+    <nav class="ttags" aria-label="${q.category ? 'Category' : 'Reading'} keywords">
+      <a class="chip ${q.tag ? '' : 'on'}" ${q.tag ? '' : 'aria-current="true"'} href="${link('')}" title="Clear keyword filter">All keywords</a>
       ${keywords.map(tag => `<a class="chip ${String(tag.id) === String(q.tag) ? 'on' : ''}" ${String(tag.id) === String(q.tag) ? 'aria-current="true"' : ''}
-        href="${link(tag.id)}">#${esc(tag.name)} <span class="count">${fmtNum(tag.count)}</span></a>`).join('')}</nav>` : '<p class="count">No keywords yet.</p>'}
-    ${more ? '<button type="button" class="btn" data-more-keywords>Show more keywords</button>' : ''}
-    <p class="count" data-keyword-error role="alert" hidden></p>
-    ${q.tag ? `<a class="btn" href="${link('')}">Clear keyword filter</a>` : ''}</section>`;
+        href="${link(tag.id)}" title="${fmtNum(tag.count)} readings">#${esc(tag.name)}</a>`).join('')}
+      ${more ? '<button type="button" class="chip more" data-more-keywords>Show more</button>' : ''}</nav>
+    ${keywords.length ? '' : '<p class="count">No keywords yet.</p>'}
+    <p class="count" data-keyword-error role="alert" hidden></p></section>`;
 }
 
 async function readListView(q) {
@@ -814,12 +814,10 @@ async function readListView(q) {
   const category = q.category || '';
   const tag = q.tag || '';
   view().innerHTML = `<section class="read reading-library">
-    ${category ? '' : `<div class="reading-heading"><div><p class="reading-kicker">Your reading space</p><h1>Find your next good read.</h1></div><a class="btn" href="#/liked?kind=read">♥ Liked readings</a></div>
-    <nav class="reading-pages" aria-label="Read pages">${(info.pages || []).map(page => `<a class="chip" href="${href(['page', page.slug], { from: '/read' })}">${esc(page.title)}</a>`).join('')}</nav>`}
     <div class="tools reading-tools" role="search" aria-label="Find readings">
       <label for="q">Search readings<input type="search" id="q" placeholder="Titles, stories, ideas…" value="${esc(q.q || '')}"></label>
       <label for="sort">Sort by<select id="sort">${[['longest', 'Longest first'], ['shortest', 'Quick reads'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    </div>${category ? `<div class="reading-filter"><span id="reading-category-name">Filtered by category</span><a class="btn" href="${href(['read'], { q: q.q || '', sort })}">Clear filter ×</a></div><div id="reading-keywords"></div>` : ''}
+    </div><div id="reading-keywords"></div>
     <div id="list" aria-live="polite"><div class="loading">Loading…</div></div></section>`;
   if (searchFocused) { $('#q').focus({ preventScroll: true }); $('#q').setSelectionRange(selection, selection); }
   const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, tag, ...patch, page: patch.page || '' }); };
@@ -827,8 +825,7 @@ async function readListView(q) {
   $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => go({ q: e.target.value.trim() }), 450); });
   const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, tag, page, limit: 30 })}&curation=1`, { signal: request.signal });
   if (disposed) return;
-  if (category) {
-    $('#reading-category-name').textContent = r.category?.name || 'Filtered by category';
+  {
     const keywords = new Map((r.keywords || []).map(keyword => [keyword.id, keyword]));
     let keywordOffset = 40;
     const paintKeywords = () => {
@@ -1478,6 +1475,19 @@ function thumbsView(q) {
 }
 
 // ---------- trending ----------
+function fitTagRow(container, limit) {
+  const chips = [...container.querySelectorAll('a.chip')];
+  const button = container.querySelector('button.more');
+  chips.forEach(chip => { chip.hidden = false; });
+  if (!button || chips.length <= limit) return chips.length;
+  const row = chips[limit - 1].offsetTop;
+  let visible = chips.findIndex(chip => chip.offsetTop > row);
+  if (visible < 0) visible = chips.length;
+  chips.slice(visible).forEach(chip => { chip.hidden = true; });
+  while (visible > 1 && button.offsetTop > row) chips[--visible].hidden = true;
+  return visible;
+}
+
 // Photos with a GIF after every few, from the posts of the trending tags (or one picked tag), most
 // liked + commented first. Same justified rows as the thumbnails; 👍 toggles a like in the post's own deck.
 const TREND_SORTS = [['hot', 'Likes + comments'], ['likes', 'Most liked'], ['comments', 'Most commented'], ['newest', 'Newest']];
@@ -1516,46 +1526,78 @@ function trendingView(q) {
   const request = new AbortController();
   const gallery = mediaGrid(grid, items, tileFor, { justified: true, previews: true, maxH: Math.max(220, Math.round(innerHeight * 0.45)) });
 
-  // Tag chips: the trending tags, then "More tags" pages through every other tag (most active first).
-  // While searching, the chips are the tags whose names match.
+  // Keep a page buffered so the final visible row can fill before its Show more button.
   const shownTags = new Set();
-  let tagOffset = 0;
+  const tagList = [];
+  let tagOffset = 0, tagLimit = 40, remoteTags = false, tagsBusy = false, tagsFailed = false, focusTags = false;
   const link = (id) => href(['trending'], { tag: id || '', sort: sortQ });
   const stat = (t) => `${fmtNum(t.posts)} posts${t.likes ? ` · 👍 ${fmtNum(t.likes)}` : ''}${t.comments ? ` · 💬 ${fmtNum(t.comments)}` : ''}`;
   const chip = (t) => `<a class="chip ${t.id === tag ? 'on' : ''}" href="${link(t.id)}" title="${esc(stat(t))}">#${esc(t.name)}</a>`;
-  function addChips(list, hasMore) {
+  function addChips(list) {
     const fresh = list.filter((t) => !shownTags.has(t.id));
     fresh.forEach((t) => shownTags.add(t.id));
-    $('#t-tags .chip.more')?.remove();
-    $('#t-tags').insertAdjacentHTML('beforeend', fresh.map(chip).join('')
-      + (hasMore ? '<button type="button" class="chip more" title="Show more tags">＋ More tags</button>' : ''));
+    tagList.push(...fresh);
+  }
+  function paintTags() {
+    const container = $('#t-tags');
+    container.innerHTML = `<a class="chip ${tag || query ? '' : 'on'}" href="${link(0)}" title="Posts from every trending tag">🔥 All trending</a>`
+      + tagList.map(chip).join('')
+      + (remoteTags || tagList.length > tagLimit ? `<button type="button" class="chip more" title="Show more tags" ${tagsBusy ? 'disabled' : ''}>${tagsBusy ? 'Loading…' : tagsFailed ? 'Retry tags' : 'Show more'}</button>` : '');
+    const visible = fitTagRow(container, tagLimit + 1);
+    if (!remoteTags && visible === tagList.length + 1) container.querySelector('button.more')?.remove();
+    if (focusTags && !tagsBusy) {
+      (container.querySelector('button.more') || container.querySelectorAll('a.chip')[visible - 1])?.focus({ preventScroll: true });
+      focusTags = false;
+    }
+    if (remoteTags && visible === tagList.length + 1 && !tagsBusy && !tagsFailed) moreTags();
   }
   async function moreTags() {
-    if (disposed) return;
-    const btn = $('#t-tags .chip.more');
-    if (!btn || btn.disabled) return;
-    btn.disabled = true; btn.textContent = 'Loading…';
+    if (disposed || tagsBusy || !remoteTags) return;
+    tagsBusy = true;
+    tagsFailed = false;
+    paintTags();
     try {
-      const r = await api(`/api/public/trending/tags?${new URLSearchParams({ offset: tagOffset, limit: 40, ...(query ? { q: query } : {}) })}`, { signal: request.signal });
+      const r = await api(`/api/public/trending/tags?${new URLSearchParams({ offset: tagOffset, limit: 80, ...(query ? { q: query } : {}) })}`, { signal: request.signal });
       if (disposed) return;
+      if (!r.tags.length && tagOffset < r.total) throw new Error('No more tags returned. Please retry.');
       tagOffset = r.offset + r.tags.length;
-      addChips(r.tags, tagOffset < r.total);
-    } catch (e) { if (!disposed) { toast(e.message); btn.disabled = false; btn.textContent = '＋ More tags'; } }
-  }
-  $('#t-tags').addEventListener('click', (e) => { if (e.target.closest('.chip.more')) moreTags(); });
-  async function chips(r) {
-    $('#t-tags').innerHTML = `<a class="chip ${tag || query ? '' : 'on'}" href="${link(0)}" title="Posts from every trending tag">🔥 All trending</a>`;
-    if (r.tag) addChips([{ ...r.tag, posts: r.total, likes: 0, comments: 0 }], false);
-    if (query) {
-      // first page of matching tags; the button continues through the rest
-      tagOffset = 0;
-      $('#t-tags').insertAdjacentHTML('beforeend', '<button type="button" class="chip more">＋ More tags</button>');
-      await moreTags();
-    } else {
-      tagOffset = r.tags.length;
-      addChips(r.tags, r.moreTags);
+      remoteTags = tagOffset < r.total;
+      addChips(r.tags);
+      tagsBusy = false;
+      paintTags();
+    } catch (e) {
+      if (!disposed) {
+        toast(e.message);
+        tagsBusy = false;
+        tagsFailed = true;
+        paintTags();
+      }
     }
   }
+  $('#t-tags').addEventListener('click', (e) => {
+    if (!e.target.closest('.chip.more') || tagsBusy) return;
+    focusTags = true;
+    if (tagsFailed) { moreTags(); return; }
+    tagLimit += 40;
+    if (remoteTags && tagList.length < tagLimit + 40) moreTags();
+    else paintTags();
+  });
+  function chips(r) {
+    if (r.tag) addChips([{ ...r.tag, posts: r.total, likes: 0, comments: 0 }]);
+    tagOffset = query ? 0 : r.tags.length;
+    remoteTags = query || r.moreTags;
+    if (!query) addChips(r.tags);
+    if (remoteTags) moreTags();
+    else paintTags();
+  }
+  let tagWidth = 0;
+  const tagResize = new ResizeObserver(entries => {
+    const width = entries[0].contentRect.width;
+    if (width === tagWidth || disposed) return;
+    tagWidth = width;
+    if (tagList.length) paintTags();
+  });
+  tagResize.observe($('#t-tags'));
   function likeBtn(v) {
     return `<div class="tvote"><button class="tv like ${v.vote === 'like' ? 'on' : ''}" data-vote="like" title="Like">👍 <b>${fmtNum(v.likes || 0)}</b></button></div>`;
   }
@@ -1609,7 +1651,7 @@ function trendingView(q) {
   });
   const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) more(); }, { rootMargin: '1200px 0px' });
   io.observe($('#t-more'));
-  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); io.disconnect(); gallery.close(); closeViewer?.(); };
+  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); tagResize.disconnect(); io.disconnect(); gallery.close(); closeViewer?.(); };
   layout();
   more();
 }

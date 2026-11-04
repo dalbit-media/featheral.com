@@ -345,16 +345,13 @@ body .entry .reading-thumbnail { display: block; width: 80px; height: 80px; max-
 
 /* trending */
 .ttags { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 14px; }
-.ttags .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; text-decoration: none; white-space: nowrap; }
+.ttags .chip { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 12px; text-decoration: none; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .ttags .chip:hover { color: var(--text); border-color: var(--muted); }
 .ttags .chip.on { background: #fff; color: #000; border-color: #fff; font-weight: 600; }
 .reading-keywords { margin-bottom: 24px; }
-.reading-keywords h2 { margin: 0 0 12px; font-size: 16px; }
-.reading-keywords .ttags { margin: 0; gap: 8px; }
-.reading-keywords .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; white-space: normal; overflow-wrap: anywhere; }
+.reading-keywords .ttags { margin: 0; }
 .reading-keywords .chip:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .reading-keywords .chip.on .count { color: inherit; }
-.reading-keywords .btn { margin-top: 12px; }
 .mtile .tgif { position: absolute; left: 4px; bottom: 4px; padding: 1px 5px; border-radius: 4px; background: rgba(0, 0, 0, .45); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; letter-spacing: .04em; opacity: .7; pointer-events: none; }
 .mtile:hover .tgif { opacity: 0; }
 .vtags { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 0; }

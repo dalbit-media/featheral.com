@@ -1209,6 +1209,8 @@ class PublicSite {
           WHERE tt.taxonomy='category' AND tt.term_taxonomy_id=?`, +q.category);
         if (row) category = { id: +q.category, name: T.decodeEntities(row.name) };
       }
+    }
+    {
       const { tags, byPost } = tagIndex(this.site), counts = new Map();
       for (const row of list) {
         for (const id of new Set(byPost.get(row.ID) || [])) counts.set(id, (counts.get(id) || 0) + 1);
