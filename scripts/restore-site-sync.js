@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
+const http = require("node:http");
 const { spawnSync } = require("node:child_process");
 const { DatabaseSync } = require("node:sqlite");
 const { hash, safeName, excludedName } = require("../services/operations/site-sync-snapshot");
@@ -197,6 +198,56 @@ function installSnapshot(root, snapshotDirectory, backupDirectory, prepared) {
   writeReplace(path.join(roots.data, MARKER), JSON.stringify(marker));
   return { manifest, roots, state };
 }
+function replicaHealthURL(environment) {
+  const host = environment.HOST || "127.0.0.1", port = Number(environment.PORT || 8080);
+  assert(["127.0.0.1", "localhost", "0.0.0.0", "::", "::1"].includes(host), "Sync requires a local or wildcard HTTP host.");
+  assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid target HTTP port.");
+  return `http://${host.includes(":") ? "[::1]" : host === "localhost" ? "localhost" : "127.0.0.1"}:${port}/healthz`;
+}
+function probeReplica(url) {
+  return new Promise((resolve, reject) => {
+    // Use server-side HTTP, without fetch's browser-only restricted-port rules.
+    const request = http.get(url, { agent: false }, response => {
+      response.once("error", reject);
+      response.resume();
+      const replica = response.headers["x-featheral-replica"];
+      if (response.statusCode === 200 && replica === "read-only") resolve();
+      else reject(new Error(`HTTP ${response.statusCode}; X-Featheral-Replica: ${replica || "missing"}`));
+    });
+    const timer = setTimeout(() => request.destroy(new Error("Health request timed out after 3000 ms.")), 3000);
+    request.once("close", () => clearTimeout(timer));
+    request.once("error", reject);
+  });
+}
+async function waitForReplica(url, { probe = probeReplica, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), log = console.log } = {}) {
+  let failure;
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    log(`Read-only health check ${attempt}/60: ${url}`);
+    try { await probe(url); return; }
+    catch (error) {
+      failure = error;
+      log(`Replica health probe failed: ${error.code ? `${error.code}: ` : ""}${error.message}`);
+    }
+    if (attempt < 60) await wait(2000);
+  }
+  throw new Error(`Read-only replica did not pass health verification at ${url}: ${failure.message}`, { cause: failure });
+}
+function logApplicationOutput(root) {
+  const directory = path.join(root, "shared", "logs");
+  const names = fs.existsSync(directory) ? fs.readdirSync(directory).filter(name => /^(?:error|app)(?:-\d+)?\.log$/.test(name)) : [];
+  if (!names.length) console.error("Application logs are unavailable.");
+  for (const name of names) {
+    const file = path.join(root, "shared", "logs", name);
+    if (!fs.existsSync(file)) { console.error(`--- ${name} is unavailable ---`); continue; }
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size, buffer = Buffer.alloc(Math.min(size, 65536));
+      const bytes = fs.readSync(fd, buffer, 0, buffer.length, Math.max(0, size - buffer.length));
+      console.error(`--- ${name} (last 64 KiB, up to 80 lines) ---`);
+      console.error(buffer.subarray(0, bytes).toString("utf8").split("\n").slice(-80).join("\n"));
+    } finally { fs.closeSync(fd); }
+  }
+}
 async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   assert(process.platform === "linux", "The sync receiver requires the Linux deployment layout.");
   const release = fs.realpathSync(path.join(root, "current"));
@@ -218,8 +269,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   assert(fs.realpathSync(apps[0].pm2_env.pm_cwd) === release, "PM2 is not running this target's current release. Deploy or repair it before syncing.");
   process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
   const { OperationsSettings } = require(path.join(release, "services", "operations", "settings"));
-  const port = Number(new OperationsSettings({ root: release }).environment().PORT || 8080);
-  assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid target HTTP port.");
+  const healthURL = replicaHealthURL(new OperationsSettings({ root: release }).environment());
   const lock = path.join(root, "shared", "site-sync.lock");
   fs.writeFileSync(lock, backupDirectory, { flag: "wx", mode: 0o600 });
   let prepared, stopped = false, started = false, rollbackConfirmed = false;
@@ -234,23 +284,16 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
     console.log("FEATHERAL_SYNC:restart");
     command("restart", "featheral"); started = true;
     console.log("FEATHERAL_SYNC:health");
-    let healthy = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      console.log(`Read-only health check ${attempt + 1}/30.`);
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: AbortSignal.timeout(2000) });
-        if (response.ok && response.headers.get("x-featheral-replica") === "read-only") { healthy = true; break; }
-      } catch (error) {
-        if (attempt === 29) console.error("Replica health probe failed:", error.name);
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    assert(healthy, "Read-only replica did not pass health verification.");
+    await waitForReplica(healthURL);
     prepared.state.phase = "complete";
     fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
     console.log("Snapshot installed; read-only health confirmed. Verified backup:", backupDirectory);
   } catch (error) {
     console.error("Sync failed:", error.message);
+    if (started) {
+      try { logApplicationOutput(root); }
+      catch (diagnosticError) { console.error("Could not read application diagnostics:", diagnosticError.message); }
+    }
     if (stopped) {
       console.log("FEATHERAL_SYNC:rollback");
       if (started) command("stop", "featheral");
@@ -261,6 +304,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
       if (prepared) {
         prepared.state.phase = "rolled-back";
         fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
+        console.log("FEATHERAL_SYNC:rollback-complete");
       }
     }
     throw error;
@@ -296,4 +340,5 @@ if (require.main === module) {
   const operation = process.argv[2] === "--recover" ? recover(...process.argv.slice(3)) : run(...process.argv.slice(2));
   operation.catch(error => { console.error(error.message); process.exitCode = 1; });
 }
-module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, returnStaged, targetRoots, run };
+module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, returnStaged, targetRoots,
+  replicaHealthURL, probeReplica, waitForReplica, run };

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-async function fixture(currentStatus = { running: false, logs: [] }) {
+async function fixture(currentStatus = { running: false, logs: [] }, selfStatus = { available: false, running: false, logs: [] }) {
   const elements = new Map(), calls = [];
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, { value: '', disabled: false, textContent: '', listeners: {},
@@ -28,11 +28,15 @@ async function fixture(currentStatus = { running: false, logs: [] }) {
       calls.push({ url, input: options?.json });
       if (url === '/api/deployment/status') return currentStatus;
       if (url === '/api/deployment/plan') return { ...plan };
+      if (url === '/api/settings/self-sync') return selfStatus;
       if (url.endsWith('/challenge')) {
         if (failure) { const error = failure; failure = null; throw error; }
         return { challengeId: 'approved' };
       }
-      if (url.endsWith('/start')) return { running: true };
+      if (url.endsWith('/start')) {
+        if (url === '/api/settings/self-sync/start') selfStatus = { ...selfStatus, running: true };
+        return { running: true };
+      }
       throw new Error('Unexpected request: ' + url);
     },
   });
@@ -40,11 +44,53 @@ async function fixture(currentStatus = { running: false, logs: [] }) {
   vm.runInContext(source, context);
   await context.mountDeploymentControls(1, () => ready);
   return { element, calls, plan, context, setFailure(error) { failure = error; }, setReady(value) { ready = value; },
+    async mountSelf() { await context.mountSelfDeploymentControls(1, () => ready); },
+    setSelfStatus(value) { selfStatus = value; },
     async refresh() { await poll(); },
     get confirmed() { return confirmed; }, get signed() { return signed; },
     async click(selector) { const control = element(selector); await control.listeners.click({ currentTarget: control }); },
     async enter(value) { const input = element('#deployment-approval'); input.value = value; await input.listeners.input(); } };
 }
+
+test('self-sync is signed, targets only the current Admin server and remains disabled while running', async () => {
+  const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
+  await f.mountSelf();
+  assert.equal(f.element('#self-sync-start').disabled, false);
+  await f.click('#self-sync-start');
+  assert.equal(f.signed, 1); assert.equal(f.confirmed, 1);
+  const start = f.calls.find(call => call.url === '/api/settings/self-sync/start');
+  assert.equal(start.input.signature, 'signed');
+  assert.equal(Object.hasOwn(start.input, 'target'), false);
+  assert.equal(f.element('#self-sync-start').disabled, true);
+  f.setSelfStatus({ available: true, running: false, phase: 'complete', message: 'Health verified', logs: [{ at: 1, message: '<build complete>' }] });
+  await f.refresh();
+  assert.equal(f.element('#self-sync-status').textContent, 'Health verified');
+  assert.match(f.element('#self-sync-console').textContent, /<build complete>/);
+  assert.equal(f.element('#self-sync-start').disabled, false);
+});
+test('self-sync is unavailable locally and blocks uncertain jobs or unsaved Settings', async () => {
+  const f = await fixture(undefined, { available: false, running: false, message: 'Linux Admin only', logs: [] });
+  await f.mountSelf();
+  assert.equal(f.element('#self-sync-start').disabled, true);
+  await f.click('#self-sync-start');
+  assert.equal(f.signed, 0);
+  f.setSelfStatus({ available: true, running: false, phase: 'uncertain', logs: [] });
+  await f.click('#self-sync-refresh');
+  assert.equal(f.element('#self-sync-start').disabled, true);
+  f.setSelfStatus({ available: true, running: false, phase: 'idle', logs: [] });
+  f.setReady(false);
+  await f.click('#self-sync-refresh');
+  assert.equal(f.element('#self-sync-start').disabled, true);
+});
+test('failed self-sync approval is shown and never launches a job', async () => {
+  const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
+  await f.mountSelf();
+  f.setFailure(new Error('Approval unavailable'));
+  await f.click('#self-sync-start');
+  assert.equal(f.element('#self-sync-status').textContent, 'Approval unavailable');
+  assert(!f.calls.some(call => call.url === '/api/settings/self-sync/start'));
+  assert.equal(f.element('#self-sync-start').disabled, false);
+});
 
 test('deployment waits for exact approval before requesting a wallet challenge and starts the signed release', async () => {
   const f = await fixture();

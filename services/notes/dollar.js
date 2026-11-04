@@ -94,7 +94,7 @@ function createDollarApi({ env = require("../operations/runtime").environment(),
   const ownsProfiles = !suppliedProfiles;
   const profiles = suppliedProfiles || require("../database/wallet-profiles").createWalletProfiles(
     require("../database/sqlite"), env.DB_WALLET_PROFILES_FILE || ":memory:");
-  for (const profile of ledger.profiles.values()) profiles.importLegacy(profile);
+  if (!profiles.readOnlyReplica) for (const profile of ledger.profiles.values()) profiles.importLegacy(profile);
   const trustedServices = readTrustedServices(env.TOKEN_API_SERVICES_JSON || "");
   const authenticator = new ServiceAuthenticator(trustedServices);
   const gold = suppliedGold || createGoldApi({ env, provider: suppliedProvider, logger });

@@ -155,8 +155,13 @@ const serverUsers = new ServerUsers({ deployment, settings: operationsSettings }
 const siteSync = new (require('./lib/site-sync').SiteSync)({
   root: path.resolve(__dirname, '..', '..'), settings: operationsSettings, deployment,
   command: serverUsers.command.bind(serverUsers),
-  busy: () => serverUsers.changing || operationsSettings.busy,
+  busy: () => serverUsers.changing || operationsSettings.busy || selfDeployment.active(),
 });
+const selfDeployment = new (require('../operations/self-deployment').SelfDeployment)({
+  root: path.resolve(__dirname, '..', '..'), settings: operationsSettings, deployment,
+  busy: () => siteSync.running || serverUsers.changing || operationsSettings.busy,
+});
+deployment.selfDeployment = selfDeployment;
 const ledgerDirectory = path.resolve(env.DB_LEDGER_DIR || path.join(__dirname, '..', '..', 'data', 'file-ledgers'));
 fs.mkdirSync(ledgerDirectory, { recursive: true });
 const database = require('../database/server').createDatabase({
@@ -165,7 +170,7 @@ const database = require('../database/server').createDatabase({
   repository: path.resolve(__dirname, '..', '..'), sites: () => sitePages.hosts,
   credentialVault: operationsSettings,
 });
-operationsSettings.isBusy = () => deployment.running || siteSync.running;
+operationsSettings.isBusy = () => deployment.running || siteSync.running || selfDeployment.active();
 deployment.siteSync = siteSync;
 operationsSettings.verifyCredential = async config => {
   const client = await serverUsers.connect(config);
@@ -188,7 +193,7 @@ app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
   service: serverUsers, cmsAuth, passwordConfigured: () => true, adminHost: String(CONFIG.cmsHost).toLowerCase(),
 }));
 app.use('/api/settings', require('../operations/api').settingsApi({
-  settings: operationsSettings, siteSync, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  settings: operationsSettings, siteSync, selfDeployment, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
   sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
 }));
 app.operationsSettings = operationsSettings;

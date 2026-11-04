@@ -1,7 +1,7 @@
 "use strict";
 const express = require("express");
 const crypto = require("node:crypto");
-function settingsApi({ settings, siteSync, cmsAuth, adminHost = "admin.featheral.com", sites = () => [] }) {
+function settingsApi({ settings, siteSync, selfDeployment, cmsAuth, adminHost = "admin.featheral.com", sites = () => [] }) {
   const router = express.Router(), limits = new Map();
   router.use((req, res, next) => {
     res.set({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -12,6 +12,9 @@ function settingsApi({ settings, siteSync, cmsAuth, adminHost = "admin.featheral
     cmsAuth(req, res, next);
   });
   router.get("/", (_req, res) => res.json(settings.status()));
+  if (selfDeployment) router.get("/self-sync", (_req, res, next) => {
+    try { res.json(selfDeployment.status()); } catch (error) { next(error); }
+  });
   router.param("site", (req, res, next, key) => {
     const site = sites().find(site => site.key === key && site.status === "ready");
     if (!site) return res.status(404).json({ error: "Unknown managed site." });
@@ -40,6 +43,10 @@ function settingsApi({ settings, siteSync, cmsAuth, adminHost = "admin.featheral
   };
   router.post("/challenge", run((input, ctx) => settings.challenge(input, ctx)));
   router.post("/", run((input, ctx) => settings.save(input, ctx)));
+  if (selfDeployment) {
+    router.post("/self-sync/challenge", run((_input, ctx) => selfDeployment.challenge(ctx)));
+    router.post("/self-sync/start", run((input, ctx) => selfDeployment.start(input, ctx)));
+  }
   router.post("/sites/:site/challenge", run((input, ctx, req) => settings.siteChallenge(req.params.site, input, ctx, req.settingsSite.path ? "" : req.settingsSite.hostname)));
   router.post("/sites/:site", run((input, ctx, req) => settings.saveSite(req.params.site, input, ctx, req.settingsSite.path ? "" : req.settingsSite.hostname)));
   if (siteSync) {

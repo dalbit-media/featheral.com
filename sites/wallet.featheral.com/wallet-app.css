@@ -34,6 +34,7 @@ html{scrollbar-width:thin;scrollbar-color:#555563 transparent;scrollbar-gutter:s
 .vault-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.vault-actions button,#linked-wallets button{font-size:12px;padding:8px 12px}#vault-state{display:block;color:var(--muted);font-size:11px;font-weight:400}#local-wallet{text-align:left;padding:16px 20px}#local-wallet p{font-size:12px}#vault-backup-step{display:grid;gap:12px;margin-top:12px}#vault-backup-step label{display:flex;align-items:flex-start}#vault-backup-confirm{width:auto}#linked-wallets p{margin-bottom:4px}#vault-status:empty{display:none}.account-divider{font-size:11px;color:var(--muted);margin:18px 0 4px;overflow-wrap:anywhere}
 :root{--wallet-bg:#0b0b10;--on-accent:#181510}
 body[data-primary]{background:var(--wallet-bg)}
+html:has(>body[data-embedded=true]){background:var(--wallet-bg)}
 [data-primary] input,[data-primary] select,[data-primary] code{background:var(--wallet-bg);color:var(--txt)}
 [data-primary] button:hover{background:var(--btn);border-color:var(--brand)}
 [data-primary] header #connect,[data-primary] .fund-action,[data-primary] form button[type=submit]{background:var(--brand);color:var(--on-accent)}

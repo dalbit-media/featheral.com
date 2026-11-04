@@ -110,7 +110,7 @@ function deploymentControlsHtml() {
     <section class="form-grid deployment-review" aria-labelledby="deployment-review-heading">
     <div class="deployment-review-heading"><h3 id="deployment-review-heading">2. Review &amp; deploy</h3>
     <button class="btn" type="button" id="deployment-plan">Review release</button></div>
-    <p class="muted small">One release for all assigned servers. Installation is detected automatically; existing data and keys are preserved.</p>
+    <p class="muted small">Code is compressed into a verified ZIP before upload. One release for all assigned servers; installation is detected automatically and existing data and keys are preserved. Database/uploads sync remains a separate file transfer.</p>
     <p id="deployment-summary" class="deployment-summary" role="status">Save the connection, then review the release.</p>
     <details class="deployment-technical"><summary>Servers &amp; technical details</summary>
     <pre class="deployment-plan" id="deployment-details">No plan generated yet.</pre></details>
@@ -125,7 +125,54 @@ function deploymentControlsHtml() {
     <pre id="deployment-console" class="deployment-console" role="log" aria-labelledby="deployment-console-heading" aria-live="polite" tabindex="0">No deployment logs yet.</pre>
     <p class="muted small">Live installer output appears here with known credentials redacted. The full server log remains in shared/logs/deployment.log. Logs may contain operational data; review before sharing. Back up existing private data before deploying.</p>
     </section>
+    <section class="form-grid" aria-labelledby="self-sync-heading">
+    <h3 id="self-sync-heading">Self-sync this Admin server</h3>
+    <p class="muted small">Pull this repository's default branch on the deployed Linux Admin server, build a fresh release and restart with health checks and code rollback. No database or upload transfer; published pages and private data stay unchanged. Server Git access and non-interactive deployment sudo are required.</p>
+    <button id="self-sync-start" class="btn" type="button" disabled>Sign &amp; self-sync</button>
+    <button id="self-sync-refresh" class="btn" type="button">Refresh self-sync status</button>
+    <p id="self-sync-status" role="status" aria-live="polite">Checking self-sync availability...</p>
+    <pre id="self-sync-console" class="deployment-console" role="log" aria-label="Self-sync output" tabindex="0">No self-sync logs yet.</pre>
+    </section>
   </div>`;
+}
+async function mountSelfDeploymentControls(token, ready = () => true) {
+  const hash = location.hash, active = () => token === state.seq && location.hash === hash;
+  const button = $('#self-sync-start'), feedback = $('#self-sync-status');
+  let timer, submitting = false, current;
+  const cleanup = viewCleanup;
+  viewCleanup = () => { clearInterval(timer); cleanup?.(); };
+  const update = () => { button.disabled = submitting || !ready() || !current?.available || current.running || current.phase === 'uncertain'; };
+  const refresh = async () => {
+    try {
+      current = await api('/api/settings/self-sync');
+      if (!active()) return;
+      feedback.textContent = current.message || (current.running ? 'Self-sync running; reconnect after restart.' : 'Ready to pull, rebuild and restart this Admin server.');
+      renderConsole($('#self-sync-console'), (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`).join('\n') || 'No self-sync logs yet.');
+      update();
+      if (current.running && !timer) timer = setInterval(refresh, 3000);
+      if (!current.running) { clearInterval(timer); timer = null; }
+    } catch (error) {
+      if (active()) feedback.textContent = `${error.message} Reconnect and refresh status before retrying; the server job may still be running.`;
+    }
+  };
+  $('#self-sync-refresh').addEventListener('click', refresh);
+  button.addEventListener('click', async () => {
+    if (!active() || submitting || button.disabled) return;
+    if (!ready()) { feedback.textContent = 'Save Settings before self-sync.'; return; }
+    if (!confirm('Pull the default branch, rebuild and restart this Admin server? Back up private data first.')) return;
+    submitting = true; update();
+    try {
+      const challenge = await api('/api/settings/self-sync/challenge', { json: {} });
+      const signed = await approveAdminAction(challenge, active);
+      if (!active()) return;
+      await api('/api/settings/self-sync/start', { json: signed });
+      feedback.textContent = 'Self-sync accepted. The independent job continues through the Admin restart.';
+      if (!timer) timer = setInterval(refresh, 3000);
+      await refresh();
+    } catch (error) { if (active()) feedback.textContent = error.message; }
+    finally { submitting = false; if (active()) update(); }
+  });
+  await refresh();
 }
 async function mountDeploymentControls(token, ready = () => true) {
   let plan;

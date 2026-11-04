@@ -17,12 +17,14 @@
     muted: "--muted", line: "--line", button: "--btn", onAccent: "--on-accent" };
   function applyTheme(theme) {
     if (!theme || typeof theme !== "object" || Array.isArray(theme)) return;
+    // Theme both roots so the page canvas outside <body> matches light host sites instead of staying dark.
+    const roots = [document.documentElement, document.body].filter(root => root?.style);
     for (const [key, property] of Object.entries(themeProperties)) {
       const value = theme[key];
       if (typeof value === "string" && value.length <= 80 && /^(?:#[\da-f]{3,8}|[a-z]+|(?:rgb|hsl)a?\([\d\s.,%+/-]+\))$/i.test(value))
-        document.body.style.setProperty(property, value);
+        for (const root of roots) root.style.setProperty(property, value);
     }
-    if (["light", "dark"].includes(theme.scheme)) document.body.style.colorScheme = theme.scheme;
+    if (["light", "dark"].includes(theme.scheme)) for (const root of roots) root.style.colorScheme = theme.scheme;
   }
   const primarySymbol = config.primary, fthxFirst = primarySymbol === "FTHX";
   const emptyBalance = `${["FTHG", "FTHS"].includes(primarySymbol) ? "0.000" : "0.00"} ${primarySymbol}`;

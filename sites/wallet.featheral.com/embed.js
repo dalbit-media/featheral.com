@@ -143,9 +143,15 @@
     if (!window.getComputedStyle) return null;
     const style = window.getComputedStyle(document.body);
     const variable = (...names) => names.map(name => style.getPropertyValue(name).trim()).find(Boolean);
-    return { accent: variable("--brand", "--gold"), background: variable("--bg") || style.backgroundColor,
-      panel: variable("--panel") || style.backgroundColor, text: variable("--text", "--txt") || style.color,
-      muted: variable("--muted", "--mut"), line: variable("--line"), button: variable("--btn", "--panel"),
+    // Some light sites paint only <html>, leaving <body> transparent.
+    const opaque = color => color && !/^(?:transparent|rgba\([^)]*,\s*0\))$/i.test(color.trim()) ? color : "";
+    const surface = opaque(style.backgroundColor)
+      || (document.documentElement ? opaque(window.getComputedStyle(document.documentElement).backgroundColor) : "");
+    const light = /light/.test(style.colorScheme || "") && !/dark/.test(style.colorScheme || "");
+    return { accent: variable("--brand", "--gold"), background: variable("--bg") || surface,
+      panel: variable("--panel") || surface, text: variable("--text", "--txt") || style.color,
+      muted: variable("--muted", "--mut") || (light ? "#5f6475" : undefined), line: variable("--line") || (light ? "#0000001f" : undefined),
+      button: variable("--btn", "--panel") || (light ? surface : undefined),
       onAccent: variable("--on-accent"), scheme: style.colorScheme };
   }
   function sendTheme(frame) {
@@ -276,6 +282,18 @@
     }
     dialog.dataset.walletPrimary = primary;
     dialog.style.cssText = "position:fixed;inset:64px 12px auto auto;margin:0;width:min(380px,calc(100% - 24px));max-width:none;height:min(800px,calc(100dvh - 80px));max-height:calc(100dvh - 80px);box-sizing:border-box;padding:12px 18px;border:1px solid var(--line,#262633);border-radius:14px;background:var(--panel,#16161f);color:var(--text,var(--txt,#f4f4f7));box-shadow:0 18px 50px #0008;overflow:hidden";
+    {
+      // Hosts without --panel/--line variables (e.g. light Notes) still get a shell matching their page.
+      const theme = hostTheme();
+      if (theme?.panel) dialog.style.background = theme.panel;
+      if (theme?.text) dialog.style.color = theme.text;
+      if (theme?.scheme === "light") {
+        dialog.style.boxShadow = "0 18px 50px #0002";
+        if (!theme.line) dialog.style.borderColor = "#0000001f";
+      }
+      const frame = dialog.querySelector("iframe");
+      if (frame && theme?.panel) frame.style.background = theme.panel;
+    }
     const heading = dialog.querySelector("[data-wallet-heading]"), root = dialog.querySelector("[data-wallet-root]");
     heading.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:12px;font:14px/1.5 system-ui,sans-serif";
     heading.querySelector("b").textContent = "Wallet";

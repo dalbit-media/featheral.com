@@ -8,6 +8,7 @@ const { pipeline } = require('node:stream/promises');
 const { hosts } = require('./site-pages');
 const { sshTarget } = require('../../database/ssh-target');
 const { StringDecoder } = require('node:string_decoder');
+const { ZipFile } = require('yazl');
 
 const error = (status, message) => Object.assign(new Error(message), { status });
 const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
@@ -83,7 +84,7 @@ const installerSteps = {
   'node-install': 'Installing Node 24.',
   'node-check': 'Verifying Node 24 or newer.',
   'private-data': 'Checking private storage. Existing installations require restored data; brand-new installations require empty directories.',
-  extract: 'Verifying the individually uploaded release files. No archive extraction.',
+  extract: 'Verifying and extracting the release ZIP, then checking every reviewed file.',
   'legacy-env': 'Checking for an unmigrated shared .env. Migrate it into Settings before deployment.',
   'link-data': 'Linking the existing private data into the release.',
   dependencies: 'Installing locked dependencies.',
@@ -160,6 +161,32 @@ const digestFiles = (root, files) => {
   }
   return hash.digest('hex');
 };
+async function prepareRelease(root, files, content, prepared) {
+  const transfers = [];
+  for (const name of files) {
+    const source = path.join(root, ...name.split('/')), file = path.join(prepared, ...name.split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (name.endsWith('.sh')) fs.writeFileSync(file, fs.readFileSync(source, 'utf8').replace(/\r\n/g, '\n'), { mode: 0o600 });
+    else { fs.copyFileSync(source, file); fs.chmodSync(file, 0o600); }
+    transfers.push({ name, file, bytes: fs.statSync(file).size, hash: await fileHash(file) });
+  }
+  for (const [name, text] of [['.cms-published.json', content], ['.deployment-source.json', JSON.stringify({ files })]]) {
+    const file = path.join(prepared, name);
+    fs.writeFileSync(file, text, { mode: 0o600 });
+    transfers.push({ name, file, bytes: Buffer.byteLength(text), hash: await fileHash(file) });
+  }
+  const manifest = path.join(prepared, '.deployment-files.json');
+  fs.writeFileSync(manifest, JSON.stringify(transfers.map(({ name, bytes, hash }) => ({ name, bytes, hash }))), { mode: 0o600 });
+  transfers.push({ name: '.deployment-files.json', file: manifest, bytes: fs.statSync(manifest).size, hash: await fileHash(manifest) });
+  const zip = new ZipFile(), archive = path.join(prepared, 'release.zip');
+  const output = pipeline(zip.outputStream, fs.createWriteStream(archive, { mode: 0o600 }));
+  for (const entry of transfers) zip.addFile(entry.file, entry.name, { mtime: new Date('2000-01-01T00:00:00Z'), mode: 0o100600 });
+  zip.end();
+  await output;
+  return { file: archive, bytes: fs.statSync(archive).size, hash: await fileHash(archive),
+    expandedBytes: transfers.reduce((sum, entry) => sum + entry.bytes, 0),
+    installer: transfers.find(entry => entry.name === 'scripts/deploy-release.sh') };
+}
 class Deployment {
   constructor({ root, env = require("../../operations/runtime").environment(), settings, clientFactory = () => new Client(), snapshot = () => ({ integrated: [], managed: [] }), hostnames = () => hosts, sites,
     stateDirectory = path.join(root, 'data', 'deployment') }) {
@@ -180,6 +207,7 @@ class Deployment {
     }
   }
   plan(input = {}) {
+    if (this.selfDeployment?.active()) throw error(409, 'Wait for the current self-sync job.');
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw error(400, 'Deployment plan options must be an object.');
     if (input.initialize !== undefined || input.freshManagedSites !== undefined) throw error(400, 'Installation is detected automatically. Reload Admin and review a new plan.');
     const config = this.settings ? this.settings.configuration() : this.vault && !this.env.DEPLOY_PASSWORD && !this.env.DEPLOY_KEY_FILE
@@ -207,7 +235,7 @@ class Deployment {
       targetDigest, targets: targets.map(({ password, keyFile, ...target }) => target),
       files: files.length, hosts: domains, enabled: this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true', walletApprovalRequired: Boolean(config.vault),
       ...(this.settings ? { settingsRevision: config.settingsRevision, uploadLimitMiB: config.uploadLimitMiB, requestTimeoutSeconds: config.requestTimeoutSeconds, deploymentTimeoutSeconds: config.deploymentTimeoutSeconds } : {}),
-      steps: ['Upload reviewed Git-tracked source and published CMS metadata one file at a time; no ZIP or compression. Retry reuses verified files and partial prefixes.',
+      steps: ['Compress reviewed Git-tracked source and published CMS metadata into a ZIP before upload. Verify its SHA256 and every extracted file. Retry resumes the verified ZIP prefix.',
         'Database/media replication remains a separately reviewed Site Sync: database entries transfer and verify first, then uploads. Complete required replica sync before activating dependent sites.',
         'Use each server’s own SSH credential; configure Nginx/HTTPS only for the hostnames assigned to that server. Point their DNS A/AAAA records to that server before deployment.',
         'Deploy separate servers first and the shared administration server last. A DB-only target runs no financial writers or other site services.',
@@ -234,7 +262,7 @@ class Deployment {
   validate(input) {
     if (!(this.settings ? this.settings.value.enabled : this.env.DEPLOY_ENABLED === 'true')) throw error(403, 'Deployment is disabled. Review and enable deployment in Admin Settings.');
     if (this.settings?.busy) throw error(409, 'Wait for the Settings operation.');
-    if (this.running || this.siteSync?.running) throw error(409, 'Another deployment or site sync is running');
+    if (this.running || this.siteSync?.running || this.selfDeployment?.active()) throw error(409, 'Another deployment or site sync is running');
     const plan = this.plans.get(input?.planId);
     if (!plan || Date.now() - plan.createdAt > 10 * 60_000) throw error(400, 'Deployment plan expired or unavailable. Review a new plan.');
     if (input?.approval !== `DEPLOY ${plan.digest} ${plan.contentDigest}`) throw error(400, 'Enter the exact approval phrase from the reviewed deployment plan.');
@@ -354,34 +382,17 @@ class Deployment {
     try {
       fs.mkdirSync(temporary, { recursive: true });
       fs.mkdirSync(prepared, { mode: 0o700 });
-      this.log('Preparing the reviewed file manifest. No compression or release ZIP.');
-      const transfers = [];
-      for (const file of plan.files) {
-        let local = path.join(this.root, ...file.split('/'));
-        if (file.endsWith('.sh')) {
-          const deployed = fs.readFileSync(local, 'utf8').replace(/\r\n/g, '\n');
-          local = path.join(prepared, ...file.split('/'));
-          fs.mkdirSync(path.dirname(local), { recursive: true });
-          fs.writeFileSync(local, deployed, { mode: 0o600 });
-        }
-        transfers.push({ name: file, file: local, bytes: fs.statSync(local).size, hash: await fileHash(local) });
-      }
-      if (digestFiles(this.root, plan.files) !== plan.digest) throw error(409, 'Source changed while preparing the file manifest. Review a new plan.');
-      for (const [name, content] of [['.cms-published.json', plan.content], ['.deployment-source.json', JSON.stringify({ files: plan.files })]]) {
-        const file = path.join(prepared, name);
-        fs.writeFileSync(file, content, { mode: 0o600 });
-        transfers.push({ name, file, bytes: Buffer.byteLength(content), hash: await fileHash(file) });
-      }
-      const manifestFile = path.join(prepared, '.deployment-files.json');
-      fs.writeFileSync(manifestFile, JSON.stringify(transfers.map(({ name, bytes, hash }) => ({ name, bytes, hash }))), { mode: 0o600 });
-      transfers.push({ name: '.deployment-files.json', file: manifestFile, bytes: fs.statSync(manifestFile).size, hash: await fileHash(manifestFile) });
-      const releaseId = `release-0-${crypto.createHash('sha256').update(plan.digest + plan.contentDigest + plan.targetDigest).digest('hex').slice(0, 12)}`;
+      this.log('Compressing reviewed source and published metadata into a release ZIP before upload.');
+      const archive = await prepareRelease(this.root, plan.files, plan.content, prepared);
+      if (digestFiles(this.root, plan.files) !== plan.digest) throw error(409, 'Source changed while preparing the release ZIP. Review a new plan.');
+      this.log(`Release ZIP ready: ${archive.bytes} compressed bytes; ${archive.expandedBytes} extracted bytes.`);
+      const releaseId = `release-${Date.now()}-${archive.hash.slice(0, 12)}`;
       const targets = [...plan.targets].sort((a, b) => Number(a.id === 'shared') - Number(b.id === 'shared'));
       for (const target of targets) {
         this.result = { success: false, targets: results, currentTarget: target.host, message: 'Deployment in progress; not yet verified.' };
         this.persistStatus();
         try {
-          await this.deployTarget(target, credentials.find(item => item.id === target.id), transfers, releaseId);
+          await this.deployTarget(target, credentials.find(item => item.id === target.id), archive, releaseId);
           results.push({ host: target.host, hosts: target.hosts, success: true });
           this.log(`${target.host}: deployment and HTTPS health checks verified.`);
         } catch (err) {
@@ -406,24 +417,21 @@ class Deployment {
       this.persistStatus();
     }
   }
-  async deployTarget(config, credential, transfers, releaseId) {
+  async deployTarget(config, credential, archive, releaseId) {
     if (this.siteSync?.running) throw error(409, 'Wait for the current site sync.');
     let client;
     try {
       this.log(`${config.host}: connecting to SSH with the saved credential and pinned server key.`);
       client = await this.connect(config.vault ? { ...config, password: credential.password } : config);
-      const remote = `${config.directory}/releases/${releaseId}`;
+      const remote = `${config.directory}/shared/deployment/${archive.hash}`;
       await this.execute(client, `mkdir -p ${quote(remote)}`, "", config.sshTimeoutSeconds || 20);
-      await checkSpace(this, client, remote, transfers.reduce((sum, file) => sum + file.bytes, 0) + 512 * 1024 * 1024, config.sshTimeoutSeconds || 20);
+      await checkSpace(this, client, remote, archive.bytes + archive.expandedBytes + 512 * 1024 * 1024, config.sshTimeoutSeconds || 20);
       const sftp = await this.transfer(client, callback => client.sftp(callback), config.sshTimeoutSeconds || 20);
-      this.log(`${config.host}: uploading ${transfers.length} files individually. Verified existing files are skipped.`);
+      this.log(`${config.host}: uploading the compressed release ZIP and installer. Verified partial uploads are resumed.`);
       try {
-        let count = 0;
-        for (const entry of transfers) {
-          const destination = `${remote}/${entry.name}`;
-          await this.execute(client, `mkdir -p ${quote(destination.slice(0, destination.lastIndexOf('/')))}`, "", config.sshTimeoutSeconds || 20);
-          await uploadFile({ deployment: this, client, sftp, file: entry.file, remote: destination, bytes: entry.bytes, digest: entry.hash, target: config });
-          this.log(`${config.host}: verified file ${++count}/${transfers.length}: ${entry.name}`);
+        for (const entry of [{ ...archive, name: 'release.zip' }, { ...archive.installer, name: 'deploy-release.sh' }]) {
+          await uploadFile({ deployment: this, client, sftp, file: entry.file, remote: `${remote}/${entry.name}`, bytes: entry.bytes, digest: entry.hash, target: config });
+          this.log(`${config.host}: checksum verified: ${entry.name}`);
         }
       } finally { sftp.end(); }
       this.log(`${config.host}: running setup, build, PM2, Nginx, certificates and health checks. Server output follows (credentials redacted).`);
@@ -432,7 +440,7 @@ class Deployment {
         ...Object.values(this.settings?.value.siteServers || {}).map(profile => profile.credential?.password),
         ...require('../../operations/configuration').fields.filter(field => field.secret).flatMap(field => [this.settings?.value.runtime?.[field.name], this.env[field.name]])];
       const onLog = line => this.log(`${config.host}: ${redactServerLog(line, secrets)}`);
-      const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/scripts/deploy-release.sh')} ${quote(config.directory)} ${quote(releaseId)} ${quote(config.email)} ${quote(config.hosts.join(' '))}${this.settings ? ` ${quote(config.uploadLimitMiB)} ${quote(config.requestTimeoutSeconds)} ${quote(config.id === 'shared')}` : ''}`;
+      const job = `systemd-run --wait --pipe --collect --unit=featheral-deployment --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash ${quote(remote + '/deploy-release.sh')} ${quote(config.directory)} ${quote(releaseId)} ${quote(config.email)} ${quote(config.hosts.join(' '))} ${quote(config.uploadLimitMiB || 16)} ${quote(config.requestTimeoutSeconds || 90)} ${quote(config.id === 'shared')} ${quote(remote + '/release.zip')} ${quote(archive.hash)}`;
       if (this.settings) {
         const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then printf '%s\\n' "$password" | ${job}; else printf '%s\\n' "$password" | sudo -S -p '' -v && printf '%s\\n' "$password" | sudo -n ${job}; fi`;
         await this.execute(client, command, credential.password + '\n', config.deploymentTimeoutSeconds, (phase, exitCode) => this.logPhase(config.host, phase, exitCode), onLog);
@@ -450,4 +458,4 @@ class Deployment {
     });
   }
 }
-module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles, redactServerLog, uploadFile, fileHash, checkSpace };
+module.exports = { Deployment, configuration, sshConfiguration, sshTarget, releaseFiles, digestFiles, prepareRelease, redactServerLog, uploadFile, fileHash, checkSpace };

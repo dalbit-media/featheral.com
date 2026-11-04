@@ -8,6 +8,10 @@ hostnames="${4:?Public hostnames required}"
 upload_mib="${5:-16}"
 request_timeout="${6:-90}"
 primary="${7:-true}"
+archive="${8:-}"
+archive_hash="${9:-}"
+deployment_mode="${10:-upload}"
+[[ "$deployment_mode" == upload || "$deployment_mode" == self ]]
 [[ "$primary" == true || "$primary" == false ]]
 [[ "$upload_mib" =~ ^[0-9]+$ && "$upload_mib" -ge 1 && "$upload_mib" -le 1024 ]]
 [[ "$request_timeout" =~ ^[0-9]+$ && "$request_timeout" -ge 5 && "$request_timeout" -le 3600 ]]
@@ -29,7 +33,11 @@ for host in $hostnames; do [[ "$host" =~ ^([a-z0-9][a-z0-9-]*\.)+[a-z]{2,}$ ]]; 
 release="$root/releases/$release_id"
 shared="$root/shared"
 [[ ! -e "$shared/site-sync.lock" ]] || { echo "A site sync needs completion or recovery before deployment."; exit 1; }
+if [[ -n "$archive" ]]; then
+  [[ ! -e "$release" && ! -L "$release" ]] || { echo "ZIP deployment requires a new release directory."; exit 1; }
+fi
 mkdir -p "$shared/logs"
+mkdir -p "$release"
 exec 3>&1
 phase() { printf 'FEATHERAL_PHASE:%s\n' "$1" >&3; }
 step=provision
@@ -50,17 +58,19 @@ phase "$step"
 as_root apt-get update
 step=apt-install
 phase "$step"
-as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gnupg nginx curl certbot python3-certbot-nginx
+as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gnupg nginx curl certbot python3-certbot-nginx unzip git
 if ! command -v node >/dev/null || ! node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'; then
   step=node-repository
   phase "$step"
   # Install Node through an HTTPS-fetched, signed APT repository, not a remote shell script.
-  node_key="$release/nodesource.key"
+  provision="$shared/deployment/provision-$release_id"
+  mkdir -p "$provision"
+  node_key="$provision/nodesource.key"
   curl -fsS --proto '=https' --tlsv1.2 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o "$node_key"
-  gpg --batch --yes --dearmor --output "$release/nodesource.gpg" "$node_key"
-  as_root install -m 644 "$release/nodesource.gpg" /usr/share/keyrings/nodesource.gpg
-  printf '%s\n' "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > "$release/nodesource.list"
-  as_root install -m 644 "$release/nodesource.list" /etc/apt/sources.list.d/nodesource.list
+  gpg --batch --yes --dearmor --output "$provision/nodesource.gpg" "$node_key"
+  as_root install -m 644 "$provision/nodesource.gpg" /usr/share/keyrings/nodesource.gpg
+  printf '%s\n' "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > "$provision/nodesource.list"
+  as_root install -m 644 "$provision/nodesource.list" /etc/apt/sources.list.d/nodesource.list
   step=node-update
   phase "$step"
   as_root apt-get update
@@ -98,13 +108,34 @@ else
 fi
 step=extract
 phase "$step"
+if [[ -n "$archive" ]]; then
+  [[ "$archive" == "$shared/"* && "$archive_hash" =~ ^[a-f0-9]{64}$ ]]
+  printf '%s  %s\n' "$archive_hash" "$archive" | sha256sum --check --status
+  [[ -z "$(ls -A "$release")" ]] || { echo "Refusing to extract over an existing release."; false; }
+  unzip -Z1 "$archive" | node -e '
+    let input="";process.stdin.on("data",chunk=>input+=chunk);process.stdin.on("end",()=>{
+      const names=input.trimEnd().split(String.fromCharCode(10)),seen=new Set();
+      for(const name of names){
+        if(!name||Array.from(name).some(c=>c.charCodeAt(0)<32||[92,127].includes(c.charCodeAt(0)))||name.startsWith("/")||name.split("/").some(part=>!part||part==="."||part==="..")||seen.has(name))
+          throw new Error("Unsafe or duplicate ZIP path.");
+        seen.add(name);
+      }
+      if(!seen.has(".deployment-files.json"))throw new Error("Missing ZIP manifest.");
+    });'
+  # ZIPs are generated with regular files only; reject link entries before extraction.
+  if unzip -Z -l "$archive" | grep '^l' >/dev/null; then echo "Linked ZIP entries are forbidden."; false; fi
+  unzip -q "$archive" -d "$release"
+fi
 node - "$release" <<'VERIFY_RELEASE'
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
 const root = process.argv[2], entries = JSON.parse(fs.readFileSync(path.join(root, ".deployment-files.json"), "utf8"));
 if (!Array.isArray(entries) || !entries.length) throw new Error("Missing reviewed file manifest.");
+const names = new Set([".deployment-files.json"]);
 for (const entry of entries) {
   if (typeof entry.name !== "string" || entry.name.startsWith("/") || entry.name.includes("\\") || entry.name.split("/").some(part => !part || part === "." || part === ".."))
     throw new Error("Invalid release file path.");
+  if (names.has(entry.name)) throw new Error("Duplicate release file path.");
+  names.add(entry.name);
   let file = root;
   for (const part of entry.name.split("/")) {
     file = path.join(file, part);
@@ -116,6 +147,14 @@ for (const entry of entries) {
   finally { fs.closeSync(fd); }
   if (digest.digest("hex") !== entry.hash) throw new Error("Release file checksum mismatch.");
 }
+function verifyInventory(directory, prefix = "") {
+  for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+    const name = prefix + item.name;
+    if (item.isDirectory()) verifyInventory(path.join(directory, item.name), name + "/");
+    else if (!item.isFile() || !names.has(name)) throw new Error("Unreviewed release entry.");
+  }
+}
+verifyInventory(root);
 VERIFY_RELEASE
 node -e 'const fs=require("node:fs");fs.writeFileSync(process.argv[1],JSON.stringify({hosts:process.argv[2].split(" "),primary:process.argv[3]==="true",uploadLimitMiB:Number(process.argv[4]),requestTimeoutSeconds:Number(process.argv[5])}),{mode:0o600})' "$release/.deployment-hosts.json" "$hostnames" "$primary" "$upload_mib" "$request_timeout"
 step=legacy-env
@@ -245,7 +284,7 @@ phase "$step"
 for host in $hostnames; do
   getent ahosts "$host" >/dev/null
 done
-if [[ "$hostnames" != db.featheral.com ]]; then
+if [[ "$hostnames" != db.featheral.com && "$deployment_mode" != self ]]; then
   step=import-pages
   phase "$step"
   FEATHERAL_DEPLOY_DIAGNOSTICS=1 node scripts/import-site-pages.js

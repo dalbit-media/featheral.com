@@ -60,10 +60,10 @@ class SiteSync {
     });
     return { ...result, steps, running: this.running };
   }
-  completeStep() {
-    const step = this.result.steps?.find(step => step.status === "running");
+  completeStep(id) {
+    const step = this.result.steps?.find(step => id ? step.id === id && step.status !== "complete" : step.status === "running");
     if (!step) return;
-    step.elapsedMs = (step.elapsedMs || 0) + Math.max(0, this.now() - step.startedAt);
+    step.elapsedMs = (step.elapsedMs || 0) + (step.startedAt != null ? Math.max(0, this.now() - step.startedAt) : 0);
     step.startedAt = null; step.status = "complete";
     if (step.id !== "upload" && step.elapsedMs > 0) {
       this.result.timings ||= {};
@@ -109,6 +109,7 @@ class SiteSync {
   }
   finish(phase, message) {
     if (["complete", "review-ready"].includes(phase)) this.completeStep();
+    else if (phase === "rolled-back") this.completeStep("rollback");
     else {
       const step = this.result?.steps?.find(step => step.status === "running");
       if (step) {
@@ -356,8 +357,9 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
           backup: [80, "Creating checksum-verified target backup."], install: [85, "Installing databases and overlaying uploads."],
           restart: [92, "Restarting target as a read-only replica."], health: [95, "Waiting for read-only health verification."],
           rollback: [95, "Restoring the verified backup after failure.", { step: "rollback" }] };
-        const marker = /^FEATHERAL_SYNC:([a-z]+)$/.exec(line);
-        if (marker && stages[marker[1]]) this.progress(...stages[marker[1]]);
+        const marker = /^FEATHERAL_SYNC:([a-z-]+)$/.exec(line);
+        if (marker?.[1] === "rollback-complete") { this.completeStep("rollback"); this.persist(); }
+        else if (marker && stages[marker[1]]) this.progress(...stages[marker[1]]);
         else this.log(line, [target.password]);
       };
       const remote = `${target.directory}/shared/site-sync/${plan.binding.id}`;

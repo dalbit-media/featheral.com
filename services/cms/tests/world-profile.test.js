@@ -12,6 +12,21 @@ const { profileMessage, verifySignedProfile } = require("../../identity/profile"
 const { profileUi, prepareProfile } = require("../../identity/profile-ui");
 const { validate } = require("../../../sites/wallet.featheral.com/site-sign-in");
 
+test("Dollar startup does not import ledger profiles into read-only replica storage", t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dollar-replica-profile-"));
+  const env = { FTH_LEDGER_DIR: path.join(directory, "notes"), FTH_LEDGER_MODE: "unconfigured", FTH_LEDGER_BLOCK_INTERVAL_MS: "0" };
+  const writer = createDollarApi({ env });
+  const profile = { address: "0x0000000000000000000000000000000000000001", username: "snapshot_user", avatar: "", bio: "retained", issuedAt: "2026-01-01T00:00:00.000Z" };
+  writer.ledger.profiles.set(profile.address, profile);
+  let imports = 0;
+  const profiles = { readOnlyReplica: true, importLegacy() { imports++; throw new Error("Replica import attempted."); } };
+  let replica;
+  t.after(() => { replica?.close(); writer.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  replica = createDollarApi({ env: { ...env, FTH_LEDGER_MODE: "reader" }, ledger: writer.ledger, profiles });
+  assert.equal(imports, 0);
+  assert.equal(replica.ledger.profiles.get(profile.address).username, profile.username);
+});
+
 test("World JSON profile model and constrained wallet approval bind bio, avatar, wallet and timestamp", async () => {
   const wallet = Wallet.createRandom(), input = { address: wallet.address, username: "AppInsider", bio: "Volunteer\nMobile tools", avatar: "" };
   const model = profileUi();

@@ -30,3 +30,24 @@ test("wallet profiles persist independently with unique usernames and monotonic 
   profiles = createWalletProfiles(sqlite, file);
   assert.equal(profiles.get(first.address).username, "wallet_one");
 });
+
+test("replica profiles remain readable without allowing legacy import or save", t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-replica-profiles-"));
+  const file = path.join(directory, "profiles.sqlite");
+  const first = { address: "0x0000000000000000000000000000000000000001", username: "wallet_one", avatar: "", bio: "bio", issuedAt: "2026-01-01T00:00:00.000Z" };
+  const writer = createWalletProfiles(sqlite, file);
+  assert.equal(writer.readOnlyReplica, false);
+  writer.save(first); writer.close();
+  const replicaSqlite = { open(file) {
+    const db = new (require("node:sqlite").DatabaseSync)(file, { readOnly: true });
+    db.readOnlyReplica = true;
+    return db;
+  } };
+  const profiles = createWalletProfiles(replicaSqlite, file);
+  t.after(() => { profiles.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  assert.equal(profiles.readOnlyReplica, true);
+  assert.equal(profiles.get(first.address).username, first.username);
+  const updated = { ...first, bio: "changed", issuedAt: "2026-01-02T00:00:00.000Z" };
+  assert.throws(() => profiles.importLegacy(updated), /readonly database/);
+  assert.throws(() => profiles.save(updated), /readonly database/);
+});

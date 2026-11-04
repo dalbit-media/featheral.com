@@ -483,10 +483,9 @@ test('reviewed source is uploaded by SFTP and SSH failures never report success'
     clientFactory: () => new FakeClient(), stateDirectory: temp });
   const plan = deployment.plan();
   await assert.rejects(deployment.start({ planId: plan.id, approval: `DEPLOY ${plan.digest} ${plan.contentDigest}` }), { status: 502 });
-  assert.equal(uploads.length, plan.files + 3);
-  assert.ok(uploads.some(entry => entry.destination.endsWith('/.cms-published.json')));
-  assert(!uploads.some(entry => entry.destination.endsWith('.zip')));
-  assert.match([...remoteFiles].find(([file]) => file.endsWith('/scripts/deploy-release.sh'))[1].toString(), /set -Eeuo pipefail/);
+  assert.equal(uploads.length, 2);
+  assert.ok(uploads.some(entry => entry.destination.endsWith('/release.zip')));
+  assert.match([...remoteFiles].find(([file]) => file.endsWith('/deploy-release.sh'))[1].toString(), /set -Eeuo pipefail/);
   assert.ok(commands.some(command => command.startsWith('sudo -n systemd-run')));
   assert.equal(deployment.status().result.success, false);
   assert.equal(deployment.status().running, false);

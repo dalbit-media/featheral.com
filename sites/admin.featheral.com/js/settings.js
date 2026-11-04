@@ -116,6 +116,7 @@ VIEWS.settings = async (_q, token) => {
   });
   await load();
   if (active()) await mountDeploymentControls(token, () => loaded && !saving && snapshot() === saved);
+  if (active()) await mountSelfDeploymentControls(token, () => loaded && !saving && snapshot() === saved);
 };
 
 VIEWS["site-server"] = async (key, _q, token) => {

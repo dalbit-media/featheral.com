@@ -7,8 +7,67 @@ const os = require("node:os");
 const { DatabaseSync } = require("node:sqlite");
 const { snapshot, hash, runtimePaths } = require("../../operations/site-sync-snapshot");
 const { MARKER, readReplica, replicaEnvironment, allowReplicaRequest } = require("../../operations/replica");
-const { prepareBackup, installSnapshot, restoreBackup, returnStaged, verifySnapshot } = require("../../../scripts/restore-site-sync");
+const { prepareBackup, installSnapshot, restoreBackup, returnStaged, verifySnapshot,
+  replicaHealthURL, probeReplica, waitForReplica } = require("../../../scripts/restore-site-sync");
 const { SiteSync } = require("../lib/site-sync");
+test("replica health uses the configured local listener including IPv6", () => {
+  for (const host of ["127.0.0.1", "0.0.0.0"])
+    assert.equal(replicaHealthURL({ HOST: host, PORT: "6000" }), "http://127.0.0.1:6000/healthz");
+  for (const host of ["::", "::1"])
+    assert.equal(replicaHealthURL({ HOST: host, PORT: "9000" }), "http://[::1]:9000/healthz");
+  assert.equal(replicaHealthURL({ HOST: "localhost" }), "http://localhost:8080/healthz");
+  assert.equal(replicaHealthURL({}), "http://127.0.0.1:8080/healthz");
+  assert.throws(() => replicaHealthURL({ HOST: "remote.example" }), /local or wildcard/);
+  for (const port of ["invalid", "0", "65536", "1.5"])
+    assert.throws(() => replicaHealthURL({ PORT: port }), /Invalid target HTTP port/);
+});
+test("replica HTTP probe requires a healthy read-only response and exposes connection errors", async t => {
+  const http = require("node:http");
+  let status = 200, replica = "read-only";
+  const server = http.createServer((req, res) => {
+    assert.equal(req.url, "/healthz");
+    if (replica) res.setHeader("X-Featheral-Replica", replica);
+    res.writeHead(status); res.end("{}");
+  });
+  t.after(() => server.close());
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}/healthz`;
+  await probeReplica(url);
+  replica = "";
+  await assert.rejects(probeReplica(url), /HTTP 200; X-Featheral-Replica: missing/);
+  replica = "read-only"; status = 503;
+  await assert.rejects(probeReplica(url), /HTTP 503/);
+  await new Promise(resolve => server.close(resolve));
+  await assert.rejects(probeReplica(url), error => error.code === "ECONNREFUSED");
+});
+test("replica health allows slow startup and retains actionable failures after all 60 attempts", async () => {
+  const url = "http://[::1]:9000/healthz", logs = [], waits = [];
+  let attempts = 0;
+  const failure = Object.assign(new Error("connect ECONNREFUSED ::1:9000"), { code: "ECONNREFUSED" });
+  const options = { log: line => logs.push(line), wait: async ms => waits.push(ms),
+    probe: async endpoint => { assert.equal(endpoint, url); if (++attempts < 60) throw failure; } };
+  await waitForReplica(url, options);
+  assert.equal(attempts, 60); assert.equal(waits.length, 59);
+  assert(waits.every(ms => ms === 2000));
+  assert(logs.some(line => line.includes("ECONNREFUSED")));
+  assert(logs.at(-1).includes("60/60"));
+  attempts = 0; waits.length = 0; logs.length = 0;
+  await assert.rejects(waitForReplica(url, { ...options, probe: async () => { attempts++; throw failure; } }),
+    error => error.cause === failure && error.message.includes(url) && error.message.includes("ECONNREFUSED"));
+  assert.equal(attempts, 60); assert.equal(waits.length, 59);
+});
+test("replica HTTP probe enforces a three-second deadline even when the server never responds", async t => {
+  const server = require("node:http").createServer();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const received = require("node:events").once(server, "request");
+  const probe = probeReplica(`http://127.0.0.1:${server.address().port}/healthz`);
+  const rejected = assert.rejects(probe, /timed out after 3000 ms/);
+  await received;
+  t.mock.timers.tick(3000);
+  await rejected;
+});
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-site-sync-"));
   const root = path.join(directory, "source"), target = path.join(directory, "target");
@@ -712,6 +771,48 @@ test("unconfirmed target apply retains the archive until a signed receipt check 
   await f.service.reconcile({ site: "gold" }, { session: "admin" });
   assert.equal(approvals, 1); assert.equal(f.service.status().phase, "complete");
   assert(!fs.existsSync(f.directory));
+});
+test("confirmed rollback completes its step without reporting a successful sync", async t => {
+  const f = resumableFixture(t), execute = f.deployment.execute;
+  let now = 1000;
+  f.service.now = () => now;
+  f.service.result = { logs: [], host: f.target.host, steps: [
+    { id: "health", status: "pending", elapsedMs: 0, startedAt: null },
+  ] };
+  f.deployment.execute = async (...args) => {
+    if (args[1].includes("systemd-run")) {
+      const onLog = args[5];
+      onLog("FEATHERAL_SYNC:health"); now += 30000;
+      onLog("FEATHERAL_SYNC:rollback"); now += 264000;
+      onLog("FEATHERAL_SYNC:rollback-complete");
+      throw new Error("Target job exited with status 1");
+    }
+    return execute(...args);
+  };
+  f.service.launch(f.plan); await f.service.transferTask;
+  let status = f.service.status();
+  assert.equal(status.phase, "uncertain");
+  assert.equal(status.steps.find(step => step.id === "health").status, "interrupted");
+  const rollback = status.steps.find(step => step.id === "rollback");
+  assert.equal(rollback.status, "complete"); assert.equal(rollback.percent, 100);
+  assert.equal(rollback.elapsedSeconds, 264); assert.equal(rollback.remainingSeconds, 0);
+  assert(fs.existsSync(f.archive));
+  f.settings.approvals = { consume() {} };
+  f.service.command = async () => JSON.stringify({ active: false, locked: false, online: true, phase: "rolled-back" });
+  await f.service.reconcile({ site: "gold" }, {});
+  status = f.service.status();
+  assert.equal(status.phase, "rolled-back");
+  assert.equal(status.steps.find(step => step.id === "rollback").elapsedSeconds, 264);
+});
+test("rollback receipt corrects an interrupted step from an older receiver without adding idle time", async t => {
+  const f = resumableFixture(t);
+  f.service.result = { phase: "uncertain", site: "gold", id: f.binding.id, binding: f.binding, logs: [],
+    steps: [{ id: "rollback", status: "interrupted", elapsedMs: 264000, startedAt: null }] };
+  f.settings.approvals = { consume() {} };
+  f.service.command = async () => JSON.stringify({ active: false, locked: false, online: true, phase: "rolled-back" });
+  await f.service.reconcile({ site: "gold" }, {});
+  const rollback = f.service.status().steps[0];
+  assert.equal(rollback.status, "complete"); assert.equal(rollback.elapsedSeconds, 264);
 });
 test("step timing reports measured upload ETA, freezes paused time and preserves historical estimates", async t => {
   const f = resumableFixture(t);

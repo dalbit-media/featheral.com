@@ -18,7 +18,7 @@ const { initialize, initializeNewInstallation, migrateEnvironment } = require(".
 const context = { origin: "http://admin.localhost", session: "fixture-admin" };
 const password = "fixture-server-password:with:colons";
 const adminPassword = "fixture-admin-password-long";
-// In-memory resumable SFTP target matching the per-file deployment uploader.
+// In-memory resumable SFTP target for the release ZIP and installer.
 function fakeRemote(files, onUpload = () => {}) {
   return {
     reply(command, stream) {
@@ -153,7 +153,7 @@ test("a fresh encrypted installation boots the gateway and wallet-only Admin wit
   });
   const releaseFiles = [...new Set([...require("../lib/deployment").releaseFiles(source),
     "services/operations/replica.js", "services/operations/site-sync-snapshot.js", "services/cms/lib/site-sync.js",
-    "scripts/restore-site-sync.js", "shared/gold-pricing.js"])];
+    "scripts/restore-site-sync.js", "services/operations/self-deployment.js", "scripts/self-deploy.js", "shared/gold-pricing.js"])];
   for (const relative of releaseFiles) {
     const target = path.join(repository, relative);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -628,8 +628,8 @@ test("Settings-backed deployment sends credentials only over stdin, uses SFTP, a
   const result = await deployment.start(input, credential);
   assert.equal(result.success, true);
   assert.ok(credential.every(target => target.password === ""));
-  assert.equal(uploads.length, plan.files + 3);
-  assert(!uploads.some(target => target.endsWith(".zip")));
+  assert.equal(uploads.length, 2);
+  assert(uploads.some(target => target.endsWith("/release.zip")));
   assert.match(commands.at(-1), /systemd-run --wait --pipe --collect/);
   assert.match(commands.at(-1), /sudo -S -p '' -v/);
   assert.match(commands.at(-1), /'32' '120'/);
@@ -681,13 +681,13 @@ test("one reviewed Git-tracked archive deploys to shared and DB servers with ind
   assert.deepEqual(connections.map(connection => connection.host), [site, "featheral.com"]);
   assert.ok(connections.every(connection => connection.username === "root"));
   const files = host => new Map(uploads.filter(upload => upload.host === host)
-    .map(upload => [upload.target.replace(/^.*\/releases\/[^/]+\//, ""), upload.bytes]));
+    .map(upload => [path.posix.basename(upload.target), upload.bytes]));
   const dbFiles = files(site), sharedFiles = files("featheral.com");
-  assert(!uploads.some(upload => upload.target.endsWith(".zip")));
+  assert(uploads.some(upload => upload.target.endsWith("/release.zip")));
   assert.deepEqual([...dbFiles.keys()].sort(), [...sharedFiles.keys()].sort());
   for (const [name, bytes] of dbFiles) assert.deepEqual(bytes, sharedFiles.get(name), name);
   assert.ok(uploads.filter(upload => upload.target.endsWith(".sh")).every(upload => !upload.bytes.includes(13)), "Linux shell uploads normalize Windows CRLF");
-  assert.ok(dbFiles.has("sites/db.featheral.com/index.html"));
+  assert.ok(dbFiles.has("release.zip"));
   const dbCommand = commands.find(entry => entry.host === site && entry.command.includes("systemd-run")).command;
   const sharedCommand = commands.find(entry => entry.host === "featheral.com" && entry.command.includes("systemd-run")).command;
   assert.match(dbCommand, /'db.featheral.com'/); assert.match(dbCommand, /'false'/);
@@ -699,7 +699,7 @@ test("one reviewed Git-tracked archive deploys to shared and DB servers with ind
   assert.equal(result.targets.length, 2);
   assert.ok(!JSON.stringify(deployment.status()).includes(dbPassword));
   assert.ok(!JSON.stringify(deployment.status()).includes(password));
-  assert.ok(deployment.status().logs.some(entry => /verified file \d+\/\d+/.test(entry.message)));
+  assert.ok(deployment.status().logs.some(entry => /checksum verified: release\.zip/.test(entry.message)));
   assert.match(deployment.status().logs.at(-1).message, /All deployment targets verified/);
 });
 test("multi-target failures preserve per-server results and reject changed assignments before any SSH use", async t => {

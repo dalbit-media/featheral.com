@@ -303,7 +303,7 @@ All sites default to the shared server. To use different root passwords for
 3. Point DB's DNS A/AAAA records to the DB server; keep the other hosts on the
    shared server. This workflow does not modify your DNS provider's records.
 4. In **Settings → Deployment**, review both targets/hostname lists, enter the approval
-   phrase and sign. Both servers receive the same individually transferred Git-tracked
+   phrase and sign. Both servers receive the same compressed ZIP of Git-tracked
    working-tree files (tracked edits included; untracked files excluded), plus
    the published CMS snapshot. Each connection uses its own encrypted credential.
 
@@ -322,14 +322,27 @@ a deployed release still exclude newly introduced/untracked files, without
 shipping `.git`. Status records each target's verified/failed outcome. A failed
 target stops the batch; previously verified servers are not rolled back across
 servers. Never retry a partially completed rollout without reviewing its logs.
-No compression or ZIP is used. Each file is checksum-verified, completed files
-are skipped on retry, and partial files resume from verified prefixes. Disk-space
+Code is compressed into a ZIP before upload. The ZIP and bootstrap installer are
+checksum-verified; retries resume the verified ZIP prefix. Extraction is into a
+fresh release only, rejects unsafe paths/links, and verifies every reviewed file.
+Disk-space
 preflight fails explicitly without deleting old staging or backups.
 Database/media replication uses the separately reviewed Site Sync workflow:
 database and metadata entries transfer first, then media files individually;
 the target stays unchanged until the full snapshot and backup are verified.
 Shell scripts use LF line endings in the transferred files and installer so
 releases prepared on Windows also run on Linux.
+
+On the deployed Linux Admin server, **Settings → Deployment → Sign & self-sync**
+pulls this repository's remote default branch into a persistent checkout, builds
+a fresh release and restarts through the same deployment health checks and code
+rollback. It does not upload code, copy databases/media, or re-import published
+pages. Git access must already be configured on that server; credentials are
+never placed in the repository. The service account needs non-interactive sudo
+for the deployment operations. Self-sync is wallet-approved, runs independently
+under `featheral-deployment.service`, and records progress across Admin restarts.
+It is unavailable on local Windows/development installations and other servers.
+Commit and push code before using it; it pulls committed remote code, not local edits.
 
 Before the **first** deployment, restore a consistent **offline backup** into
 `<target>/shared/data/` (including the private system database, original keys,
@@ -806,6 +819,8 @@ Embeds add `embedded=1&parentOrigin=<origin>`; only Featheral and local developm
 origins are allowed. No HTML, arbitrary actions, provider bridge or credentials are
 accepted through configuration. Embedded mutations are blocked; connection/signing
 opens the central wallet top-level. Browser-blocked storage is reported explicitly.
+The embed and its dialog follow the host page's theme (CSS variables, or the body/html
+background and color-scheme), so light sites get a light wallet and dark sites a dark one.
 
 Combined estimates include wallet FTH$/notes, verified mainnet ERC20 FTHG and linked
 World funds. Legacy direct-wallet World accounts are counted once. Unlinked guest

@@ -85,6 +85,7 @@ function createWalletProfiles(sqlite, file) {
   }
 
   return Object.freeze({
+    readOnlyReplica: Boolean(db.readOnlyReplica),
     get,
     owner,
     save(profile) { return write(profile); },

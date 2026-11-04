@@ -44,7 +44,7 @@ credentials keep the saved value; switching to Shared retains the independent
 profile for later use.
 
 All sites share the default server until assigned to a separate server. Reviewed
-**Settings → Deployment** uploads the same Git-tracked working-tree files individually to every target,
+**Settings → Deployment** compresses the same Git-tracked working-tree files into a ZIP before uploading to every target,
 using each target's own encrypted SSH/sudo credential. Nginx/TLS and the gateway
 are scoped to assigned hostnames; set DNS A/AAAA records accordingly beforehand.
 Separate targets deploy before the shared Admin server. A DB-only target starts
@@ -63,6 +63,21 @@ desktops use two columns and narrow screens stack the same workflow.
 Deploy remains disabled until the exact approval phrase matches the current,
 unexpired plan. A new review clears the old phrase; a failed wallet challenge
 shows its error and allows retry without leaving Settings.
+
+**Sign & self-sync** is available only on the active deployed Linux Admin
+server. It requires wallet approval, server-side Git access to
+`https://github.com/dalbit-media/featheral.com.git`, Git installed on the server,
+and non-interactive sudo for deployment operations. The independent
+`featheral-deployment.service` job pulls the remote default branch with
+`git pull --ff-only` into `<deployment-root>/shared/self-deployment/checkout`,
+refuses local checkout edits or a changed origin, packages a fresh release,
+builds, restarts and verifies it with the existing code rollback safeguards.
+Private storage stays linked in place; published CMS pages are not re-imported.
+It never uses source-machine edits: commit and push them first. Status and bounded
+redacted logs persist in `shared/self-deployment/status.json`; refresh Settings
+after the Admin restart. An interrupted job without a completion receipt reports
+uncertainty and requires inspection of `journalctl -u featheral-deployment`
+before retrying. It cannot update a selected remote server.
 Existing limits and low-level runtime values are preserved. Common service options use readable labels
 in the corresponding App, World, Silver, Gold, Media, Wallet or Database site settings.
 The reduced UI preserves existing low-level runtime values; advanced/offline
@@ -197,8 +212,15 @@ polling and Gold execution, removes financial private keys from the runtime, ope
 persistent SQLite read-only and rejects journal transactions and HTTP mutations.
 Replica startup skips seeding/upgrades and public page views do not increment
 stored counters. Target server Settings and encryption keys remain its own.
+Dollar startup also skips legacy wallet-profile imports when profile storage is
+read-only; it serves the profiles already present in the snapshot.
 The source remains the writer; purchasing, login and other mutations belong there.
 Health must explicitly return `X-Featheral-Replica: read-only` before success.
+The probe follows the target's configured HTTP host and port (including IPv6),
+using server-side HTTP without browser restricted-port rules. Like deployment,
+it allows 60 attempts, with a three-second request timeout and two seconds between
+attempts. Failed attempts include the endpoint and connection/HTTP error; exhausted
+health checks print bounded recent application logs before restoring the backup.
 Code deployments preserve this marker; removing it is **not** a supported promotion
 procedure. Never enable a second financial writer.
 
@@ -211,6 +233,9 @@ restart or transport loss reports **uncertain**, never success. **Sign & recheck
 target status** reads the original target receipt/process status without copying
 data, and clears uncertainty only for a completed/rolled-back receipt or an online,
 untouched target with no receipt, active job or lock.
+Confirmed rollback completes the restore progress step, not the failed sync.
+Older interrupted restore steps are corrected when the signed receipt check
+confirms rollback.
 
 For an interrupted install, inspect `journalctl -u featheral-site-sync.service`.
 After the job has stopped, an operator on that target can restore a specific
@@ -421,7 +446,7 @@ remote release.
 
 The site-page editor opens the homepage first, with separate site/page selectors, full-width title/description/content fields and collapsible widget help. **View published page** opens the selected page at its public URL. The status distinguishes saved content from unsaved changes; use **Publish changes** or Ctrl/Cmd+S to publish. Switching pages or leaving the editor prompts before discarding changes.
 
-**Deploy all sites** uses a digest-bound, expiring review plan covering every server and hostname assignment, followed by SFTP upload and pinned-host-key SSH execution with per-server credentials. It is disabled by default and must be enabled in Admin Settings with origin-wallet approval. Every target receives the same Git-tracked source files individually, without compression; untracked files are excluded and the tracked inventory is retained for later deployments from installed releases. Status preserves per-target outcomes; failures stop the batch without rolling back other servers. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment). Initial full-stack private data must be restored from a consistent offline backup; a fresh DB-only host does not need financial data or root credentials copied from the shared server. No deployment occurs merely by reviewing a plan.
+**Deploy all sites** uses a digest-bound, expiring review plan covering every server and hostname assignment, followed by SFTP upload and pinned-host-key SSH execution with per-server credentials. It is disabled by default and must be enabled in Admin Settings with origin-wallet approval. Every target receives the same compressed ZIP of Git-tracked source and published metadata; untracked files are excluded and the tracked inventory is retained for later deployments from installed releases. Both the ZIP and every extracted file are checksum-verified; retries resume the ZIP's verified prefix. ZIP paths and links are checked before extraction into a fresh release. Free-space preflight includes compressed and expanded bytes plus headroom. Database/uploads Site Sync remains uncompressed file transfer. Status preserves per-target outcomes; failures stop the batch without rolling back other servers. See the root [deployment instructions](../../README.md#unified-administration-cms-editing-and-reviewed-deployment). Initial full-stack private data must be restored from a consistent offline backup; a fresh DB-only host does not need financial data or root credentials copied from the shared server. No deployment occurs merely by reviewing a plan.
 
 This application and its complete local data were moved into the Featheral foundation at `services/cms/`; the old source root is empty. Run `npm start` from the foundation root to serve CMS, X, Exchange and all registered CMS sites through the same gateway as Foundation, Gold, Dollar and World. Root `npm install` includes this CMS workspace. Run `npm run test:cms` from the foundation root for the migrated suite.
 
