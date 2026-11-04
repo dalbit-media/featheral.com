@@ -85,7 +85,7 @@ test('Liked offers only media and readings, drops legacy folder filters and supp
 
 test('sidebar refreshes keep CMS page links current and ignore obsolete responses', async () => {
   const pending = [], target = { innerHTML: '' }, info = { pages: [] };
-  const context = vm.createContext({ info, $: () => target, esc: String, fmtNum: String,
+  const context = vm.createContext({ info, $: () => target, esc: String, fmtNum: String, readingCategoryIcon: () => '<svg aria-hidden="true"></svg>',
     api: () => new Promise(resolve => pending.push(resolve)), readingLink: page => `#/page/${page.slug}`,
     href: () => '#/read', parseHash: () => ({ parts: ['read'] }), setTab() {} });
   vm.runInContext(source.slice(source.indexOf('let readingNavigation ='), source.indexOf('async function render()')), context);
@@ -141,7 +141,7 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
   assert.match(html, /class="site-sidebar"[^>]+hidden/);
   assert.doesNotMatch(html, /<body class="has-site-sidebar">/);
-  assert.match(html, /class="trash-link trash-button" aria-label="Trash" title="Trash"><svg/);
+  assert.doesNotMatch(html.match(/<aside class="site-sidebar"[\s\S]*?<\/aside>/)[0], /#\/trash|trash-button/);
   assert.match(html, /href="#\/trash" data-tab="trash" aria-label="Trash"/);
   const trashLink = html.match(/<a href="#\/trash" data-tab="trash"[\s\S]*?<\/a>/)[0];
   assert.match(trashLink, /<svg class="trash-icon"[^>]+aria-hidden="true"/);
@@ -160,4 +160,32 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.doesNotMatch(trash, /originalSize: true|tile original-tile/);
   assert.match(liked, /previews: true, minWidth: 250, minColumns: 2, groupBy:/);
   assert.doesNotMatch(source, /data-folders|data-organize|folder-create|folderDialog|\/api\/public\/collections/);
+});
+
+test('reading thumbnails use lazy bounded previews, site scoping, and reject invalid media', () => {
+  const context = vm.createContext({ TYPE_LABEL: { png: 'PNG', jpeg: 'JPG', gif: 'GIF' }, esc: String,
+    publicUrl: url => '/tenant' + url });
+  vm.runInContext(source.slice(source.indexOf('function readingThumbnail('), source.indexOf('function readingEntry(')), context);
+  const html = context.readingThumbnail({ id: 8, thumbnail: { type: 'gif' } });
+  assert.match(html, /src="\/tenant\/api\/public\/posts\/8\/preview\?type=gif"/);
+  assert.match(html, /width="80" height="80" loading="lazy" decoding="async" alt=""/);
+  for (const item of [{ id: -1, thumbnail: { type: 'png' } }, { id: 1 }, { id: 1, thumbnail: { type: 'read' } }]) {
+    assert.equal(context.readingThumbnail(item), '');
+  }
+  const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
+  assert.match(css, /\.reading-thumbnail \{[^}]+width: 80px; height: 80px/);
+  assert.match(css, /\.reading-thumbnail \{[^}]+width: 64px; height: 64px/);
+  assert.equal((source.match(/\$\{readingThumbnail\((?:item|t)\)\}/g) || []).length, 2, 'Read and shared Liked/Trash cards render previews');
+});
+
+test('reading category icons are decorative, semantic, and have a consistent fallback', () => {
+  const context = vm.createContext({});
+  vm.runInContext(source.slice(source.indexOf('function readingCategoryIcon('), source.indexOf('let readingNavigation =')), context);
+  const news = context.readingCategoryIcon('News');
+  assert.match(news, /<svg class="category-icon"[^>]+aria-hidden="true"/);
+  assert.notEqual(news, context.readingCategoryIcon('Stories'));
+  assert.equal(context.readingCategoryIcon('Other'), context.readingCategoryIcon('<script>'));
+  assert.doesNotMatch(context.readingCategoryIcon('<script>'), /<script>/);
+  assert.match(source, /section class="reading-nav-group" aria-labelledby="reading-pages-title"/);
+  assert.match(source, /section class="reading-nav-group reading-categories" aria-labelledby="reading-categories-title"/);
 });

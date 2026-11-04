@@ -123,10 +123,15 @@ main { padding-top: var(--top); min-height: 100%; }
 .site-sidebar nav { display: grid; gap: 4px; }
 .site-sidebar a { display: block; padding: 10px; border-radius: 10px; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
 .site-sidebar a:hover, .site-sidebar a.on { background: var(--panel); }
-.site-sidebar .trash-link { border: 1px solid var(--line); margin-block: 4px; }
 .trash-icon { display: block; flex-shrink: 0; }
-.site-sidebar .trash-button, header.top .tabs .trash-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-width: 44px; padding: 10px; flex: 0 0 44px; }
+header.top .tabs .trash-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-width: 44px; padding: 10px; flex: 0 0 44px; }
 .site-sidebar h2 { font-size: 13px; color: var(--muted); margin: 20px 10px 8px; }
+.reading-nav-group { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.reading-nav-group h2 { margin: 0 10px 10px; font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.site-sidebar .reading-categories a { display: flex; align-items: center; gap: 8px; }
+.category-icon { flex-shrink: 0; color: var(--brand); }
+.reading-categories a > span:not(.count) { min-width: 0; }
+.reading-categories .count { margin-left: auto; flex-shrink: 0; }
 .has-site-sidebar #view { margin-left: 220px; }
 .liked-tabs, .reading-pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .liked-tabs [role="tab"] { display: block; border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; color: var(--text); }
@@ -146,6 +151,9 @@ main { padding-top: var(--top); min-height: 100%; }
 .reading-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; color: var(--muted); font-size: 13px; }
 .reading-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 body .reading-cards a.entry { display: flex; flex-direction: column; gap: 10px; padding: 22px; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.reading-card-heading { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.reading-card-heading h3 { min-width: 0; margin: 0; }
+body .entry .reading-thumbnail { display: block; width: 80px; height: 80px; max-width: 80px; flex: 0 0 80px; object-fit: cover; border-radius: 8px; background: var(--panel); }
 .reading-cards .entry h3 { line-height: 1.4; }
 .reading-cards .entry p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; line-height: 1.6; }
 .reading-cards .entry .m { margin-top: auto; padding-top: 8px; line-height: 1.7; }
@@ -169,6 +177,7 @@ body .reading-cards a.entry { display: flex; flex-direction: column; gap: 10px; 
   .reading-tools label { width: 100%; }
   .reading-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   body .reading-cards a.entry { padding: 18px; }
+  body .entry .reading-thumbnail { width: 64px; height: 64px; max-width: 64px; flex-basis: 64px; }
   .site-sidebar summary .count { font-size: 11px; margin-left: 8px; }
 }
 @media (max-width: 900px) {

@@ -238,10 +238,31 @@ function readingLink(item, from = location.hash.slice(1), trashed = false) {
     { from, ...(trashed ? { trash: 1 } : {}) });
 }
 
+function readingThumbnail(item) {
+  if (!item.thumbnail || !TYPE_LABEL[item.thumbnail.type] || !Number.isSafeInteger(item.id) || item.id < 1) return '';
+  return `<img class="reading-thumbnail" src="${esc(publicUrl(`/api/public/posts/${item.id}/preview?type=${item.thumbnail.type}`))}" width="80" height="80" loading="lazy" decoding="async" alt="">`;
+}
+
 function readingEntry(item, from = location.hash.slice(1), trashed = false) {
-  return `<a class="entry" href="${esc(readingLink(item, from, trashed))}"><h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
+  return `<a class="entry" href="${esc(readingLink(item, from, trashed))}"><div class="reading-card-heading">${readingThumbnail(item)}<h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
     ${item.snippet ? `<p>${esc(item.snippet)}</p>` : ''}
     <div class="m">${fmtNum(item.words)} words · ${Math.max(1, Math.round(item.words / 230))} min read${item.likes != null ? ` · ♥ ${fmtNum(item.likes)} · 👎 ${fmtNum(item.dislikes)}` : ''}${trashed ? ` · ${item.deleted ? 'In Trash' : 'More dislikes than likes'}` : ''}</div></a>`;
+}
+
+function readingCategoryIcon(name) {
+  const icons = [
+    [/news|updates|announcements/i, 'M4 4h16v16H4zM7 8h10M7 12h4M7 16h10M14 11h3v3h-3z'],
+    [/tech|science|software|coding/i, 'M8 4h8v16H8zM4 8h4M4 16h4M16 8h4M16 16h4M11 8h2v8h-2z'],
+    [/art|photo|design|gallery/i, 'M3 4h18v16H3zM3 17l6-6 4 4 3-3 5 5M16 8h.01'],
+    [/video|film|movie/i, 'M3 5h18v14H3zM10 9l5 3-5 3z'],
+    [/music|audio/i, 'M9 17V5l11-2v12M9 8l11-2M9 17a3 3 0 1 1-3-3c2 0 3 1 3 3M20 15a3 3 0 1 1-3-3c2 0 3 1 3 3'],
+    [/love|romance|relationship/i, 'M12 20S3 14 3 8a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6-9 12-9 12z'],
+    [/guide|learn|education|story|stories|fiction|book|reading/i, 'M12 6C8 3 4 4 3 5v15c3-2 6-2 9 0 3-2 6-2 9 0V5c-3-2-6-2-9 1v14'],
+    [/travel|world/i, 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M3 12h18M12 3c-5 5-5 13 0 18 5-5 5-13 0-18'],
+    [/health|fitness|wellness/i, 'M3 12h5l3-8 3 16 3-8h4'],
+  ];
+  const path = icons.find(([pattern]) => pattern.test(name))?.[1] || 'M3 7V5h7l2 2h9v13H3z';
+  return `<svg class="category-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
 }
 
 let readingNavigation = null, readingNavigationRequest = 0;
@@ -265,8 +286,8 @@ async function loadReadingNavigation() {
     if (sequence !== readingNavigationRequest) return;
     readingNavigation = result;
     info.pages = readingNavigation.pages.filter(page => page.id < 0).map(({ slug, title }) => ({ slug, title }));
-    target.innerHTML = `<h2>Pages</h2><nav aria-label="Pages">${readingNavigation.pages.map(page => `<a href="${esc(readingLink(page, '/read'))}">${esc(page.title)}</a>`).join('') || '<p class="count">No published pages.</p>'}</nav>
-      <h2>Categories</h2><nav aria-label="Reading categories"><a href="#/read">All readings</a>${readingNavigation.categories.map(category => `<a href="${href(['read'], { category: category.id })}">${esc(category.name)} <span class="count">${fmtNum(category.count)}</span></a>`).join('')}</nav>`;
+    target.innerHTML = `<section class="reading-nav-group" aria-labelledby="reading-pages-title"><h2 id="reading-pages-title">Pages</h2><nav aria-label="Pages">${readingNavigation.pages.map(page => `<a href="${esc(readingLink(page, '/read'))}">${esc(page.title)}</a>`).join('') || '<p class="count">No published pages.</p>'}</nav></section>
+      <section class="reading-nav-group reading-categories" aria-labelledby="reading-categories-title"><h2 id="reading-categories-title">Categories</h2><nav aria-label="Reading categories">${readingNavigation.categories.map(category => `<a href="${href(['read'], { category: category.id })}">${readingCategoryIcon(category.name)}<span>${esc(category.name)}</span><span class="count">${fmtNum(category.count)}</span></a>`).join('') || '<p class="count">No reading categories.</p>'}</nav></section>`;
     const active = parseHash().parts[0];
     setTab(active === 'page' ? 'read' : active || 'swipe');
   } catch (error) {
@@ -777,7 +798,7 @@ async function readListView(q) {
   if (disposed) return;
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
-    <div class="reading-cards">${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
+    <div class="reading-cards">${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
       <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a>`).join('')}</div>
     <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, page: r.page + 1 })}">Next page →</a>` : ''}</div>`

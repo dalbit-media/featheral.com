@@ -6,6 +6,28 @@ const { SitePages } = require('../lib/site-pages');
 const root = path.resolve(__dirname, '../../..');
 const source = fs.readFileSync(path.join(root, 'sites', 'x.featheral.com', 'site.js'), 'utf8');
 
+test('reading lists, details and liked summaries expose only available local thumbnail types', () => {
+  const rows = [1, 2, 3].map(ID => ({ ID, post_title: `Reading ${ID}`, post_content: 'A short story.', post_date: '2026-01-01' }));
+  const metrics = new Map([
+    [1, { wordCount: 3, imageBest: { png: { url: '/uploads/one.png' } } }],
+    [2, { wordCount: 3, imageBest: { gif: { url: 'https://other.invalid/two.gif' } } }],
+    [3, { wordCount: 3 }],
+  ]);
+  const subject = Object.assign(Object.create(PublicSite.prototype), {
+    site: { memo: { publicPosts: rows, publicIds: new Set([1, 2, 3]) }, trashed: new Set(), mediaBase: '/uploads',
+      has: () => false, t: table => table, postMetrics: () => metrics, all: () => rows, get: (_sql, id) => rows.find(row => row.ID === id) },
+    cms: { published: () => [] }, store: { viewCounts: () => new Map() },
+  });
+  const list = subject.textList({});
+  assert.deepEqual(list.items.find(item => item.id === 1).thumbnail, { type: 'png' });
+  for (const id of [2, 3]) assert.equal(list.items.find(item => item.id === id).thumbnail, null);
+  assert.deepEqual(subject.text(1).thumbnail, { type: 'png' });
+  assert.deepEqual(subject.readingSummary(1).thumbnail, { type: 'png' });
+  assert(!Object.hasOwn(subject.readingSummary(1), 'paragraphs'));
+  assert.equal(subject.readingThumbnail(-10), null);
+  assert.equal(subject.cmsText({ id: 10, title: 'Page', body: 'Words here' }).thumbnail, null);
+});
+
 test('bootstrap metadata skips all media indexes and totals while preserving gate, pages, theme and features', () => {
   const settings = { ageGate: true, homepage: 'media', displayName: 'Custom brand', description: 'Custom description' };
   const calls = [];

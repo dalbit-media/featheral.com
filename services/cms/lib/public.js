@@ -1156,6 +1156,12 @@ class PublicSite {
     return { ...summary, snippet: paragraphs.join(' ').slice(0, 220) };
   }
 
+  readingThumbnail(id) {
+    if (id < 0) return null;
+    const media = mainMedia(this.site, id);
+    return media?.url?.startsWith(this.site.mediaBase + '/') ? { type: media.type } : null;
+  }
+
   textList(q) {
     const metrics = this.site.postMetrics();
     let list = publishedPosts(this.site).filter((r) => !this.site.trashed.has(r.ID) && (metrics.get(r.ID)?.wordCount || 0) >= 1);
@@ -1194,7 +1200,7 @@ class PublicSite {
         const title = r.cms ? r.cms.title : T.decodeEntities(row?.post_title || '') || 'Untitled';
         const snippet = r.cms ? T.htmlToText(r.cms.excerpt || r.cms.body).slice(0, 220) : row ? describe(row).slice(0, 220) : '';
         return {
-          id: r.ID, title, date: r.post_date, words: words(r), views: seen.get(r.ID) || 0, snippet,
+          id: r.ID, title, date: r.post_date, words: words(r), views: seen.get(r.ID) || 0, snippet, thumbnail: this.readingThumbnail(r.ID),
           ...(r.cms ? { type: r.cms.type, slug: r.cms.slug } : {}),
         };
       }),
@@ -1205,7 +1211,7 @@ class PublicSite {
     const text = T.htmlToText(post.body).trim();
     return {
       id: -post.id, title: post.title, date: post.createdAt, type: post.type, slug: post.slug,
-      words: T.wordCount(text), views: this.store.viewCounts([-post.id]).get(-post.id) || 0,
+      words: T.wordCount(text), views: this.store.viewCounts([-post.id]).get(-post.id) || 0, thumbnail: null,
       paragraphs: text.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean),
     };
   }
@@ -1228,7 +1234,8 @@ class PublicSite {
     const text = T.htmlToText(row.post_content || '').trim();
     return {
       id, title: T.decodeEntities(row.post_title || '') || 'Untitled', date: row.post_date,
-      words: T.wordCount(text), views: this.store.viewCounts([id]).get(id) || 0, paragraphs: text.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean),
+      words: T.wordCount(text), views: this.store.viewCounts([id]).get(id) || 0, thumbnail: this.readingThumbnail(id),
+      paragraphs: text.split(/\n\s*\n|\n/).map((p) => p.trim()).filter(Boolean),
     };
   }
 
