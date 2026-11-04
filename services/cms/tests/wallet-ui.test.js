@@ -2,15 +2,17 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { walletUi, primaryFor, allowedOrigin } = require("../../wallet/ui");
 const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
-test("Admin header and sign-in wallet avatars use a fixed compact positioned control", () => {
+test("Admin header keeps its compact avatar while sign-in uses a direct accessible action", () => {
   const admin = path.resolve(__dirname, "../../../sites/admin.featheral.com");
   const login = fs.readFileSync(path.join(admin, "login.html"), "utf8");
   const header = fs.readFileSync(path.join(admin, "index.html"), "utf8");
   const styles = fs.readFileSync(path.join(admin, "styles.css"), "utf8");
   assert.match(header, /id="admin-wallet" class="icon-btn wallet-icon"/);
-  assert.match(login, /id="login-wallet" class="wallet-icon"/);
+  assert.doesNotMatch(login, /id="login-wallet"|wallet-profile\.js/);
+  assert.match(login, /id="login-sign" type="button">Connect and sign in/);
+  assert.match(login, /label id="login-provider-field" hidden/);
   assert.match(login, /class="login-actions"/);
-  for (const [source, id] of [[styles, "admin-wallet"], [login, "login-wallet"]]) {
+  for (const [source, id] of [[styles, "admin-wallet"]]) {
     assert.match(source, new RegExp(`#${id} \\{[^}]*position: relative;[^}]*flex: 0 0 32px;[^}]*width: 32px; height: 32px;[^}]*padding: 0;`));
     assert.match(source, new RegExp(`#${id} \\.wp-avatar \\{ width: 32px; height: 32px; box-sizing: border-box; \\}`));
   }

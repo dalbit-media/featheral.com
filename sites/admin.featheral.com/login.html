@@ -4,30 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in - Featheral Admin</title>
-  <link rel="stylesheet" href="/shared/wallet-profile.css">
   <style>
     body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #f5f6fa; color: #202338; font: 16px system-ui, sans-serif; }
-    main { max-width: 32rem; margin: 1.5rem; padding: 2rem; background: white; border: 1px solid #e1e4ed; border-radius: 1rem; }
+    main { width: min(32rem, calc(100% - 3rem)); box-sizing: border-box; margin: 1.5rem; padding: clamp(1.25rem, 5vw, 2rem); background: white; border: 1px solid #e1e4ed; border-radius: 1rem; }
     h1 { margin-top: 0; } p { line-height: 1.6; } button { cursor: pointer; padding: .7rem 1rem; border: 1px solid #cdd1df; border-radius: .5rem; background: white; }
-    #login-sign { background: #353c99; color: white; } #login-status { overflow-wrap: anywhere; }
+    #login-sign { background: #353c99; color: white; min-height: 48px; } #login-status { overflow-wrap: anywhere; }
+    button:disabled { cursor: wait; opacity: .7; }
+    select { display: block; width: 100%; margin-top: .5rem; min-height: 48px; font: inherit; }
+    label { display: block; margin-block: 1rem; }
+    summary { cursor: pointer; } code { overflow-wrap: anywhere; font-size: .8rem; }
+    [hidden] { display: none !important; }
     .login-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    #login-wallet { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; min-width: 32px; max-width: 32px; min-height: 32px; max-height: 32px; padding: 0; border: 0; border-radius: 50%; box-sizing: border-box; }
-    #login-wallet .wp-avatar { width: 32px; height: 32px; box-sizing: border-box; }
-    #login-wallet svg { flex: none; width: 18px; height: 18px; }
   </style>
 </head>
 <body>
   <main>
     <h1>Featheral Admin</h1>
-    <p>Connect the origin or Dollar reserve wallet, then sign in. No Admin password is needed.</p>
+    <p>Sign in with the origin or Dollar reserve wallet. One button connects your wallet and asks you to sign a message.</p>
+    <p>No password, network switch, gas or transaction is needed.</p>
+    <label id="login-provider-field" hidden>Signing wallet<select id="login-provider"><option value="">Choose a wallet</option></select></label>
     <div class="login-actions">
-    <button id="login-wallet" class="wallet-icon" type="button" aria-label="Connect Admin wallet" title="Connect Admin wallet"></button>
-    <button id="login-sign" type="button">Sign in to Admin</button>
+    <button id="login-sign" type="button">Connect and sign in</button>
     </div>
     <p id="login-status" role="status" aria-live="polite"></p>
+    <details><summary>Need help signing in?</summary><p>Unlock your Ethereum wallet and select the origin or Dollar reserve account. If several wallet extensions are installed, choose the correct signing wallet above. Approve both the connection and the sign-in message in your wallet.</p><p>A wallet connected on another Featheral site is not automatically connected to Admin. Server updates end Admin sessions; sign in again after an update.</p></details>
+    <noscript><p>Enable JavaScript to connect your wallet and sign in.</p></noscript>
   </main>
   <script src="/js/vendor/ethers.js"></script>
-  <script src="/shared/wallet-profile.js"></script>
   <script src="/js/login.js"></script>
 </body>
 </html>

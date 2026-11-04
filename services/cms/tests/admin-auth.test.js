@@ -70,7 +70,7 @@ test("privileged approvals follow the signed-in origin or Dollar wallet and stay
 test("only signed allowed wallets open Admin; Basic credentials and localhost never bypass access", async t => {
   const f = await fixture(t);
   const root = await f.call("/");
-  assert.equal(root.status, 200); assert.match(root.text, /Sign in to Admin/); assert.doesNotMatch(root.text, /id="sidebar"/);
+  assert.equal(root.status, 200); assert.match(root.text, /Connect and sign in/); assert.doesNotMatch(root.text, /id="sidebar"/);
   assert.equal((await f.call("/js/login.js")).status, 200);
   assert.equal((await f.call("/js/core.js")).status, 401);
   assert.equal((await f.call("/private")).status, 401);
