@@ -161,6 +161,9 @@ body .entry .reading-thumbnail { display: block; width: 80px; height: 80px; max-
 .has-site-sidebar .reader { padding-inline: clamp(18px, 4vw, 40px); }
 .has-site-sidebar .reader article p { color: var(--text); font-size: clamp(17px, 2vw, 19px); }
 .has-site-sidebar .reader h1 { overflow-wrap: anywhere; }
+.reading-media { margin: 24px 0; text-align: center; }
+.reading-media img { display: block; width: auto; height: auto; max-width: 100%; max-height: 75dvh; object-fit: contain; margin-inline: auto; border-radius: 10px; }
+.reading-media figcaption { margin-top: 12px; color: var(--muted); font-size: 13px; }
 #trash-readings .entry { display: block; }
 @media (max-width: 1024px) {
   .site-sidebar { position: static; width: auto; margin-top: var(--top); border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 16px; }

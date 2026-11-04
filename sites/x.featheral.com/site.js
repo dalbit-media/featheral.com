@@ -243,6 +243,23 @@ function readingThumbnail(item) {
   return `<img class="reading-thumbnail" src="${esc(publicUrl(`/api/public/posts/${item.id}/preview?type=${item.thumbnail.type}`))}" width="80" height="80" loading="lazy" decoding="async" alt="">`;
 }
 
+function readingMedia(item) {
+  if (!item.thumbnail || !TYPE_LABEL[item.thumbnail.type] || !Number.isSafeInteger(item.id) || item.id < 1) return '';
+  return `<figure class="reading-media"><img alt="${esc(item.title)}" decoding="async" data-src="${esc(publicUrl(`/api/public/posts/${item.id}/media?type=${item.thumbnail.type}`))}"><figcaption role="status">Loading media...</figcaption><button class="btn" type="button" data-retry-reading-media hidden>Retry media</button></figure>`;
+}
+
+function loadReadingMedia(container) {
+  const image = $('img', container), status = $('figcaption', container), retry = $('[data-retry-reading-media]', container);
+  image.onload = () => { status.hidden = true; retry.hidden = true; };
+  image.onerror = () => { status.hidden = false; status.textContent = 'Media could not be loaded.'; retry.hidden = false; };
+  const load = () => {
+    status.hidden = false; status.textContent = 'Loading media...'; retry.hidden = true;
+    image.src = image.dataset.src;
+  };
+  retry.onclick = load;
+  load();
+}
+
 function readingEntry(item, from = location.hash.slice(1), trashed = false) {
   return `<a class="entry" href="${esc(readingLink(item, from, trashed))}"><div class="reading-card-heading">${readingThumbnail(item)}<h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
     ${item.snippet ? `<p>${esc(item.snippet)}</p>` : ''}
@@ -807,8 +824,11 @@ async function readListView(q) {
 
 async function readerView(id, q, bySlug = false) {
   const request = new AbortController();
-  let disposed = false, stopVotes;
-  cleanup = () => { disposed = true; request.abort(); stopVotes?.(); document.title = info.brand; };
+  let disposed = false, stopVotes, mediaImage;
+  cleanup = () => {
+    disposed = true; request.abort(); stopVotes?.(); document.title = info.brand;
+    if (mediaImage) { mediaImage.onload = null; mediaImage.onerror = null; mediaImage.removeAttribute('src'); }
+  };
   view().innerHTML = '<div class="loading">Loading…</div>';
   const t = await api(bySlug
     ? `/api/public/texts/by-slug/${encodeURIComponent(id)}`
@@ -829,12 +849,15 @@ async function readerView(id, q, bySlug = false) {
     <h1>${esc(t.title)}</h1>
     ${actions}
     <div class="m">${t.date ? `${esc(fmtDate(t.date))} · ` : ''}${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · <span id="r-views">👁 ${fmtNum(t.views || 0)} views</span></div>
+    ${readingMedia(t)}
     <article>${t.paragraphs.map((p, i) => projectPage && i > 0 && p.length <= 100
       ? `<h2>${esc(p)}</h2>` : `<p${landing && i === 0 ? ' class="project-lead"' : ''}>${esc(p)}</p>`).join('') || '<p class="m">This post has no text.</p>'}</article>
     ${actions}
     <div id="reading-votes" class="viewer-votes" role="group" aria-label="Reading votes"></div>
     <div class="nav"><a class="btn" href="${esc(back)}">← Back</a><button class="btn" id="top">↑ Top</button></div>
   </section>`;
+  const media = $('.reading-media', view());
+  if (media) { mediaImage = $('img', media); loadReadingMedia(media); }
   $('#top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
   if (q.trash !== '1') countView(t, (x) => { const e = $('#r-views'); if (e) e.textContent = `👁 ${fmtNum(x.views)} views`; });
   stopVotes = readingVotes(t, $('#reading-votes'));

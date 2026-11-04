@@ -189,3 +189,27 @@ test('reading category icons are decorative, semantic, and have a consistent fal
   assert.match(source, /section class="reading-nav-group" aria-labelledby="reading-pages-title"/);
   assert.match(source, /section class="reading-nav-group reading-categories" aria-labelledby="reading-categories-title"/);
 });
+
+test('reading details show uncropped original media and provide an explicit loading error and retry', () => {
+  const image = { dataset: { src: '/tenant/api/public/posts/8/media?type=gif' } }, status = {}, retry = {};
+  const context = vm.createContext({ TYPE_LABEL: { png: 'PNG', jpeg: 'JPG', gif: 'GIF' }, esc: String,
+    publicUrl: url => '/tenant' + url, $: selector => selector === 'img' ? image : selector === 'figcaption' ? status : retry });
+  vm.runInContext(source.slice(source.indexOf('function readingMedia('), source.indexOf('function readingEntry(')), context);
+  const html = context.readingMedia({ id: 8, title: 'A GIF', thumbnail: { type: 'gif' } });
+  assert.match(html, /data-src="\/tenant\/api\/public\/posts\/8\/media\?type=gif"/);
+  assert.doesNotMatch(html, /\/preview\?/);
+  assert.equal(context.readingMedia({ id: -1, title: 'Text only' }), '');
+  context.loadReadingMedia({});
+  assert.equal(image.src, image.dataset.src);
+  assert.equal(status.textContent, 'Loading media...');
+  image.onerror();
+  assert.equal(status.textContent, 'Media could not be loaded.');
+  assert.equal(retry.hidden, false);
+  retry.onclick();
+  assert.equal(retry.hidden, true);
+  image.onload();
+  assert.equal(status.hidden, true);
+  const reader = source.slice(source.indexOf('async function readerView('), source.indexOf('function readingVotes('));
+  assert(reader.indexOf('${readingMedia(t)}') < reader.indexOf('<article>'));
+  assert.match(reader, /mediaImage.removeAttribute\('src'\)/);
+});
