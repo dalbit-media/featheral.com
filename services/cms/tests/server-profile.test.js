@@ -31,7 +31,7 @@ test("storage inventory classifies databases, ledgers, uploads, trash and code w
   const first = profile.snapshot().storage;
   assert.equal(first.complete, true);
   assert.deepEqual(Object.fromEntries(Object.entries(first.categories).map(([key, value]) => [key, value.bytes])), {
-    databases: 16, ledgers: 24, uploads: 36, trash: 29, codebase: 37, otherData: 31,
+    databases: 16, ledgers: 24, uploads: 36, trash: 29, temporary: 0, backups: 0, releases: 0, codebase: 37, otherData: 31,
   });
   assert.equal(first.totalBytes, 173);
   fs.writeFileSync(path.join(root, "services", "cms", "server.js"), Buffer.alloc(100));
@@ -39,6 +39,54 @@ test("storage inventory classifies databases, ledgers, uploads, trash and code w
   await profile.refreshStorage();
   assert.equal(profile.snapshot().storage.categories.codebase.bytes, 100);
   assert.equal(profile.snapshot().storage.categories.codebase.files, 1);
+});
+
+test("managed release inventory resolves live data links and measures staging, all-site trash and backups exactly once", async t => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-managed-profile-"));
+  const root = path.join(base, "releases", "current-release"), shared = path.join(base, "shared");
+  const put = (relative, bytes) => {
+    const file = path.join(base, relative);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(bytes));
+  };
+  for (const [file, bytes] of [
+    ["releases/current-release/server.js", 2], ["releases/old-release/server.js", 3],
+    ["shared/data/wallet.sqlite", 5], ["shared/data/fth-ledger/entry.json", 7],
+    ["shared/cms-data/site-a/db.sqlite", 11], ["shared/cms-data/site-b/db.sqlite", 13],
+    ["shared/cms-data/site-a/uploads/photo.jpg", 17],
+    ["shared/cms-data/site-a/trash/old.jpg", 19], ["shared/cms-data/site-b/trash/old.sqlite", 23],
+    ["shared/deployment/digest/release.zip", 29], ["shared/site-sync/snapshot/uploads/photo.jpg", 31],
+    ["shared/data/deployment/job/release.zip", 37], ["shared/data/site-sync/job/db.sqlite", 41],
+    ["shared/self-deployment/job/source.zip", 43],
+    ["shared/sync-backups/job/uploads/photo.jpg", 47], ["shared/data/backups/saved.sqlite", 53],
+    ["unrelated/secret.bin", 59],
+  ]) put(file, bytes);
+  fs.mkdirSync(path.join(root, "services", "cms"), { recursive: true });
+  fs.symlinkSync(root, path.join(base, "current"), "junction");
+  fs.symlinkSync(path.join(shared, "data"), path.join(root, "data"), "junction");
+  fs.symlinkSync(path.join(shared, "cms-data"), path.join(root, "services", "cms", "data"), "junction");
+  fs.symlinkSync(path.join(base, "unrelated"), path.join(shared, "untrusted"), "junction");
+  fs.linkSync(path.join(shared, "data", "wallet.sqlite"), path.join(shared, "data", "wallet-copy.sqlite"));
+  const profile = new ServerProfile({ root, dataDirectory: path.join(root, "services", "cms", "data"),
+    externalDirectories: [{ directory: path.join(shared, "data", "fth-ledger"), category: "ledgers" }], autoStart: false });
+  t.after(() => {
+    profile.close();
+    for (const link of [path.join(base, "current"), path.join(root, "data"), path.join(root, "services", "cms", "data"), path.join(shared, "untrusted")])
+      if (process.platform === "win32") fs.rmdirSync(link); else fs.unlinkSync(link);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+  const firstScan = profile.refreshStorage();
+  assert.equal(profile.refreshStorage(), firstScan, "concurrent callers await the same scan");
+  await firstScan;
+  assert.equal(profile.storage.complete, true);
+  assert.deepEqual(Object.fromEntries(Object.entries(profile.storage.categories).map(([key, value]) => [key, value.bytes])), {
+    databases: 29, ledgers: 7, uploads: 17, trash: 42, temporary: 181, backups: 100, releases: 3, codebase: 2, otherData: 0,
+  });
+  assert.equal(profile.storage.totalBytes, 381);
+  fs.unlinkSync(path.join(shared, "deployment", "digest", "release.zip"));
+  await profile.refreshStorage();
+  assert.equal(profile.storage.categories.temporary.bytes, 152);
+  assert.equal(profile.storage.totalBytes, 352);
 });
 
 test("HTTP instrumentation bounds history and measures declared ingress, response bytes, latency and errors", () => {

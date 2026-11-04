@@ -5,6 +5,7 @@ const os = require("node:os");
 const v8 = require("node:v8");
 const { monitorEventLoopDelay, performance } = require("node:perf_hooks");
 const express = require("express");
+const { managedShared } = require("../../operations/storage-cleanup");
 
 const SAMPLE_MS = 1000;
 const HISTORY_SIZE = 60;
@@ -13,7 +14,7 @@ const DISK_HISTORY_MS = 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "artifacts", "cache", "coverage", "dist", "out"]);
 const DATABASE_FILE = /\.(?:sqlite|sqlite3|db)(?:-(?:wal|shm|journal))?$/i;
-const CATEGORY_NAMES = ["databases", "ledgers", "uploads", "trash", "codebase", "otherData"];
+const CATEGORY_NAMES = ["databases", "ledgers", "uploads", "trash", "temporary", "backups", "releases", "codebase", "otherData"];
 const emptyCategories = () => Object.fromEntries(CATEGORY_NAMES.map(name => [name, { bytes: 0, files: 0 }]));
 const percentile = (values, fraction) => {
   if (!values.length) return 0;
@@ -131,22 +132,43 @@ class ServerProfile {
     this.current = this.newBucket();
   }
 
-  async refreshStorage() {
-    if (this.storage.scanning || this.closed) return;
+  refreshStorage() {
+    if (this.closed) return Promise.resolve();
+    if (!this.storageScan) this.storageScan = this.scanStorage().finally(() => { this.storageScan = null; });
+    return this.storageScan;
+  }
+
+  async scanStorage() {
     this.storage.scanning = true;
     const categories = emptyCategories();
     let complete = true, scanError = null;
-    const roots = [{ directory: this.root, label: "repository" }];
-    for (const { directory, category } of this.externalDirectories) {
-      const relative = path.relative(this.root, directory);
-      if (directory === this.root || (!relative.startsWith("..") && !path.isAbsolute(relative))) continue;
-      const overlaps = roots.some(root => {
-        const fromRoot = path.relative(root.directory, directory);
-        const fromDirectory = path.relative(directory, root.directory);
-        return root.directory === directory || !path.isAbsolute(fromRoot) && !fromRoot.startsWith("..")
-          || !path.isAbsolute(fromDirectory) && !fromDirectory.startsWith("..");
-      });
-      if (!overlaps) roots.push({ directory, category, label: `external-${roots.length}` });
+    const roots = [], hints = [], seenFiles = new Set();
+    const inside = (parent, child) => {
+      const relative = path.relative(parent, child);
+      return relative === "" || !path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`);
+    };
+    const configured = [{ directory: this.root }, { directory: path.join(this.root, "data"), data: true },
+      ...(this.dataDirectory ? [{ directory: this.dataDirectory, data: true }] : []), ...this.externalDirectories];
+    let shared = null;
+    try { shared = managedShared(this.root); }
+    catch (error) {
+      complete = false;
+      scanError = "Managed shared storage could not be located.";
+      console.error("Server profile shared storage lookup failed:", error.code || error.name);
+    }
+    if (shared) configured.push({ directory: shared }, { directory: path.dirname(this.root) });
+    for (const entry of configured) {
+      try {
+        const directory = await fs.promises.realpath(entry.directory);
+        if (entry.category || entry.data) hints.push({ ...entry, directory });
+        if (roots.some(root => inside(root.directory, directory))) continue;
+        for (let i = roots.length - 1; i >= 0; i--) if (inside(directory, roots[i].directory)) roots.splice(i, 1);
+        roots.push({ directory });
+      } catch (error) {
+        if (error.code !== "ENOENT" || entry.directory === this.root) {
+          complete = false; scanError = "A configured storage directory could not be inspected.";
+        }
+      }
     }
     const visit = async (directory, relativeParts = [], dataRoot = false, categoryHint = null) => {
       let entries;
@@ -162,15 +184,13 @@ class ServerProfile {
         if (entry.isSymbolicLink()) continue;
         if (entry.isDirectory()) {
           const name = entry.name.toLowerCase();
-          const managedData = dataRoot || name === "data" || relativeParts.some(part => ["uploads", "trash"].includes(part.toLowerCase()));
+          const managedData = dataRoot || ["data", "cms-data"].includes(name) || relativeParts.some(part => ["uploads", "trash"].includes(part.toLowerCase()));
           if (EXCLUDED_DIRECTORIES.has(name) && !managedData) continue;
           const parts = [...relativeParts, entry.name];
           const childDirectory = path.join(directory, entry.name);
-          const childHint = categoryHint || this.externalDirectories.find(configured => {
-            const relative = path.relative(configured.directory, childDirectory);
-            return !path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`);
-          })?.category || null;
-          await visit(childDirectory, parts, dataRoot || entry.name.toLowerCase() === "data", childHint);
+          const hint = hints.find(configured => configured.category && inside(configured.directory, childDirectory));
+          const childHint = categoryHint || hint?.category || null;
+          await visit(childDirectory, parts, managedData || hints.some(configured => configured.data && inside(configured.directory, childDirectory)), childHint);
         } else if (entry.isFile()) files.push(entry);
       }
       for (let offset = 0; offset < files.length; offset += 64) {
@@ -187,15 +207,21 @@ class ServerProfile {
             continue;
           }
           if (!info.isFile()) continue;
+          const identity = info.ino ? `${info.dev}:${info.ino}` : path.resolve(directory, entry.name);
+          if (seenFiles.has(identity)) continue;
+          seenFiles.add(identity);
           const parts = [...relativeParts, entry.name], lower = parts.map(part => part.toLowerCase());
           const name = entry.name.toLowerCase(), filePath = path.resolve(directory, entry.name);
           const dataRelative = this.dataDirectory ? path.relative(this.dataDirectory, filePath) : null;
           const inDataDirectory = dataRelative === "" || dataRelative !== null &&
             dataRelative !== ".." && !dataRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(dataRelative);
           let category = "codebase";
-          if (DATABASE_FILE.test(name)) category = "databases";
+          if (lower.some(part => ["backups", "sync-backups"].includes(part))) category = "backups";
+          else if (lower.some(part => ["deployment", "site-sync", "self-deployment"].includes(part))) category = "temporary";
+          else if (shared && inside(path.dirname(this.root), filePath) && !inside(this.root, filePath)) category = "releases";
           else if (lower.includes("trash")) category = "trash";
           else if (lower.includes("uploads")) category = "uploads";
+          else if (DATABASE_FILE.test(name)) category = "databases";
           else if (lower.some(part => part.includes("ledger") || ["journals", "blocks"].includes(part))) category = "ledgers";
           else if (categoryHint) category = categoryHint;
           else if (dataRoot || inDataDirectory) category = "otherData";
@@ -218,7 +244,8 @@ class ServerProfile {
           scanError = "A configured storage directory could not be inspected.";
           continue;
         }
-        await visit(root.directory, [], false, root.category || null);
+        const hint = hints.find(configured => configured.category && inside(configured.directory, root.directory));
+        await visit(root.directory, [], hints.some(configured => configured.data && inside(configured.directory, root.directory)), hint?.category || null);
       }
       await this.refreshDisk();
       const values = Object.values(categories);

@@ -2,15 +2,19 @@
 VIEWS["server-profile"] = async (q, token) => {
   renderSidebar("server-profile"); setCrumbs("<b>Server profile</b>");
   setView(`<div class="server-profile-dashboard"><section class="server-profile-heading"><div><h1>Server profile</h1><span id="server-profile-status" class="muted small" role="status">Connecting...</span></div>
-    <div class="row"><a href="#/settings" class="btn sm">Settings</a><button id="server-profile-refresh" type="button" class="btn sm">Refresh metrics</button><button id="server-storage-refresh" type="button" class="btn sm">Rescan storage</button></div></section>
+    <div class="row"><a href="#/settings" class="btn sm">Settings</a><button id="server-profile-refresh" type="button" class="btn sm">Refresh metrics</button></div></section>
     <div id="server-profile-stats" class="stats server-profile-overview"></div>
     <section class="server-profile-grid">
     <div class="card"><h2>Disk capacity</h2><div id="server-disk-chart"><p class="muted">Waiting for capacity...</p></div><p id="server-disk-sampled" class="muted small"></p>
     <details class="server-info"><summary>Capacity &amp; forecast info</summary><p>Service filesystem, including other applications and reserved space. Refreshed every five minutes. Net growth uses up to 24 hours since restart; forecasts are estimates. Warning: 85% used or full within 30 days. Critical: 95% or 7 days.</p></details></div>
     <div class="card"><h2>Resource risks</h2><div id="server-profile-risks" class="server-profile-risks"></div>
     <details class="server-info"><summary>Risk thresholds</summary><p>Disk: 85% / 95% used or full in 30 / 7 days. CPU: 80% / 95% of one core. Event-loop p95: 100 / 250 ms. Memory: 80% heap or 85% host / 95% either. HTTP errors: 5% / 20%. Network: 80% / 95% of the capacity configured in Settings.</p></details></div>
-    <div class="card"><h2>Application storage</h2><div id="server-profile-storage" class="server-profile-storage"></div><p id="server-storage-status" class="muted small">Waiting for inventory...</p>
-    <details class="server-info"><summary>Inventory info</summary><p>Cached scan every five minutes. Excludes dependency and build folders outside managed data; symlinks are not followed. Application totals differ from filesystem capacity.</p></details></div></section>
+    </section>
+    <section class="card server-storage-card"><div class="card-head"><div><h2>Application storage</h2><p class="muted small">All CMS sites and deployment data on this server</p></div><button id="server-storage-refresh" type="button" class="btn sm">Rescan storage</button></div>
+    <div id="server-profile-storage" class="server-profile-storage"></div><p id="server-storage-status" class="muted small">Waiting for inventory...</p>
+    <div class="server-storage-cleanup"><div><h3>Temporary files &amp; trash</h3><p class="muted small">Cleanup removes eligible staging older than 24 hours and permanently empties trash across all CMS sites. Active transfers, backups and rollback releases stay protected. Replica trash requires cleanup on the writable source.</p></div><button id="server-storage-cleanup" class="btn" type="button">Clean temporary files &amp; empty trash</button></div>
+    <p id="server-cleanup-result" class="server-cleanup-result" role="status" aria-live="polite" hidden></p>
+    <details class="server-info"><summary>What is included?</summary><p>Logical file sizes from live CMS data, shared server data, deployment/sync staging and retained backups/releases. Known managed data links are resolved; arbitrary symlinks are not followed and hard-linked files count once. Temporary totals include protected or recent staging and are not a promise of reclaimable space. Trash is physical files across sites, not database row estimates. Dependencies/build outputs outside managed data, operating-system files and other applications are excluded, so inventory is not total filesystem usage. Cached scans run every five minutes.</p></details></section>
     <section class="card server-profile-chart-card"><div class="card-head"><h2>Live metrics <span class="muted small">Last minute</span></h2>
     <details class="server-info"><summary>Chart info</summary><p>Each row has its own scale. Process CPU is per core and can exceed 100%. Ingress uses declared Content-Length; response bytes exclude headers.</p></details></div>
     <div id="server-profile-chart" class="server-profile-chart" role="img" aria-label="Recent CPU, memory, event-loop, request, and network metrics"></div></section>
@@ -21,7 +25,8 @@ VIEWS["server-profile"] = async (q, token) => {
     <div class="row"><button id="server-users-prev" class="btn" disabled>Previous</button><span id="server-users-page"></span><button id="server-users-next" class="btn" disabled>Next</button></div></section></div>`, token);
   const controller = new AbortController(), viewHash = location.hash;
   const active = () => token === state.seq && !controller.signal.aborted && location.hash === viewHash;
-  let page = 1, loading = false, profileLoading = false;
+  let page = 1, loading = false, profileLoading = false, cleaning = false;
+  leaveView = () => !cleaning;
   const status = $("#server-users-status"), rows = $("#server-users-rows"), pageLabel = $("#server-users-page");
   const previous = $("#server-users-prev"), next = $("#server-users-next"), search = $("#server-user-search");
   function renderProfile(data) {
@@ -47,13 +52,40 @@ VIEWS["server-profile"] = async (q, token) => {
     const categories = data.storage.categories;
     $("#server-profile-storage").innerHTML = [
       ["Databases", categories.databases], ["Currency & other ledgers", categories.ledgers], ["Uploads", categories.uploads],
-      ["Trash", categories.trash], ["Codebase", categories.codebase], ["Other data", categories.otherData],
-    ].map(([label, item]) => `<div class="server-storage-item"><span>${esc(label)}</span><b>${fmtBytes(item.bytes)}</b><small>${fmtNum(item.files)} files</small></div>`).join("");
+      ["Temporary & deployment files", categories.temporary], ["Trashed files · all sites", categories.trash],
+      ["Retained backups", categories.backups], ["Rollback releases", categories.releases], ["Current codebase", categories.codebase], ["Other data", categories.otherData],
+    ].map(([label, item]) => `<div class="server-storage-item${label.startsWith("Temporary") || label.startsWith("Trashed") ? " cleanup" : ""}"><span>${esc(label)}</span><b>${!data.storage.updatedAt ? "Calculating..." : item ? fmtBytes(item.bytes) : "Unavailable"}</b><small>${!data.storage.updatedAt ? "Waiting for inventory" : item ? `${fmtNum(item.files)} files` : "Update the server to report this category"}</small></div>`).join("");
     const stored = data.storage.updatedAt ? `Inventory ${new Date(data.storage.updatedAt).toLocaleTimeString()}; ${fmtNum(data.storage.totalFiles)} files; ${fmtBytes(data.storage.totalBytes)}` : "Inventory has not completed yet.";
     $("#server-storage-status").textContent = stored + (data.storage.scanning ? "; scanning" : data.storage.scanError ? `; ${data.storage.scanError}` : "");
     $("#server-profile-status").textContent = `Sampled ${new Date(data.sampledAt).toLocaleTimeString()}; ${fmtNum(m.uptimeSeconds)} sec uptime`;
     $("#server-profile-chart").innerHTML = ServerProfileCharts.renderServerProfileChart(history);
   }
+  $("#server-storage-cleanup").addEventListener("click", async () => {
+    if (!active() || cleaning) return;
+    if (!confirm("Permanently delete ALL trashed posts, readings and their unused files across ALL CMS sites on this server? This cannot be undone. Safe temporary files older than 24 hours will also be removed. Backups and active transfers are preserved. Replicas clean temporary files only.")) return;
+    cleaning = true;
+    const control = $("#server-storage-cleanup"), output = $("#server-cleanup-result");
+    control.disabled = true;
+    output.hidden = false;
+    output.textContent = "Cleaning server storage and refreshing sizes. Keep this page open...";
+    try {
+      const result = await api("/api/settings/cleanup", { json: { confirmation: "EMPTY ALL CMS TRASH" } });
+      const totals = result.sites.reduce((sum, site) => ({ posts: sum.posts + site.posts, files: sum.files + site.files, bytes: sum.bytes + site.bytes }), { posts: 0, files: 0, bytes: 0 });
+      const gib = bytes => (bytes / 1024 ** 3).toFixed(2);
+      const text = [
+        `Removed ${result.temporary.candidates.length} temporary entries (${gib(result.temporary.removedBytes)} GiB).`,
+        `Emptied ${totals.posts} trashed items and ${totals.files} files (${gib(totals.bytes)} GiB) across ${result.sites.length} sites.`,
+        result.trashSkipped || "",
+        ...result.temporary.skipped.map(item => `Preserved: ${item.reason}.`),
+        ...result.errors.map(error => `Cleanup failed for ${error.key}: ${error.message}`),
+        result.disk.available ? `Server free space: ${gib(result.disk.freeBytes)} GiB.` : `Free-space check unavailable: ${result.disk.error}`,
+      ].filter(Boolean).join(" ");
+      if (active()) { output.textContent = text; await loadProfile(); } else toast(text);
+    } catch (error) {
+      const text = `Cleanup was not confirmed; some files may already have been removed. Rescan storage before retrying. ${error.message}`;
+      if (active()) { output.textContent = text; await loadProfile(); } else toast(text);
+    } finally { cleaning = false; if (active()) control.disabled = false; }
+  });
   async function loadProfile() {
     if (profileLoading || !active()) return;
     profileLoading = true;

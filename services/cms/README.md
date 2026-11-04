@@ -317,7 +317,7 @@ use `--min-age-hours=0` to remove verified inactive staging immediately. The sam
 command runs locally on each server; it does not remotely erase other servers.
 Unknown/unconfirmed target artifacts are intentionally retained for review.
 
-**Admin > Settings > Storage cleanup** provides one **Clean temporary files & empty all trash**
+**Admin > Server profile > Application storage** provides one **Clean temporary files & empty trash**
 button for the server running Admin, not its remote deployment target. After an
 irreversible-deletion confirmation, it removes eligible temporary entries older
 than 24 hours and empties trash across **all CMS sites**, including sites that
@@ -327,7 +327,7 @@ files only and explicitly report that source-side trash deletion is required.
 Per-site failures are reported without hiding successful cleanup on other sites;
 busy server operations block cleanup. The result includes removed item/file/byte
 totals and a fresh filesystem free-space measurement; Server profile's storage
-breakdown is rescanned. The authenticated, same-origin
+breakdown is rescanned before the cleanup response, and the card refreshes automatically. The authenticated, same-origin
 `POST /api/settings/cleanup` requires `confirmation: "EMPTY ALL CMS TRASH"`.
 Successful manual purges reset enabled weekly schedules to seven days later
 without changing any site's opt-in setting.
@@ -372,10 +372,21 @@ Storage is scanned at startup and every five minutes; an authenticated same-orig
 `POST /api/server-profile/refresh` requests an early scan. Filesystem capacity
 is sampled separately: each authenticated dashboard read samples
 current available space immediately, without waiting for the inventory scan.
-The source inventory
-skips `.git`, `node_modules`, `artifacts`, `cache`, `coverage`, `dist` and `out`;
-those names are still counted inside data, upload and trash trees. Symlinks are
-not followed. Set network capacity in **Settings** to a positive bytes-per-
+The application inventory resolves the explicitly configured live data roots,
+including managed releases' `data` and `services/cms/data` links into shared storage.
+Managed servers also scan shared deployment/sync staging, backups and retained releases.
+Overlapping roots and hard-linked files count once; arbitrary symlinks are not followed.
+Categories distinguish databases, ledgers, uploads, all-site physical trash files,
+temporary/deployment files, retained backups, rollback releases, current code and other data.
+Staged snapshot databases/uploads count as temporary files, not live data; backup
+contents remain in backups, even when they contain uploads or databases.
+Temporary size includes recent/protected staging, not just space reclaimable now.
+Totals are logical file lengths, not allocated filesystem blocks or database trash-row estimates.
+The inventory skips `.git`, `node_modules`, `artifacts`, `cache`, `coverage`, `dist` and `out`;
+those names are still counted inside data, upload and trash trees.
+The full-width storage card groups sizes with rescan and confirmed cleanup controls;
+missing/unfinished measurements show unavailable/calculating rather than misleading zeros.
+Set network capacity in **Settings** to a positive bytes-per-
 second value to enable network utilization risk thresholds. Without that
 setting, only observed HTTP traffic is reported because interface capacity is
 not available from Node's portable OS APIs.

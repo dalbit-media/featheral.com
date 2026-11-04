@@ -196,10 +196,10 @@ app.use('/api/settings', require('../operations/api').settingsApi({
   settings: operationsSettings, siteSync, selfDeployment, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
   sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
   cleanup: async () => {
+    if (serverProfile.storage.scanning) await serverProfile.refreshStorage();
     const result = getMaintenance().runNow();
-    await serverProfile.refreshDisk();
-    void serverProfile.refreshStorage();
-    return { ...result, disk: serverProfile.disk };
+    await serverProfile.refreshStorage();
+    return { ...result, disk: serverProfile.disk, storage: serverProfile.storage };
   },
 }));
 app.operationsSettings = operationsSettings;

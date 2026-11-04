@@ -45,15 +45,19 @@ test("Settings cleanup requires Admin authentication, host, TLS, same origin and
   assert.equal((await request()).status, 409);
 });
 
-test("Settings cleanup confirms once, reports partial failure and replica skips, and prevents duplicate submissions", async () => {
-  const source = fs.readFileSync(path.resolve(__dirname, "../../../sites/admin.featheral.com/js/settings.js"), "utf8");
-  const start = source.indexOf('  $("#settings-cleanup").addEventListener(');
-  const code = source.slice(start, source.indexOf("  async function load()", start));
+test("Server profile cleanup confirms once, refreshes inventory, and reports partial failures without duplicate submissions", async () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../../../sites/admin.featheral.com/js/server-users.js"), "utf8");
+  const settings = fs.readFileSync(path.resolve(__dirname, "../../../sites/admin.featheral.com/js/settings.js"), "utf8");
+  assert.doesNotMatch(settings, /settings-cleanup|Storage cleanup/);
+  assert.match(source, /Temporary & deployment files/);
+  assert.match(source, /Trashed files · all sites/);
+  const start = source.indexOf('  $("#server-storage-cleanup").addEventListener(');
+  const code = source.slice(start, source.indexOf("  async function loadProfile()", start));
   let click, resolve, requests = 0, confirmed = false;
   const control = { addEventListener(_type, fn) { click = fn; } }, output = {};
   const context = vm.createContext({
-    $: selector => selector === "#settings-cleanup" ? control : output,
-    active: () => true, cleaning: false, saving: false, confirm: () => confirmed, toast() {},
+    $: selector => selector === "#server-storage-cleanup" ? control : output,
+    active: () => true, cleaning: false, confirm: () => confirmed, toast() {}, loadProfile: async () => { refreshes++; },
     api: async (url, options) => {
       assert.equal(url, "/api/settings/cleanup");
       assert.equal(options.json.confirmation, "EMPTY ALL CMS TRASH");
@@ -61,6 +65,7 @@ test("Settings cleanup confirms once, reports partial failure and replica skips,
       return new Promise(done => { resolve = done; });
     },
   });
+  let refreshes = 0;
   vm.runInContext(code, context);
   await click();
   assert.equal(requests, 0);
@@ -79,9 +84,11 @@ test("Settings cleanup confirms once, reports partial failure and replica skips,
   assert.match(output.textContent, /Replica trash preserved/);
   assert.match(output.textContent, /Server free space: 6.00 GiB/);
   assert.equal(control.disabled, false);
+  assert.equal(refreshes, 1);
   context.api = async () => { throw new Error("Connection interrupted"); };
   await click();
   assert.match(output.textContent, /Cleanup was not confirmed; some files may already have been removed/);
   assert.match(output.textContent, /Connection interrupted/);
   assert.equal(control.disabled, false);
+  assert.equal(refreshes, 2);
 });
