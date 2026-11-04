@@ -9,6 +9,38 @@ const { Deployment, configuration, releaseFiles } = require('../lib/deployment')
 const root = path.resolve(__dirname, '..', '..', '..');
 const env = { DEPLOY_TARGET: 'featheral@server.example:/opt/featheral', DEPLOY_KEY_FILE: path.resolve('unused-test-key'),
   DEPLOY_HOST_KEY_SHA256: 'SHA256:' + 'a'.repeat(43), DEPLOY_TLS_EMAIL: 'ops@example.com' };
+test('published content importer skips replicas before reading snapshots or opening CMS stores', t => {
+  const vm = require('node:vm'), { createRequire } = require('node:module');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'replica-code-import-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'data'));
+  const marker = path.join(directory, 'data', 'site-sync-replica.json');
+  const content = JSON.stringify({ version: 1, readOnly: true, runtime: {} });
+  fs.writeFileSync(marker, content);
+  fs.writeFileSync(path.join(directory, '.cms-published.json'), 'not parsed on replicas');
+  const script = path.join(root, 'scripts', 'import-site-pages.js'), actualRequire = createRequire(script), logs = [];
+  let opened = 0;
+  const run = () => vm.runInNewContext(fs.readFileSync(script, 'utf8'), {
+    __dirname: path.join(directory, 'scripts'),
+    console: { log: line => logs.push(line) },
+    require(name) {
+      if (name === '../services/cms/lib/site-pages') return { SitePages: class {
+        constructor() { opened++; throw new Error('CMS must not open on replica import.'); }
+      } };
+      if (name === '../services/cms/lib/cms') return class {
+        constructor() { opened++; throw new Error('CMS must not open on replica import.'); }
+      };
+      return actualRequire(name);
+    },
+  });
+  run();
+  assert.equal(opened, 0);
+  assert.match(logs[0], /Read-only replica: skipping published CMS import/);
+  assert.equal(fs.readFileSync(marker, 'utf8'), content);
+  assert.equal(fs.readFileSync(path.join(directory, '.cms-published.json'), 'utf8'), 'not parsed on replicas');
+  fs.writeFileSync(marker, JSON.stringify({ version: 1, readOnly: false, runtime: {} }));
+  assert.throws(run, /Invalid read-only replica marker/);
+});
 test('deployment console persists bounded progress and accepts only fixed installer phases, never raw server output', async t => {
   const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-console-'));
   t.after(() => fs.rmSync(stateDirectory, { recursive: true, force: true }));

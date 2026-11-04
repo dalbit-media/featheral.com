@@ -17,6 +17,59 @@ function fixture(t) {
   t.after(() => { pages.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   return { pages, directory };
 }
+test('replica rendering preserves old defaults and custom content without upgrades or new journal records', t => {
+  const { pages } = fixture(t), hostname = 'featheral.com';
+  const original = pages.documents.template(hostname, 'index.html');
+  pages.pages(hostname);
+  const store = pages.store(hostname), existing = store.publishedPage(original.slug);
+  const customTemplate = { ...original, title: 'Release update', body: original.body + '<h1>New release content</h1>',
+    replaces: [crypto.createHash('sha256').update(JSON.stringify({
+      title: existing.title, excerpt: existing.excerpt, body: existing.body })).digest('hex')] };
+  pages.documents.files = host => host === hostname ? [customTemplate] : [];
+  pages.documents.readOnlyReplica = true;
+  const before = store.list(), revisions = store.revisions(existing.id);
+  const save = store.save;
+  store.save = () => { throw new Error('Public replica render attempted a write.'); };
+  const html = pages.render(hostname, 'index.html');
+  assert(html.includes(existing.title));
+  assert.doesNotMatch(html, /New release content/);
+  assert.deepEqual(store.list(), before);
+  assert.deepEqual(store.revisions(existing.id), revisions);
+  store.save = save;
+  store.save({ ...existing, title: 'Custom snapshot title', body: existing.body + '<h1>Custom snapshot content</h1>', revision: existing.revision }, existing.id);
+  store.save = () => { throw new Error('Public replica render attempted a write.'); };
+  assert.match(pages.render(hostname, 'index.html'), /Custom snapshot content/);
+});
+test('replica renders missing documents with legacy text and missing classic blocks without persisting defaults', t => {
+  const { pages } = fixture(t), hostname = 'featheral.com';
+  const template = pages.documents.template(hostname, 'docs/index.html');
+  const key = /data-cms-copy="([^"]+)"/.exec(template.body)[1];
+  const store = pages.store(hostname);
+  store.save({ title: 'Legacy block', slug: key, body: 'Snapshot legacy heading', type: 'page', status: 'publish' });
+  pages.documents.readOnlyReplica = true;
+  const before = store.list();
+  store.save = () => { throw new Error('Replica tried to seed a document.'); };
+  const html = pages.render(hostname, 'docs/index.html');
+  assert.match(html, /Snapshot legacy heading/);
+  assert.doesNotMatch(html, /data-cms-copy|cms-widget/);
+  assert.deepEqual(store.list(), before);
+  const classic = pages.store('silver.featheral.com');
+  classic.save = () => { throw new Error('Replica tried to seed a classic block.'); };
+  const silver = pages.render('silver.featheral.com', 'index.html');
+  assert.match(silver, /<html/);
+  assert.deepEqual(classic.list(), []);
+});
+test('document replica mode is read from the validated persistent marker', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cms-document-replica-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'data'));
+  const file = path.join(directory, 'data', 'site-sync-replica.json');
+  assert.equal(new Documents(directory).readOnlyReplica, false);
+  fs.writeFileSync(file, JSON.stringify({ version: 1, readOnly: true, runtime: {} }));
+  assert.equal(new Documents(directory).readOnlyReplica, true);
+  fs.writeFileSync(file, '{}');
+  assert.throws(() => new Documents(directory), /Invalid read-only replica marker/);
+});
 test('seven complete documents replace static home/docs/governance pages, preserving live DOM and scripts', t => {
   const { pages } = fixture(t);
   let count = 0;
@@ -104,15 +157,16 @@ test('document HTML allows rich safe links but rejects executable markup, unsafe
   }
   assert.throws(() => validateBody('<a data-site="unknown" href="/">Bad</a>', {}), { status: 400 });
 });
-test('Foundation home and guide describe every current site without demo, placeholder or deployed-rollup claims', t => {
+test('Foundation home and guide describe the family without advertising standalone X', t => {
   const { pages } = fixture(t);
   for (const file of ['index.html', 'docs/index.html']) {
     const html = pages.render('featheral.com', file);
-    for (const site of ['foundation', 'gold', 'silver', 'app', 'dollar', 'world', 'x', 'ex', 'notes', 'sites', 'stats', 'wallet']) {
+    for (const site of ['foundation', 'gold', 'silver', 'app', 'dollar', 'world', 'ex', 'notes', 'sites', 'stats', 'wallet']) {
       assert.ok(html.includes(`data-site="${site}"`), `${file}: ${site}`);
     }
     assert.match(html, /admin\.featheral\.com/);
     assert.doesNotMatch(html, /data-site="(?:admin|cms)"/);
+    assert.doesNotMatch(html, /data-site="x"|https:\/\/x\.featheral\.com/);
     assert.doesNotMatch(html, /Coming soon|Demo only|demo exchange|Local simulation|~\$0\.01|This page is a placeholder/);
     assert.match(html, /not a deployed Layer 3 rollup/);
     assert.match(html, /Gold/);

@@ -8,7 +8,10 @@ function importError(step, message) {
   return new Error(message);
 }
 const file = path.join(__dirname, '..', '.cms-published.json');
-if (fs.existsSync(file)) {
+const replica = require('../services/operations/replica').readReplica(path.join(__dirname, '..'));
+if (replica) {
+  console.log('Read-only replica: skipping published CMS import; synced content and replica protection are preserved.');
+} else if (fs.existsSync(file)) {
   const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
   // Releases intentionally link CMS data to shared storage; journals require its physical path.
   const dataDir = fs.realpathSync(path.join(__dirname, '..', 'services', 'cms', 'data'));

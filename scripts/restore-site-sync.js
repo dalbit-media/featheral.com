@@ -5,7 +5,7 @@ const http = require("node:http");
 const { spawnSync } = require("node:child_process");
 const { DatabaseSync } = require("node:sqlite");
 const { hash, safeName, excludedName } = require("../services/operations/site-sync-snapshot");
-const { MARKER } = require("../services/operations/replica");
+const { MARKER, readReplica } = require("../services/operations/replica");
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 function within(base, name) {
   assert(safeName(name), "Invalid snapshot path.");
@@ -25,7 +25,7 @@ function destination(roots, name) {
   assert(roots[kind] && parts.length, "Invalid storage root.");
   return within(roots[kind], parts.join("/"));
 }
-function verifySnapshot(directory) {
+function verifySnapshot(directory, { retainedRoot } = {}) {
   const manifest = JSON.parse(fs.readFileSync(path.join(directory, "manifest.json"), "utf8"));
   assert(manifest.version === 1 && Array.isArray(manifest.entries) && manifest.entries.length, "Invalid snapshot manifest.");
   const names = new Set();
@@ -33,7 +33,15 @@ function verifySnapshot(directory) {
     assert(safeName(entry.name) && /^(?:data|cms)\//.test(entry.name) && !names.has(entry.name)
       && !excludedName(entry.name) && !/(?:-wal|-shm|-journal)$/i.test(entry.name),
     "Unsupported or secret snapshot entry.");
-    const file = within(directory, entry.name), stat = fs.lstatSync(file);
+    let file;
+    if (entry.retained === true) {
+      assert(retainedRoot && readReplica(retainedRoot), "Retained snapshot files require an explicitly selected read-only target.");
+      file = destination(targetRoots(retainedRoot), entry.name);
+    } else {
+      assert(entry.retained === undefined, "Invalid retained snapshot entry.");
+      file = within(directory, entry.name);
+    }
+    const stat = fs.lstatSync(file);
     assert(stat.isFile() && stat.nlink === 1 && stat.size === entry.bytes && hash(file) === entry.hash, "Snapshot checksum mismatch.");
     if (/\.(?:sqlite3?|db)$/i.test(entry.name)) {
       const database = new DatabaseSync(file, { readOnly: true });
@@ -98,7 +106,7 @@ function journalFiles(directory, relative = "") {
   return files;
 }
 function prepareBackup(root, snapshotDirectory, backupDirectory) {
-  const manifest = verifySnapshot(snapshotDirectory), roots = targetRoots(root), touched = new Set(manifest.entries.map(entry => entry.name));
+  const manifest = verifySnapshot(snapshotDirectory, { retainedRoot: root }), roots = targetRoots(root), touched = new Set(manifest.entries.map(entry => entry.name));
   for (const key of ["FTH_LEDGER_DIR", "WORLD_LEDGER_DIR", "DB_LEDGER_DIR"]) {
     const name = manifest.runtime[key];
     assert(name && name.startsWith("data/"), "Missing journal root.");
@@ -262,7 +270,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   };
   for (const file of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
     assert(fs.readFileSync(path.join(release, file), "utf8").includes("replica"), "Deploy the sync-capable release to the target first.");
-  verifySnapshot(snapshotDirectory);
+  verifySnapshot(snapshotDirectory, { retainedRoot: release });
   console.log("Snapshot checksums and database integrity verified.");
   const apps = JSON.parse(command("jlist")).filter(app => app.name === "featheral");
   assert(apps.length === 1 && apps[0].pm2_env.status === "online", "The target Featheral application must be online before sync.");

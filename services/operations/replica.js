@@ -2,6 +2,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const MARKER = "site-sync-replica.json";
+const CMS_ORIGIN = "site-sync-origin.json";
+function validCMSOrigin(value) {
+  return value && typeof value.directory === "string" && value.directory.length <= 4096
+    && !/[\x00-\x1f]/.test(value.directory) && ["\\", "/"].includes(value.separator)
+    && (value.separator === "\\" ? /^(?:[a-zA-Z]:\\|\\\\[^\\]+\\[^\\]+(?:\\|$))/.test(value.directory)
+      : path.posix.isAbsolute(value.directory));
+}
 function readReplica(root) {
   const file = path.join(root, "data", MARKER);
   if (!fs.existsSync(file)) return null;
@@ -11,6 +18,20 @@ function readReplica(root) {
       || typeof item !== "string" || !/^data\/[a-zA-Z0-9._/-]+$/.test(item) || item.split("/").includes("..")))
     throw new Error("Invalid read-only replica marker. Refusing startup.");
   return value;
+}
+function readCMSOrigin(root) {
+  const file = path.join(root, "data", CMS_ORIGIN);
+  const replica = readReplica(root);
+  if (!fs.existsSync(file)) {
+    if (replica?.sourceCMS && !validCMSOrigin(replica.sourceCMS)) throw new Error("Invalid CMS storage origin.");
+    return replica?.sourceCMS || null;
+  }
+  const value = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (value.version !== 1 || !validCMSOrigin(value.sourceCMS)
+    || replica?.sourceCMS && (value.sourceCMS.directory !== replica.sourceCMS.directory
+      || value.sourceCMS.separator !== replica.sourceCMS.separator))
+    throw new Error("Invalid or conflicting CMS storage origin. Refusing to change content namespaces.");
+  return value.sourceCMS;
 }
 function replicaEnvironment(root, environment) {
   const replica = readReplica(root);
@@ -33,4 +54,4 @@ function allowReplicaRequest(req, res, settings) {
   res.end(JSON.stringify({ error: "This server is a read-only snapshot replica. Send writes to the source server." }));
   return false;
 }
-module.exports = { MARKER, readReplica, replicaEnvironment, allowReplicaRequest };
+module.exports = { MARKER, CMS_ORIGIN, readReplica, readCMSOrigin, replicaEnvironment, allowReplicaRequest };

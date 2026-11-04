@@ -6,7 +6,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { DatabaseSync } = require("node:sqlite");
 const { snapshot, hash, runtimePaths } = require("../../operations/site-sync-snapshot");
-const { MARKER, readReplica, replicaEnvironment, allowReplicaRequest } = require("../../operations/replica");
+const { MARKER, CMS_ORIGIN, readReplica, readCMSOrigin, replicaEnvironment, allowReplicaRequest } = require("../../operations/replica");
 const { prepareBackup, installSnapshot, restoreBackup, returnStaged, verifySnapshot,
   replicaHealthURL, probeReplica, waitForReplica } = require("../../../scripts/restore-site-sync");
 const { SiteSync } = require("../lib/site-sync");
@@ -107,6 +107,59 @@ test("snapshot includes live SQLite WAL contents and excludes operational secret
   try { assert.equal(copy.prepare("SELECT name FROM wallets").get().name, "source wallet"); } finally { copy.close(); }
   assert.equal(verifySnapshot(output).entries.length, manifest.entries.length);
   assert.equal(f.database.prepare("SELECT COUNT(*) AS n FROM wallets").get().n, 1);
+});
+test("promoted CMS storage retains its source identity without retaining the replica role", t => {
+  const f = fixture(t), marker = path.join(f.root, "data", MARKER), origin = path.join(f.root, "data", CMS_ORIGIN);
+  const sourceCMS = { directory: "C:\\original\\services\\cms\\data", separator: "\\" };
+  assert.equal(readCMSOrigin(f.root), null);
+  fs.writeFileSync(marker, JSON.stringify({ version: 1, readOnly: true, runtime: {}, sourceCMS }));
+  assert.deepEqual(readCMSOrigin(f.root), sourceCMS);
+  fs.writeFileSync(origin, JSON.stringify({ version: 1, sourceCMS }));
+  assert.deepEqual(readCMSOrigin(f.root), sourceCMS);
+  fs.unlinkSync(marker);
+  assert.equal(readReplica(f.root), null);
+  assert.deepEqual(readCMSOrigin(f.root), sourceCMS);
+  assert.deepEqual(snapshot(f.root, path.join(f.directory, "promoted-snapshot"), {}).sourceCMS, sourceCMS);
+  fs.writeFileSync(marker, JSON.stringify({ version: 1, readOnly: true, runtime: {},
+    sourceCMS: { directory: "/different/cms", separator: "/" } }));
+  assert.throws(() => readCMSOrigin(f.root), /conflicting CMS storage origin/);
+});
+test("malformed CMS storage origins fail closed rather than select empty namespaces", t => {
+  const f = fixture(t), file = path.join(f.root, "data", CMS_ORIGIN);
+  for (const value of [{}, { version: 2, sourceCMS: { directory: "/cms", separator: "/" } },
+    ...["relative", "", "/cms\nbad"].map(directory => ({ version: 1, sourceCMS: { directory, separator: "/" } })),
+    { version: 1, sourceCMS: { directory: "/cms", separator: "\\" } }]) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    assert.throws(() => readCMSOrigin(f.root), /CMS storage origin/);
+  }
+});
+test("final frozen sync reuses checksum-verified replica files without staging another full copy", t => {
+  const f = fixture(t), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "backup");
+  const manifest = snapshot(f.root, output, {});
+  const entry = manifest.entries.find(entry => entry.name.endsWith("/photo.txt"));
+  fs.copyFileSync(path.join(output, ...entry.name.split("/")), path.join(f.target, "services", "cms", "data", ...entry.name.split("/").slice(1)));
+  fs.unlinkSync(path.join(output, ...entry.name.split("/")));
+  entry.retained = true;
+  fs.writeFileSync(path.join(output, "manifest.json"), JSON.stringify(manifest));
+  assert.throws(() => verifySnapshot(output), /explicitly selected read-only target/);
+  assert.throws(() => verifySnapshot(output, { retainedRoot: f.target }), /read-only target/);
+  f.write(f.target, `data/${MARKER}`, JSON.stringify({ version: 1, readOnly: true, runtime: {} }));
+  assert.equal(verifySnapshot(output, { retainedRoot: f.target }).entries.length, manifest.entries.length);
+  const prepared = prepareBackup(f.target, output, backup);
+  assert(prepared.state.records.find(record => record.name === entry.name).unchanged);
+  installSnapshot(f.target, output, backup, prepared);
+  assert.equal(hash(path.join(f.target, "services", "cms", "data", ...entry.name.split("/").slice(1))), entry.hash);
+});
+test("retained replica files must still match the frozen source when backup starts", t => {
+  const f = fixture(t), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "backup");
+  const manifest = snapshot(f.root, output, {});
+  const entry = manifest.entries.find(entry => entry.name.endsWith("/photo.txt"));
+  entry.retained = true;
+  fs.writeFileSync(path.join(output, "manifest.json"), JSON.stringify(manifest));
+  f.write(f.target, `data/${MARKER}`, JSON.stringify({ version: 1, readOnly: true, runtime: {} }));
+  assert.throws(() => prepareBackup(f.target, output, backup), /Snapshot checksum mismatch/);
+  assert.equal(fs.existsSync(backup), false);
+  assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", ...entry.name.split("/").slice(1)), "utf8"), "target overlapping upload");
 });
 test("verified backup precedes replacement; upload overlay and target credentials survive; rollback is exact", t => {
   const f = fixture(t), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "backup");

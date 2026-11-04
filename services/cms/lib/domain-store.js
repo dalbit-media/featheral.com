@@ -16,11 +16,11 @@ function openDomain(file) {
     domain = createDomainApi({ journals: new FileJournals(directory), sites: () => [] });
     standaloneDomains.set(directory, domain);
   }
-  const replica = require('../../operations/replica').readReplica(path.resolve(__dirname, '..', '..', '..'));
+  const sourceCMS = require('../../operations/replica').readCMSOrigin(path.resolve(__dirname, '..', '..', '..'));
   const localCMS = require('./store').DATA_DIR;
   const relative = path.relative(localCMS, resolved);
-  const identity = replica?.sourceCMS && relative && !relative.startsWith('..') && !path.isAbsolute(relative)
-    ? replica.sourceCMS.directory + replica.sourceCMS.separator + relative.split(path.sep).join(replica.sourceCMS.separator) : resolved;
+  const identity = sourceCMS && relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+    ? sourceCMS.directory + sourceCMS.separator + relative.split(path.sep).join(sourceCMS.separator) : resolved;
   const name = 'cms-' + crypto.createHash('sha256').update(identity.toLowerCase()).digest('hex').slice(0, 40);
   return domain.database(name);
 }

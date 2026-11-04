@@ -55,7 +55,10 @@ function validateBody(body, widgets, layout = '') {
   return serialize(fragment);
 }
 class Documents {
-  constructor(root) { this.directory = path.join(root, 'sites', 'admin.featheral.com', 'documents'); }
+  constructor(root) {
+    this.directory = path.join(root, 'sites', 'admin.featheral.com', 'documents');
+    this.readOnlyReplica = Boolean(require('../../operations/replica').readReplica(root));
+  }
   files(hostname) {
     if (!documentHosts.includes(hostname)) return [];
     const directory = path.join(this.directory, hostname);
@@ -66,7 +69,7 @@ class Documents {
   pages(hostname, store) {
     return this.files(hostname).map(document => {
       let page = store.list().find(page => page.slug === document.slug);
-      if (page && page.status === 'publish' && document.replaces?.includes(crypto.createHash('sha256')
+      if (!this.readOnlyReplica && page && page.status === 'publish' && document.replaces?.includes(crypto.createHash('sha256')
         .update(JSON.stringify({ title: page.title, excerpt: page.excerpt, body: page.body })).digest('hex'))) {
         const fragment = parseFragment(document.body);
         const clean = node => {
@@ -95,8 +98,9 @@ class Documents {
           for (const child of node.childNodes || []) migrate(child);
         };
         migrate(fragment);
-        page = store.save({ type: 'page', status: 'publish', title: document.title, slug: document.slug,
-          excerpt: document.description || '', body: validateBody(serialize(fragment), document.widgets, document.layout) });
+        const content = { type: 'page', status: 'publish', title: document.title, slug: document.slug,
+          excerpt: document.description || '', body: validateBody(serialize(fragment), document.widgets, document.layout) };
+        page = this.readOnlyReplica ? content : store.save(content);
       }
       return { ...page, template: document.file, format: 'document', widgets: Object.keys(document.widgets) };
     });

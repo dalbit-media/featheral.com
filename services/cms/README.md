@@ -214,6 +214,12 @@ Replica startup skips seeding/upgrades and public page views do not increment
 stored counters. Target server Settings and encryption keys remain its own.
 Dollar startup also skips legacy wallet-profile imports when profile storage is
 read-only; it serves the profiles already present in the snapshot.
+Code deployment skips published CMS imports on a read-only replica, preserving
+the synced content and replica marker. It still rebuilds, restarts and verifies
+the code release; it never enables writes to make an import succeed.
+Public page rendering also skips persisted document upgrades and content seeding
+on replicas. Existing snapshot pages remain unchanged; missing document/block
+templates are rendered in memory, including legacy text, without journal writes.
 The source remains the writer; purchasing, login and other mutations belong there.
 Health must explicitly return `X-Featheral-Replica: read-only` before success.
 The probe follows the target's configured HTTP host and port (including IPv6),
@@ -223,6 +229,23 @@ attempts. Failed attempts include the endpoint and connection/HTTP error; exhaus
 health checks print bounded recent application logs before restoring the backup.
 Code deployments preserve this marker; removing it is **not** a supported promotion
 procedure. Never enable a second financial writer.
+
+An operator-controlled writer cutover must first stop and durably fence the old
+writer, synchronize its final frozen state, and restore the original game and
+Gold authority keys (and ledger signing keys when configured). Preserve the
+snapshot's `sourceCMS` identity separately as
+`data/site-sync-origin.json` (`{"version":1,"sourceCMS":{...}}`) before retiring
+the replica marker. This identity is not a permission flag: it retains existing
+CMS journal namespaces across operating systems, future releases and subsequent
+snapshots. Malformed or conflicting identities fail closed. Configure all copied
+runtime paths explicitly and verify ledger continuity, sessions and gameplay
+before routing writes to the new authority. Never automatically reactivate the
+old writer after the new authority has accepted writes.
+For a final frozen cutover snapshot, receiver manifests may mark already-present
+files `retained: true`. They are verified against an explicitly selected read-only
+target, checked again before backup and left in place only when their size and
+SHA256 still match. This avoids staging or retransmitting unchanged uploads;
+changed files retain the normal upload, backup and rollback path.
 
 The target job runs as `featheral-site-sync.service`, independently of the SSH
 connection. Backups and recovery receipts remain under
@@ -897,7 +920,8 @@ To turn the original sync features back on, set `allowSync` to `true` and restar
 
 The public site is at `http://127.0.0.1:5178/` and the CMS is at `http://127.0.0.1:5178/admin` for local development. In deployment, use `https://x.featheral.com/` and `https://admin.featheral.com/`.
 
-- **Swipe**: one shuffled deck of every GIF and image post, mixed together, shown full-screen TikTok-style with the title, description and like count (all rounds) overlaid. Swipe right (or press →) to like and keep a post. Swipe left (or press ←) to dislike it: in round 1 this deletes the post and its media; from round 2 the dislike is only counted. Undo with ↺ or Backspace. Each post shows its largest attached GIF, or its largest image if it has no GIF. The shuffle is stable within a round, so leaving and coming back continues where you stopped; each new round is shuffled differently. Only published posts with a downloaded file are included. The next cards' media is downloaded and decoded in the background (always the next 5, and up to 12 within a 600 MB budget). Each card's still frame and blurred backdrop are prepared off the main thread, so swiping never waits on loading or decoding. Only the card on top plays; the cards behind it show a still frame. Each card shows up to 6 of its keyword tags as `#tag` chips (most used first); clicking one opens that tag's Trending gallery.
+- **Standalone X**: X is not advertised in family headers, footers or Foundation discovery cards. Its own app has no ecosystem header/footer, but retains the shared wallet, age gate, posting, saved likes and existing routes. Its host-scoped visual theme uses warm gradients, rounded discovery cards, prominent action buttons and a compact mobile tab strip with visible labels. Other CMS-hosted sites retain their selected themes. This is a visual refresh, not a dating/matching feature or a change to vote semantics.
+- **Discover** (the existing Swipe route): one shuffled deck of every GIF and image post, mixed together, with the title, description and like count (all rounds) overlaid. Swipe right (or press →) to like and keep a post. Swipe left (or press ←) to dislike it: in round 1 this deletes the post and its media; from round 2 the dislike is only counted. Undo with ↺ or Backspace. Each post shows its largest attached GIF, or its largest image if it has no GIF. The shuffle is stable within a round, so leaving and coming back continues where you stopped; each new round is shuffled differently. Only published posts with a downloaded file are included. The next cards' media is downloaded and decoded in the background (always the next 5, and up to 12 within a 600 MB budget). Each card's still frame and blurred backdrop are prepared off the main thread, so swiping never waits on loading or decoding. Only the card on top plays; the cards behind it show a still frame. Each card shows up to 6 of its keyword tags as `#tag` chips (most used first); clicking one opens that tag's Trending gallery.
 - **Read**: a separate menu that lists every published post with text. You can search it and sort it by length (longest by default) or date, and open any post in a clean reader view.
 - **Trending**: a gap-free gallery of all photos (thumbnails included) and GIFs from the posts of the trending tags. GIFs are scattered: one after every 5 photos. It is sorted by likes + comments by default; it can also be sorted by most liked, most commented or newest. Tag heat is the sum over the tag's posts of likes + 2 × comments. More recent activity counts for more (up to 3×, fading over about a week), and the sum is divided by √(posts) so big tags don't always win. When fewer than 12 tags have activity, the most used tags fill the list. Click a tag chip to see only that tag. **＋ More tags** keeps loading the rest of the tags, 40 at a time (most active first, then by size). The search box searches every post's title and text (all words must match) plus tag names; matching tags show as chips. The viewer lists each post's tags, and clicking one opens that tag's gallery. 👍 likes the post (in its deck's current round), with infinite scroll. Tags come from **Keyword tags** below.
 - **Branding & posting**: the media site is **x.featheral.com**. Its logo (`public/site/logo.svg`, also the favicon) is a black shiny feather with a red 18 above it. Posting is the round pink **＋** button floating at the bottom right of every page (hidden on the post page itself). A post can be a YouTube video, an image, a GIF or a link. For a YouTube link (`youtube.com/watch`, `youtu.be`, `/shorts/`, `/embed/`, `/live/`), the video's title and cover image (the largest of maxres/sd/hq) are fetched, and the post always goes to the Swipe deck. The video id is kept in `member_posts.video` and the post meta `_wpx_youtube`. The cover then shows like any image, with a ▶ button on swipe cards and a ▶ badge on gallery tiles; pressing play (or opening it in the viewer) plays it in a `youtube-nocookie.com` embed. The same video can't be posted twice. Posting still needs a connected wallet and 1 FTHX.

@@ -116,8 +116,10 @@ class SitePages {
     for (const file of this.templates(hostname)) {
       for (const block of this.blocks(hostname, file).blocks) {
         let page = existing.get(block.slug);
-        if (!page) page = store.save({ type: 'page', status: 'publish', slug: block.slug,
-          title: block.text.slice(0, 100), body: block.text });
+        if (!page) {
+          const content = { type: 'page', status: 'publish', slug: block.slug, title: block.text.slice(0, 100), body: block.text };
+          page = this.documents.readOnlyReplica ? content : store.save(content);
+        }
         result.push({ ...page, template: file });
       }
     }

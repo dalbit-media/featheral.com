@@ -13,6 +13,8 @@ const TYPE_LABEL = { gif: 'GIF', jpeg: 'JPG', png: 'PNG' };
 const previewSite = new URLSearchParams(location.search).get('site');
 const hostedSite = document.querySelector('meta[name=site-key]')?.content;
 const siteBase = document.querySelector('meta[name=site-base]')?.content || '';
+if (location.hostname === 'x.featheral.com' || location.hostname === 'x.localhost')
+  document.body.dataset.standalone = 'x';
 const storageKey = (key) => previewSite || hostedSite ? `site:${previewSite || hostedSite}:${key}` : key;
 function publicUrl(url) {
   if (!previewSite) return url.startsWith('/api/') ? siteBase + url : url;
@@ -210,7 +212,12 @@ let cleanup = null;
 const view = () => $('#view');
 
 function setTab(tab) {
-  document.querySelectorAll('.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+  document.querySelectorAll('.tabs a').forEach((a) => {
+    const active = a.dataset.tab === tab;
+    a.classList.toggle('on', active);
+    if (active) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
 }
 
 async function render() {

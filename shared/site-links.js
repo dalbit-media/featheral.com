@@ -5,7 +5,7 @@
 (() => {
   const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "x", "ex", "notes", "sites", "stats", "wallet"];
   const publicSites = [["foundation", "Foundation"], ["gold", "Gold · FTHG"], ["dollar", "Dollar · FTH$"],
-    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["x", "X"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"], ["admin", "Admin"]];
+    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"], ["admin", "Admin"]];
   const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$",
     app: "FTHX", media: "FTHX", x: "FTHX", ex: "FTHX", notes: "FTHX", sites: "FTHX", wallet: "FTHX" };
   const familySites = ["foundation", "gold", "dollar", "silver", "stats", "world", "media"];
@@ -29,6 +29,8 @@
   }
 
   function apply(root = document) {
+    const standalone = current === "x";
+    if (standalone) document.body.dataset.standalone = "x";
     const embedded = document.body.dataset.embedded === "true"
       || current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1";
     const main = root.querySelector?.("main");
@@ -45,9 +47,14 @@
       document.body.prepend(skip);
     }
     const header = root.querySelector?.("body > header, #app > header, header.topbar, #app header.topbar");
+    if (!standalone) for (const link of root.querySelectorAll('a[href], a[data-site]')) {
+      const target = new URL(link.getAttribute("href") || "/", window.location.href);
+      if (link.dataset.site === "x" || [new URL(url("x")).hostname, "x.featheral.com"].includes(target.hostname))
+        link.remove();
+    }
     // World game pages are full-viewport apps with their own rail, so they skip the family chrome.
     const game = current === "world" && !!document.querySelector("#app");
-    if (game) {
+    if (game || standalone) {
       delete document.body.dataset.familyLayout;
       for (const chrome of document.querySelectorAll(".eco-bar, .eco-footer")) chrome.remove();
     }
@@ -56,7 +63,7 @@
       const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/shared/site-links.css";
       style.dataset.siteNavigation = "true"; document.head.append(style);
     }
-    if (!game && !root.querySelector?.(".eco-bar") && header && current !== "admin"
+    if (!game && !standalone && !root.querySelector?.(".eco-bar") && header && current !== "admin"
       && !window.location.pathname.startsWith("/operations/")) {
       const bar = document.createElement("nav");
       bar.className = "eco-bar";
@@ -91,7 +98,7 @@
     for (const title of root.querySelectorAll("header .brand, header a.logo, a.game-brand, a.site-brand")) {
       if (title.tagName === "A") { title.dataset.site = current; title.removeAttribute("data-path"); title.href = url(current); }
     }
-    if (!game && current !== "admin" && !window.location.pathname.startsWith("/operations/")
+    if (!game && !standalone && current !== "admin" && !window.location.pathname.startsWith("/operations/")
       && document.body.dataset.embedded !== "true"
       && !(current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1")
       && !document.querySelector(".eco-footer")) {
@@ -112,7 +119,7 @@
       for (const [label, sites] of [
         ["Currencies", ["gold", "silver", "dollar"]],
         ["World & community", ["world", "media"]],
-        ["Apps", ["app", "x", "ex", "notes", "sites"]],
+        ["Apps", ["app", "ex", "notes", "sites"]],
         ["Ledgers", ["ledger"]],
         ["Tools", ["wallet", "stats", "db", "admin"]],
       ]) {

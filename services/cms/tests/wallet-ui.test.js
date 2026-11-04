@@ -566,6 +566,40 @@ test("shared skip links focus the content without changing SPA routes or duplica
     assert.equal(context.window.location.href, "http://gold.localhost:8080/#/docs");
   }
 });
+test("family pages remove stale published X links without touching Exchange, external sites or app routes", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
+  const cleanup = source.slice(source.indexOf("    if (!standalone) for"), source.indexOf("    // World game pages"));
+  for (const origin of ["https://gold.featheral.com/", "http://notes.localhost:8080/"]) {
+    const make = (href, site) => ({ dataset: { ...(site ? { site } : {}) }, getAttribute: () => href,
+      remove() { this.removed = true; } });
+    const links = [make("/", "x"), make("https://x.featheral.com/"), make("http://x.localhost:8080/#/read"),
+      make("https://ex.featheral.com/"), make("https://example.com/"), make("#/read"), make("/", "world")];
+    const context = { standalone: false, root: { querySelectorAll: () => links }, URL,
+      window: { location: new URL(origin) }, url: () => origin.includes("localhost") ? "http://x.localhost:8080/" : "https://x.featheral.com/" };
+    vm.runInNewContext(cleanup, context);
+    assert.deepEqual(links.map(link => !!link.removed), [true, true, origin.includes("localhost"), false, false, false, false]);
+    links.forEach(link => { delete link.removed; });
+    vm.runInNewContext(cleanup, { ...context, standalone: true });
+    assert.ok(links.every(link => !link.removed), "X keeps its own app navigation");
+  }
+});
+test("standalone X retains existing routes, labelled mobile tabs and accessible motion/focus styling", () => {
+  const base = path.join(__dirname, "../../../sites/x.featheral.com");
+  const html = fs.readFileSync(path.join(base, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(base, "standalone.css"), "utf8");
+  const source = fs.readFileSync(path.join(base, "site.js"), "utf8");
+  for (const [tab, route] of [["swipe", "#/"], ["trending", "#/trending"], ["thumbs", "#/thumbs"], ["read", "#/read"], ["liked", "#/liked"]])
+    assert.match(html, new RegExp(`href="${route}" data-tab="${tab}"[^>]*aria-label="[^"]+"`));
+  assert.match(html, /href="\/site\/standalone\.css"/);
+  assert.match(html, /<nav class="tabs" aria-label="Discover">/);
+  assert.doesNotMatch(html, /<footer/);
+  assert.match(source, /location\.hostname === 'x\.featheral\.com' \|\| location\.hostname === 'x\.localhost'/);
+  assert.match(source, /setAttribute\('aria-current', 'page'\)/);
+  assert.match(css, /body\[data-standalone="x"\]/);
+  assert.match(css, /prefers-reduced-motion/);
+  assert.match(css, /:focus-visible/);
+  assert.match(css, /\.tabs a span \{ display: inline; \}/);
+});
 test("ecosystem navigation has compact family headers and the full footer hierarchy without embedded duplication", () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
   function fixture(host, embedded = false, query = "", initialSites = [], game = false) {
@@ -644,7 +678,7 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   }
   assert.ok(fixture("dollar").bar.querySelector('a[data-site="world"]'), "all core sites share the six family links");
   assert.ok(fixture("app").bar.querySelector('a[data-site="media"]'), "FTHX siblings remain available");
-  const fthxSites = ["app", "media", "x", "ex", "notes", "sites", "wallet"];
+  const fthxSites = ["app", "media", "ex", "notes", "sites", "wallet"];
   for (const host of fthxSites) {
     if (familySites.includes(host)) continue;
     const headerLinks = fixture(host).bar.querySelectorAll("a[data-site]");
@@ -654,8 +688,11 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   const stable = fixture("wallet");
   assert.equal(stable.bar.querySelectorAll("a[data-site]")[0], stable.firstLink,
     "reapplying unchanged navigation preserves link nodes and keyboard focus");
-  assert.equal(links.length, 16);
-  assert.equal(new Set(links.map(link => link.dataset.site)).size, 16);
+  assert.equal(links.length, 15);
+  assert.equal(new Set(links.map(link => link.dataset.site)).size, 15);
+  assert.ok(!links.some(link => link.dataset.site === "x"));
+  for (const host of [...familySites, ...fthxSites, "admin", "db", "ledger"])
+    assert.ok(!fixture(host).bar.querySelector('a[data-site="x"]'), `${host} never advertises standalone X`);
   assert.ok(links.some(link => link.dataset.site === "admin"));
   assert.ok(links.some(link => link.dataset.site === "media"));
   assert.equal(links.find(link => link.dataset.site === "gold").href, "http://gold.localhost:8080/");
@@ -671,6 +708,11 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   assert.equal(play.body.querySelectorAll(".eco-bar").length, 0, "World game pages drop the family bar");
   assert.equal(play.footer, undefined, "World game pages drop the family footer");
   assert.equal(play.body.dataset.familyLayout, undefined, "World game pages keep their own full-viewport layout");
+  const standalone = fixture("x", false, "", ["foundation", "x"]);
+  assert.equal(standalone.body.querySelectorAll(".eco-bar").length, 0);
+  assert.equal(standalone.footer, undefined);
+  assert.equal(standalone.body.dataset.standalone, "x");
+  assert.equal(standalone.body.dataset.familyLayout, undefined);
   const css = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.css"), "utf8");
   assert.match(css, /\.eco-bar:not\(\[data-family-ready\]\)\{visibility:hidden\}/);
   assert.match(css, /\.eco-bar\[data-family-ready\]\{[^}]*font:11px\/1\.5/);

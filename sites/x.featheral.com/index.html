@@ -11,18 +11,19 @@
   <link rel="stylesheet" href="/site/site.css" />
   <link rel="stylesheet" href="/site/demos.css" />
   <link rel="stylesheet" href="/shared/traffic-charts.css" />
+  <link rel="stylesheet" href="/site/standalone.css" />
 </head>
 <body>
   <a class="skip-link" href="#view">Skip to content</a>
   <header class="top">
     <a class="logo" href="#/"><img class="mark" src="/shared/logo-x.svg" alt="" width="34" height="34"><span class="names"><span id="brand"></span><span class="sub" id="tagline"></span></span></a>
-    <nav class="tabs">
+    <nav class="tabs" aria-label="Discover">
       <a href="#/" data-tab="home" hidden>Home</a>
-      <a href="#/" data-tab="swipe" data-media-tab>🔥 <span>Swipe</span></a>
-      <a href="#/trending" data-tab="trending" data-media-tab>📈 <span>Trending</span></a>
-      <a href="#/thumbs" data-tab="thumbs" data-media-tab>▦ <span>Thumbs</span></a>
-      <a href="#/read" data-tab="read">📖 <span>Read</span></a>
-      <a href="#/liked" data-tab="liked" data-media-tab>♥ <span>Liked</span></a>
+      <a href="#/" data-tab="swipe" data-media-tab aria-label="Discover"><span class="tab-icon" aria-hidden="true">✦</span><span>Discover</span></a>
+      <a href="#/trending" data-tab="trending" data-media-tab aria-label="Trending"><span class="tab-icon" aria-hidden="true">↗</span><span>Trending</span></a>
+      <a href="#/thumbs" data-tab="thumbs" data-media-tab aria-label="Gallery"><span class="tab-icon" aria-hidden="true">▦</span><span>Gallery</span></a>
+      <a href="#/read" data-tab="read" aria-label="Read"><span class="tab-icon" aria-hidden="true">≡</span><span>Read</span></a>
+      <a href="#/liked" data-tab="liked" data-media-tab aria-label="Liked"><span class="tab-icon" aria-hidden="true">♡</span><span>Liked</span></a>
       <a href="#/shop" data-tab="shop" data-feature="commerce" hidden>Shop</a>
       <a href="#/exchange" data-tab="exchange" data-feature="exchange" hidden>Exchange</a>
       <a href="#/page/fthx" data-tab="fthx" data-cms-page="fthx" hidden>FTHX</a>

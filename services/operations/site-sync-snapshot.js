@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
+const { readCMSOrigin } = require("./replica");
 const fail = message => Object.assign(new Error(message), { status: 409 });
 const exclusions = [
   "Server Settings, Admin/SSH credentials, external bootstrap and encryption keys",
@@ -95,7 +96,13 @@ function snapshot(root, destination, env) {
     entries.push({ name: entry.name, bytes: fs.statSync(output).size, hash: hash(output) });
   }
   const after = inventory(root);
-  if (JSON.stringify(before) !== JSON.stringify(after)) throw fail("Source storage changed while taking the snapshot. No target data was changed; retry during a quiet period.");
+  if (JSON.stringify(before) !== JSON.stringify(after)) {
+    const previous = new Map(before.map(entry => [entry.name, entry]));
+    const current = new Map(after.map(entry => [entry.name, entry]));
+    const changed = [...new Set([...previous.keys(), ...current.keys()])]
+      .filter(name => JSON.stringify(previous.get(name)) !== JSON.stringify(current.get(name)));
+    throw fail(`Source storage changed while taking the snapshot (${changed.slice(0, 5).join(", ")}). No target data was changed; retry during a quiet period.`);
+  }
   const journals = [runtime.FTH_LEDGER_DIR, runtime.WORLD_LEDGER_DIR, runtime.DB_LEDGER_DIR];
   const publicKeys = {};
   for (const prefix of ["FTH_LEDGER", "WORLD_LEDGER"]) {
@@ -105,7 +112,7 @@ function snapshot(root, destination, env) {
   }
   const cmsDirectory = path.join(root, "services", "cms", "data");
   const manifest = { version: 1, createdAt: new Date().toISOString(), runtime, publicKeys, journals, entries,
-    sourceCMS: { directory: fs.existsSync(cmsDirectory) ? fs.realpathSync(cmsDirectory) : cmsDirectory, separator: path.sep } };
+    sourceCMS: readCMSOrigin(root) || { directory: fs.existsSync(cmsDirectory) ? fs.realpathSync(cmsDirectory) : cmsDirectory, separator: path.sep } };
   fs.writeFileSync(path.join(destination, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
   return manifest;
 }
