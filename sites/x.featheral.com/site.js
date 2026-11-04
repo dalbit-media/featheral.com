@@ -909,13 +909,14 @@ async function likedView(q = {}) {
   let folderNames = new Map();
   const items = [];
   const request = new AbortController();
+  let paging = null;
   const onWallet = () => {
     if (disposed) return;
     if (collection) history.replaceState(null, '', href(['liked'], { sort, group: grouping }));
     render();
   };
   document.addEventListener('wallet', onWallet);
-  cleanup = () => { disposed = true; request.abort(); gallery?.close(); closeViewer?.(); folderDialog?.close(); folderDialog?.remove(); document.removeEventListener('wallet', onWallet); };
+  cleanup = () => { disposed = true; request.abort(); paging?.disconnect(); gallery?.close(); closeViewer?.(); folderDialog?.close(); folderDialog?.remove(); document.removeEventListener('wallet', onWallet); };
   view().innerHTML = `<section class="read liked-timeline"><h1>♥ Liked <span class="count" id="liked-count"></span></h1>
     <p class="m">Shared site-wide likes. Newest likes first. Folders are private to your signed-in wallet. Browsing never changes likes.</p>
     <div class="liked-tools">
@@ -942,7 +943,12 @@ async function likedView(q = {}) {
   }, { minWidth: 320, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
   function loadMore() {
     if (disposed || !more) return Promise.resolve();
-    if (!pending) pending = fetchPage().finally(() => { pending = null; });
+    if (!pending) pending = fetchPage().then(() => {
+      if (!disposed && more && !closeViewer) {
+        paging?.unobserve($('#liked-more'));
+        paging?.observe($('#liked-more'));
+      }
+    }).finally(() => { pending = null; });
     return pending;
   }
   async function fetchPage() {
@@ -1046,11 +1052,23 @@ async function likedView(q = {}) {
     if (event.target.closest('[data-folders]')) { organize(v).catch(error => { if (!disposed) toast(error.message); }); return; }
     closeViewer?.(); gallery.pause(true);
     closeViewer = openViewer(items, +b.dataset.i, {
-      onClose: () => { closeViewer = null; if (!disposed && refreshOnClose) render(); else gallery.pause(false); }, hasMore: () => more, loadMore,
+      onClose: () => {
+        closeViewer = null;
+        if (!disposed && refreshOnClose) render();
+        else {
+          gallery.pause(false);
+          if (!disposed && more) { paging?.unobserve($('#liked-more')); paging?.observe($('#liked-more')); }
+        }
+      }, hasMore: () => more, loadMore,
       organize: v => organize(v).catch(error => { if (!disposed) toast(error.message); }),
     });
   });
   $('#liked-more').onclick = () => loadMore().catch(error => toast(error.message));
+  paging = new IntersectionObserver(entries => {
+    if (!disposed && !closeViewer && entries.some(entry => entry.isIntersecting))
+      loadMore().catch(error => { if (!disposed) toast(error.message); });
+  }, { rootMargin: '600px 0px' });
+  paging.observe($('#liked-more'));
   await Promise.all([loadMore(), refreshFolders()]);
 }
 

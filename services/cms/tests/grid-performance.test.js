@@ -191,3 +191,37 @@ test('all three routes use the bounded grid and only viewers directly load origi
   assert.doesNotMatch(routes, /loading="lazy"/);
   assert.equal((routes.match(/<img src=/g) || []).length, 0, 'all routes leave source loading to the bounded grid and shared viewer');
 });
+
+test('Liked infinite paging deduplicates requests, rearms after success and stops on errors or route exit', async () => {
+  const liked = source.slice(source.indexOf('async function likedView('), source.indexOf('// ---------- thumbnail gallery'));
+  const loader = liked.slice(liked.indexOf('  function loadMore()'), liked.indexOf('  async function fetchPage()'));
+  let resolve, reject, calls = 0, observed = 0;
+  const sentinel = {};
+  const context = vm.createContext({
+    disposed: false, more: true, pending: null, closeViewer: null,
+    $: () => sentinel,
+    paging: { unobserve: node => assert.equal(node, sentinel), observe: node => { assert.equal(node, sentinel); observed++; } },
+    fetchPage: () => { calls++; return new Promise((yes, no) => { resolve = yes; reject = no; }); },
+  });
+  vm.runInContext(loader, context);
+  const first = context.loadMore();
+  assert.equal(first, context.loadMore());
+  assert.equal(calls, 1);
+  resolve(); await first;
+  assert.equal(observed, 1, 'short pages recheck whether the sentinel is still near the viewport');
+  const failed = context.loadMore(); reject(new Error('Offline'));
+  await assert.rejects(failed, /Offline/);
+  assert.equal(observed, 1, 'errors must not cause an automatic retry loop');
+  context.closeViewer = () => {};
+  const viewer = context.loadMore(); resolve(); await viewer;
+  assert.equal(observed, 1, 'viewer continuation does not start background paging');
+  context.closeViewer = null;
+  const late = context.loadMore(); context.disposed = true; resolve(); await late;
+  assert.equal(observed, 1);
+  await context.loadMore(); assert.equal(calls, 4);
+  context.disposed = false; context.more = false;
+  await context.loadMore(); assert.equal(calls, 4);
+  assert.match(liked, /paging\?\.disconnect\(\)/);
+  assert.match(liked, /!disposed && !closeViewer && entries\.some\(entry => entry\.isIntersecting\)/);
+  assert.match(liked, /rootMargin: '600px 0px'/);
+});
