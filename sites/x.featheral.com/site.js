@@ -237,6 +237,17 @@ function readingEntry(item, from = location.hash.slice(1), trashed = false) {
 }
 
 let readingNavigation = null, readingNavigationRequest = 0;
+function readingLayout(parts) {
+  const sidebar = $('.site-sidebar');
+  if (!sidebar) return;
+  const active = parts[0] === 'read' || parts[0] === 'page';
+  const entering = sidebar.hidden && active;
+  sidebar.hidden = !active;
+  document.body.classList.toggle('has-site-sidebar', active);
+  if (entering) $('details', sidebar).open = !window.matchMedia('(max-width: 1024px)').matches;
+  if (active && !readingNavigation && !readingNavigationRequest) loadReadingNavigation();
+}
+
 async function loadReadingNavigation() {
   const target = $('#reading-navigation');
   if (!target) return;
@@ -260,6 +271,7 @@ async function loadReadingNavigation() {
 async function render() {
   if (cleanup) { cleanup(); cleanup = null; }
   const { parts, q } = parseHash();
+  readingLayout(parts);
   trackHit();
   window.scrollTo(0, 0);
   $('#fab')?.classList.toggle('here', parts[0] === 'post');
@@ -727,18 +739,23 @@ function swipeView(type) {
 
 // ---------- reading ----------
 async function readListView(q) {
+  const searchFocused = document.activeElement?.id === 'q';
+  const selection = searchFocused ? document.activeElement.selectionStart : null;
   const request = new AbortController();
   let disposed = false, timer;
   cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); };
   const sort = q.sort || 'longest';
   const page = +q.page || 1;
   const category = q.category || '';
-  view().innerHTML = `<section class="read"><h1>📖 Read</h1>
+  view().innerHTML = `<section class="read reading-library">
+    <div class="reading-heading"><div><p class="reading-kicker">Your reading space</p><h1>Find your next good read.</h1></div><a class="btn" href="#/liked?kind=read">♥ Liked readings</a></div>
     <nav class="reading-pages" aria-label="Read pages">${(info.pages || []).map(page => `<a class="chip" href="${href(['page', page.slug], { from: '/read' })}">${esc(page.title)}</a>`).join('')}</nav>
-    <div class="tools">
-      <input type="search" id="q" placeholder="Search texts…" value="${esc(q.q || '')}">
-      <select id="sort">${[['longest', 'Longest first'], ['shortest', 'Shortest first'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select>
-    </div><div id="list"><div class="loading">Loading…</div></div></section>`;
+    <div class="tools reading-tools" role="search" aria-label="Find readings">
+      <label for="q">Search readings<input type="search" id="q" placeholder="Titles, stories, ideas…" value="${esc(q.q || '')}"></label>
+      <label for="sort">Sort by<select id="sort">${[['longest', 'Longest first'], ['shortest', 'Quick reads'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    </div>${category ? `<div class="reading-filter"><span>Filtered by category</span><a class="btn" href="${href(['read'], { q: q.q || '', sort })}">Clear filter ×</a></div>` : ''}
+    <div id="list" aria-live="polite"><div class="loading">Loading…</div></div></section>`;
+  if (searchFocused) { $('#q').focus({ preventScroll: true }); $('#q').setSelectionRange(selection, selection); }
   const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, ...patch, page: patch.page || '' }); };
   $('#sort').addEventListener('change', (e) => go({ sort: e.target.value }));
   $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => go({ q: e.target.value.trim() }), 450); });
@@ -746,9 +763,9 @@ async function readListView(q) {
   if (disposed) return;
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
-    ${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
+    <div class="reading-cards">${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
-      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a>`).join('')}
+      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a>`).join('')}</div>
     <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
 }
@@ -1563,7 +1580,7 @@ function trendingView(q) {
 async function trashView() {
   let disposed = false, pending = null, more = true, offset = 0, closeViewer = null, changed = false;
   const items = [], request = new AbortController();
-  view().innerHTML = `<section class="read liked-timeline"><h1>Trash <span class="count" id="trash-count"></span></h1>
+  view().innerHTML = `<section class="read liked-timeline"><h1><span aria-hidden="true">🦝</span> Trash <span class="count" id="trash-count"></span></h1>
     <p class="m">Trashed posts and readings, plus posts with more dislikes than likes. A round-1 dislike moves an item to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
     <p class="m" id="trash-status" role="status"></p><div id="trash-readings"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
   const grid = $('.grid', view()), readingIds = new Set();
@@ -2212,7 +2229,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[data-feature]').forEach((link) => { link.hidden = !settings?.[link.dataset.feature]; });
   document.querySelectorAll('[data-media-tab]').forEach((link) => { link.hidden = settings?.homepage !== 'media'; });
   $('[data-tab="home"]').hidden = settings?.homepage === 'media';
-  loadReadingNavigation();
   $('#fab').hidden = settings?.homepage !== 'media';
   $('.logo').title = info.tagline || info.brand;
   document.querySelector('meta[name=description]')?.setAttribute('content', info.tagline || info.brand);

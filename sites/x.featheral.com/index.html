@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/shared/traffic-charts.css" />
   <link rel="stylesheet" href="/site/standalone.css" />
 </head>
-<body class="has-site-sidebar">
+<body>
   <a class="skip-link" href="#view">Skip to content</a>
   <header class="top">
     <a class="logo" href="#/"><img class="mark" src="/shared/logo-x.svg" alt="" width="34" height="34"><span class="names"><span id="brand"></span><span class="sub" id="tagline"></span></span></a>
@@ -24,15 +24,15 @@
       <a href="#/thumbs" data-tab="thumbs" data-media-tab aria-label="Gallery"><span class="tab-icon" aria-hidden="true">▦</span><span>Gallery</span></a>
       <a href="#/read" data-tab="read" aria-label="Read"><span class="tab-icon" aria-hidden="true">≡</span><span>Read</span></a>
       <a href="#/liked" data-tab="liked" aria-label="Liked"><span class="tab-icon" aria-hidden="true">♡</span><span>Liked</span></a>
-      <a href="#/trash" data-tab="trash" aria-label="Trash"><span class="tab-icon" aria-hidden="true">⌫</span><span>Trash</span></a>
+      <a href="#/trash" data-tab="trash" aria-label="Trash" title="Trash · give posts a second chance"><span class="tab-icon" aria-hidden="true">🦝</span><span>Trash</span></a>
       <a href="#/shop" data-tab="shop" data-feature="commerce" hidden>Shop</a>
       <a href="#/exchange" data-tab="exchange" data-feature="exchange" hidden>Exchange</a>
     </nav>
     <button class="wallet" id="wallet" type="button" title="Connect an Ethereum wallet to comment">🦊 <span>Connect wallet</span></button>
   </header>
-  <aside class="site-sidebar" aria-label="Site navigation">
-    <details open><summary>Browse site</summary>
-      <nav aria-label="Library"><a href="#/read">Read</a><a href="#/liked">Liked</a><a href="#/trash" class="trash-link">Trash</a></nav>
+  <aside class="site-sidebar" aria-label="Reading navigation" hidden>
+    <details><summary>Browse readings <span class="count">Pages &amp; categories</span></summary>
+      <nav aria-label="Library"><a href="#/read">All readings</a><a href="#/liked?kind=read">Liked readings</a><a href="#/trash" class="trash-link"><span aria-hidden="true">🦝</span> Trash</a></nav>
       <div id="reading-navigation" aria-live="polite"><p class="count">Loading pages and categories...</p></div>
     </details>
   </aside>

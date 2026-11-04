@@ -100,11 +100,56 @@ test('sidebar refreshes keep CMS page links current and ignore obsolete response
   assert.equal(info.pages[0].slug, 'current');
 });
 
-test('Trash is always discoverable and project pages are only under Read/sidebar, not the overflowing top tabs', () => {
+test('reading layout is exclusive to Read and readers, and loads navigation only on demand', () => {
+  const sidebar = { hidden: true }, details = { open: false }, classes = new Set();
+  let requests = 0, compact = true;
+  const context = vm.createContext({
+    $: selector => selector === '.site-sidebar' ? sidebar : details,
+    document: { body: { classList: { toggle(name, active) { if (active) classes.add(name); else classes.delete(name); } } } },
+    window: { matchMedia: () => ({ matches: compact }) },
+    loadReadingNavigation() { requests++; },
+  });
+  vm.runInContext('let readingNavigation = null, readingNavigationRequest = 0;\n' +
+    source.slice(source.indexOf('function readingLayout('), source.indexOf('async function loadReadingNavigation(')), context);
+  for (const route of [[], ['trending'], ['thumbs'], ['liked'], ['trash'], ['post'], ['shop'], ['exchange']]) {
+    context.readingLayout(route);
+    assert.equal(sidebar.hidden, true);
+    assert.equal(classes.size, 0);
+  }
+  assert.equal(requests, 0, 'media routes do not fetch reading navigation');
+  context.readingLayout(['read']);
+  assert.equal(sidebar.hidden, false);
+  assert(classes.has('has-site-sidebar'));
+  assert.equal(details.open, false, 'compact reading navigation starts collapsed');
+  assert.equal(requests, 1);
+  vm.runInContext('readingNavigation = { pages: [], categories: [] };', context);
+  details.open = true;
+  context.readingLayout(['read', '10']);
+  assert.equal(details.open, true, 'reading navigation preserves the visitor toggle');
+  assert.equal(requests, 1);
+  context.readingLayout(['liked']);
+  assert.equal(sidebar.hidden, true);
+  compact = false;
+  context.readingLayout(['page', 'fthx']);
+  assert.equal(details.open, true, 'desktop readers open the sidebar');
+  context.readingLayout(['trash']);
+  assert.equal(sidebar.hidden, true);
+  assert.equal(classes.size, 0);
+});
+
+test('Trash stays in the header with a decorative icon and Read alone owns the responsive layout', () => {
   const html = fs.readFileSync(path.join(root, 'sites/x.featheral.com/index.html'), 'utf8');
-  assert.match(html, /class="site-sidebar"[\s\S]*class="trash-link">Trash/);
+  const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
+  assert.match(html, /class="site-sidebar"[^>]+hidden/);
+  assert.doesNotMatch(html, /<body class="has-site-sidebar">/);
+  assert.match(html, /class="trash-link"><span aria-hidden="true">🦝<\/span> Trash/);
   assert.match(html, /href="#\/trash" data-tab="trash" aria-label="Trash"/);
+  assert.match(html, /class="tab-icon" aria-hidden="true">🦝/);
   assert.doesNotMatch(html, /data-cms-page="fthx/);
+  assert.match(css, /\.reading-cards \{[^}]+repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 600px\)/);
+  assert.match(source, /label for="q">Search readings/);
+  assert.match(source, /setSelectionRange\(selection, selection\)/);
   assert.match(source, /category, page, limit: 30/);
   assert.match(source, /kind: 'read'/);
 });
