@@ -52,6 +52,45 @@ test('weekly schedules persist across restarts, catch up once, and never opt oth
   assert.deepEqual(f.calls, ['x', 'new', 'x', 'new'], 'downtime causes only one catch-up purge, not a burst');
 });
 
+test('manual cleanup empties every CMS site regardless of weekly opt-in and reports bytes and failures', t => {
+  const f = fixture(t), task = new Maintenance(f.options);
+  f.options.cleanup = () => ({ candidates: [{ bytes: 100 }], removedBytes: 100, skipped: [], blocked: false });
+  task.cleanup = f.options.cleanup;
+  f.setFail(true);
+  const partial = task.runNow();
+  assert.deepEqual(f.calls, ['x', 'existing', 'new']);
+  assert.deepEqual(partial.errors, [{ key: 'x', message: 'purge failed' }]);
+  assert.equal(partial.temporary.removedBytes, 100);
+  assert.equal(partial.sites.reduce((sum, site) => sum + site.bytes, 0), 84);
+  assert.deepEqual(f.invalidated, ['x', 'existing', 'new']);
+  assert(!task.state.sites.existing, 'manual purge does not opt a site into weekly cleanup');
+  assert(task.state.sites.new.lastTrashAt);
+  f.setFail(false);
+  const complete = task.runNow();
+  assert.deepEqual(complete.errors, []);
+  assert.equal(complete.sites.length, 3);
+  assert.equal(task.state.sites.x.nextTrashAt, task.state.sites.x.lastTrashAt + WEEK);
+});
+
+test('manual cleanup protects replicas, active operations and blocked staging before trash deletion', t => {
+  const f = fixture(t), task = new Maintenance(f.options);
+  f.setBusy(true);
+  assert.throws(() => task.runNow(), { status: 409 });
+  assert.equal(f.cleanupCount(), 0);
+  f.setBusy(false); f.setReplica(true);
+  const replica = task.runNow();
+  assert.equal(f.cleanupCount(), 1);
+  assert.match(replica.trashSkipped, /read-only replica/);
+  assert.deepEqual(f.calls, []);
+  assert(!fs.existsSync(task.file));
+  f.setReplica(false);
+  task.cleanup = () => ({ blocked: true });
+  assert.throws(() => task.runNow(), { status: 409 });
+  assert.deepEqual(f.calls, []);
+  task.deployment = { running: true };
+  assert.throws(() => task.runNow(), { status: 409 });
+});
+
 test('busy servers skip maintenance; replicas clean staging only; failed purges log and retry without advancing', t => {
   const f = fixture(t), task = new Maintenance(f.options);
   f.setBusy(true); task.tick();

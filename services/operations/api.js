@@ -1,7 +1,7 @@
 "use strict";
 const express = require("express");
 const crypto = require("node:crypto");
-function settingsApi({ settings, siteSync, selfDeployment, cmsAuth, adminHost = "admin.featheral.com", sites = () => [] }) {
+function settingsApi({ settings, siteSync, selfDeployment, cleanup, cmsAuth, adminHost = "admin.featheral.com", sites = () => [] }) {
   const router = express.Router(), limits = new Map();
   router.use((req, res, next) => {
     res.set({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
@@ -43,6 +43,11 @@ function settingsApi({ settings, siteSync, selfDeployment, cmsAuth, adminHost = 
   };
   router.post("/challenge", run((input, ctx) => settings.challenge(input, ctx)));
   router.post("/", run((input, ctx) => settings.save(input, ctx)));
+  if (cleanup) router.post("/cleanup", run(input => {
+    if (input?.confirmation !== "EMPTY ALL CMS TRASH")
+      throw Object.assign(new Error("Confirm permanent deletion of trash across all CMS sites."), { status: 400 });
+    return cleanup();
+  }));
   if (selfDeployment) {
     router.post("/self-sync/challenge", run((_input, ctx) => selfDeployment.challenge(ctx)));
     router.post("/self-sync/start", run((input, ctx) => selfDeployment.start(input, ctx)));

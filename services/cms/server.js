@@ -195,6 +195,12 @@ app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
 app.use('/api/settings', require('../operations/api').settingsApi({
   settings: operationsSettings, siteSync, selfDeployment, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
   sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
+  cleanup: async () => {
+    const result = getMaintenance().runNow();
+    await serverProfile.refreshDisk();
+    void serverProfile.refreshStorage();
+    return { ...result, disk: serverProfile.disk };
+  },
 }));
 app.operationsSettings = operationsSettings;
 const serverProfile = new ServerProfile({
@@ -1184,16 +1190,17 @@ if (primaryPublicKey) {
   if (primary.cms.siteSettings().homepage === 'media') primary.warmFeed();
 }
 notes.validateBalances();
-app.startMaintenance = () => {
-  if (app.maintenance) return;
+function getMaintenance() {
+  if (app.maintenance) return app.maintenance;
   app.maintenance = new (require('./lib/maintenance').Maintenance)({
     root: path.resolve(__dirname, '..', '..'),
     sites: () => siteManager?.records || (CONFIG.siteKey ? [{ key: CONFIG.siteKey, hostname: CONFIG.publicHost }] : []),
     publicByKey, invalidateSite, deployment, siteSync,
     busy: () => serverUsers.changing || operationsSettings.busy || selfDeployment.active(),
   });
-  app.maintenance.start();
-};
+  return app.maintenance;
+}
+app.startMaintenance = () => getMaintenance().start();
 module.exports = app;
 if (require.main === module) {
   app.startMaintenance();

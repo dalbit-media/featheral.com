@@ -317,6 +317,21 @@ use `--min-age-hours=0` to remove verified inactive staging immediately. The sam
 command runs locally on each server; it does not remotely erase other servers.
 Unknown/unconfirmed target artifacts are intentionally retained for review.
 
+**Admin > Settings > Storage cleanup** provides one **Clean temporary files & empty all trash**
+button for the server running Admin, not its remote deployment target. After an
+irreversible-deletion confirmation, it removes eligible temporary entries older
+than 24 hours and empties trash across **all CMS sites**, including sites that
+have not enabled weekly cleanup. It preserves backups, releases, active transfers
+and shared media still used by kept posts. Read-only replicas clean temporary
+files only and explicitly report that source-side trash deletion is required.
+Per-site failures are reported without hiding successful cleanup on other sites;
+busy server operations block cleanup. The result includes removed item/file/byte
+totals and a fresh filesystem free-space measurement; Server profile's storage
+breakdown is rescanned. The authenticated, same-origin
+`POST /api/settings/cleanup` requires `confirmation: "EMPTY ALL CMS TRASH"`.
+Successful manual purges reset enabled weekly schedules to seven days later
+without changing any site's opt-in setting.
+
 **Site features > Permanently empty all trash once a week** controls irreversible
 trash deletion. It is enabled automatically for Featheral X unless explicitly
 disabled, and defaults on for newly created CMS sites. Other existing sites

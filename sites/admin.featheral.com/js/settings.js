@@ -22,6 +22,11 @@ function changedServiceSettings(form, fields) {
 VIEWS.settings = async (_q, token) => {
   renderSidebar("settings"); setCrumbs("<b>Settings</b>");
   setView(`<div class="server-profile-dashboard"><section class="server-profile-heading"><h1>Settings</h1><span id="settings-status" role="status">Loading...</span></section>
+    <section class="card form-grid"><h2>Storage cleanup</h2>
+      <p>Clean inactive deployment and sync temporary files older than 24 hours, and permanently empty trash across all CMS sites on this server. Backups, rollback releases and active transfers are preserved. On read-only replicas, only temporary files are cleaned; trash must be emptied on the writable source.</p>
+      <div class="row"><button id="settings-cleanup" class="btn" type="button">Clean temporary files &amp; empty all trash</button><a class="btn" href="#/server-profile">Server profile</a></div>
+      <p id="settings-cleanup-result" role="status" aria-live="polite"></p>
+    </section>
     <section class="card form-grid settings-deployment"><h2>Deployment &amp; Git sync</h2>
     <form id="operations-settings" class="form-grid" autocomplete="off">
         <h3>1. Connection</h3>
@@ -39,13 +44,38 @@ VIEWS.settings = async (_q, token) => {
   const controller = new AbortController(), hash = location.hash, form = $("#operations-settings");
   const active = () => token === state.seq && !controller.signal.aborted && location.hash === hash;
   const feedback = $("#settings-feedback"), button = $("#settings-save");
-  let revision = 0, saving = false, loaded = false, saved = "", savedHost = "", savedPort = 22, enrolled = false;
+  let revision = 0, saving = false, cleaning = false, loaded = false, saved = "", savedHost = "", savedPort = 22, enrolled = false;
   const snapshot = () => JSON.stringify(Object.fromEntries(new FormData(form)));
   button.disabled = true;
   const names = ["host", "port", "directory", "tlsEmail"];
   const numbers = new Set(["port"]);
   viewCleanup = () => { controller.abort(); form.reset(); };
-  leaveView = () => !saving && (!loaded || snapshot() === saved || confirm("Discard unsaved deployment settings?"));
+  leaveView = () => !saving && !cleaning && (!loaded || snapshot() === saved || confirm("Discard unsaved deployment settings?"));
+  $("#settings-cleanup").addEventListener("click", async () => {
+    if (!active() || cleaning || saving) return;
+    if (!confirm("Permanently delete ALL trashed posts, readings and their unused files across ALL CMS sites on this server? This cannot be undone. Safe temporary files older than 24 hours will also be removed. Backups and active transfers are preserved. Replicas clean temporary files only.")) return;
+    cleaning = true;
+    const control = $("#settings-cleanup"), output = $("#settings-cleanup-result");
+    control.disabled = true;
+    output.textContent = "Cleaning server storage. Keep this page open...";
+    try {
+      const result = await api("/api/settings/cleanup", { json: { confirmation: "EMPTY ALL CMS TRASH" } });
+      const totals = result.sites.reduce((sum, site) => ({ posts: sum.posts + site.posts, files: sum.files + site.files, bytes: sum.bytes + site.bytes }), { posts: 0, files: 0, bytes: 0 });
+      const gib = bytes => (bytes / 1024 ** 3).toFixed(2);
+      const text = [
+        `Removed ${result.temporary.candidates.length} temporary entries (${gib(result.temporary.removedBytes)} GiB).`,
+        `Emptied ${totals.posts} trashed items and ${totals.files} files (${gib(totals.bytes)} GiB) across ${result.sites.length} sites.`,
+        result.trashSkipped || "",
+        ...result.temporary.skipped.map(item => `Preserved: ${item.reason}.`),
+        ...result.errors.map(error => `Cleanup failed for ${error.key}: ${error.message}`),
+        result.disk.available ? `Server free space: ${gib(result.disk.freeBytes)} GiB.` : `Free-space check unavailable: ${result.disk.error}`,
+      ].filter(Boolean).join(" ");
+      if (active()) output.textContent = text; else toast(text);
+    } catch (error) {
+      const text = `Cleanup was not confirmed; some files may already have been removed. Check Server profile before retrying. ${error.message}`;
+      if (active()) output.textContent = text; else toast(text);
+    } finally { cleaning = false; if (active()) control.disabled = false; }
+  });
   async function load() {
     loaded = false; button.disabled = true;
     try {
@@ -75,7 +105,7 @@ VIEWS.settings = async (_q, token) => {
   });
   form.addEventListener("submit", async event => {
     event.preventDefault();
-    if (!active() || saving || !loaded) return;
+    if (!active() || saving || cleaning || !loaded) return;
     saving = true; button.disabled = true;
     const settings = Object.fromEntries(names.map(name => [name, numbers.has(name) ? Number(form.elements[name].value) : form.elements[name].value.trim()]));
     settings.enabled = true;

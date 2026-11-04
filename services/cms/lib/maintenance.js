@@ -23,6 +23,36 @@ class Maintenance {
     fs.renameSync(this.file + ".tmp", this.file);
     this.state = state;
   }
+  runNow() {
+    if (this.busy() || this.deployment?.running || this.siteSync?.running)
+      throw Object.assign(new Error("A server operation is active. Wait before cleaning storage."), { status: 409 });
+    const now = this.now();
+    const temporary = this.cleanup({ root: this.root, apply: true, now, deployment: this.deployment, siteSync: this.siteSync });
+    if (temporary.blocked) throw Object.assign(new Error("Storage cleanup is blocked by an active server operation."), { status: 409 });
+    this.logger.info(`Manual storage cleanup removed ${temporary.candidates.length} temporary entries (${temporary.removedBytes} bytes).`);
+    const result = { temporary, sites: [], errors: [], trashSkipped: null };
+    if (this.replica()) {
+      result.trashSkipped = "This server is a read-only replica. Trash must be emptied on the writable source and synced normally.";
+      return result;
+    }
+    for (const site of this.sites()) {
+      try {
+        const pub = this.publicByKey(site.key);
+        const weeklyTrash = pub.cms.siteSettings().weeklyTrash;
+        let trash;
+        try { trash = pub.emptyTrash(); }
+        finally { this.invalidateSite(site.key); }
+        result.sites.push({ key: site.key, hostname: site.hostname, ...trash });
+        if (weeklyTrash)
+          this.saveSite(site.key, { nextTrashAt: now + WEEK, lastTrashAt: now, result: trash });
+        this.logger.info(`Manual storage cleanup for ${site.hostname || site.key}: ${trash.posts} posts, ${trash.files} files, ${trash.bytes} bytes permanently deleted.`);
+      } catch (error) {
+        this.logger.error(`Manual storage cleanup failed for ${site.key}:`, error);
+        result.errors.push({ key: site.key, message: error.message });
+      }
+    }
+    return result;
+  }
   tick() {
     try {
       if (this.busy() || this.deployment?.running || this.siteSync?.running) return;
