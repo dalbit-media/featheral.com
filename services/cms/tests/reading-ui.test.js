@@ -65,22 +65,21 @@ test('reading controls handle errors and disposal without reintroducing stale bu
   error.stop();
 });
 
-test('Liked tabs preserve route filters, escape private folder names and support keyboard navigation', () => {
+test('Liked offers only media and readings, drops legacy folder filters and supports keyboard navigation', () => {
   const context = vm.createContext({ fmtNum: String,
     esc: value => String(value).replace(/</g, '&lt;'),
     href: (parts, query) => '#/' + parts.join('/') + '?' + new URLSearchParams(Object.entries(query).filter(([, value]) => value)).toString() });
   vm.runInContext(tabs, context);
-  const html = context.likedTabs({ kind: 'read', sort: 'recent' }, [{ id: 'abc', name: '<Private>', count: 2 }]);
+  const html = context.likedTabs({ kind: 'read', sort: 'recent', collection: 'abc' });
   assert.match(html, /aria-selected="true" tabindex="0"[^>]+>Readings/);
   assert.match(html, /kind=read/);
-  assert.match(html, /collection=abc/);
-  assert.match(html, /&lt;Private>/);
-  assert.doesNotMatch(html, /<Private>/);
+  assert.doesNotMatch(html, /collection=|Private|Folders/);
+  assert.equal((html.match(/role="tab"/g) || []).length, 2);
   let focused = -1, clicked = -1;
   const nodes = Array.from({ length: 3 }, (_, i) => ({ focus() { focused = i; }, click() { clicked = i; } }));
-  context.folderTabKeys({ key: 'ArrowRight', target: nodes[0], currentTarget: { querySelectorAll: () => nodes }, preventDefault() {} });
+  context.likedTabKeys({ key: 'ArrowRight', target: nodes[0], currentTarget: { querySelectorAll: () => nodes }, preventDefault() {} });
   assert.equal(focused, 1); assert.equal(clicked, 1);
-  context.folderTabKeys({ key: 'End', target: nodes[1], currentTarget: { querySelectorAll: () => nodes }, preventDefault() {} });
+  context.likedTabKeys({ key: 'End', target: nodes[1], currentTarget: { querySelectorAll: () => nodes }, preventDefault() {} });
   assert.equal(clicked, 2);
 });
 
@@ -159,5 +158,6 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   const trash = source.slice(source.indexOf('async function trashView('), source.indexOf('async function trashView(') + 1800);
   assert.doesNotMatch(liked, /originalSize: true|tile original-tile/);
   assert.doesNotMatch(trash, /originalSize: true|tile original-tile/);
-  assert.match(liked, /previews: true, groupBy:/);
+  assert.match(liked, /previews: true, minWidth: 250, minColumns: 2, groupBy:/);
+  assert.doesNotMatch(source, /data-folders|data-organize|folder-create|folderDialog|\/api\/public\/collections/);
 });

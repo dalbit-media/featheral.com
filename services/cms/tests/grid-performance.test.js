@@ -71,6 +71,18 @@ test('Liked and Trash thumbnail grids fit multiple media per row on phones, tabl
   }
 });
 
+test('larger Liked tiles use exactly two, three and four columns as the viewport grows', () => {
+  for (const [width, columns] of [[343, 2], [773, 3], [1168, 4]]) {
+    const f = fixture(Array.from({ length: 60 }, (_, i) => item(i)), { previews: true, minWidth: 250, minColumns: 2 });
+    f.grid.clientWidth = width; f.gallery.layout(); f.flush();
+    const first = f.grid.children.filter(el => el.dataset?.i != null && /top:0px;/.test(el.style.cssText));
+    assert.equal(first.length, columns);
+    assert.equal(+/width:([\d.]+)px/.exec(first[0].style.cssText)[1], (width - (columns - 1) * 8) / columns);
+    assert(f.active().length <= 2);
+    f.gallery.close();
+  }
+});
+
 test('10,000 grid items retain at most 80 tiles and two in-flight images during fast scrolling', () => {
   const items = Array.from({ length: 10000 }, (_, i) => item(i));
   const f = fixture(items);
@@ -260,7 +272,7 @@ test('all four routes use the bounded grid and leave image requests to its sched
   assert.equal((routes.match(/mediaGrid\(grid,/g) || []).length, 4);
   assert.equal((routes.match(/previews: true/g) || []).length, 4);
   assert.equal((routes.match(/gallery\.close\(\)/g) || []).length, 3);
-  assert.equal((routes.match(/signal: request.signal/g) || []).length, 7);
+  assert.equal((routes.match(/signal: request.signal/g) || []).length, 5);
   assert.doesNotMatch(routes, /loading="lazy"/);
   assert.equal((routes.match(/<img src=/g) || []).length, 0, 'all routes leave source loading to the bounded grid and shared viewer');
 });

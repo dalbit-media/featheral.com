@@ -844,7 +844,7 @@ function readingVotes(reading, target) {
 }
 
 // ---------- liked ----------
-function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, minWidth = 150, groupBy = null, originalSize = false, previews = false } = {}) {
+function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, minWidth = 150, minColumns = 1, groupBy = null, originalSize = false, previews = false } = {}) {
   const mounted = new Map();
   const headings = new Map();
   const constrained = navigator.connection?.saveData || /^(slow-)?2g$/.test(navigator.connection?.effectiveType || '');
@@ -995,7 +995,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
       grid.style.height = `${y}px`;
     } else if (justified) positions = justifyRows(grid, items, width, 6, { maxH, cache: rowCache });
     else {
-      const columns = Math.max(1, Math.floor((width + 8) / (minWidth + 8))), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
+      const columns = Math.max(minColumns, Math.floor((width + 8) / (minWidth + 8))), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
       positions = []; groups = [];
       let y = 0, column = 0, previous = null;
       items.forEach((item, index) => {
@@ -1069,14 +1069,14 @@ function likedDate(item, grouping = 'day') {
     label: date.toLocaleDateString(undefined, grouping === 'month'
       ? { year: 'numeric', month: 'long' } : { year: 'numeric', month: 'long', day: 'numeric' }) };
 }
-function likedTabs(q, folders = []) {
-  const readings = q.kind === 'read' && !q.collection;
-  const tabs = [{ label: 'All media', query: { ...q, kind: '', collection: '' }, active: !q.collection && !readings },
-    { label: 'Readings', query: { ...q, kind: 'read', collection: '' }, active: readings },
-    ...folders.map(folder => ({ label: `${folder.name} (${fmtNum(folder.count)})`, query: { ...q, kind: '', collection: folder.id }, active: q.collection === folder.id }))];
+function likedTabs(q) {
+  const readings = q.kind === 'read';
+  const query = { sort: q.sort, group: q.group };
+  const tabs = [{ label: 'All media', query, active: !readings },
+    { label: 'Readings', query: { ...query, kind: 'read' }, active: readings }];
   return tabs.map(tab => `<a role="tab" aria-controls="liked-panel" aria-selected="${tab.active}" tabindex="${tab.active ? 0 : -1}" href="${href(['liked'], tab.query)}">${esc(tab.label)}</a>`).join('');
 }
-function folderTabKeys(event) {
+function likedTabKeys(event) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
   const tabs = [...event.currentTarget.querySelectorAll('[role=tab]')], index = tabs.indexOf(event.target);
   if (index < 0) return;
@@ -1089,33 +1089,29 @@ async function likedView(q = {}) {
   const restoreTabFocus = document.activeElement?.getAttribute('role') === 'tab';
   cleanup?.();
   const sort = q.sort === 'likes' ? 'likes' : 'recent', grouping = q.group === 'month' ? 'month' : q.group === 'none' ? 'none' : 'day';
-  const collection = q.collection || '';
-  const readings = q.kind === 'read' && !collection;
-  let disposed = false, gallery = null, closeViewer = null, folderDialog = null, pending = null, refreshOnClose = false, more = true, offset = 0;
-  let folderNames = new Map();
+  const readings = q.kind === 'read';
+  if (q.collection) history.replaceState(null, '', href(['liked'], { sort, group: grouping, kind: readings ? 'read' : '' }));
+  let disposed = false, gallery = null, closeViewer = null, pending = null, refreshOnClose = false, more = true, offset = 0;
   const items = [];
   const request = new AbortController();
   let paging = null;
   const onWallet = () => {
     if (disposed) return;
-    if (collection) history.replaceState(null, '', href(['liked'], { sort, group: grouping }));
     render();
   };
   document.addEventListener('wallet', onWallet);
-  cleanup = () => { disposed = true; request.abort(); paging?.disconnect(); gallery?.close(); closeViewer?.(); folderDialog?.close(); folderDialog?.remove(); document.removeEventListener('wallet', onWallet); };
+  cleanup = () => { disposed = true; request.abort(); paging?.disconnect(); gallery?.close(); closeViewer?.(); document.removeEventListener('wallet', onWallet); };
   view().innerHTML = `<section class="read liked-timeline"><h1>♥ Liked <span class="count" id="liked-count"></span></h1>
-    <p class="m">Shared site-wide likes. Newest likes first. Folders are private to your signed-in wallet. Browsing never changes likes.</p>
-    <nav class="folder-tabs" id="liked-tabs" role="tablist" aria-label="Liked folders">${likedTabs(q)}</nav>
+    <p class="m">Shared site-wide likes. Newest likes first. Browsing never changes likes.</p>
+    <nav class="liked-tabs" id="liked-tabs" role="tablist" aria-label="Liked content">${likedTabs(q)}</nav>
     <div class="liked-tools">
       <label>Sort <select id="liked-sort"><option value="recent">Recently liked</option><option value="likes">Most liked</option></select></label>
       <label>Group <select id="liked-group"><option value="day">By day</option><option value="month">By month</option><option value="none">No groups</option></select></label>
-      <button class="btn" id="folder-create">${wallet.token ? 'New folder' : 'Sign in for folders'}</button>
-      ${collection && wallet.token ? '<button class="btn" id="folder-rename">Rename folder</button><button class="btn" id="folder-delete">Delete folder</button>' : ''}
     </div><p class="m" id="liked-status" role="status"></p>
-    <div class="grid media-grid" id="liked-panel" role="tabpanel" aria-label="${readings ? 'Liked readings' : collection ? 'Private folder media' : 'All liked media'}"></div><button class="btn" id="liked-more">Load more</button></section>`;
+    <div class="grid media-grid" id="liked-panel" role="tabpanel" aria-label="${readings ? 'Liked readings' : 'All liked media'}"></div><button class="btn" id="liked-more">Load more</button></section>`;
   const grid = $('.grid', view());
-  const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, kind: readings ? 'read' : '', collection, ...patch }); };
-  $('#liked-tabs').addEventListener('keydown', folderTabKeys);
+  const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, kind: readings ? 'read' : '', ...patch }); };
+  $('#liked-tabs').addEventListener('keydown', likedTabKeys);
   if (restoreTabFocus) $('#liked-tabs [aria-selected=true]')?.focus();
   $('#liked-sort').value = sort; $('#liked-group').value = grouping; $('#liked-group').disabled = sort === 'likes';
   $('#liked-sort').onchange = e => navigate({ sort: e.target.value });
@@ -1126,10 +1122,9 @@ async function likedView(q = {}) {
     const tile = document.createElement('div');
     tile.className = 'tile'; tile.title = v.title; v.el = tile;
     tile.innerHTML = `<button class="liked-open" aria-label="Open ${esc(v.title)} with comments"><img alt="">${ytBadge(v)}
-      <span>${esc(v.title)}<br>♥ ${fmtNum(v.likes)} · 💬 ${fmtNum(v.comments)} · ${esc(likedDate(v).label)}</span></button>
-      <button class="btn liked-save" data-folders aria-label="Organize ${esc(v.title)} in folders">Folders</button>`;
+      <span>${esc(v.title)}<br>♥ ${fmtNum(v.likes)} · 💬 ${fmtNum(v.comments)} · ${esc(likedDate(v).label)}</span></button>`;
     return tile;
-  }, { previews: true, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
+  }, { previews: true, minWidth: 250, minColumns: 2, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
   function loadMore() {
     if (disposed || !more) return Promise.resolve();
     if (!pending) pending = fetchPage().then(() => {
@@ -1144,7 +1139,7 @@ async function likedView(q = {}) {
     $('#liked-more').disabled = true;
     $('#liked-status').textContent = 'Loading likes...';
     try {
-      const r = await api(`/api/public/liked?${new URLSearchParams({ sort, offset, limit: 24, ...(readings ? { kind: 'read' } : {}), ...(collection ? { collection } : {}) })}`, { signal: request.signal });
+      const r = await api(`/api/public/liked?${new URLSearchParams({ sort, offset, limit: 24, ...(readings ? { kind: 'read' } : {}) })}`, { signal: request.signal });
       if (disposed) return;
       const known = new Set(items.map(item => item.id));
       const fresh = r.items.filter(item => !known.has(item.id));
@@ -1152,94 +1147,18 @@ async function likedView(q = {}) {
       if (readings) grid.insertAdjacentHTML('beforeend', fresh.map(item => readingEntry(item)).join(''));
       offset = r.offset + r.items.length; more = offset < r.total && r.items.length > 0;
       $('#liked-count').textContent = fmtNum(r.total);
-      $('#liked-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : collection ? 'No currently liked media in this folder.' : 'Nothing liked yet.';
+      $('#liked-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : 'Nothing liked yet.';
       $('#liked-more').hidden = !more;
       gallery?.layout();
     } catch (error) {
       if (!disposed) { $('#liked-status').textContent = error.message; throw error; }
     } finally { if (!disposed) $('#liked-more').disabled = false; }
   }
-  async function refreshFolders() {
-    if (!wallet.token) return;
-    let r;
-    try { r = await api('/api/public/collections', { signal: request.signal }); }
-    catch (error) { if (disposed) return; throw error; }
-    if (disposed) return;
-    folderNames = new Map(r.items.map(folder => [folder.id, folder.name]));
-    $('#liked-tabs').innerHTML = likedTabs(q, r.items);
-    if (restoreTabFocus) $('#liked-tabs [aria-selected=true]')?.focus();
-  }
-  function folderInput(action) {
-    folderDialog?.close();
-    const dialog = document.createElement('dialog'); folderDialog = dialog; dialog.className = 'collection-dialog';
-    const deleting = action === 'delete';
-    dialog.setAttribute('aria-label', deleting ? 'Delete folder' : action === 'create' ? 'New folder' : 'Rename folder');
-    dialog.innerHTML = `<form><h2>${deleting ? 'Delete folder' : action === 'create' ? 'New folder' : 'Rename folder'}</h2>
-      ${deleting ? '<p>Delete this private folder? Media and shared likes will not change.</p>' : `<label>Folder name <input name="name" required maxlength="80" value="${esc(action === 'create' ? '' : folderNames.get(collection) || '')}" autofocus></label>`}
-      <div class="row"><button class="btn" type="button" data-cancel>Cancel</button><button class="btn primary" type="submit">${deleting ? 'Delete folder' : 'Save folder'}</button></div></form>`;
-    return new Promise(resolve => {
-      let value = null;
-      $('form', dialog).onsubmit = event => {
-        event.preventDefault();
-        const name = deleting ? 'delete' : $('input', dialog).value.trim();
-        if (!name) { $('input', dialog).setCustomValidity('Enter a folder name'); $('input', dialog).reportValidity(); return; }
-        value = name; dialog.close();
-      };
-      $('input', dialog)?.addEventListener('input', event => event.target.setCustomValidity(''));
-      $('[data-cancel]', dialog).onclick = () => dialog.close();
-      dialog.addEventListener('close', () => { dialog.remove(); if (folderDialog === dialog) folderDialog = null; resolve(value); }, { once: true });
-      document.body.append(dialog); dialog.showModal();
-    });
-  }
-  async function folderAction(action) {
-    if (!wallet.token) { await connectWallet(); return; }
-    const id = action === 'create' ? '' : collection;
-    const name = await folderInput(action);
-    if (name === null || disposed) return;
-    if (action === 'delete') {
-      await api(`/api/public/collections/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!disposed) navigate({ collection: '' });
-      return;
-    }
-    const folder = await api('/api/public/collections' + (id ? '/' + encodeURIComponent(id) : ''), { method: id ? 'PUT' : 'POST', json: { name } });
-    if (!disposed) { if (action === 'create') navigate({ kind: '', collection: folder.id }); else await refreshFolders(); }
-  }
-  for (const action of ['create', 'rename', 'delete']) $('#folder-' + action)?.addEventListener('click', () => folderAction(action).catch(error => toast(error.message)));
-  async function organize(v) {
-    if (!wallet.token) { await connectWallet(); return; }
-    const r = await api(`/api/public/collections?post=${v.id}`, { signal: request.signal });
-    if (disposed) return;
-    folderDialog?.close();
-    const dialog = document.createElement('dialog'); folderDialog = dialog; dialog.className = 'collection-dialog';
-    dialog.setAttribute('aria-label', 'Organize in folders');
-    dialog.innerHTML = `<form method="dialog"><h2>Organize ${esc(v.title)}</h2><p>Private folders for your wallet. Shared likes stay unchanged.</p>
-      ${r.items.length ? r.items.map(folder => `<label><input type="checkbox" value="${esc(folder.id)}" ${folder.saved ? 'checked' : ''}> ${esc(folder.name)}</label>`).join('') : '<p>Create a folder using “New folder” above.</p>'}
-      <button class="btn">Done</button></form><p role="status"></p>`;
-    dialog.addEventListener('change', async event => {
-      const input = event.target;
-      if (!input.matches('input[type=checkbox]')) return;
-      const saved = input.checked; input.disabled = true;
-      try {
-        await api(`/api/public/collections/${input.value}/posts/${v.id}`, { method: saved ? 'PUT' : 'DELETE' });
-        if (disposed) return;
-        $('p[role=status]', dialog).textContent = saved ? 'Saved to folder.' : 'Removed from folder.';
-        if (collection === input.value) refreshOnClose = true;
-        await refreshFolders();
-      } catch (error) { input.checked = !saved; $('p[role=status]', dialog).textContent = error.message; }
-      finally { input.disabled = false; }
-    });
-    dialog.addEventListener('close', () => {
-      dialog.remove(); if (folderDialog === dialog) folderDialog = null;
-      if (!disposed && !closeViewer && refreshOnClose) render();
-    });
-    document.body.append(dialog); dialog.showModal();
-  }
   grid.addEventListener('click', event => {
     const b = event.target.closest('.tile');
     if (!b) return;
     const v = items[+b.dataset.i];
     if (!v) return;
-    if (event.target.closest('[data-folders]')) { organize(v).catch(error => { if (!disposed) toast(error.message); }); return; }
     closeViewer?.(); gallery.pause(true);
     closeViewer = openViewer(items, +b.dataset.i, {
       onClose: () => {
@@ -1250,7 +1169,6 @@ async function likedView(q = {}) {
           if (!disposed && more) { paging?.unobserve($('#liked-more')); paging?.observe($('#liked-more')); }
         }
       }, hasMore: () => more, loadMore, onVote: () => { refreshOnClose = true; },
-      organize: v => organize(v).catch(error => { if (!disposed) toast(error.message); }),
     });
   });
   $('#liked-more').onclick = () => loadMore().catch(error => toast(error.message));
@@ -1259,7 +1177,7 @@ async function likedView(q = {}) {
       loadMore().catch(error => { if (!disposed) toast(error.message); });
   }, { rootMargin: '600px 0px' });
   paging.observe($('#liked-more'));
-  await Promise.all([loadMore(), refreshFolders()]);
+  await loadMore();
 }
 
 // ---------- thumbnail gallery ----------
@@ -1664,7 +1582,6 @@ function openViewer(list, i, opts = {}) {
     $('.vmedia img', box)?.removeAttribute('src');
     const dims = v.media.width && v.media.height ? `${v.media.width}×${v.media.height}` : '';
     box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">${i + 1} / ${fmtNum(list.length)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${dims ? `${dims} · ` : ''}${esc(fmtBytes(v.media.size))}</span>
-      ${opts.organize ? '<button class="btn" data-organize>Folders</button>' : ''}
       <button class="btn" data-prev aria-label="Previous media" ${i ? '' : 'disabled'}>←</button><button class="btn" data-next aria-label="Next media" ${i < list.length - 1 || opts.hasMore?.() ? '' : 'disabled'}>→</button><button class="btn" data-close aria-label="Close media">✕</button></div>
       <div class="vbody">
         <div class="vmedia">${v.video ? `<figure><div class="ytbox"></div><figcaption>▶ YouTube video · <a href="${esc(ytWatch(v.video))}" target="_blank" rel="noopener noreferrer">open on YouTube ↗</a></figcaption></figure>` : `<figure><img src="${esc(v.media.url.startsWith('/api/') ? publicUrl(v.media.url) : v.media.url)}" alt=""${v.media.width ? ` width="${v.media.width}" height="${v.media.height}"` : ''}>
@@ -1835,7 +1752,6 @@ function openViewer(list, i, opts = {}) {
     if (e.target.closest('[data-close]')) close();
     else if (e.target.closest('[data-prev]')) step(-1);
     else if (e.target.closest('[data-next]')) step(1);
-    else if (e.target.closest('[data-organize]')) opts.organize?.(list[i]);
     else if (e.target.closest('[data-viewer-vote]')) vote(e.target.closest('[data-viewer-vote]').dataset.viewerVote);
     else if (e.target.closest('[data-retry-votes]')) loadCuration(list[i], seq);
     else if (e.target.closest('[data-retry-media]')) {

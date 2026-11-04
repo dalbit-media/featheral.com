@@ -128,9 +128,9 @@ main { padding-top: var(--top); min-height: 100%; }
 .site-sidebar .trash-button, header.top .tabs .trash-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; min-width: 44px; padding: 10px; flex: 0 0 44px; }
 .site-sidebar h2 { font-size: 13px; color: var(--muted); margin: 20px 10px 8px; }
 .has-site-sidebar #view { margin-left: 220px; }
-.folder-tabs, .reading-pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-.folder-tabs [role="tab"] { display: block; border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; color: var(--text); }
-.folder-tabs [aria-selected="true"] { border-color: var(--brand); background: var(--panel); }
+.liked-tabs, .reading-pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.liked-tabs [role="tab"] { display: block; border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; color: var(--text); }
+.liked-tabs [aria-selected="true"] { border-color: var(--brand); background: var(--panel); }
 .reading-pages a { text-decoration: none; }
 .reading-library { max-width: 1080px; padding-inline: clamp(16px, 3vw, 40px); }
 .reading-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
@@ -172,25 +172,19 @@ body .reading-cards a.entry { display: flex; flex-direction: column; gap: 10px; 
   .site-sidebar summary .count { font-size: 11px; margin-left: 8px; }
 }
 @media (max-width: 900px) {
-  .folder-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 4px; }
-  .folder-tabs [role="tab"] { white-space: nowrap; flex-shrink: 0; }
+  .liked-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 4px; }
+  .liked-tabs [role="tab"] { white-space: nowrap; flex-shrink: 0; }
 }
 .liked-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
 .liked-tools label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
 .liked-tools select { max-width: 260px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
 .liked-open { display: block; border: 0; padding: 0; width: 100%; height: 100%; background: transparent; color: inherit; cursor: zoom-in; }
 .liked-timeline .tile span { font-size: 12px; padding: 24px 8px 8px; -webkit-line-clamp: 3; color: #fff; }
-.liked-save { position: absolute; top: 10px; right: 10px; background: var(--panel); }
 .media-grid .original-tile { overflow: visible; aspect-ratio: auto; }
 .media-grid .original-tile[data-media-state] { contain: layout; }
 .original-tile img { object-fit: contain; border-radius: 12px; }
 .liked-timeline .original-tile span { top: 100%; bottom: auto; height: 72px; padding: 8px 0; background: none; -webkit-line-clamp: 3; color: var(--text); }
 .timeline-heading { position: absolute; left: 0; right: 0; margin: 0; font-size: 19px; line-height: 36px; }
-.collection-dialog { max-width: min(460px, calc(100vw - 32px)); max-height: 80dvh; overflow: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; padding: 24px; }
-.collection-dialog::backdrop { background: rgba(0, 0, 0, .7); }
-.collection-dialog label { display: flex; gap: 10px; align-items: center; padding: 12px 0; }
-.collection-dialog input[name="name"] { min-width: 0; flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
-.collection-dialog h2 { overflow-wrap: anywhere; }
 .vmedia { touch-action: pan-y pinch-zoom; }
 :is(.mtile, .tile)[data-media-state] { contain: layout paint; }
 :is(.mtile, .tile)[data-media-state="paused"]::before { content: "Open media"; }

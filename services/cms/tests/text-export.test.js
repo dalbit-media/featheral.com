@@ -479,7 +479,7 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   assert.equal((await request(prefix + '/api/public/vote', { id: readingId, type: 'read', round: 1, vote: 'none' })).data.deleted, false);
   assert.equal((await request(prefix + '/api/public/texts/by-slug/first-only')).status, 200);
   assert.equal((await request(prefix + '/api/public/texts?category=bad')).status, 400);
-  assert.equal((await request(prefix + '/api/public/collections')).status, 401);
+  assert.equal((await request(prefix + '/api/public/collections')).status, 410);
   const wallet = require('ethers').Wallet.createRandom();
   const nonce = await request(prefix + '/api/public/wallet/nonce', { address: wallet.address });
   const login = await request(prefix + '/api/public/wallet/login', {
@@ -487,18 +487,18 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   });
   assert.equal(login.status, 200);
   const options = { token: login.data.token };
-  const created = await request(prefix + '/api/public/collections', { name: 'HTTP folder' }, false, 'sites.localhost', options);
-  assert.equal(created.status, 201);
-  const folderRoute = prefix + '/api/public/collections/' + created.data.id;
-  const folders = await request(prefix + '/api/public/collections', undefined, false, 'sites.localhost', options);
-  assert.equal(folders.headers['cache-control'], 'no-store');
-  assert.equal(folders.data.items[0].name, 'HTTP folder');
-  assert.equal((await request(second.data.path + '/api/public/collections', undefined, false, 'sites.localhost', options)).status, 401);
-  assert.equal((await request(folderRoute, { name: 'Renamed' }, false, 'sites.localhost', { ...options, method: 'PUT' })).data.name, 'Renamed');
-  assert.equal((await request(folderRoute + '/posts/999999', undefined, false, 'sites.localhost', { ...options, method: 'PUT' })).status, 404);
-  assert.equal((await request(folderRoute + '/posts/999999', undefined, false, 'sites.localhost', { ...options, method: 'DELETE' })).status, 200);
-  assert.equal((await request(folderRoute, undefined, false, 'sites.localhost', { ...options, method: 'DELETE', origin: 'https://unrelated.example' })).status, 403);
-  assert.equal((await request(folderRoute, undefined, false, 'sites.localhost', { ...options, method: 'DELETE' })).status, 200);
+  const folderRoute = prefix + '/api/public/collections/removed-folder';
+  for (const method of ['GET', 'POST', 'PUT', 'DELETE']) {
+    const retired = await request(folderRoute, undefined, false, 'sites.localhost', { ...options, method });
+    assert.equal(retired.status, 410);
+    assert.equal(retired.headers['cache-control'], 'no-store');
+    assert.match(retired.data.error, /removed/);
+  }
+  assert.equal((await request(prefix + '/api/public/collections', { name: 'HTTP folder' }, false, 'sites.localhost', options)).status, 410);
+  assert.equal((await request(folderRoute + '/posts/999999', undefined, false, 'sites.localhost', { ...options, method: 'PUT' })).status, 410);
+  assert.equal((await request(second.data.path + '/api/public/collections', undefined, false, 'sites.localhost', options)).status, 410);
+  assert.equal((await request(prefix + '/api/public/liked?collection=removed-folder')).status, 410);
+  assert.equal((await request(prefix + '/api/public/liked')).status, 200);
   const store = new (require('../lib/cms'))(path.join(first.data.localDir, 'cms.sqlite'));
   try { store.setTheme('editorial'); } finally { store.close(); }
   assert.equal((await request(prefix + '/api/public/info')).data.theme, 'editorial');
