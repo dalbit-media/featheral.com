@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/shared/traffic-charts.css" />
   <link rel="stylesheet" href="/site/standalone.css" />
 </head>
-<body>
+<body class="has-site-sidebar">
   <a class="skip-link" href="#view">Skip to content</a>
   <header class="top">
     <a class="logo" href="#/"><img class="mark" src="/shared/logo-x.svg" alt="" width="34" height="34"><span class="names"><span id="brand"></span><span class="sub" id="tagline"></span></span></a>
@@ -23,15 +23,19 @@
       <a href="#/trending" data-tab="trending" data-media-tab aria-label="Trending"><span class="tab-icon" aria-hidden="true">↗</span><span>Trending</span></a>
       <a href="#/thumbs" data-tab="thumbs" data-media-tab aria-label="Gallery"><span class="tab-icon" aria-hidden="true">▦</span><span>Gallery</span></a>
       <a href="#/read" data-tab="read" aria-label="Read"><span class="tab-icon" aria-hidden="true">≡</span><span>Read</span></a>
-      <a href="#/liked" data-tab="liked" data-media-tab aria-label="Liked"><span class="tab-icon" aria-hidden="true">♡</span><span>Liked</span></a>
-      <a href="#/trash" data-tab="trash" data-media-tab aria-label="Trash"><span class="tab-icon" aria-hidden="true">⌫</span><span>Trash</span></a>
+      <a href="#/liked" data-tab="liked" aria-label="Liked"><span class="tab-icon" aria-hidden="true">♡</span><span>Liked</span></a>
+      <a href="#/trash" data-tab="trash" aria-label="Trash"><span class="tab-icon" aria-hidden="true">⌫</span><span>Trash</span></a>
       <a href="#/shop" data-tab="shop" data-feature="commerce" hidden>Shop</a>
       <a href="#/exchange" data-tab="exchange" data-feature="exchange" hidden>Exchange</a>
-      <a href="#/page/fthx" data-tab="fthx" data-cms-page="fthx" hidden>FTHX</a>
-      <a href="#/page/fthx-whitepaper" data-tab="fthx-whitepaper" data-cms-page="fthx-whitepaper" hidden>Whitepaper</a>
     </nav>
     <button class="wallet" id="wallet" type="button" title="Connect an Ethereum wallet to comment">🦊 <span>Connect wallet</span></button>
   </header>
+  <aside class="site-sidebar" aria-label="Site navigation">
+    <details open><summary>Browse site</summary>
+      <nav aria-label="Library"><a href="#/read">Read</a><a href="#/liked">Liked</a><a href="#/trash" class="trash-link">Trash</a></nav>
+      <div id="reading-navigation" aria-live="polite"><p class="count">Loading pages and categories...</p></div>
+    </details>
+  </aside>
   <main id="view" tabindex="-1"><div class="empty" role="status">Loading your feed...</div></main>
   <a class="fab" id="fab" href="#/post" title="New post: a YouTube video, an image, a GIF or a link" aria-label="New post"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></a>
   <div id="gate" hidden></div>

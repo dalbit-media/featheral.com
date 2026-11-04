@@ -116,6 +116,26 @@ main { padding-top: var(--top); min-height: 100%; }
 .media-grid, .masonry { overflow-anchor: none; }
 .media-grid .tile { position: absolute; }
 .liked-timeline { max-width: 1200px; }
+.site-sidebar { position: fixed; top: var(--top, 64px); left: 0; bottom: 0; z-index: 8; width: 220px; padding: 20px 14px; overflow-y: auto; background: var(--bg); border-right: 1px solid var(--line); }
+.site-sidebar summary { font-weight: 750; padding: 8px; cursor: pointer; }
+.site-sidebar nav { display: grid; gap: 4px; }
+.site-sidebar a { display: block; padding: 10px; border-radius: 10px; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.site-sidebar a:hover, .site-sidebar a.on { background: var(--panel); }
+.site-sidebar .trash-link { border: 1px solid var(--line); margin-block: 4px; }
+.site-sidebar h2 { font-size: 13px; color: var(--muted); margin: 20px 10px 8px; }
+.has-site-sidebar #view { margin-left: 220px; }
+.folder-tabs, .reading-pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.folder-tabs [role="tab"] { display: block; border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; text-decoration: none; color: var(--text); }
+.folder-tabs [aria-selected="true"] { border-color: var(--brand); background: var(--panel); }
+.reading-pages a { text-decoration: none; }
+.reading-liked-list .entry, #trash-readings .entry { display: block; }
+@media (max-width: 900px) {
+  .site-sidebar { position: static; width: auto; margin-top: var(--top); max-height: 36dvh; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 16px; }
+  .site-sidebar > details > nav { display: flex; flex-wrap: wrap; }
+  .has-site-sidebar #view { margin-left: 0; padding-top: 0; }
+  .folder-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 4px; }
+  .folder-tabs [role="tab"] { white-space: nowrap; flex-shrink: 0; }
+}
 .liked-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0; }
 .liked-tools label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
 .liked-tools select { max-width: 260px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }

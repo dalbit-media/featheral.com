@@ -31,8 +31,8 @@ class CmsStore {
     return this.published().find(row => row.slug === slug && row.type === 'page') || null;
   }
 
-  publicPages() {
-    return this.published().filter(row => row.type === 'page').sort((a, b) => a.id - b.id).map(({ slug, title }) => ({ slug, title }));
+  publicPages({ excludeIds = new Set() } = {}) {
+    return this.published().filter(row => row.type === 'page' && !excludeIds.has(row.id)).sort((a, b) => a.id - b.id).map(({ slug, title }) => ({ slug, title }));
   }
 
   save(input, id) {

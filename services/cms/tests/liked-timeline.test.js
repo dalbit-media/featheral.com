@@ -28,13 +28,19 @@ function fixture(t) {
     posts, postmeta, terms: new Map(), rels: [], comments: [], users: new Map(), usermeta: [], options: {}, raw: [],
   }, { contentFormat: 'rendered', api: { siteUrl: 'https://example.test', requests: 0 }, manifest });
   writeJson(path.join(dir, 'manifest.json'), manifest);
+  const raw = require('../../database/sqlite').open(path.join(dir, 'db.sqlite'));
+  const prefix = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%term_taxonomy'").get().name.replace(/term_taxonomy$/, '');
+  raw.exec(`INSERT INTO ${prefix}terms VALUES (10,'Essays','essays',0),(20,'Guides','guides',0);
+    INSERT INTO ${prefix}term_taxonomy VALUES (10,10,'category','',0,2),(20,20,'category','',0,1);
+    INSERT INTO ${prefix}term_relationships VALUES (1,10,0),(2,10,0),(3,20,0);`);
+  raw.close();
   let pub = new PublicSite(getSite(key), { brand: 'Test' });
   for (let id = 1; id <= 30; id++) {
     pub.store.setVote(id, 'jpeg', 1, 'like');
     pub.store.db.prepare('UPDATE votes SET at=? WHERE post_id=?').run(id * 1000, id);
   }
   t.after(() => { pub.close(); dropSite(key); fs.rmSync(dir, { recursive: true, force: true }); });
-  return { dir, get pub() { return pub; }, reopen() { pub.close(); pub = new PublicSite(getSite(key), { brand: 'Test' }); return pub; } };
+  return { dir, get pub() { return pub; }, reopen() { pub.close(); dropSite(key); pub = new PublicSite(getSite(key), { brand: 'Test' }); return pub; } };
 }
 async function login(pub, wallet = Wallet.createRandom()) {
   const challenge = pub.walletNonce(wallet.address);
@@ -60,6 +66,97 @@ test('liked timeline sorts by latest surviving like, defaults to 24 and pages de
   pub.store.db.prepare('UPDATE votes SET at=30000 WHERE post_id=29').run();
   assert.deepEqual(pub.liked({ limit: 2 }).items.map(item => item.id), [30, 29], 'timestamp ties use post ID');
   assert.throws(() => pub.liked({ sort: 'random' }), { status: 400 });
+});
+
+test('reading likes are separate from media likes and include only published kept CMS readings', t => {
+  const { pub } = fixture(t);
+  const page = pub.cms.save({ title: 'FTHX', slug: 'fthx', type: 'page', body: 'Published reference text.', status: 'publish' });
+  const draft = pub.cms.save({ title: 'Private draft', body: 'Not public', status: 'draft' });
+  const result = pub.vote(-page.id, 'read', 'like', '', 1);
+  assert.equal(result.likes, 1);
+  pub.vote(1, 'read', 'like', '', 1);
+  assert.equal(pub.curation(1, 'read').likes, 1, 'reading counts do not inherit media likes');
+  assert.equal(pub.curation(1, 'jpeg').likes, 1, 'media counts do not inherit reading likes');
+  assert.equal(pub.store.activity().get(1).likes, 1, 'Trending activity remains media-only');
+  assert.equal(pub.liked().total, 30, 'All media remains a media-only timeline');
+  const readings = pub.liked({ kind: 'read' });
+  assert.equal(readings.total, 2);
+  assert(readings.items.every(item => item.deck === 'read' && !item.media && !item.paragraphs));
+  assert(readings.items.some(item => item.slug === 'fthx'));
+  assert.throws(() => pub.vote(-draft.id, 'read', 'like'), { status: 404 });
+  assert.throws(() => pub.publicMediaFile(-page.id, 'read'), { status: 400 });
+  pub.vote(-page.id, 'read', 'dislike', '', 1);
+  assert.equal(pub.textBySlug('fthx'), null);
+  assert.equal(pub.text(-page.id), null);
+  assert.equal(pub.text(-page.id, true).title, 'FTHX');
+  assert.equal(pub.liked({ kind: 'read' }).total, 1);
+  const trashed = pub.publicTrash().items.find(item => item.id === -page.id);
+  assert.equal(trashed.reading, true);
+  assert.equal(trashed.media, undefined);
+  assert(!pub.readingNavigation().pages.some(item => item.slug === 'fthx'));
+  pub.vote(-page.id, 'read', 'none', '', 1);
+  assert.equal(pub.textBySlug('fthx').title, 'FTHX');
+  assert(pub.readingNavigation().pages.some(item => item.slug === 'fthx'));
+  pub.store.setRound('read', 2);
+  pub.vote(2, 'read', 'dislike', '', 2);
+  assert.equal(pub.curation(2, 'read').deleted, false);
+  assert(pub.publicTrash().items.some(item => item.id === 2 && item.reading), 'later-round net-disliked readings appear without moving their media');
+  assert.throws(() => pub.vote(2, 'read', 'like', '', 1), { status: 409 });
+});
+
+test('reading sidebar categories filter kept readings without including CMS pages or private drafts', t => {
+  const { pub } = fixture(t);
+  pub.cms.save({ title: 'Whitepaper', slug: 'fthx-whitepaper', type: 'page', body: 'Public whitepaper.', status: 'publish' });
+  pub.cms.save({ title: 'Private page', slug: 'private-page', type: 'page', body: 'Private', status: 'draft' });
+  const nav = pub.readingNavigation();
+  assert.equal(nav.pages.length, 1);
+  assert.equal(nav.pages[0].slug, 'fthx-whitepaper');
+  assert.deepEqual(nav.categories.map(row => [row.name, row.count]), [['Essays', 2], ['Guides', 1]]);
+  assert.deepEqual(pub.textList({ category: 10 }).items.map(row => row.id), [2, 1]);
+  assert.equal(pub.textList({ category: 999 }).total, 0);
+  assert.throws(() => pub.textList({ category: 'bad' }), { status: 400 });
+  pub.vote(1, 'read', 'dislike');
+  assert.equal(pub.readingNavigation().categories.find(row => row.id === 10).count, 1);
+  assert.deepEqual(pub.textList({ category: 10 }).items.map(row => row.id), [2]);
+});
+
+test('reading review rounds advance only after all kept readings were reviewed', t => {
+  const { pub } = fixture(t);
+  assert.equal(pub.status('read').remaining, 30);
+  assert.throws(() => pub.nextRound('read'), { status: 409 });
+  for (let id = 1; id <= 30; id++) pub.vote(id, 'read', 'like', '', 1);
+  assert.equal(pub.status('read').remaining, 0);
+  assert.equal(pub.nextRound('read').round, 2);
+  const result = pub.vote(1, 'read', 'dislike', '', 2);
+  assert.equal(result.deleted, false);
+  assert.equal(pub.store.round('jpeg'), 1);
+});
+
+test('CMS reading trash survives reopen and Admin purge removes only trashed CMS content', t => {
+  const f = fixture(t), pub = f.pub;
+  const page = pub.cms.save({ title: 'Temporary reading', body: 'Neutral text', status: 'publish' });
+  const kept = pub.cms.save({ title: 'Kept reading', body: 'Keep this text', status: 'publish' });
+  pub.vote(-page.id, 'read', 'dislike');
+  const reopened = f.reopen();
+  assert(reopened.site.trashed.has(-page.id));
+  assert.equal(reopened.publicTrash().total, 1);
+  assert.equal(reopened.emptyTrash().posts, 1);
+  assert.equal(reopened.cms.get(page.id), null);
+  assert.equal(reopened.cms.get(kept.id).title, 'Kept reading');
+  assert.equal(reopened.liked().total, 30);
+});
+
+test('Admin purge protects a trashed active CMS homepage before removing any other content', t => {
+  const { pub } = fixture(t);
+  const home = pub.cms.save({ title: 'Home', slug: 'home', type: 'page', body: 'Neutral home', status: 'publish' });
+  pub.cms.setSiteSettings({ ...pub.cms.siteSettings(), homepage: 'content', homeSlug: home.slug });
+  pub.vote(-home.id, 'read', 'dislike');
+  pub.vote(1, 'read', 'dislike');
+  assert.throws(() => pub.emptyTrash(), { status: 409 });
+  assert(pub.cms.get(home.id));
+  assert.equal(pub.store.trashRows().length, 2);
+  pub.cms.setSiteSettings({ ...pub.cms.siteSettings(), homepage: 'media' });
+  assert.equal(pub.emptyTrash().posts, 2);
 });
 
 test('public Trash includes first-round deletions and net-disliked posts without moving later-round media', t => {

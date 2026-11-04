@@ -218,6 +218,43 @@ function setTab(tab) {
     if (active) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+  document.querySelectorAll('.site-sidebar a').forEach(a => {
+    const active = a.getAttribute('href') === location.hash;
+    a.classList.toggle('on', active);
+    if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+}
+
+function readingLink(item, from = location.hash.slice(1), trashed = false) {
+  return href(item.type === 'page' && item.id < 0 && !trashed ? ['page', item.slug] : ['read', item.id],
+    { from, ...(trashed ? { trash: 1 } : {}) });
+}
+
+function readingEntry(item, from = location.hash.slice(1), trashed = false) {
+  return `<a class="entry" href="${esc(readingLink(item, from, trashed))}"><h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
+    ${item.snippet ? `<p>${esc(item.snippet)}</p>` : ''}
+    <div class="m">${fmtNum(item.words)} words · ${Math.max(1, Math.round(item.words / 230))} min read${item.likes != null ? ` · ♥ ${fmtNum(item.likes)} · 👎 ${fmtNum(item.dislikes)}` : ''}${trashed ? ` · ${item.deleted ? 'In Trash' : 'More dislikes than likes'}` : ''}</div></a>`;
+}
+
+let readingNavigation = null, readingNavigationRequest = 0;
+async function loadReadingNavigation() {
+  const target = $('#reading-navigation');
+  if (!target) return;
+  const sequence = ++readingNavigationRequest;
+  try {
+    const result = await api('/api/public/reading-navigation');
+    if (sequence !== readingNavigationRequest) return;
+    readingNavigation = result;
+    info.pages = readingNavigation.pages.filter(page => page.id < 0).map(({ slug, title }) => ({ slug, title }));
+    target.innerHTML = `<h2>Pages</h2><nav aria-label="Pages">${readingNavigation.pages.map(page => `<a href="${esc(readingLink(page, '/read'))}">${esc(page.title)}</a>`).join('') || '<p class="count">No published pages.</p>'}</nav>
+      <h2>Categories</h2><nav aria-label="Reading categories"><a href="#/read">All readings</a>${readingNavigation.categories.map(category => `<a href="${href(['read'], { category: category.id })}">${esc(category.name)} <span class="count">${fmtNum(category.count)}</span></a>`).join('')}</nav>`;
+    const active = parseHash().parts[0];
+    setTab(active === 'page' ? 'read' : active || 'swipe');
+  } catch (error) {
+    if (sequence !== readingNavigationRequest) return;
+    target.innerHTML = `<p role="alert">${esc(error.message)}</p><button class="btn" data-retry-navigation>Retry navigation</button>`;
+    $('[data-retry-navigation]', target).onclick = loadReadingNavigation;
+  }
 }
 
 async function render() {
@@ -286,12 +323,12 @@ async function render() {
         return;
       }
     }
-    if (parts[0] === 'read' && parts[1]) { setTab('read'); return readerView(parts[1], q); }
+    if (parts[0] === 'read' && parts[1]) { setTab('read'); return await readerView(parts[1], q); }
     if (parts[0] === 'page' && parts[1]) {
-      setTab(['fthx', 'fthx-whitepaper'].includes(parts[1]) ? parts[1] : 'read');
+      setTab('read');
       return await readerView(parts[1], q, true);
     }
-    if (parts[0] === 'read') { setTab('read'); return readListView(q); }
+    if (parts[0] === 'read') { setTab('read'); return await readListView(q); }
     if (parts[0] === 'liked') { setTab('liked'); return await likedView(q); }
     if (parts[0] === 'trash') { setTab('trash'); return await trashView(); }
     if (parts[0] === 'thumbs') { setTab('thumbs'); return thumbsView(q); }
@@ -300,6 +337,7 @@ async function render() {
     setTab('swipe');
     return swipeView('mix');
   } catch (e) {
+    if (e.name === 'AbortError') return;
     view().innerHTML = `<div class="empty"><div class="big">⚠️</div>${esc(e.message)}</div>`;
   }
 }
@@ -689,33 +727,42 @@ function swipeView(type) {
 
 // ---------- reading ----------
 async function readListView(q) {
+  const request = new AbortController();
+  let disposed = false, timer;
+  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); };
   const sort = q.sort || 'longest';
   const page = +q.page || 1;
+  const category = q.category || '';
   view().innerHTML = `<section class="read"><h1>📖 Read</h1>
+    <nav class="reading-pages" aria-label="Read pages">${(info.pages || []).map(page => `<a class="chip" href="${href(['page', page.slug], { from: '/read' })}">${esc(page.title)}</a>`).join('')}</nav>
     <div class="tools">
       <input type="search" id="q" placeholder="Search texts…" value="${esc(q.q || '')}">
       <select id="sort">${[['longest', 'Longest first'], ['shortest', 'Shortest first'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select>
     </div><div id="list"><div class="loading">Loading…</div></div></section>`;
-  const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, ...patch, page: patch.page || '' }); };
+  const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, ...patch, page: patch.page || '' }); };
   $('#sort').addEventListener('change', (e) => go({ sort: e.target.value }));
-  let timer;
   $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => go({ q: e.target.value.trim() }), 450); });
-  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, page, limit: 30 })}`);
+  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, page, limit: 30 })}`, { signal: request.signal });
+  if (disposed) return;
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
-    ${r.items.map((t) => `<a class="entry" href="${href(t.type === 'page' ? ['page', t.slug] : ['read', t.id], { from: location.hash.slice(1) })}"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
+    ${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
       <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a>`).join('')}
-    <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
+    <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
 }
 
 async function readerView(id, q, bySlug = false) {
+  const request = new AbortController();
+  let disposed = false, stopVotes;
+  cleanup = () => { disposed = true; request.abort(); stopVotes?.(); document.title = info.brand; };
   view().innerHTML = '<div class="loading">Loading…</div>';
   const t = await api(bySlug
     ? `/api/public/texts/by-slug/${encodeURIComponent(id)}`
-    : `/api/public/texts/${encodeURIComponent(id)}`);
-  const back = q.from && q.from.startsWith('/read') ? '#' + q.from : '#/read';
+    : `/api/public/texts/${encodeURIComponent(id)}${q.trash === '1' ? '?trash=1' : ''}`, { signal: request.signal });
+  if (disposed) return;
+  const back = q.from && /^\/(?:read|liked|trash)(?:[/?]|$)/.test(q.from) ? '#' + q.from : '#/read';
   document.title = `${t.title} · ${info.brand}`;
   const projectPage = bySlug && ['fthx', 'fthx-whitepaper'].includes(id);
   const landing = projectPage && id === 'fthx';
@@ -733,11 +780,50 @@ async function readerView(id, q, bySlug = false) {
     <article>${t.paragraphs.map((p, i) => projectPage && i > 0 && p.length <= 100
       ? `<h2>${esc(p)}</h2>` : `<p${landing && i === 0 ? ' class="project-lead"' : ''}>${esc(p)}</p>`).join('') || '<p class="m">This post has no text.</p>'}</article>
     ${actions}
+    <div id="reading-votes" class="viewer-votes" role="group" aria-label="Reading votes"></div>
     <div class="nav"><a class="btn" href="${esc(back)}">← Back</a><button class="btn" id="top">↑ Top</button></div>
   </section>`;
   $('#top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-  countView(t, (x) => { const e = $('#r-views'); if (e) e.textContent = `👁 ${fmtNum(x.views)} views`; });
-  cleanup = () => { document.title = info.brand; };
+  if (q.trash !== '1') countView(t, (x) => { const e = $('#r-views'); if (e) e.textContent = `👁 ${fmtNum(x.views)} views`; });
+  stopVotes = readingVotes(t, $('#reading-votes'));
+}
+
+function readingVotes(reading, target) {
+  const request = new AbortController();
+  let state = null, busy = false, disposed = false;
+  function paint() {
+    if (disposed || !state) return;
+    const disabled = busy || !state.canRestore ? 'disabled' : '';
+    target.innerHTML = `<div class="row"><button class="btn" data-reading-vote="like" aria-pressed="${state.vote === 'like'}" ${disabled}>♥ Like ${fmtNum(state.likes)}</button>
+      <button class="btn" data-reading-vote="dislike" aria-pressed="${state.vote === 'dislike'}" ${disabled}>👎 Dislike ${fmtNum(state.dislikes)}</button></div>
+      <p class="count" role="status">${state.deleted ? 'In Trash. Like or undo this dislike to restore when available.' : state.round === 1 ? 'Round 1: a dislike moves this reading to Trash.' : `Round ${fmtNum(state.round)}: dislikes are counted without removing this reading.`}${!state.canRestore ? ' Restore through Admin.' : ''}</p>
+      <a class="btn" href="#/liked?kind=read">Liked readings</a> <a class="btn" href="#/trash">Trash</a>`;
+  }
+  async function load() {
+    state = null;
+    target.innerHTML = '<p class="count" role="status">Loading reading votes...</p>';
+    try { state = await api(`/api/public/posts/${reading.id}/curation?type=read`, { signal: request.signal }); paint(); }
+    catch (error) { if (!disposed) target.innerHTML = `<p role="alert">${esc(error.message)}</p><button class="btn" data-retry-reading-votes>Retry votes</button>`; }
+  }
+  const click = async event => {
+    if (event.target.closest('[data-retry-reading-votes]')) { load(); return; }
+    const button = event.target.closest('[data-reading-vote]');
+    if (!button || disposed || busy || !state?.canRestore) return;
+    const kind = button.dataset.readingVote, vote = state.vote === kind ? 'none' : kind;
+    busy = true; paint();
+    try {
+      const result = await api('/api/public/vote', { json: { id: reading.id, type: 'read', round: state.round, vote } });
+      if (disposed) return;
+      state = { ...state, ...result, vote: vote === 'none' ? null : vote };
+      if (vote === 'like') rewardNote(result);
+      toast(result.deleted ? 'Reading moved to Trash' : vote === 'none' ? 'Vote undone' : vote === 'like' ? 'Reading liked' : 'Reading disliked');
+      loadReadingNavigation();
+    } catch (error) { if (!disposed) { toast(error.message); await load(); } }
+    finally { busy = false; paint(); }
+  };
+  target.addEventListener('click', click);
+  load();
+  return () => { disposed = true; request.abort(); target.removeEventListener('click', click); };
 }
 
 // ---------- liked ----------
@@ -966,10 +1052,28 @@ function likedDate(item, grouping = 'day') {
     label: date.toLocaleDateString(undefined, grouping === 'month'
       ? { year: 'numeric', month: 'long' } : { year: 'numeric', month: 'long', day: 'numeric' }) };
 }
+function likedTabs(q, folders = []) {
+  const readings = q.kind === 'read' && !q.collection;
+  const tabs = [{ label: 'All media', query: { ...q, kind: '', collection: '' }, active: !q.collection && !readings },
+    { label: 'Readings', query: { ...q, kind: 'read', collection: '' }, active: readings },
+    ...folders.map(folder => ({ label: `${folder.name} (${fmtNum(folder.count)})`, query: { ...q, kind: '', collection: folder.id }, active: q.collection === folder.id }))];
+  return tabs.map(tab => `<a role="tab" aria-controls="liked-panel" aria-selected="${tab.active}" tabindex="${tab.active ? 0 : -1}" href="${href(['liked'], tab.query)}">${esc(tab.label)}</a>`).join('');
+}
+function folderTabKeys(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = [...event.currentTarget.querySelectorAll('[role=tab]')], index = tabs.indexOf(event.target);
+  if (index < 0) return;
+  event.preventDefault();
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  tabs[next].focus(); tabs[next].click();
+}
 async function likedView(q = {}) {
+  const restoreTabFocus = document.activeElement?.getAttribute('role') === 'tab';
   cleanup?.();
   const sort = q.sort === 'likes' ? 'likes' : 'recent', grouping = q.group === 'month' ? 'month' : q.group === 'none' ? 'none' : 'day';
   const collection = q.collection || '';
+  const readings = q.kind === 'read' && !collection;
   let disposed = false, gallery = null, closeViewer = null, folderDialog = null, pending = null, refreshOnClose = false, more = true, offset = 0;
   let folderNames = new Map();
   const items = [];
@@ -984,21 +1088,24 @@ async function likedView(q = {}) {
   cleanup = () => { disposed = true; request.abort(); paging?.disconnect(); gallery?.close(); closeViewer?.(); folderDialog?.close(); folderDialog?.remove(); document.removeEventListener('wallet', onWallet); };
   view().innerHTML = `<section class="read liked-timeline"><h1>♥ Liked <span class="count" id="liked-count"></span></h1>
     <p class="m">Shared site-wide likes. Newest likes first. Folders are private to your signed-in wallet. Browsing never changes likes.</p>
+    <nav class="folder-tabs" id="liked-tabs" role="tablist" aria-label="Liked folders">${likedTabs(q)}</nav>
     <div class="liked-tools">
       <label>Sort <select id="liked-sort"><option value="recent">Recently liked</option><option value="likes">Most liked</option></select></label>
       <label>Group <select id="liked-group"><option value="day">By day</option><option value="month">By month</option><option value="none">No groups</option></select></label>
-      <label>Folder <select id="liked-folder"><option value="">All shared likes</option></select></label>
       <button class="btn" id="folder-create">${wallet.token ? 'New folder' : 'Sign in for folders'}</button>
       ${collection && wallet.token ? '<button class="btn" id="folder-rename">Rename folder</button><button class="btn" id="folder-delete">Delete folder</button>' : ''}
     </div><p class="m" id="liked-status" role="status"></p>
-    <div class="grid media-grid"></div><button class="btn" id="liked-more">Load more</button></section>`;
+    <div class="grid media-grid" id="liked-panel" role="tabpanel" aria-label="${readings ? 'Liked readings' : collection ? 'Private folder media' : 'All liked media'}"></div><button class="btn" id="liked-more">Load more</button></section>`;
   const grid = $('.grid', view());
-  const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, collection, ...patch }); };
+  const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, kind: readings ? 'read' : '', collection, ...patch }); };
+  $('#liked-tabs').addEventListener('keydown', folderTabKeys);
+  if (restoreTabFocus) $('#liked-tabs [aria-selected=true]')?.focus();
   $('#liked-sort').value = sort; $('#liked-group').value = grouping; $('#liked-group').disabled = sort === 'likes';
   $('#liked-sort').onchange = e => navigate({ sort: e.target.value });
   $('#liked-group').onchange = e => navigate({ group: e.target.value });
-  $('#liked-folder').onchange = e => navigate({ collection: e.target.value });
-  gallery = mediaGrid(grid, items, v => {
+  $('#liked-group').disabled = readings || sort === 'likes';
+  if (readings) grid.className = 'reading-liked-list';
+  else gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('div');
     tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
     tile.innerHTML = `<button class="liked-open" aria-label="Open ${esc(v.title)} with comments"><img alt="">${ytBadge(v)}
@@ -1020,15 +1127,17 @@ async function likedView(q = {}) {
     $('#liked-more').disabled = true;
     $('#liked-status').textContent = 'Loading likes...';
     try {
-      const r = await api(`/api/public/liked?${new URLSearchParams({ sort, offset, limit: 24, ...(collection ? { collection } : {}) })}`, { signal: request.signal });
+      const r = await api(`/api/public/liked?${new URLSearchParams({ sort, offset, limit: 24, ...(readings ? { kind: 'read' } : {}), ...(collection ? { collection } : {}) })}`, { signal: request.signal });
       if (disposed) return;
       const known = new Set(items.map(item => item.id));
-      items.push(...r.items.filter(item => !known.has(item.id)));
+      const fresh = r.items.filter(item => !known.has(item.id));
+      items.push(...fresh);
+      if (readings) grid.insertAdjacentHTML('beforeend', fresh.map(item => readingEntry(item)).join(''));
       offset = r.offset + r.items.length; more = offset < r.total && r.items.length > 0;
       $('#liked-count').textContent = fmtNum(r.total);
       $('#liked-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : collection ? 'No currently liked media in this folder.' : 'Nothing liked yet.';
       $('#liked-more').hidden = !more;
-      gallery.layout();
+      gallery?.layout();
     } catch (error) {
       if (!disposed) { $('#liked-status').textContent = error.message; throw error; }
     } finally { if (!disposed) $('#liked-more').disabled = false; }
@@ -1040,9 +1149,8 @@ async function likedView(q = {}) {
     catch (error) { if (disposed) return; throw error; }
     if (disposed) return;
     folderNames = new Map(r.items.map(folder => [folder.id, folder.name]));
-    $('#liked-folder').innerHTML = '<option value="">All shared likes</option>' +
-      r.items.map(folder => `<option value="${esc(folder.id)}">${esc(folder.name)} (${fmtNum(folder.count)})</option>`).join('');
-    $('#liked-folder').value = collection;
+    $('#liked-tabs').innerHTML = likedTabs(q, r.items);
+    if (restoreTabFocus) $('#liked-tabs [aria-selected=true]')?.focus();
   }
   function folderInput(action) {
     folderDialog?.close();
@@ -1077,7 +1185,7 @@ async function likedView(q = {}) {
       return;
     }
     const folder = await api('/api/public/collections' + (id ? '/' + encodeURIComponent(id) : ''), { method: id ? 'PUT' : 'POST', json: { name } });
-    if (!disposed) { if (action === 'create') navigate({ collection: folder.id }); else await refreshFolders(); }
+    if (!disposed) { if (action === 'create') navigate({ kind: '', collection: folder.id }); else await refreshFolders(); }
   }
   for (const action of ['create', 'rename', 'delete']) $('#folder-' + action)?.addEventListener('click', () => folderAction(action).catch(error => toast(error.message)));
   async function organize(v) {
@@ -1456,9 +1564,9 @@ async function trashView() {
   let disposed = false, pending = null, more = true, offset = 0, closeViewer = null, changed = false;
   const items = [], request = new AbortController();
   view().innerHTML = `<section class="read liked-timeline"><h1>Trash <span class="count" id="trash-count"></span></h1>
-    <p class="m">Trashed posts and posts with more dislikes than likes. A round-1 dislike moves a post to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
-    <p class="m" id="trash-status" role="status"></p><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
-  const grid = $('.grid', view());
+    <p class="m">Trashed posts and readings, plus posts with more dislikes than likes. A round-1 dislike moves an item to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
+    <p class="m" id="trash-status" role="status"></p><div id="trash-readings"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
+  const grid = $('.grid', view()), readingIds = new Set();
   const gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('button');
     tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
@@ -1472,11 +1580,15 @@ async function trashView() {
     try {
       const r = await api(`/api/public/trash?${new URLSearchParams({ offset, limit: 24 })}`, { signal: request.signal });
       if (disposed) return;
-      const known = new Set(items.map(item => item.id));
-      items.push(...r.items.filter(item => !known.has(item.id)));
+      const known = new Set([...items.map(item => item.id), ...readingIds]);
+      const fresh = r.items.filter(item => !known.has(item.id));
+      items.push(...fresh.filter(item => !item.reading));
+      const readings = fresh.filter(item => item.reading);
+      readings.forEach(item => readingIds.add(item.id));
+      $('#trash-readings').insertAdjacentHTML('beforeend', readings.map(item => readingEntry(item, '/trash', true)).join(''));
       offset = r.offset + r.items.length; more = offset < r.total && r.items.length > 0;
       $('#trash-count').textContent = fmtNum(r.total);
-      $('#trash-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : 'Trash is empty.';
+      $('#trash-status').textContent = offset ? `${fmtNum(offset)} of ${fmtNum(r.total)} shown` : 'Trash is empty.';
       $('#trash-more').hidden = !more;
       gallery.layout();
     } catch (error) {
@@ -2100,6 +2212,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('[data-feature]').forEach((link) => { link.hidden = !settings?.[link.dataset.feature]; });
   document.querySelectorAll('[data-media-tab]').forEach((link) => { link.hidden = settings?.homepage !== 'media'; });
   $('[data-tab="home"]').hidden = settings?.homepage === 'media';
+  loadReadingNavigation();
   $('#fab').hidden = settings?.homepage !== 'media';
   $('.logo').title = info.tagline || info.brand;
   document.querySelector('meta[name=description]')?.setAttribute('content', info.tagline || info.brand);

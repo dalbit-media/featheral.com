@@ -625,13 +625,14 @@ app.get('/api/public/texts', wrap((req, res) => {
   if (req.query.q && r.page === 1) logSearch(req, 'read', req.query.q, r.total);
   res.json(r);
 }));
+app.get('/api/public/reading-navigation', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).readingNavigation())));
 app.get('/api/public/texts/by-slug/:slug', wrap((req, res) => {
   const t = publicSite(req).textBySlug(req.params.slug);
   if (!t) throw notFound('Page not found');
   res.json(t);
 }));
 app.get('/api/public/texts/:id', wrap((req, res) => {
-  const t = publicSite(req).text(req.params.id);
+  const t = publicSite(req).text(req.params.id, req.query.trash === '1');
   if (!t) throw notFound('Text not found');
   res.json(t);
 }));

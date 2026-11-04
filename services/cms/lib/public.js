@@ -193,7 +193,7 @@ class PublicSite {
       brand: settings.displayName || this.brand,
       tagline: settings.description || this.tagline || T.decodeEntities(options.blogdescription || ''),
       theme: this.cms.theme(),
-      pages: this.cms.publicPages(),
+      pages: this.cms.publicPages({ excludeIds: new Set([...this.site.trashed].filter(id => id < 0).map(id => -id)) }),
       siteSettings: settings,
       ...(counts ? {
         types: PUBLIC_TYPES.map((id) => ({ id, label: id === 'jpeg' ? 'JPG' : id.toUpperCase(), ...this.status(id) })),
@@ -244,6 +244,14 @@ class PublicSite {
 
   // Progress of the current review round for one media type.
   status(type) {
+    if (type === 'read') {
+      const round = this.store.round(type), reviewed = this.store.reviewed(type, round);
+      const ids = [...publishedPosts(this.site).map(row => row.ID), ...this.cms.published().map(row => -row.id)]
+        .filter(id => this.readingPublished(id) && !this.site.trashed.has(id));
+      const tally = this.store.roundTally(type, round);
+      return { type, round, total: ids.length, remaining: ids.filter(id => !reviewed.has(id)).length,
+        liked: tally.like || 0, disliked: tally.dislike || 0 };
+    }
     if (this.checkType(type, { mix: true }) === 'mix') return this.mixStatus();
     const round = this.store.round(type);
     const reviewed = this.store.reviewed(type, round);
@@ -316,10 +324,11 @@ class PublicSite {
   // from round 2 on it is only recorded. none: undo this round's vote. `type` may also be 'thumbs'.
   vote(id, type, vote, token = '', expectedRound) {
     id = +id;
-    if (type !== 'thumbs') this.checkType(type);
+    if (!['thumbs', 'read'].includes(type)) this.checkType(type);
     if (!VOTES.includes(vote)) throw httpError(400, 'Invalid vote');
-    const known = type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type];
-    if (!isPublished(this.site, id) || !known) throw httpError(404, 'Post not found');
+    const known = type === 'read' ? this.readingPublished(id)
+      : isPublished(this.site, id) && (type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]);
+    if (!known) throw httpError(404, 'Post not found');
     const round = this.store.round(type);
     if (expectedRound !== undefined && expectedRound !== round) throw httpError(409, 'The round changed. Reopen this post before voting.');
     const existing = this.store.vote(id, type, round);
@@ -336,8 +345,8 @@ class PublicSite {
       this.store.setVote(id, type, round, 'dislike');
       if (!trashed && round === 1) this.trash(id, type, round);
     }
-    const c = this.store.counts([id]).get(id) || { likes: 0, dislikes: 0 };
-    const reward = vote === 'like' ? this.likeReward(id, token) : null;
+    const c = this.store.counts([id], type === 'read' ? 'read' : '').get(id) || { likes: 0, dislikes: 0 };
+    const reward = vote === 'like' && id > 0 ? this.likeReward(id, token) : null;
     return { id, type, round, vote, likes: c.likes, dislikes: c.dislikes, score: c.likes - c.dislikes, deleted: this.site.trashed.has(id), ...(reward ? { reward } : {}) };
   }
 
@@ -622,11 +631,16 @@ class PublicSite {
       this.ownedCollection(address, q.collection);
       saved = new Set(this.store.db.prepare('SELECT post_id FROM saved_media WHERE collection_id=?').all(q.collection).map(row => row.post_id));
     }
-    const all = this.store.likedPosts().filter(r => (!saved || saved.has(r.post_id)) && isPublic(this.site, r.post_id) && this.likedMedia(r));
+    const readings = q.kind === 'read';
+    const all = this.store.likedPosts(readings ? 'read' : 'media').filter(r => (!saved || saved.has(r.post_id))
+      && (readings ? this.readingPublished(r.post_id) && !this.site.trashed.has(r.post_id)
+        : isPublic(this.site, r.post_id) && this.likedMedia(r)));
     all.sort((a, b) => (sort === 'likes' ? b.likes - a.likes : 0) || b.at - a.at || b.post_id - a.post_id);
     const offset = clampInt(q.offset, 0, all.length, 0);
     const limit = clampInt(q.limit, 1, 200, 24);
     const slice = all.slice(offset, offset + limit);
+    if (readings) return { total: all.length, offset, limit, sort, kind: 'read',
+      items: slice.map(row => ({ ...this.readingSummary(row.post_id), likes: row.likes, dislikes: row.dislikes, likedAt: row.at, deck: 'read' })) };
     const rows = postRows(this.site, slice.map((r) => r.post_id));
     const viewed = this.store.viewCounts(slice.map((r) => r.post_id));
     const members = this.store.memberInfo(slice.map((r) => r.post_id));
@@ -644,19 +658,24 @@ class PublicSite {
 
   curation(id, type) {
     id = +id;
-    if (!isPublished(this.site, id)) throw httpError(404, 'Post not found');
-    if (!type) type = this.galleryPosts().get(id)?.deck;
-    if (type !== 'thumbs') this.checkType(type);
-    if (!(type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]))
-      throw httpError(404, 'Media not found');
+    if (type === 'read') {
+      if (!this.readingPublished(id)) throw httpError(404, 'Reading not found');
+    } else {
+      if (!isPublished(this.site, id)) throw httpError(404, 'Post not found');
+      if (!type) type = this.galleryPosts().get(id)?.deck;
+      if (type !== 'thumbs') this.checkType(type);
+      if (!(type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]))
+        throw httpError(404, 'Media not found');
+    }
     const round = this.store.round(type);
-    const counts = this.store.counts([id]).get(id) || { likes: 0, dislikes: 0 };
+    const counts = this.store.counts([id], type === 'read' ? 'read' : '').get(id) || { likes: 0, dislikes: 0 };
     const trash = this.store.trashRow(id);
     return { id, type, round, vote: this.store.vote(id, type, round), ...counts, deleted: !!trash,
       canRestore: !trash || (trash.type === type && trash.round === round) };
   }
 
   publicMediaFile(id, type) {
+    if (type === 'read') throw httpError(400, 'Readings do not have a media preview');
     const state = this.curation(id, type);
     const media = state.type === 'thumbs' ? mainMedia(this.site, +id)
       : { ...this.site.postMetrics().get(+id).imageBest[state.type], type: state.type };
@@ -673,18 +692,26 @@ class PublicSite {
   publicTrash(q = {}) {
     const trash = new Map(this.store.trashRows().map(row => [row.post_id, row]));
     const counts = this.store.activity();
-    const all = [...this.galleryPosts()].filter(([id]) => isPublished(this.site, id)
-      && (trash.has(id) || (counts.get(id)?.dislikes || 0) > (counts.get(id)?.likes || 0)));
+    const readingCounts = this.store.activity('read');
+    const entries = new Map(this.galleryPosts());
+    for (const [id, value] of readingCounts) if (value.dislikes > value.likes && this.readingPublished(id)) entries.set(id, { deck: 'read' });
+    for (const [id] of trash) if (!entries.has(id) && this.readingPublished(id)) entries.set(id, { deck: 'read' });
+    const all = [...entries].filter(([id]) => (isPublished(this.site, id) || this.readingPublished(id))
+      && (trash.has(id) || (counts.get(id)?.dislikes || 0) > (counts.get(id)?.likes || 0)
+        || (readingCounts.get(id)?.dislikes || 0) > (readingCounts.get(id)?.likes || 0)));
+    const dislikes = id => ((trash.get(id)?.type === 'read' || entries.get(id).deck === 'read' ? readingCounts : counts).get(id)?.dislikes || 0);
     all.sort(([a], [b]) => Number(trash.has(b)) - Number(trash.has(a))
       || (trash.get(b)?.at || 0) - (trash.get(a)?.at || 0)
-      || (counts.get(b)?.dislikes || 0) - (counts.get(a)?.dislikes || 0) || b - a);
+      || dislikes(b) - dislikes(a) || b - a);
     const offset = clampInt(q.offset, 0, all.length, 0), limit = clampInt(q.limit, 1, 200, 24);
     const slice = all.slice(offset, offset + limit), ids = slice.map(([id]) => id);
     const rows = postRows(this.site, ids), comments = this.commentCounts(ids), members = this.store.memberInfo(ids);
     return { total: all.length, offset, limit, items: slice.map(([id, entry]) => {
       const owner = trash.get(id)?.type;
-      const type = owner === 'thumbs' || PUBLIC_TYPES.includes(owner) ? owner : entry.deck;
-      const state = this.curation(id, type), media = this.likedMedia({ post_id: id, type });
+      const type = ['thumbs', 'read'].includes(owner) || PUBLIC_TYPES.includes(owner) ? owner : entry.deck;
+      const state = this.curation(id, type);
+      if (type === 'read') return { ...this.readingSummary(id, true), ...state, deck: 'read', reading: true, trashedAt: trash.get(id)?.at || null };
+      const media = this.likedMedia({ post_id: id, type });
       if (state.deleted) media.url = `/api/public/posts/${id}/media?type=${encodeURIComponent(state.type)}`;
       return { ...memberFields(members.get(id)), ...state, deck: state.type, title: T.decodeEntities(rows.get(id)?.post_title || '') || 'Untitled',
         description: rows.get(id) ? describe(rows.get(id)) : '', media, comments: comments.get(id) || 0,
@@ -986,6 +1013,12 @@ class PublicSite {
 
   // Moves a post's media to <set>/trash, keeping any file that a post outside the trash still uses.
   trash(id, type, round, dupOf = null) {
+    if (id < 0 && type === 'read') {
+      const post = this.cms.get(-id);
+      this.store.addTrash({ id, type, round, title: post.title, files: [], missed: [], attachments: [], bytes: 0, shared: 0 });
+      this.site.trashed.add(id);
+      return;
+    }
     const { files, attachments } = this.site.postAssets(id);
     const users = this.site.fileUsers();
     const shared = new Set();
@@ -1040,7 +1073,11 @@ class PublicSite {
     const rows = this.store.trashRows();
     if (!rows.length) return { posts: 0, files: 0, bytes: 0 };
     const site = this.site;
-    const ids = rows.map((r) => r.post_id);
+    const cmsIds = rows.filter(row => row.post_id < 0).map(row => -row.post_id);
+    const settings = this.cms.siteSettings();
+    if (cmsIds.some(id => settings.homepage === 'content' && this.cms.get(id)?.slug === settings.homeSlug))
+      throw httpError(409, 'Choose another homepage before permanently deleting the trashed homepage');
+    const ids = rows.filter(row => row.post_id > 0).map((r) => r.post_id);
     const attachments = [...new Set(rows.flatMap((r) => r.attachments))];
     const gone = new Set(rows.flatMap((r) => [...r.files, ...r.missed]));
     for (const r of rows) {
@@ -1074,10 +1111,49 @@ class PublicSite {
       fs.writeFileSync(indexPath, JSON.stringify(index.filter((x) => !gone.has(x.path))));
     }
     const bytes = rows.reduce((a, r) => a + (r.bytes || 0), 0);
+    for (const id of cmsIds) if (this.cms.get(id)) this.cms.delete(id);
     this.store.clearTrash();
     fs.rmSync(this.trashDir, { recursive: true, force: true });
     site.trashed.clear();
-    return { posts: ids.length, files: gone.size, bytes };
+    return { posts: rows.length, files: gone.size, bytes };
+  }
+
+  readingPublished(id) {
+    if (!Number.isSafeInteger(id) || id === 0) return false;
+    if (id < 0) {
+      const post = this.cms.get(-id);
+      return post?.status === 'publish' && T.wordCount(post.body) > 0;
+    }
+    return isPublished(this.site, id) && (this.site.postMetrics().get(id)?.wordCount || 0) > 0;
+  }
+
+  readingNavigation() {
+    const readable = new Set(publishedPosts(this.site).filter(row => this.readingPublished(row.ID) && !this.site.trashed.has(row.ID)).map(row => row.ID));
+    const pages = this.cms.published().filter(row => row.type === 'page' && !this.site.trashed.has(-row.id))
+      .map(row => ({ id: -row.id, title: row.title, slug: row.slug, type: 'page' }));
+    for (const row of this.site.all(`SELECT ID,post_title FROM ${this.site.t('posts')} WHERE post_type='page'`)) {
+      if (readable.has(row.ID)) pages.push({ id: row.ID, title: T.decodeEntities(row.post_title || '') || 'Untitled', type: 'page' });
+    }
+    const categories = [];
+    if (this.site.has('term_relationships') && this.site.has('term_taxonomy') && this.site.has('terms')) {
+      const groups = new Map();
+      for (const row of this.site.all(`SELECT r.object_id AS post, tt.term_taxonomy_id AS id, t.name FROM ${this.site.t('term_relationships')} r
+        JOIN ${this.site.t('term_taxonomy')} tt ON tt.term_taxonomy_id=r.term_taxonomy_id JOIN ${this.site.t('terms')} t ON t.term_id=tt.term_id WHERE tt.taxonomy='category'`)) {
+        if (!readable.has(row.post)) continue;
+        const group = groups.get(row.id) || { id: row.id, name: T.decodeEntities(row.name), posts: new Set() };
+        group.posts.add(row.post); groups.set(row.id, group);
+      }
+      for (const group of groups.values()) categories.push({ id: group.id, name: group.name, count: group.posts.size });
+    }
+    categories.sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+    return { pages, categories };
+  }
+
+  readingSummary(id, includeTrashed = false) {
+    const text = this.text(id, includeTrashed);
+    if (!text) throw httpError(404, 'Reading not found');
+    const { paragraphs, ...summary } = text;
+    return { ...summary, snippet: paragraphs.join(' ').slice(0, 220) };
   }
 
   textList(q) {
@@ -1089,7 +1165,14 @@ class PublicSite {
       const hits = new Set(this.site.all(`SELECT ID FROM ${this.site.t('posts')} WHERE post_title LIKE ? OR post_content LIKE ? OR post_excerpt LIKE ?`, s, s, s).map((r) => r.ID));
       list = list.filter((r) => hits.has(r.ID));
     }
-    const cmsPosts = this.cms.published().filter((r) => T.wordCount(r.body) >= 1 && (!search ||
+    if (q.category) {
+      if (!/^[1-9]\d*$/.test(String(q.category))) throw httpError(400, 'Invalid category');
+      const members = this.site.has('term_relationships') && this.site.has('term_taxonomy')
+        ? new Set(this.site.all(`SELECT r.object_id FROM ${this.site.t('term_relationships')} r JOIN ${this.site.t('term_taxonomy')} tt
+          ON tt.term_taxonomy_id=r.term_taxonomy_id WHERE tt.taxonomy='category' AND tt.term_taxonomy_id=?`, +q.category).map(row => row.object_id)) : new Set();
+      list = list.filter(row => members.has(row.ID));
+    }
+    const cmsPosts = this.cms.published().filter((r) => !q.category && !this.site.trashed.has(-r.id) && T.wordCount(r.body) >= 1 && (!search ||
       `${r.title}\n${r.excerpt}\n${r.body}`.toLowerCase().includes(search)))
       .map((r) => ({ ID: -r.id, post_title: r.title, post_date: r.createdAt, cms: r }));
     list.push(...cmsPosts);
@@ -1129,17 +1212,18 @@ class PublicSite {
 
   textBySlug(slug) {
     const post = this.cms.publishedPage(String(slug || ''));
-    return post ? this.cmsText(post) : null;
+    return post && !this.site.trashed.has(-post.id) ? this.cmsText(post) : null;
   }
 
-  text(id) {
+  text(id, includeTrashed = false) {
     id = +id;
+    if (!includeTrashed && this.site.trashed.has(id)) return null;
     if (id < 0) {
       const post = this.cms.get(-id);
       if (!post || post.status !== 'publish') return null;
       return this.cmsText(post);
     }
-    if (!isPublic(this.site, id)) return null;
+    if (!isPublished(this.site, id)) return null;
     const row = this.site.get(`SELECT ID, post_title, post_excerpt, post_content, post_date FROM ${this.site.t('posts')} WHERE ID = ?`, id);
     const text = T.htmlToText(row.post_content || '').trim();
     return {
@@ -1339,17 +1423,17 @@ class Curation {
 
   clearVote(id, type, round, vote) { this.db.prepare('DELETE FROM votes WHERE post_id = ? AND type = ? AND round = ? AND vote = ?').run(id, type, round, vote); }
 
-  counts(ids) {
+  counts(ids, type = '') {
     if (!ids.length) return new Map();
-    const rows = this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes FROM votes WHERE post_id IN (${ids.map(() => '?').join(',')}) GROUP BY post_id`).all(...ids);
+    const rows = this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes FROM votes WHERE post_id IN (${ids.map(() => '?').join(',')}) AND ${type ? 'type=?' : "type<>'read'"} GROUP BY post_id`).all(...ids, ...(type ? [type] : []));
     return new Map(rows.map((r) => [r.post_id, { likes: r.likes, dislikes: r.dislikes }]));
   }
 
   // Likes, dislikes, wallet comments and the time of the latest of them, for every post that has any.
-  activity() {
+  activity(type = '') {
     const out = new Map();
     const get = (id) => out.get(id) || out.set(id, { likes: 0, dislikes: 0, comments: 0, at: 0 }).get(id);
-    for (const r of this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes, MAX(CASE WHEN vote = 'like' THEN at END) AS at FROM votes GROUP BY post_id`).all()) {
+    for (const r of this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes, MAX(CASE WHEN vote = 'like' THEN at END) AS at FROM votes WHERE ${type ? 'type=?' : "type<>'read'"} GROUP BY post_id`).all(...(type ? [type] : []))) {
       Object.assign(get(r.post_id), { likes: r.likes, dislikes: r.dislikes, at: r.at || 0 });
     }
     for (const r of this.db.prepare('SELECT post_id, COUNT(*) AS n, MAX(at) AS at FROM comments GROUP BY post_id').all()) {
@@ -1359,10 +1443,10 @@ class Curation {
   }
 
   // Liked posts, best-voted first; `type` is the media type of the most recent like.
-  likedPosts() {
+  likedPosts(kind = 'media') {
     return this.db.prepare(`SELECT v.post_id, SUM(v.vote = 'like') AS likes, SUM(v.vote = 'dislike') AS dislikes, MAX(CASE WHEN v.vote = 'like' THEN v.at END) AS at,
-        (SELECT type FROM votes l WHERE l.post_id = v.post_id AND l.vote = 'like' ORDER BY l.at DESC LIMIT 1) AS type
-      FROM votes v GROUP BY v.post_id HAVING likes > 0 ORDER BY likes - dislikes DESC, at DESC`).all();
+        (SELECT type FROM votes l WHERE l.post_id = v.post_id AND l.vote = 'like' AND ${kind === 'read' ? "l.type='read'" : "l.type<>'read'"} ORDER BY l.at DESC LIMIT 1) AS type
+      FROM votes v WHERE ${kind === 'read' ? "v.type='read'" : "v.type<>'read'"} GROUP BY v.post_id HAVING likes > 0 ORDER BY likes - dislikes DESC, at DESC`).all();
   }
 
   addTrash(t) {
