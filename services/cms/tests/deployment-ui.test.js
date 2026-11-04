@@ -14,7 +14,7 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   };
   const plan = { id: 'reviewed', enabled: true, walletApprovalRequired: true, digest: 'source', contentDigest: 'content',
     expiresAt: Date.now() + 600000, target: 'root@server.example', files: 100, steps: ['Upload release'] };
-  let failure, ready = true, confirmed = 0, signed = 0, poll;
+  let failure, signingFailure, startFailure, ready = true, confirmed = 0, signed = 0, poll;
   const context = vm.createContext({
     document: {
       createDocumentFragment: () => ({ children: [], append(child) { this.children.push(child); } }),
@@ -23,9 +23,13 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
     },
     VIEWS: {}, state: { seq: 1 }, location: { hash: '#/settings' }, viewCleanup: null, $: element,
     setInterval: callback => { poll = callback; return 1; }, clearInterval() {}, confirm: () => { confirmed++; return true; }, toast() {},
-    async approveAdminAction() { signed++; return { challengeId: 'approved', signature: 'signed' }; },
+    async approveAdminAction() {
+      signed++;
+      if (signingFailure) { const error = signingFailure; signingFailure = null; throw error; }
+      return { challengeId: 'approved', signature: 'signed' };
+    },
     async api(url, options) {
-      calls.push({ url, input: options?.json });
+      calls.push({ url, input: options?.json, cache: options?.cache });
       if (url === '/api/deployment/status') return currentStatus;
       if (url === '/api/deployment/plan') return { ...plan };
       if (url === '/api/settings/self-sync') return selfStatus;
@@ -34,6 +38,7 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
         return { challengeId: 'approved' };
       }
       if (url.endsWith('/start')) {
+        if (startFailure) { const error = startFailure; startFailure = null; throw error; }
         if (url === '/api/settings/self-sync/start') selfStatus = { ...selfStatus, running: true };
         return { running: true };
       }
@@ -44,6 +49,8 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   vm.runInContext(source, context);
   await context.mountDeploymentControls(1, () => ready);
   return { element, calls, plan, context, setFailure(error) { failure = error; }, setReady(value) { ready = value; },
+    setSigningFailure(error) { signingFailure = error; },
+    setStartFailure(error) { startFailure = error; },
     setSelfStatus(value) { selfStatus = value; },
     async refresh() { await poll(); },
     get confirmed() { return confirmed; }, get signed() { return signed; },
@@ -62,7 +69,7 @@ test('self-sync is signed, targets only the current Admin server and remains dis
   assert.equal(f.element('#self-sync-start').disabled, true);
   f.setSelfStatus({ available: true, running: false, phase: 'complete', message: 'Health verified', logs: [{ at: 1, message: '<build complete>' }] });
   await f.refresh();
-  assert.equal(f.element('#self-sync-status').textContent, 'Health verified');
+  assert.match(f.element('#self-sync-status').textContent, /Health verified/);
   assert.match(f.element('#deployment-console').textContent, /Git self-sync[\s\S]*<build complete>/);
   assert.equal(f.element('#self-sync-start').disabled, false);
 });
@@ -83,9 +90,34 @@ test('failed self-sync approval is shown and never launches a job', async () => 
   const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
   f.setFailure(new Error('Approval unavailable'));
   await f.click('#self-sync-start');
-  assert.equal(f.element('#self-sync-status').textContent, 'Approval unavailable');
+  assert.equal(f.element('#self-sync-status').textContent, 'Self-sync not started: Approval unavailable');
   assert(!f.calls.some(call => call.url === '/api/settings/self-sync/start'));
   assert.equal(f.element('#self-sync-start').disabled, false);
+});
+test('refresh cannot hide a missing signing wallet behind an older successful run', async () => {
+  const f = await fixture(undefined, { available: true, running: false, id: 'previous-job', phase: 'complete',
+    startedAt: '2026-11-04T10:07:18.915Z', commit: 'a'.repeat(40), message: 'Health verified',
+    logs: [{ at: 1, message: 'Previous build complete' }] });
+  f.setSigningFailure(new Error('Connect the Admin signing wallet 0x123 in the header.'));
+  await f.click('#self-sync-start');
+  assert(!f.calls.some(call => call.url === '/api/settings/self-sync/start'));
+  await f.click('#self-sync-refresh');
+  assert.match(f.element('#self-sync-status').textContent, /Self-sync not started: Connect the Admin signing wallet/);
+  assert.match(f.element('#self-sync-status').textContent, /Last recorded self-sync \(job previous-job/);
+  const text = f.element('#deployment-console').textContent;
+  assert.match(text, /Self-sync request in this browser[\s\S]*Self-sync not started: Connect the Admin signing wallet/);
+  assert.match(text, /Last recorded self-sync[\s\S]*Previous build complete/);
+  assert(f.calls.filter(call => call.url === '/api/settings/self-sync').every(call => call.cache === 'no-store'));
+  assert.equal(f.element('#self-sync-start').disabled, false);
+});
+test('a lost start response reports uncertainty rather than claiming no job ran', async () => {
+  const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
+  f.setStartFailure(new Error('Connection interrupted'));
+  await f.click('#self-sync-start');
+  await f.click('#self-sync-refresh');
+  assert.match(f.element('#self-sync-status').textContent, /submission not confirmed: Connection interrupted/);
+  assert.doesNotMatch(f.element('#self-sync-status').textContent, /Self-sync not started/);
+  assert.match(f.element('#deployment-console').textContent, /inspect the job before retrying/);
 });
 
 test('deployment waits for exact approval before requesting a wallet challenge and starts the signed release', async () => {

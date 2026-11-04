@@ -155,21 +155,41 @@ function deploymentConsoleOutput() {
 async function mountSelfDeploymentControls(token, ready, output) {
   const hash = location.hash, active = () => token === state.seq && location.hash === hash;
   const button = $('#self-sync-start'), feedback = $('#self-sync-status');
-  let timer, submitting = false, current;
+  let timer, submitting = false, current, attemptMessage = '';
+  const attemptLogs = [];
+  const reportAttempt = message => {
+    attemptMessage = message;
+    attemptLogs.push(`[${new Date().toLocaleTimeString()}] ${message}`);
+    output('Self-sync request in this browser', attemptLogs);
+    feedback.textContent = message;
+  };
+  const recordedStatus = () => {
+    const message = current.message || (current.running ? 'Self-sync running; reconnect after restart.' : 'Ready to pull, rebuild and restart this Admin server.');
+    if (!current.id && !current.startedAt) return message;
+    const identity = [current.id && `job ${current.id}`, current.startedAt && `started ${new Date(current.startedAt).toLocaleString()}`,
+      current.commit && `commit ${current.commit.slice(0, 12)}`].filter(Boolean).join(' | ');
+    return `${current.running ? 'Current' : 'Last recorded'} self-sync (${identity}): ${message}`;
+  };
   const cleanup = viewCleanup;
   viewCleanup = () => { clearInterval(timer); cleanup?.(); };
   const update = () => { button.disabled = submitting || !ready() || !current?.available || current.running || current.phase === 'uncertain'; };
   const refresh = async () => {
     try {
-      current = await api('/api/settings/self-sync');
+      current = await api('/api/settings/self-sync', { cache: 'no-store' });
       if (!active()) return;
-      feedback.textContent = current.message || (current.running ? 'Self-sync running; reconnect after restart.' : 'Ready to pull, rebuild and restart this Admin server.');
-      output('Git self-sync', (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`));
+      feedback.textContent = [attemptMessage, recordedStatus()].filter(Boolean).join('\n');
+      const lines = (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`);
+      if (current.id || current.startedAt) lines.unshift(recordedStatus());
+      output('Git self-sync', lines);
       update();
       if (current.running && !timer) timer = setInterval(refresh, 3000);
       if (!current.running) { clearInterval(timer); timer = null; }
     } catch (error) {
-      if (active()) feedback.textContent = `${error.message} Reconnect and refresh status before retrying; the server job may still be running.`;
+      if (active()) {
+        const message = `Status refresh failed: ${error.message} Reconnect and refresh status before retrying; the server job may still be running.`;
+        feedback.textContent = [attemptMessage, message].filter(Boolean).join('\n');
+        output('Self-sync status errors', [message]);
+      }
     }
   };
   $('#self-sync-refresh').addEventListener('click', refresh);
@@ -178,15 +198,22 @@ async function mountSelfDeploymentControls(token, ready, output) {
     if (!ready()) { feedback.textContent = 'Save Settings before self-sync.'; return; }
     if (!confirm('Pull the default branch, rebuild and restart this Admin server? Back up private data first.')) return;
     submitting = true; update();
+    let submitted = false;
+    reportAttempt('Requesting Admin-wallet approval. No new self-sync job has started.');
     try {
       const challenge = await api('/api/settings/self-sync/challenge', { json: {} });
       const signed = await approveAdminAction(challenge, active);
       if (!active()) return;
-      await api('/api/settings/self-sync/start', { json: signed });
-      feedback.textContent = 'Self-sync accepted. The independent job continues through the Admin restart.';
+      submitted = true;
+      const receipt = await api('/api/settings/self-sync/start', { json: signed });
+      reportAttempt(`Self-sync accepted${receipt.id ? ` (job ${receipt.id})` : ''}. The independent job continues through the Admin restart.`);
       if (!timer) timer = setInterval(refresh, 3000);
       await refresh();
-    } catch (error) { if (active()) feedback.textContent = error.message; }
+    } catch (error) {
+      if (active()) reportAttempt(submitted
+        ? `Self-sync submission not confirmed: ${error.message} Refresh status and inspect the job before retrying.`
+        : `Self-sync not started: ${error.message}`);
+    }
     finally { submitting = false; if (active()) update(); }
   });
   await refresh();

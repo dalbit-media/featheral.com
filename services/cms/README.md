@@ -68,6 +68,10 @@ shows its error and allows retry without leaving Settings.
 server. Settings groups upload deployment and Git self-sync in one action panel
 with a single source-labelled console. Both operations retain their logs when
 the other refreshes; self-sync status can be refreshed after a restart.
+Wallet approval failures are logged in the browser's request section and remain
+visible after refreshing server status. Finished receipts are labelled as the
+last recorded job with their ID, start time and commit, not a new successful
+request. An Admin session alone does not replace the required signing wallet.
 It requires wallet approval, server-side Git access to
 `https://github.com/dalbit-media/featheral.com.git`, Git installed on the server,
 and non-interactive sudo for deployment operations. It does not require the SSH
