@@ -378,4 +378,10 @@ for host in $hostnames; do
   fi
 done
 echo "Deployment complete: $release_id"
+if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]]; then
+  if ! (printf '%s\n' '{"version":1,"complete":true}' > "${archive%/*}/cleanup-complete.json.tmp" &&
+        mv "${archive%/*}/cleanup-complete.json.tmp" "${archive%/*}/cleanup-complete.json"); then
+    echo "Temporary archive cleanup receipt could not be saved; staging retained for review." >&2
+  fi
+fi
 phase verified

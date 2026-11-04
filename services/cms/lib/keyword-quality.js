@@ -1,4 +1,5 @@
 const { decodeEntities } = require('./text');
+const { canonicalInterestName } = require('./interest-keywords');
 
 const AMBIGUOUS = new Set(`
 lee kim emma anna mia emily kelly eva lily julia sarah jessica rachel han hye
@@ -25,7 +26,7 @@ function meaningfulKeyword(name) {
 }
 
 function canonicalKeyword(name) {
-  return ALIASES.get(keywordKey(name)) || name;
+  return ALIASES.get(keywordKey(name)) || canonicalInterestName(name) || name;
 }
 
 module.exports = { keywordKey, meaningfulKeyword, canonicalKeyword };

@@ -20,8 +20,9 @@ if (deploymentManifest?.hosts.length === 1 && deploymentManifest.hosts[0] === "d
   const databaseServer = require("../services/database/server").createSiteServer({
     root, settings, hosts: deploymentManifest.hosts,
   });
+  const maintenance = require("../services/operations/storage-cleanup").startStorageMaintenance(root);
   databaseServer.listen(Number(env.PORT) || 8080, env.HOST || "127.0.0.1", () => console.log("Featheral database site/API ready (no financial writers)."));
-  const stop = () => databaseServer.close(() => process.exit(0));
+  const stop = () => { maintenance.close(); databaseServer.close(() => process.exit(0)); };
   process.on("SIGINT", stop); process.on("SIGTERM", stop);
 } else {
 const http = require("http");
@@ -488,6 +489,7 @@ async function start() {
   }
   api.start();
   world.start();
+  cms.startMaintenance();
   configureServer(server, cms.operationsSettings);
   server.listen(port, host, () => {
   const local = (site) => `http://${site === "foundation" ? "" : `${site}.`}localhost:${port}/`;

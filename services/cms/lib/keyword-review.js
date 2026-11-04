@@ -1,7 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { open } = require('../../database/sqlite');
-const { tablePrefix, loadPosts, buildCelebrityTags, applyTags, slugify } = require('./autotag');
+const { tablePrefix, loadPosts, buildCelebrityTags, applyTags, slugify, bodyText } = require('./autotag');
+const { buildInterestTags } = require('./interest-keywords');
 const { meaningfulKeyword, canonicalKeyword, keywordKey } = require('./keyword-quality');
 const { canonicalCelebrityName } = require('./celebrity-keywords');
 const { loadTrashed } = require('./wp');
@@ -17,6 +18,8 @@ function reviewKeywords(dbFile, { apply = false, backupFile } = {}) {
     const trashed = loadTrashed(path.join(path.dirname(dbFile), 'public.sqlite'));
     const posts = loadPosts(db, prefix).filter(post => !trashed.has(post.id));
     const byPost = buildCelebrityTags(posts);
+    const interests = buildInterestTags(posts, bodyText);
+    for (const [id, names] of interests) byPost.set(id, [...new Set([...(byPost.get(id) || []), ...names])]);
     const tags = db.prepare(`SELECT tt.term_taxonomy_id AS id, t.name FROM ${prefix}term_taxonomy tt
       JOIN ${prefix}terms t USING(term_id) WHERE tt.taxonomy='post_tag' ORDER BY tt.term_taxonomy_id`).all();
     const decisions = tags.map(tag => {
@@ -37,9 +40,15 @@ function reviewKeywords(dbFile, { apply = false, backupFile } = {}) {
       .map(tag => [slugify(tag.name), tag.id]));
     const hasLink = db.prepare(`SELECT 1 FROM ${prefix}term_relationships WHERE object_id=? AND term_taxonomy_id=?`);
     let addedLinks = 0;
+    const newKeywords = new Map(), interestCounts = new Map();
     for (const [id, names] of byPost) {
-      for (const name of names) if (!existing.has(slugify(name)) || !hasLink.get(id, existing.get(slugify(name)))) addedLinks++;
+      for (const name of names) {
+        if (!existing.has(slugify(name))) newKeywords.set(name, (newKeywords.get(name) || 0) + 1);
+        if (!existing.has(slugify(name)) || !hasLink.get(id, existing.get(slugify(name)))) addedLinks++;
+      }
     }
+    for (const names of interests.values()) for (const name of names) interestCounts.set(name, (interestCounts.get(name) || 0) + 1);
+    const ranked = counts => [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     let stats;
     if (apply) {
       db.exec(`VACUUM INTO '${backupFile.replace(/'/g, "''")}'`);
@@ -47,7 +56,7 @@ function reviewKeywords(dbFile, { apply = false, backupFile } = {}) {
       try {
         if (backup.prepare('PRAGMA integrity_check').get().integrity_check !== 'ok') throw new Error('Keyword backup failed integrity verification');
       } finally { backup.close(); }
-      stats = applyTags(db, prefix, byPost, { replaceAuto: false, marker: 'auto-celebrity', removeTagIds: changed.map(tag => tag.id), recountAll: true });
+      stats = applyTags(db, prefix, byPost, { replaceAuto: false, marker: 'auto-reviewed', removeTagIds: changed.map(tag => tag.id), recountAll: true });
       const manifest = path.join(path.dirname(dbFile), 'manifest.json');
       if (fs.existsSync(manifest)) { const now = new Date(); fs.utimesSync(manifest, now, now); }
     }
@@ -57,6 +66,9 @@ function reviewKeywords(dbFile, { apply = false, backupFile } = {}) {
       mergedTags: decisions.filter(tag => tag.action === 'merge').map(tag => ({ from: tag.name, to: tag.canonical })),
       retainedTags: decisions.filter(tag => tag.action === 'keep').length,
       matchedPosts: byPost.size, addedLinks: stats ? stats.links : addedLinks,
+      interestKeywords: interestCounts.size, interestPosts: interests.size,
+      newInterestKeywords: ranked(new Map([...interestCounts].filter(([name]) => !existing.has(slugify(name))))),
+      newKeywords: ranked(newKeywords), topInterestKeywords: ranked(interestCounts).slice(0, 40),
       ...(apply ? { backupFile } : {}),
     };
   } finally { db.close(); }

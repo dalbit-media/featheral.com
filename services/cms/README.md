@@ -296,6 +296,43 @@ before resuming writes. A missing `state.json` means backup was interrupted
 before installation; inspect the job and original data rather than attempting an
 unverified restore or deleting files. Do not remove locks while a job is active.
 
+### Automatic storage maintenance
+
+The production gateway, standalone CMS server and DB-only deployment start an
+hourly staging-cleanup check (first check one minute after startup). Inactive
+local deployment ZIPs/preparation folders and abandoned source snapshots expire
+after **24 hours**, using the newest timestamp anywhere in each folder. Active
+operations, reviewed snapshot plans, paused/resumable transfers and uncertain
+syncs remain protected. Completed operations still use their immediate cleanup.
+On managed targets, only health-confirmed deployment archives and completed sync
+staging are eligible; rollback/recovery staging, backup receipts, backups, logs,
+Git checkouts, installed releases and live databases/uploads are not removed.
+Links and invalid operation receipts cause an explicit cleanup error, never a
+best-effort recursive sweep. Cleanup totals and failures appear in server logs.
+
+From the repository root, preview with `node scripts/cleanup-storage.js` and apply
+with `node scripts/cleanup-storage.js --apply`. The default is 24-hour retention.
+After stopping application operations and reviewing the preview, an operator may
+use `--min-age-hours=0` to remove verified inactive staging immediately. The same
+command runs locally on each server; it does not remotely erase other servers.
+Unknown/unconfirmed target artifacts are intentionally retained for review.
+
+**Site features > Permanently empty all trash once a week** controls irreversible
+trash deletion. It is enabled automatically for Featheral X unless explicitly
+disabled, and defaults on for newly created CMS sites. Other existing sites
+remain unchanged. The first purge is scheduled seven days after maintenance
+first observes the enabled option; all trash then present is emptied, not only
+items older than seven days. The source server checks hourly, remembers the
+schedule in `data/maintenance/state.json` across restarts, and performs one
+catch-up purge after downtime. Failures are logged and retried at the next check
+without marking the purge successful. Disable the option to cancel scheduling.
+The existing permanent purge removes trashed WordPress/CMS content, associated
+attachments and media, and refreshes indexes; shared media and the active CMS
+homepage remain protected. SQLite space is reusable but not vacuumed automatically.
+Read-only replicas may clean staging but **never** purge content or change this
+option automatically. Deploy/restart the writable source to activate the policy,
+then use the normal data sync workflow.
+
 The Settings API is `GET /api/settings/sites/:key/sync`. Authenticated, same-origin
 `POST /api/settings/sites/:key/sync/shared/start` accepts the current Settings
 `revision` and starts only a saved shared target. Separate review and signed mutation
@@ -1050,11 +1087,12 @@ Swiping is a curation tool, so the stored site ends up with only well-liked post
   - JAV code series (`[ABP-102]` → `ABP series`);
   - names when the whole title is a name (`Sydney Sweeney`);
   - TF-IDF keywords and two-word phrases from the title and text. Title words count more. Stopwords, reddit boilerplate, story filler (character names, -ed/-ly words) and   words found in almost every post of a subreddit are skipped. Only meaningful keywords are kept: proper nouns (a word or phrase that is capitalised mid-sentence in at least 60% of its uses, e.g. `margot robbie`, `genshin impact`) or words from a curated topic list (`TOPIC` in `lib/autotag.js`: body, look, ethnicity, act, outfit, place, role, genre, holiday). Generic words (`story`, `sunset`), weekdays, months and title words like `master`/`queen` (`NOT_TOPIC`) are dropped.
-  There are no subreddit (`r/…`) tags. The number of topic keywords grows with the length: about 3 for a photo title, up to 30 for a long story. Topic tags need at least 10 posts (`MIN_POSTS` in `lib/autotag.js`). Reviewed celebrity names in `lib/celebrity-names.json` are additional keywords and are kept even on a single post. Name matching handles aliases, accents, punctuation, casing and possessives, and checks titles, excerpts and body text across categories. Ambiguous stage names need a Celebrities title or an explicit group/full-name alias; ordinary color words are not inferred as people. Protected, unpublished and locally trashed posts are excluded.
+  There are no subreddit (`r/…`) tags. The number of statistical topic keywords grows with the length: about 3 for a photo title, up to 30 for a long story. Statistical topic tags need at least 10 posts (`MIN_POSTS` in `lib/autotag.js`). Reviewed interests in `lib/interest-keywords.json` are matched separately against complete phrases in titles, excerpts and substantive body text. They cover fandoms, characters, named creators, art/fashion formats, outdoor activities and story themes. Interests need at least three distinct eligible posts, not three repetitions in one post, and are not squeezed out by the statistical keyword budget. Aliases such as `bodypainting`, `try on haul` and `baldurs gate` reuse canonical tags. Words within phrases cannot bridge sentences or separate fields; ambiguous `One Piece` needs explicit fandom context rather than a swimsuit mention. Reviewed celebrity names in `lib/celebrity-names.json` are additional keywords and are kept even on a single post. Name matching handles aliases, accents, punctuation, casing and possessives, and checks titles, excerpts and body text across categories. Ambiguous stage names need a Celebrities title or an explicit group/full-name alias; ordinary color words are not inferred as people. Protected, unpublished and locally trashed posts are excluded.
 
-  Auto tags are marked `auto-tag`. Running the tool again replaces them and keeps hand-made tags. Stop the server before running it. New member posts are tagged on upload with existing keywords and reviewed celebrity names their title or description mentions. A full resync replaces the database and drops the tags, so run the tool again afterwards.
+  Auto tags are marked `auto-tag`. Running the tool again replaces them and keeps hand-made tags. Stop the server before running it. New member posts are tagged on upload with existing keywords, reviewed interests and reviewed celebrity names their title or description explicitly mentions; new uploads do not need to wait for another corpus-wide run. A full resync replaces the database and drops the tags, so run the tool again afterwards.
 - **Celebrity keyword backfill**: from the repository root, run `node services/cms/tools/celebrity-keywords.js [siteKey]` for a no-write preview (defaults to the registered Featheral X dataset). It reports reviewed Celebrities posts, matched posts across all categories, keyword counts, the top names and IDs of celebrity posts without a sufficiently explicit reviewed name. Do not guess identities for those unmatched posts. On the **writable source server**, stop the application, then run `node services/cms/tools/celebrity-keywords.js [siteKey] --apply --backup-file=<new absolute SQLite backup path>` and restart. The tool refuses read-only replicas, verifies the backup, inserts tags transactionally, reuses existing name tags, preserves all prior categories/tags/content, refreshes affected counts and invalidates the dataset cache. Reruns add no duplicate links. Newly created tags carry `auto-celebrity` and survive general autotag reruns. Keep the backup for recovery; deploy this code and sync source data back to replicas using the normal server-data sync workflow.
 - **All-tag quality review**: `node services/cms/tools/review-keywords.js` previews cleanup of every tag in the registered Featheral X dataset, with lists of removed fragments and merged aliases. The shared `lib/keyword-quality.js` policy rejects reviewed ambiguous single names (such as Lee, Sarah and Kim) and noisy labels, but preserves meaningful short topics and stage names. Automatic tagging, new-post matching and public tag indexes use the same policy. Full reviewed names replace fragments only when explicitly supported by the post, never by guessing an identity from a first name. On the **writable source server**, stop the application, run `node services/cms/tools/review-keywords.js --apply --backup-file=<new absolute SQLite backup path>`, then restart and sync normally. A verified backup is mandatory; replicas refuse application. One transaction removes rejected tag taxonomies, transfers all alias relationships to canonical tags, and adds explicit full-name matches to published, unprotected, non-trashed posts across categories. Unrelated tags, categories and post content remain unchanged. Reruns are idempotent. Keep the backup for recovery.
+  The same review also adds the reviewed interests above without regenerating or removing unrelated existing tags. The report includes `interestKeywords`, `interestPosts`, `newInterestKeywords` (with whole-corpus post counts), `topInterestKeywords`, and the exact number of missing relationships in `addedLinks`. Newly created tags from this combined review carry `auto-reviewed` and survive general autotag reruns. This is the preferred backed-up command for applying the expanded interest catalogue to existing X content.
 - Votes, rounds and the trash list are stored in `data/<key>/public.sqlite`. Likes and dislikes saved in the browser by older versions are imported once, the first time the site is opened.
 
 Media is cached by the browser for 7 days, so a trashed image can still appear from the cache until then. In Settings' `ADMIN_CONFIG_JSON`, `publicBrand` sets the public site name (it defaults to the stored site title), `publicTagline` sets the line under it (it defaults to the stored site description; also used for the page description and the age gate), and `ageGate` (default `true`) shows an 18+ confirmation before any content.

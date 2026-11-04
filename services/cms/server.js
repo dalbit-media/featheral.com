@@ -64,7 +64,7 @@ if (siteManager && CONFIG.sampleSites && !operationsSettings.replica) Templates.
 const fthxSite = siteManager?.records.find((record) => record.hostname === 'x.featheral.com');
 if (fthxSite && !operationsSettings.replica) {
   const cms = new CmsStore(path.join(DATA_DIR, fthxSite.key, 'cms.sqlite'));
-  try { FthxPages.installNotes(cms); } finally { cms.close(); }
+  try { FthxPages.installNotes(cms); cms.initializeTrashPolicy(); } finally { cms.close(); }
 }
 const sitesBase = siteManager?.records.find(record => record.hostname === 'sites.featheral.com' && !record.path);
 if (sitesBase && !operationsSettings.replica) {
@@ -1163,6 +1163,7 @@ app.resolveHostname = resolveHostname;
 app.renderSitePage = (hostname, file) => sitePages.render(hostname, file);
 app.hasSitePage = (hostname, file) => sitePages.templates(hostname).includes(file);
 app.close = () => {
+  app.maintenance?.close();
   app.serverProfile?.close();
   telemetry.close();
   sitePages.close();
@@ -1178,11 +1179,24 @@ const primaryPublicKey = siteManager
   : CONFIG.siteKey;
 if (primaryPublicKey) {
   const primary = publicByKey(primaryPublicKey);
+  if (!siteManager && CONFIG.publicHost === 'x.featheral.com' && !operationsSettings.replica)
+    primary.cms.initializeTrashPolicy();
   if (primary.cms.siteSettings().homepage === 'media') primary.warmFeed();
 }
 notes.validateBalances();
+app.startMaintenance = () => {
+  if (app.maintenance) return;
+  app.maintenance = new (require('./lib/maintenance').Maintenance)({
+    root: path.resolve(__dirname, '..', '..'),
+    sites: () => siteManager?.records || (CONFIG.siteKey ? [{ key: CONFIG.siteKey, hostname: CONFIG.publicHost }] : []),
+    publicByKey, invalidateSite, deployment, siteSync,
+    busy: () => serverUsers.changing || operationsSettings.busy || selfDeployment.active(),
+  });
+  app.maintenance.start();
+};
 module.exports = app;
 if (require.main === module) {
+  app.startMaintenance();
   const server = app.listen(PORT, HOST, () => console.log(
     `CMS: https://${CONFIG.cmsHost}/ · Public media site: https://${CONFIG.publicHost}/ · Local: http://${HOST}:${PORT}/admin and http://${HOST}:${PORT}/`,
   ));

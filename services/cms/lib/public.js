@@ -1072,6 +1072,8 @@ class PublicSite {
 
   // Permanently deletes every trashed post: its rows in db.sqlite, its attachment rows and its files.
   emptyTrash() {
+    if (require('../../operations/replica').readReplica(path.resolve(__dirname, '..', '..', '..')))
+      throw httpError(403, 'Trash cannot be permanently deleted on a read-only replica');
     const rows = this.store.trashRows();
     if (!rows.length) return { posts: 0, files: 0, bytes: 0 };
     const site = this.site;
@@ -1080,11 +1082,36 @@ class PublicSite {
     if (cmsIds.some(id => settings.homepage === 'content' && this.cms.get(id)?.slug === settings.homeSlug))
       throw httpError(409, 'Choose another homepage before permanently deleting the trashed homepage');
     const ids = rows.filter(row => row.post_id > 0).map((r) => r.post_id);
-    const attachments = [...new Set(rows.flatMap((r) => r.attachments))];
-    const gone = new Set(rows.flatMap((r) => [...r.files, ...r.missed]));
+    const deleting = new Set(ids);
+    const kept = new Set(site.all(`SELECT ID FROM ${site.t('posts')} WHERE post_type NOT IN ('revision','attachment')`)
+      .filter(row => !deleting.has(row.ID)).map(row => row.ID));
+    const users = site.fileUsers();
+    const retained = new Set([...users].filter(([, owners]) => owners.some(id => kept.has(id))).map(([file]) => file));
+    const attachments = [...new Set(rows.flatMap((r) => r.attachments))]
+      .filter(id => !(site.memo.attachmentFiles.get(id) || []).some(file => retained.has(file)));
+    const gone = new Set(rows.flatMap((r) => [...r.files, ...r.missed]).filter(file => !retained.has(file)));
+    let bytes = 0;
     for (const r of rows) {
-      for (const rel of r.files) { const p = inside(this.trashDir, rel); if (p) fs.rmSync(p, { force: true }); }
-      for (const rel of r.missed) { const p = inside(this.uploadsDir, rel); if (p) try { fs.rmSync(p, { force: true }); } catch {} }
+      for (const rel of r.files) {
+        const file = inside(this.trashDir, rel);
+        if (!file || !fs.existsSync(file)) continue;
+        if (retained.has(rel)) {
+          const target = inside(this.uploadsDir, rel);
+          if (!target) throw httpError(409, 'Cannot preserve shared trash media');
+          if (!fs.existsSync(target)) {
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.renameSync(file, target);
+          }
+        } else {
+          bytes += fs.statSync(file).size;
+          fs.rmSync(file);
+        }
+      }
+      for (const rel of r.missed) {
+        if (retained.has(rel)) continue;
+        const file = inside(this.uploadsDir, rel);
+        if (file && fs.existsSync(file)) { bytes += fs.statSync(file).size; fs.rmSync(file); }
+      }
     }
     const db = open(path.join(site.dir, 'db.sqlite'));
     try {
@@ -1112,7 +1139,6 @@ class PublicSite {
       const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
       fs.writeFileSync(indexPath, JSON.stringify(index.filter((x) => !gone.has(x.path))));
     }
-    const bytes = rows.reduce((a, r) => a + (r.bytes || 0), 0);
     for (const id of cmsIds) if (this.cms.get(id)) this.cms.delete(id);
     this.store.clearTrash();
     fs.rmSync(this.trashDir, { recursive: true, force: true });

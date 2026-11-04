@@ -124,7 +124,7 @@ class CmsStore {
     const stored = this.store.get('settings', 'site');
     return {
       homepage: 'media', homeSlug: 'home', commerce: false, exchange: false, stats: false, ageGate: null, nativeCurrency: 'FTHX',
-      displayName: '', description: '', footer: '',
+      displayName: '', description: '', footer: '', weeklyTrash: false,
       ...(stored?.value || {}),
     };
   }
@@ -142,6 +142,7 @@ class CmsStore {
     if (input.homepage === 'content' && !this.publishedPage(homeSlug)) throw httpError(400, 'A CMS landing homepage must use an existing published page.');
     const previous = this.siteSettings();
     if (input.stats !== undefined && typeof input.stats !== 'boolean') throw httpError(400, 'Stats feature must be a boolean');
+    if (input.weeklyTrash !== undefined && typeof input.weeklyTrash !== 'boolean') throw httpError(400, 'Weekly trash cleanup must be a boolean');
     const text = (key, max) => {
       const value = input[key] === undefined ? previous[key] : input[key];
       if (typeof value !== 'string' || value.length > max) throw httpError(400, `${key} must be text up to ${max} characters`);
@@ -150,10 +151,17 @@ class CmsStore {
     const settings = {
       homepage: input.homepage, homeSlug, commerce: input.commerce, exchange: input.exchange, stats: input.stats ?? previous.stats,
       ageGate: input.ageGate, nativeCurrency: input.nativeCurrency,
+      weeklyTrash: input.weeklyTrash ?? previous.weeklyTrash,
       displayName: text('displayName', 200), description: text('description', 500), footer: text('footer', 500),
     };
     this.store.put('settings', 'site', { value: settings });
     return settings;
+  }
+
+  initializeTrashPolicy() {
+    const stored = this.store.get('settings', 'site');
+    if (stored?.value?.weeklyTrash === undefined)
+      this.store.put('settings', 'site', { value: { ...this.siteSettings(), weeklyTrash: true } });
   }
 
   close() { this.store.close(); }

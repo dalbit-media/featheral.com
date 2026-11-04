@@ -7,6 +7,7 @@ const { SyncRunner } = require('../lib/sync');
 const { DATA_DIR, writeJson } = require('../lib/store');
 const { getSite, dropSite } = require('../lib/wp');
 const { buildTags, autotag, tagPost, titleLabels, matchExistingTags, AUTO_MARK } = require('../lib/autotag');
+const { canonicalInterestName, MIN_INTEREST_POSTS } = require('../lib/interest-keywords');
 
 const reddit = (sub, body = '') => `<table><tr><td><a href="https://www.reddit.com/r/${sub}/comments/abc/x/">img</a></td><td>`
   + `<!-- SC_OFF --><div class="md"><p>${body}</p></div><!-- SC_ON --> submitted by <a href="https://www.reddit.com/user/someone"> /u/someone </a>`
@@ -32,15 +33,15 @@ test('title labels skip age/gender codes and keep kinks, fandoms and JAV series'
   assert.deepEqual(r.series, ['jur']);
 });
 
-test('tags come from labels, series and keywords; reviewed celebrity names are exempt from the topic minimum', () => {
+test('tags come from labels, series and keywords; reviewed names and interests have separate minimums', () => {
   const tags = buildTags(corpus(), { maxDfRatio: 0.2, minPosts: 2 });
   assert.ok(![...tags.values()].flat().some((t) => t.startsWith('r/')), 'no subreddit tags');
   const use = new Map();
   for (const t of [...buildTags(corpus(), { maxDfRatio: 0.2, minPosts: 5 }).values()].flat()) use.set(t, (use.get(t) || 0) + 1);
-  assert.ok(use.size > 0 && [...use].every(([name, n]) => n >= 5 || name === 'Ali Larter'), JSON.stringify([...use]));
+  assert.ok(use.size > 0 && [...use].every(([name, n]) => n >= 5 || name === 'Ali Larter' || (n >= MIN_INTEREST_POSTS && canonicalInterestName(name))), JSON.stringify([...use]));
   assert.ok(tags.get(1).some((t) => /bikini|beach/.test(t)), tags.get(1).join());
   const lit = tags.get(7);
-  assert.ok(lit.includes('romance') && lit.includes('slow burn'), lit.join());
+  assert.ok(lit.includes('Romance') && lit.includes('slow burn'), lit.join());
   assert.ok(lit.some((t) => /lingerie|stocking|hotel|pool|massage/.test(t)), lit.join());
   assert.ok(!lit.some((t) => /lighthouse|thunderstorm|staircase|keeper|spiral|glowed/.test(t)), `only meaningful keywords: ${lit.join()}`);
   assert.ok(!tags.get(17).some((t) => /filler|mountain|cabin/.test(t)), tags.get(17).join());
@@ -85,7 +86,7 @@ test('autotag writes post_tag terms idempotently, keeps manual tags and feeds th
   assert.equal(manual.count, 1, 'manual tag kept');
   const bad = db.prepare(`SELECT COUNT(*) AS n FROM ${prefix}term_taxonomy tt WHERE count <> (SELECT COUNT(*) FROM ${prefix}term_relationships r WHERE r.term_taxonomy_id = tt.term_taxonomy_id)`).get().n;
   assert.equal(bad, 0, 'counts match relationships');
-  const lit = db.prepare(`SELECT tt.term_taxonomy_id AS id FROM ${prefix}term_taxonomy tt JOIN ${prefix}terms t USING (term_id) WHERE t.name = 'romance'`).get();
+  const lit = db.prepare(`SELECT tt.term_taxonomy_id AS id FROM ${prefix}term_taxonomy tt JOIN ${prefix}terms t USING (term_id) WHERE t.name = 'Romance'`).get();
   db.close();
 
   const site = getSite(key);

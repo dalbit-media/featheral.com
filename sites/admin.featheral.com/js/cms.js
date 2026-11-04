@@ -191,6 +191,7 @@ VIEWS['site-settings'] = async (arg, q, token) => {
         <label><input name="commerce" type="checkbox" ${settings.commerce ? 'checked' : ''}> Enable FTHX-credit ecommerce demo</label>
         <label><input name="exchange" type="checkbox" ${settings.exchange ? 'checked' : ''}> Enable FTH$-based exchange demo</label>
         <label><input name="stats" type="checkbox" ${settings.stats ? 'checked' : ''}> Show public ecosystem traffic charts on CMS homepage</label>
+        <label><input name="weeklyTrash" type="checkbox" ${settings.weeklyTrash ? 'checked' : ''}> Permanently empty all trash once a week (cannot be undone; shared media and the active homepage remain protected)</label>
         <label>Age gate<select name="ageGate">${options([['default', 'Server default'], ['true', 'Adults only'], ['false', 'No age gate']], settings.ageGate === null ? 'default' : String(settings.ageGate))}</select></label>
         <button class="btn primary" type="submit">Save features</button>
       </form></div>`, token);
@@ -200,6 +201,7 @@ VIEWS['site-settings'] = async (arg, q, token) => {
       const values = Object.fromEntries(new FormData(form));
       values.commerce = form.elements.commerce.checked; values.exchange = form.elements.exchange.checked;
       values.stats = form.elements.stats.checked;
+      values.weeklyTrash = form.elements.weeklyTrash.checked;
       values.ageGate = values.ageGate === 'default' ? null : values.ageGate === 'true';
       const button = form.querySelector('button[type=submit]'); button.disabled = true;
       try { await cmsApi('settings', { method: 'PUT', json: values }); toast('Site features saved'); }

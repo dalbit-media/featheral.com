@@ -424,7 +424,7 @@ class Deployment {
       this.log(`${config.host}: connecting to SSH with the saved credential and pinned server key.`);
       client = await this.connect(config.vault ? { ...config, password: credential.password } : config);
       const remote = `${config.directory}/shared/deployment/${archive.hash}`;
-      await this.execute(client, `mkdir -p ${quote(remote)}`, "", config.sshTimeoutSeconds || 20);
+      await this.execute(client, `mkdir -p ${quote(remote)} && rm -f ${quote(remote + '/cleanup-complete.json')}`, "", config.sshTimeoutSeconds || 20);
       await checkSpace(this, client, remote, archive.bytes + archive.expandedBytes + 512 * 1024 * 1024, config.sshTimeoutSeconds || 20);
       const sftp = await this.transfer(client, callback => client.sftp(callback), config.sshTimeoutSeconds || 20);
       this.log(`${config.host}: uploading the compressed release ZIP and installer. Verified partial uploads are resumed.`);

@@ -447,6 +447,7 @@ test('deployment startup selects DB-only mode before loading CMS or financial se
       };
       if (name === '../services/operations/configuration') return { assertDatabaseConfiguration() {} };
       if (name === '../services/operations/replica') return { readReplica: () => null, replicaEnvironment: (_root, env) => env };
+      if (name === '../services/operations/storage-cleanup') return { startStorageMaintenance() { return { close() {} }; } };
       if (name === '../services/database/server') return { createSiteServer(config) {
         options = config;
         return { listen(port, host, callback) { listening = { port, host }; callback(); } };

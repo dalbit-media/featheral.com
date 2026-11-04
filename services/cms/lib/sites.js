@@ -86,6 +86,7 @@ class SiteManager {
       }, { contentFormat: 'rendered', api: { siteUrl: manifest.siteUrl, requests: 0 }, manifest });
       const cms = new CmsStore(path.join(dir, 'cms.sqlite'));
       try {
+        cms.initializeTrashPolicy();
         const template = input.template !== undefined ? input.template : sitePath ? 'website' : null;
         if (template) Templates.install(cms, template);
         if (sitePath) cms.setSiteSettings({ ...cms.siteSettings(), displayName: name });

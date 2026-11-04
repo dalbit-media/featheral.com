@@ -8,6 +8,7 @@ const { open } = require('../../database/sqlite');
 const { htmlToText, decodeEntities } = require('./text');
 const { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName, canonicalCelebrityName } = require('./celebrity-keywords');
 const { meaningfulKeyword, canonicalKeyword } = require('./keyword-quality');
+const { interestKeywords, buildInterestTags, canonicalInterestName } = require('./interest-keywords');
 
 const AUTO_MARK = 'auto-tag';
 // every tag must group at least this many posts
@@ -300,7 +301,7 @@ function buildTags(posts, opts = {}) {
       if (kept.length !== tags.length) { out.set(id, kept); changed = true; }
     }
   }
-  for (const [id, names] of buildCelebrityTags(posts)) {
+  for (const [id, names] of [...buildInterestTags(posts, bodyText), ...buildCelebrityTags(posts)]) {
     const merged = new Map((out.get(id) || []).map(name => [slugify(name), name]));
     for (const name of names) merged.set(slugify(name), name);
     out.set(id, [...merged.values()]);
@@ -434,16 +435,19 @@ function autotag(dbFile, opts = {}) {
 // Picks existing tags whose name appears in a new post's title/description.
 function matchExistingTags(text, tagNames, limit = 12) {
   const hay = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
+  const interests = new Set(interestKeywords(text));
   const hit = [];
   for (const name of tagNames) {
     if (!meaningfulKeyword(name)) continue;
+    const interest = canonicalInterestName(name);
+    if (interest && !interests.has(interest)) continue;
     const n = name.toLowerCase().replace(/^r\//, '').replace(/ series$/, '').replace(/[^a-z0-9]+/g, ' ').trim();
     if (n.length >= 3 && hay.includes(' ' + n + ' ')) hit.push(canonicalCelebrityName(name) || canonicalKeyword(name));
   }
   return [...new Set(hit)].sort((a, b) => b.length - a.length).slice(0, limit);
 }
 
-// Tags a new post with matching existing keywords and reviewed celebrity names.
+// Tags a new post with matching existing keywords, reviewed names and interests.
 function tagPost(dbFile, postId, text, limit = 12) {
   const db = open(dbFile);
   try {
@@ -453,6 +457,7 @@ function tagPost(dbFile, postId, text, limit = 12) {
     const byName = new Map(rows.map((r) => [r.name, r.id]));
     const names = new Map(matchExistingTags(text, [...byName.keys()].filter(name => !contextualCelebrityName(name)), limit).map(name => [slugify(name), name]));
     for (const name of celebrityKeywords(bodyText(text))) names.set(slugify(name), name);
+    for (const name of interestKeywords(bodyText(text))) names.set(slugify(name), name);
     applyTags(db, prefix, new Map([[postId, [...names.values()]]]), { replaceAuto: false, marker: CELEBRITY_MARK });
     return [...names.values()];
   } finally {

@@ -100,8 +100,8 @@ test('celebrity backfill is additive, backed up, idempotent and applies across c
   } finally { db.close(); backup.close(); }
   assert.throws(() => tagCelebrities(f.file, { apply: true, backupFile }), /new absolute backup/);
   assert.equal(tagCelebrities(f.file, { apply: true, backupFile: path.join(f.dir, 'second.sqlite') }).addedLinks, 0);
-  assert.deepEqual(tagPost(f.file, 7, 'Lily-Rose Depp interview'), ['Lily-Rose Depp'], 'new posts can reuse a reviewed name with just one prior post');
-  assert.deepEqual(tagPost(f.file, 7, 'Emma Stone interview'), ['Emma Stone'], 'new names can be created from the reviewed catalogue');
+  assert.deepEqual(tagPost(f.file, 7, 'Lily-Rose Depp interview'), ['Lily-Rose Depp', 'Interview'], 'new posts can reuse a reviewed name with just one prior post and add a reviewed theme');
+  assert.deepEqual(tagPost(f.file, 7, 'Emma Stone interview').sort(), ['Emma Stone', 'Interview'], 'new names can be created from the reviewed catalogue');
   const prior = f.snapshot()[2].filter(row => row.description === CELEBRITY_MARK);
   autotag(f.file);
   const after = f.snapshot()[2].filter(row => row.description === CELEBRITY_MARK);
