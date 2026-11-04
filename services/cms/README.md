@@ -964,6 +964,20 @@ including the visible card; an oversized current card is still allowed.
 Data Saver and 2G connections fetch only the current card. Card construction
 does not bypass this budget, and obsolete requests are cancelled.
 
+Trending, Gallery and Liked use viewport-windowed grids: at most 80 tile
+elements are mounted, and only visible media is fetched. Fast scrolling defers
+new downloads until scrolling settles for 120 ms; scrolling away, hiding the
+tab, opening a viewer or leaving the route releases image sources and decoded
+tile references. At most two images load concurrently (one with Data Saver/2G).
+Visible previews are limited to 24 media sources, 24 MiB, 24 megapixels and two
+animated GIFs (one on constrained connections). A single oversized visible item
+is allowed. Tiles outside these budgets say "Open media" and still open the
+original at full quality in the viewer. Grid paging, sorting, votes, undo and
+viewer navigation retain their original semantics. Layout uses bounded row
+lookahead rather than repeatedly compacting the full list. Pagination reuses
+completed rows and recalculates only the new page and its unfinished lookahead;
+resizing, deleting and restoring tiles invalidate that layout cache.
+
 CMS templates and parsed classic blocks are cached per source file and refreshed
 when file size or timestamps change. Validated document output is reused only
 while its template, body, title and description match; published edits and theme

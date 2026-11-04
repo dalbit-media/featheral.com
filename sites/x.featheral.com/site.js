@@ -738,32 +738,185 @@ async function readerView(id, q, bySlug = false) {
 }
 
 // ---------- liked ----------
+function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity } = {}) {
+  const mounted = new Map();
+  const constrained = navigator.connection?.saveData || /^(slow-)?2g$/.test(navigator.connection?.effectiveType || '');
+  const limit = constrained ? 1 : 2;
+  let positions = [], bottom = [], rowCache = {}, frame = 0, resizeFrame = 0, timer = 0, stopped = false, scrolling = false, paused = false;
+  function release(index) {
+    const tile = mounted.get(index);
+    if (!tile) return;
+    const img = tile.el.querySelector('img');
+    img.onload = img.onerror = null;
+    img.removeAttribute('src');
+    tile.el.remove();
+    if (tile.item.el === tile.el) tile.item.el = null;
+    mounted.delete(index);
+  }
+  function pump() {
+    if (stopped || paused || document.hidden) return;
+    const bounds = grid.getBoundingClientRect();
+    const visible = [...mounted.values()].filter(tile =>
+      tile.position.y + tile.position.h > -bounds.top && tile.position.y < innerHeight - bounds.top);
+    visible.sort((a, b) => Math.abs(a.position.y + a.position.h / 2 + bounds.top - innerHeight / 2)
+      - Math.abs(b.position.y + b.position.h / 2 + bounds.top - innerHeight / 2));
+    const wanted = new Set();
+    let bytes = 0, pixels = 0, gifs = 0;
+    for (const tile of visible) {
+      const m = tile.item.media, size = m.size || 1024 * 1024;
+      const area = (m.width || 1024) * (m.height || 1024);
+      if (wanted.size && (bytes + size > 24 * 1024 * 1024 || pixels + area > 24 * 1024 * 1024
+        || (m.type === 'gif' && gifs >= (constrained ? 1 : 2)))) continue;
+      if (wanted.size >= 24) break;
+      wanted.add(tile); bytes += size; pixels += area;
+      if (m.type === 'gif') gifs++;
+    }
+    for (const tile of mounted.values()) {
+      if (!wanted.has(tile)) {
+        const img = tile.el.querySelector('img');
+        img.onload = img.onerror = null;
+        img.removeAttribute('src');
+        tile.state = '';
+        tile.el.dataset.mediaState = 'paused';
+      }
+    }
+    if (scrolling) return;
+    let active = [...mounted.values()].filter(tile => tile.state === 'loading').length;
+    for (const tile of wanted) {
+      if (active >= limit) break;
+      if (tile.state) continue;
+      tile.state = 'loading'; tile.el.dataset.mediaState = 'loading'; active++;
+      const img = tile.el.querySelector('img');
+      const settle = state => {
+        if (stopped || mounted.get(tile.position.index) !== tile || tile.state !== 'loading') return;
+        tile.state = state; tile.el.dataset.mediaState = state;
+        schedule();
+      };
+      img.onload = () => settle('ready');
+      img.onerror = () => settle('error');
+      img.decoding = 'async'; img.fetchPriority = 'low';
+      img.src = tile.item.media.url;
+    }
+  }
+  function paint() {
+    frame = 0;
+    if (stopped || paused || document.hidden) return;
+    const bounds = grid.getBoundingClientRect(), top = -bounds.top - 240, end = innerHeight - bounds.top + 240;
+    let lo = 0, hi = bottom.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (bottom[mid] < top) lo = mid + 1; else hi = mid; }
+    const wanted = [];
+    for (let i = lo; i < positions.length && positions[i].y < end; i++) wanted.push(positions[i]);
+    wanted.sort((a, b) => Math.abs(a.y + a.h / 2 + bounds.top - innerHeight / 2)
+      - Math.abs(b.y + b.h / 2 + bounds.top - innerHeight / 2));
+    const selected = wanted.slice(0, 80), indexes = new Set(selected.map(p => p.index));
+    for (const [index, tile] of mounted) if (!indexes.has(index) || tile.item !== items[index]) release(index);
+    selected.sort((a, b) => a.y - b.y || a.x - b.x);
+    for (const position of selected) {
+      let tile = mounted.get(position.index);
+      if (!tile) {
+        const item = items[position.index], el = tileFor(item);
+        tile = { el, item, position, state: '' };
+        mounted.set(position.index, tile);
+        el.dataset.i = position.index; el.dataset.mediaState = 'paused';
+        grid.append(el);
+      }
+      tile.position = position;
+      tile.el.style.cssText = `left:${position.x}px;top:${position.y}px;width:${position.w}px;height:${position.h}px`;
+    }
+    pump();
+  }
+  function schedule() { if (!stopped && !frame) frame = requestAnimationFrame(paint); }
+  function onScroll() {
+    scrolling = true;
+    clearTimeout(timer);
+    schedule();
+    timer = setTimeout(() => { scrolling = false; schedule(); }, 120);
+  }
+  function layout(append = false) {
+    if (stopped || !grid.clientWidth) return;
+    const width = Math.floor(grid.clientWidth);
+    if (!append) rowCache = {};
+    if (justified) positions = justifyRows(grid, items, width, 6, { maxH, cache: rowCache });
+    else {
+      const columns = Math.max(1, Math.floor((width + 8) / 158)), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
+      positions = items.map((item, index) => ({ index, x: (index % columns) * (w + 8), y: Math.floor(index / columns) * (h + 8), w, h }));
+      grid.style.height = `${Math.ceil(items.length / columns) * (h + 8)}px`;
+    }
+    let max = 0;
+    bottom = positions.map(p => (max = Math.max(max, p.y + p.h)));
+    schedule();
+  }
+  function visibility() {
+    if (document.hidden) for (const index of mounted.keys()) release(index);
+    else schedule();
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  document.addEventListener('visibilitychange', visibility);
+  let width = 0;
+  const resize = new ResizeObserver(() => {
+    if (grid.clientWidth !== width) {
+      width = grid.clientWidth;
+      if (!resizeFrame) resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; layout(); });
+    }
+  });
+  resize.observe(grid);
+  return { layout, pause(value) {
+    paused = value;
+    if (paused) for (const index of mounted.keys()) release(index);
+    else schedule();
+  }, close() {
+    stopped = true; clearTimeout(timer); cancelAnimationFrame(frame); cancelAnimationFrame(resizeFrame); resize.disconnect();
+    window.removeEventListener('scroll', onScroll);
+    document.removeEventListener('visibilitychange', visibility);
+    for (const index of mounted.keys()) release(index);
+  } };
+}
+
 // A new shuffle of equal-score posts each time the page is opened; kept while it stays open.
 let likedSeed = Math.random().toString(36).slice(2);
 async function likedView(reshuffle = true) {
+  cleanup?.();
+  let disposed = false, gallery = null, closeViewer = null;
+  const request = new AbortController();
+  cleanup = () => { disposed = true; request.abort(); gallery?.close(); closeViewer?.(); };
   if (reshuffle) likedSeed = Math.random().toString(36).slice(2);
-  const r = await api(`/api/public/liked?limit=200&seed=${likedSeed}`);
+  let r;
+  try { r = await api(`/api/public/liked?limit=200&seed=${likedSeed}`, { signal: request.signal }); }
+  catch (error) { if (disposed) return; throw error; }
+  if (disposed) return;
   view().innerHTML = `<section class="read" style="max-width:1100px"><h1>♥ Liked <span class="count">${fmtNum(r.total)}</span></h1>
     <p class="m">Posts that are still kept, most liked first, with GIFs scattered among the images. ▲ counts how many rounds liked each one.</p>
-    ${r.items.length ? `<div class="grid">${r.items.map((v, i) => `<button class="tile" data-i="${i}"><img src="${esc(v.media.url)}" alt="" loading="lazy">${ytBadge(v)}<span>▲ ${fmtNum(v.likes)} · 👁 ${fmtNum(v.views || 0)} · ${esc(v.title)}</span></button>`).join('')}</div>`
+    ${r.items.length ? '<div class="grid media-grid"></div>'
       : '<div class="empty"><div class="big">💔</div>Nothing liked yet. <a href="#/">Start swiping</a></div>'}</section>`;
-  view().querySelectorAll('.tile').forEach((b) => b.addEventListener('click', () => {
+  const grid = $('.grid', view());
+  if (!grid) return;
+  gallery = mediaGrid(grid, r.items, v => {
+    const tile = document.createElement('button');
+    tile.className = 'tile'; tile.title = v.title;
+    tile.innerHTML = `<img alt="">${ytBadge(v)}<span>▲ ${fmtNum(v.likes)} · 👁 ${fmtNum(v.views || 0)} · ${esc(v.title)}</span>`;
+    return tile;
+  });
+  gallery.layout();
+  grid.addEventListener('click', event => {
+    const b = event.target.closest('.tile');
+    if (!b) return;
     const v = r.items[+b.dataset.i];
     const box = document.createElement('div');
     box.className = 'viewer';
     box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">▲ ${fmtNum(v.likes)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${esc(fmtBytes(v.media.size))}</span>
       <button class="btn" data-delete>Dislike</button><button class="btn" data-close>✕</button></div><img src="${esc(v.media.url)}" alt="">`;
-    const close = () => { box.remove(); document.removeEventListener('keydown', onEsc); };
+    const close = () => { $('img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onEsc); closeViewer = null; gallery.pause(false); };
+    closeViewer?.(); closeViewer = close; gallery.pause(true);
     const onEsc = (e) => { if (e.key === 'Escape') close(); };
     document.addEventListener('keydown', onEsc);
     $('[data-close]', box).addEventListener('click', close);
     $('[data-delete]', box).addEventListener('click', async () => {
       if (!confirm('Dislike this post? In round 1 this also deletes it and its media (to the admin trash, where it can still be restored).')) return;
-      try { const d = await api('/api/public/vote', { json: { id: v.id, type: v.deck || v.media.type, vote: 'dislike' } }); close(); toast(d.deleted ? 'Deleted' : 'Disliked'); likedView(false); } catch (e) { toast(e.message); }
+      try { const d = await api('/api/public/vote', { json: { id: v.id, type: v.deck || v.media.type, vote: 'dislike' } }); close(); if (disposed) return; toast(d.deleted ? 'Deleted' : 'Disliked'); likedView(false).catch(error => toast(error.message)); } catch (e) { if (!disposed) toast(e.message); }
     });
     document.body.append(box);
     countView(v, (x) => { const e = $('#v-views', box); if (e) e.textContent = `👁 ${fmtNum(x.views)}`; const s = $('span', b); if (s) s.textContent = `▲ ${fmtNum(x.likes)} · 👁 ${fmtNum(x.views)} · ${x.title}`; });
-  }));
+  });
 }
 
 // ---------- thumbnail gallery ----------
@@ -772,17 +925,27 @@ async function likedView(reshuffle = true) {
 // smaller. Each row starts with the next image in sort order and is completed with the nearby
 // images (next LOOK) closest to it in height, so they need little or no shrinking.
 // `maxH` caps row height (big photos would otherwise give one huge image per row).
-function justifyRows(grid, items, width, tileFor, GAP = 6, { LOOK = 40, maxH = Infinity } = {}) {
+function justifyRows(grid, items, width, GAP = 6, { LOOK = 40, maxH = Infinity, cache } = {}) {
   const nat = (v) => {
     const w = v.media.width || 140; const h = v.media.height || 140;
     return h > maxH ? { w: w * maxH / h, h: maxH } : { w, h };
   };
-  const index = new Map(items.map((v, k) => [v, k]));
-  const left = items.slice();
-  let y = 0;
-  while (left.length) {
-    const seed = nat(left[0]).h;
-    const pool = left.slice(0, LOOK).map((v, k) => ({ v, k, s: nat(v) }));
+  const count = items.length, key = `${width}:${GAP}:${LOOK}:${maxH}`;
+  const resume = cache?.key === key && count > cache.count && items[0] === cache.first && items[cache.count - 1] === cache.last;
+  const indexes = resume ? [...cache.remaining, ...items.slice(cache.count).map((v, i) => i + cache.count)] : items.map((v, i) => i);
+  const first = items[0], last = items[count - 1];
+  if (resume) items = indexes.map(index => items[index]);
+  const sizes = items.map(nat), next = items.map((v, i) => i + 1), prev = items.map((v, i) => i - 1);
+  const positions = resume ? cache.positions.slice(0, cache.prefix) : [];
+  let head = 0;
+  let y = resume ? cache.y : 0, tail;
+  while (head < items.length) {
+    const seed = sizes[head].h;
+    const pool = [];
+    for (let index = head; index < items.length && pool.length < LOOK; index = next[index])
+      pool.push({ index, k: pool.length, s: sizes[index] });
+    // Appends can change only rows whose lookahead was not already full.
+    if (!tail && pool.length < LOOK) tail = { remaining: pool.map(c => indexes[c.index]), prefix: positions.length, y };
     const order = [pool[0], ...pool.slice(1).sort((a, b) => Math.abs(Math.log(a.s.h / seed)) - Math.abs(Math.log(b.s.h / seed)) || a.k - b.k)];
     const row = []; let aspect = 0; let minH = Infinity; let full = false;
     for (const c of order) {
@@ -797,17 +960,19 @@ function justifyRows(grid, items, width, tileFor, GAP = 6, { LOOK = 40, maxH = I
     row.forEach((c, k) => {
       // The last tile of a full row absorbs rounding so the row ends exactly at the page edge.
       const w = full && k === row.length - 1 ? width - x : Math.max(1, Math.floor(c.s.w / c.s.h * h));
-      const tile = tileFor(c.v);
-      tile.dataset.i = index.get(c.v);
-      tile.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${rowH}px`;
-      if (tile.parentNode !== grid) grid.append(tile);
+      positions.push({ index: indexes[c.index], x, y, w, h: rowH });
       x += w + GAP;
     });
-    const taken = new Set(row.map((c) => c.v));
-    for (let k = left.length - 1; k >= 0 && taken.size; k--) if (taken.delete(left[k])) left.splice(k, 1);
+    for (const { index } of row) {
+      if (prev[index] < 0) head = next[index]; else next[prev[index]] = next[index];
+      if (next[index] < items.length) prev[next[index]] = prev[index];
+    }
     y += rowH + GAP;
   }
   grid.style.height = `${Math.max(0, y - GAP)}px`;
+  if (cache) Object.assign(cache, { key, count, first, last, positions,
+    ...(tail || { remaining: [], prefix: positions.length, y }) });
+  return positions;
 }
 
 // Gap-free justified rows (never enlarged) built from the stored image sizes, so the layout is known
@@ -823,8 +988,9 @@ function thumbsView(q) {
   $('#t-sort').addEventListener('change', (e) => { location.hash = href(['thumbs'], { sort: e.target.value }); });
   const grid = $('#masonry');
   const items = [];
-  const GAP = 6;
-  let width = 0; let total = Infinity; let round = 1; let busy = false; let end = false; let advancing = false;
+  let total = Infinity; let round = 1; let busy = false; let end = false; let advancing = false; let disposed = false; let closeViewer = null;
+  const request = new AbortController();
+  const gallery = mediaGrid(grid, items, tileFor, { justified: true });
 
   function roundLabel() {
     $('#t-round').textContent = round === 1 ? 'Round 1 · 👎 deletes right away' : `Round ${fmtNum(round)} · 👍 👎 are counted, nothing is deleted`;
@@ -834,44 +1000,44 @@ function thumbsView(q) {
       <button class="tv nope ${v.vote === 'dislike' ? 'on' : ''}" data-vote="dislike" title="${round === 1 ? 'Dislike and delete' : 'Dislike'}">👎</button></div>`;
   }
   function tileFor(v) {
-    // Tiles are reused across reflows so their images are never fetched or decoded again.
+    // Visible tiles survive reflows; offscreen tiles and decoded media are released.
     if (!v.el) {
       v.el = document.createElement('div');
       v.el.className = 'mtile'; v.el.title = v.title;
-      v.el.innerHTML = `<img src="${esc(v.media.url)}" alt="" loading="lazy" decoding="async">${ytBadge(v)}<span>${esc(v.title)}</span>${statsBadge(v)}${buttons(v)}`;
+      v.el.innerHTML = `<img alt="">${ytBadge(v)}<span>${esc(v.title)}</span>${statsBadge(v)}${buttons(v)}`;
     }
     return v.el;
   }
   // Justified rows (see justifyRows); only re-flowed when the width changes or tiles change.
-  function layout(force) {
-    const wNow = Math.floor(grid.clientWidth);
-    if ((wNow === width && !force) || !wNow) return;
-    width = wNow;
-    justifyRows(grid, items, width, tileFor, GAP);
+  function layout(append = false) {
+    gallery.layout(append);
   }
   async function more() {
-    if (busy || end) return;
+    if (disposed || busy || end) return;
     busy = true;
     try {
       // Deleted posts are dropped from `items` and from the server's list, so the offsets stay aligned.
-      const r = await api(`/api/public/thumbs?${new URLSearchParams({ sort, offset: items.length, limit: 80 })}`);
+      const r = await api(`/api/public/thumbs?${new URLSearchParams({ sort, offset: items.length, limit: 80 })}`, { signal: request.signal });
+      if (disposed) return;
       total = r.total; round = r.round; roundLabel();
       $('#t-count').textContent = fmtNum(total);
       items.push(...r.items); layout(true);
       end = r.offset + r.items.length >= r.total;
       $('#t-more').textContent = end ? (total ? '' : 'No thumbnails.') : 'Loading…';
-    } catch (e) { toast(e.message); } finally { busy = false; }
+    } catch (e) { if (!disposed) { toast(e.message); return; } } finally { busy = false; }
+    if (disposed) return;
     if (end) nextRound();
     else if ($('#t-more').getBoundingClientRect().top < innerHeight * 2) more();
   }
   // Every thumbnail of this round has been shown: start the next one once the end is on screen.
   async function nextRound() {
-    if (advancing || !total || !items.length) return;
+    if (disposed || advancing || !total || !items.length) return;
     const r0 = $('#t-more').getBoundingClientRect();
     if (r0.top > innerHeight) return;
     advancing = true;
     try {
       const r = await api('/api/public/thumbs/seen', { json: { round } });
+      if (disposed) return;
       if (r.round !== round) {
         $('#t-more').innerHTML = `🏁 Round ${fmtNum(round)} complete. <a href="#" id="t-next">Start round ${fmtNum(r.round)} from the top</a>`;
         $('#t-next').addEventListener('click', (e) => { e.preventDefault(); render(); });
@@ -886,25 +1052,28 @@ function thumbsView(q) {
     v.pending = true;
     try {
       const r = await api('/api/public/vote', { json: { id: v.id, type: 'thumbs', vote: next } });
+      if (disposed) return;
       v.vote = next === 'none' ? null : next; v.likes = r.likes;
       if (next === 'like') { rewardNote(r); if (r.reward?.paid && (!r.reward.symbol || r.reward.symbol === 'FTHX')) v.earned = (v.earned || 0) + r.reward.paid; }
       if (r.deleted) {
         // Round 1: the post and its media are gone, so the tile leaves the gallery at once.
         const at = items.indexOf(v);
         if (at >= 0) items.splice(at, 1);
-        v.el.remove(); total--; setCount(); layout(true);
+        total--; setCount(); layout();
         toast('Deleted', { label: 'Undo', run: () => undo(v, at) });
       } else {
-        $('.tvote', v.el).outerHTML = buttons(v);
+        if (v.el) $('.tvote', v.el).outerHTML = buttons(v);
       }
     } catch (e) { toast(e.message); } finally { v.pending = false; }
   }
   async function undo(v, at) {
+    if (disposed) return;
     try {
       const r = await api('/api/public/vote', { json: { id: v.id, type: 'thumbs', vote: 'none' } });
+      if (disposed) return;
       v.vote = null; v.likes = r.likes;
-      $('.tvote', v.el).outerHTML = buttons(v);
-      items.splice(Math.min(at, items.length), 0, v); total++; setCount(); layout(true);
+      if (v.el) $('.tvote', v.el).outerHTML = buttons(v);
+      items.splice(Math.min(at, items.length), 0, v); total++; setCount(); layout();
       toast('Restored');
     } catch (e) { toast(e.message); }
   }
@@ -915,16 +1084,14 @@ function thumbsView(q) {
     if (!v) return;
     const b = e.target.closest('[data-vote]');
     if (b) return vote(v, b.dataset.vote);
-    openViewer(items, items.indexOf(v));
+    closeViewer?.(); gallery.pause(true);
+    closeViewer = openViewer(items, items.indexOf(v), { onClose: () => gallery.pause(false) });
   });
   const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) (end ? nextRound() : more()); }, { rootMargin: '1200px 0px' });
   io.observe($('#t-more'));
   const onEnd = () => { if (end) nextRound(); };
   window.addEventListener('scroll', onEnd, { passive: true });
-  // Watches the gallery itself, so a scrollbar appearing (which narrows it without a window resize) re-flows the rows too.
-  const ro = new ResizeObserver(() => layout());
-  ro.observe(grid);
-  cleanup = () => { io.disconnect(); ro.disconnect(); window.removeEventListener('scroll', onEnd); };
+  cleanup = () => { disposed = true; request.abort(); io.disconnect(); gallery.close(); closeViewer?.(); window.removeEventListener('scroll', onEnd); };
   layout();
   more();
 }
@@ -964,8 +1131,9 @@ function trendingView(q) {
   if (trendTyping) { box.focus(); const p = Math.min(trendTyping.pos ?? box.value.length, box.value.length); box.setSelectionRange(p, p); trendTyping = null; }
   const grid = $('#masonry');
   const items = [];
-  const GAP = 6;
-  let width = 0; let busy = false; let end = false;
+  let busy = false; let end = false; let disposed = false; let closeViewer = null;
+  const request = new AbortController();
+  const gallery = mediaGrid(grid, items, tileFor, { justified: true, maxH: Math.max(220, Math.round(innerHeight * 0.45)) });
 
   // Tag chips: the trending tags, then "More tags" pages through every other tag (most active first).
   // While searching, the chips are the tags whose names match.
@@ -982,14 +1150,16 @@ function trendingView(q) {
       + (hasMore ? '<button type="button" class="chip more" title="Show more tags">＋ More tags</button>' : ''));
   }
   async function moreTags() {
+    if (disposed) return;
     const btn = $('#t-tags .chip.more');
     if (!btn || btn.disabled) return;
     btn.disabled = true; btn.textContent = 'Loading…';
     try {
-      const r = await api(`/api/public/trending/tags?${new URLSearchParams({ offset: tagOffset, limit: 40, ...(query ? { q: query } : {}) })}`);
+      const r = await api(`/api/public/trending/tags?${new URLSearchParams({ offset: tagOffset, limit: 40, ...(query ? { q: query } : {}) })}`, { signal: request.signal });
+      if (disposed) return;
       tagOffset = r.offset + r.tags.length;
       addChips(r.tags, tagOffset < r.total);
-    } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = '＋ More tags'; }
+    } catch (e) { if (!disposed) { toast(e.message); btn.disabled = false; btn.textContent = '＋ More tags'; } }
   }
   $('#t-tags').addEventListener('click', (e) => { if (e.target.closest('.chip.more')) moreTags(); });
   async function chips(r) {
@@ -1012,28 +1182,27 @@ function trendingView(q) {
     if (!v.el) {
       v.el = document.createElement('div');
       v.el.className = 'mtile'; v.el.title = v.title;
-      v.el.innerHTML = `<img src="${esc(v.media.url)}" alt="" loading="lazy" decoding="async">${ytBadge(v)}<span>${esc(v.title)}</span>`
+      v.el.innerHTML = `<img alt="">${ytBadge(v)}<span>${esc(v.title)}</span>`
         + `${v.media.type === 'gif' ? '<i class="tgif">GIF</i>' : ''}${likeBtn(v)}`;
     }
     return v.el;
   }
-  function layout(force) {
-    const wNow = Math.floor(grid.clientWidth);
-    if ((wNow === width && !force) || !wNow) return;
-    width = wNow;
-    justifyRows(grid, items, width, tileFor, GAP, { maxH: Math.max(220, Math.round(innerHeight * 0.45)) });
+  function layout(append = false) {
+    gallery.layout(append);
   }
   async function more() {
-    if (busy || end) return;
+    if (disposed || busy || end) return;
     busy = true;
     try {
-      const r = await api(`/api/public/trending?${new URLSearchParams({ sort, offset: items.length, limit: 60, ...(tag ? { tag } : {}), ...(query ? { q: query } : {}) })}`);
+      const r = await api(`/api/public/trending?${new URLSearchParams({ sort, offset: items.length, limit: 60, ...(tag ? { tag } : {}), ...(query ? { q: query } : {}) })}`, { signal: request.signal });
+      if (disposed) return;
       if (!items.length) chips(r);
       $('#t-count').textContent = query ? `${fmtNum(r.total)} for “${query}”` : fmtNum(r.total);
       items.push(...r.items); layout(true);
       end = r.offset + r.items.length >= r.total;
       $('#t-more').textContent = end ? (r.total ? '' : query ? 'No posts match.' : 'Nothing here yet.') : 'Loading…';
-    } catch (e) { $('#t-more').textContent = e.message; end = true; } finally { busy = false; }
+    } catch (e) { if (!disposed) { $('#t-more').textContent = e.message; end = true; } } finally { busy = false; }
+    if (disposed) return;
     if (!end && $('#t-more').getBoundingClientRect().top < innerHeight * 2) more();
   }
   async function like(v) {
@@ -1042,9 +1211,10 @@ function trendingView(q) {
     v.pending = true;
     try {
       const r = await api('/api/public/vote', { json: { id: v.id, type: v.deck, vote: next } });
+      if (disposed) return;
       v.vote = next === 'none' ? null : 'like'; v.likes = r.likes;
       if (next === 'like') { rewardNote(r); if (r.reward?.paid && (!r.reward.symbol || r.reward.symbol === 'FTHX')) v.earned = (v.earned || 0) + r.reward.paid; }
-      $('.tvote', v.el).outerHTML = likeBtn(v);
+      if (v.el) $('.tvote', v.el).outerHTML = likeBtn(v);
     } catch (e) { toast(e.message); } finally { v.pending = false; }
   }
   grid.addEventListener('click', (e) => {
@@ -1052,13 +1222,12 @@ function trendingView(q) {
     const v = t && items[+t.dataset.i];
     if (!v) return;
     if (e.target.closest('[data-vote]')) return like(v);
-    openViewer(items, items.indexOf(v));
+    closeViewer?.(); gallery.pause(true);
+    closeViewer = openViewer(items, items.indexOf(v), { onClose: () => gallery.pause(false) });
   });
   const io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) more(); }, { rootMargin: '1200px 0px' });
   io.observe($('#t-more'));
-  const ro = new ResizeObserver(() => layout());
-  ro.observe(grid);
-  cleanup = () => { io.disconnect(); ro.disconnect(); };
+  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); io.disconnect(); gallery.close(); closeViewer?.(); };
   layout();
   more();
 }
@@ -1177,7 +1346,7 @@ function openViewer(list, i, opts = {}) {
   }
   const step = (d) => { const j = i + d; if (j >= 0 && j < list.length) { i = j; show(); } };
   const onWallet = () => { paintForm(); const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadComments(list[i], ++seq); };
-  const close = () => { closed = true; box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); };
+  const close = () => { if (closed) return; closed = true; seq++; $('.vmedia img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); };
   const onKey = (e) => {
     if (e.target.closest?.('textarea, input')) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } else if (e.key === 'Escape') e.target.blur();
@@ -1208,6 +1377,7 @@ function openViewer(list, i, opts = {}) {
   show();
   document.body.append(box);
   if (opts.focus) $('#c-text', box)?.focus();
+  return close;
 }
 
 // ---------- new post ----------
