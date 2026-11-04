@@ -1,5 +1,13 @@
 :root{--surface:#17241f;--surface-raised:#1e3028;--surface-border:#cfdfd326;--muted:#a6b9ad;--mint:#c5e7b4;--panel-shadow:0 12px 36px #06120e38;color:#edf3ec;color-scheme:dark}
 html:has(#app),body:has(#app){height:100%;overflow:hidden}
+/* The shared site stylesheet centers and caps every <main>; game views fill their grid area instead. */
+#app>main{max-width:none;margin:0}
+#app>main:is(.map,.settlement-view){padding:0}
+/* One content width for every non-map game page so headings and panels line up across Market, Inbox, Federation and guides. */
+#app{--game-content-width:1680px}
+#app :is(.community-view,.marketplace-view)>*:not(dialog){box-sizing:border-box;width:100%;max-width:var(--game-content-width);margin-inline:auto}
+#app :is(.page-heading,.exchange-heading,.bank-heading,.exchange-layout,.federation-page-content,.journal-tools,.journal-page-list,.community-chat-layout,.guide-hero,.guide-layout,.settlement-section,.world-dollar-wallet,.featheral-bank-view>p){max-width:var(--game-content-width)}
+#app .market-bank-link{width:100%;max-width:var(--game-content-width)}
 #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:88px;--game-header-height:96px;--game-footer-height:0px;--layout-gap:20px;position:relative;height:100dvh;min-height:0;grid-template-columns:var(--game-rail-width) minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr);font-size:14px;background:#0e1914}
 #app .rail{grid-column:1;grid-row:1/-1;padding:20px 10px 16px;border-color:var(--surface-border);background:#101d17}
 .game-brand{display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;color:var(--mint);font:800 30px 'Manrope',sans-serif;line-height:1}
@@ -34,12 +42,12 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app .button.primary:hover:not(:disabled),.account-pane .button.primary:hover:not(:disabled){background:#d9efcd}
 #app :is(.page-card,.exchange-card,.exchange-catalog,.inbox-directory,.chat-page){border-color:var(--surface-border);background:var(--surface);border-radius:16px}
 #app :is(.community-view,.marketplace-view){grid-column:2;grid-row:2;padding:32px;min-height:0;background:radial-gradient(ellipse at top right,#2b47372b,transparent 60%),#101c16;scrollbar-width:thin;scrollbar-color:#607d69 transparent}
-#app :is(.page-heading,.exchange-heading,.bank-heading){max-width:1200px;margin:0 auto 28px;gap:20px}
+#app :is(.page-heading,.exchange-heading,.bank-heading){margin:0 auto 28px;gap:20px}
 #app :is(.page-heading,.exchange-heading,.bank-heading) h1{font-family:'Manrope',sans-serif;font-size:30px;font-weight:750;line-height:1.25;letter-spacing:-.8px}
 #app :is(.page-heading,.bank-heading) p{color:var(--muted);font-size:14px;line-height:1.7}
 #app .page-card{padding:24px}
-#app .exchange-layout{max-width:1200px;grid-template-columns:minmax(0,1fr) 340px;gap:20px}
-#app .market-bank-link{width:min(1200px,100%);margin:0 auto 20px}
+#app .exchange-layout{grid-template-columns:minmax(0,1fr) 380px;gap:20px}
+#app .market-bank-link{margin:0 auto 20px}
 #app .exchange-card{padding:20px}
 #app .exchange-assets{max-height:320px}
 #app .exchange-asset{padding:12px;min-height:64px}
@@ -52,8 +60,8 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app .inbox-directory,#app .inbox-layout .chat-page{padding:20px}
 #app .chat-message p{font-size:14px;line-height:1.7}
 #app .chat-message time{font-size:11px}
-#app .featheral-bank-view>p{max-width:1200px;margin:0 auto;color:var(--muted);line-height:1.8}
-#app .world-dollar-wallet{max-width:1200px;margin-inline:auto}
+#app .featheral-bank-view>p{margin:0 auto;color:var(--muted);line-height:1.8}
+#app .world-dollar-wallet{margin-inline:auto}
 .management-dialog,.account-pane{background:var(--surface);border-color:var(--surface-border);box-shadow:var(--panel-shadow)}
 .management-dialog{border-radius:20px}
 .management-dialog::backdrop,.account-pane::backdrop{background:#07140bb3;backdrop-filter:blur(6px)}
