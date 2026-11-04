@@ -44,7 +44,6 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   vm.runInContext(source, context);
   await context.mountDeploymentControls(1, () => ready);
   return { element, calls, plan, context, setFailure(error) { failure = error; }, setReady(value) { ready = value; },
-    async mountSelf() { await context.mountSelfDeploymentControls(1, () => ready); },
     setSelfStatus(value) { selfStatus = value; },
     async refresh() { await poll(); },
     get confirmed() { return confirmed; }, get signed() { return signed; },
@@ -54,7 +53,6 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
 
 test('self-sync is signed, targets only the current Admin server and remains disabled while running', async () => {
   const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
-  await f.mountSelf();
   assert.equal(f.element('#self-sync-start').disabled, false);
   await f.click('#self-sync-start');
   assert.equal(f.signed, 1); assert.equal(f.confirmed, 1);
@@ -65,12 +63,11 @@ test('self-sync is signed, targets only the current Admin server and remains dis
   f.setSelfStatus({ available: true, running: false, phase: 'complete', message: 'Health verified', logs: [{ at: 1, message: '<build complete>' }] });
   await f.refresh();
   assert.equal(f.element('#self-sync-status').textContent, 'Health verified');
-  assert.match(f.element('#self-sync-console').textContent, /<build complete>/);
+  assert.match(f.element('#deployment-console').textContent, /Git self-sync[\s\S]*<build complete>/);
   assert.equal(f.element('#self-sync-start').disabled, false);
 });
 test('self-sync is unavailable locally and blocks uncertain jobs or unsaved Settings', async () => {
   const f = await fixture(undefined, { available: false, running: false, message: 'Linux Admin only', logs: [] });
-  await f.mountSelf();
   assert.equal(f.element('#self-sync-start').disabled, true);
   await f.click('#self-sync-start');
   assert.equal(f.signed, 0);
@@ -84,7 +81,6 @@ test('self-sync is unavailable locally and blocks uncertain jobs or unsaved Sett
 });
 test('failed self-sync approval is shown and never launches a job', async () => {
   const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
-  await f.mountSelf();
   f.setFailure(new Error('Approval unavailable'));
   await f.click('#self-sync-start');
   assert.equal(f.element('#self-sync-status').textContent, 'Approval unavailable');
@@ -198,8 +194,9 @@ test('deployment console displays installer stdout and stderr alongside progress
     { at: Date.now(), message: 'server.example: Error: build failed' },
   ] });
   assert.match(f.element('#deployment-console').textContent, /Building World[\s\S]*added 250 packages[\s\S]*Error: build failed/);
-  assert.equal(f.element('#deployment-console').children[0].className, 'console-info');
-  assert.equal(f.element('#deployment-console').children[4].className, 'console-error');
+  assert.equal(f.element('#deployment-console').children[0].className, 'console-source');
+  assert.equal(f.element('#deployment-console').children[2].className, 'console-info');
+  assert.equal(f.element('#deployment-console').children[6].className, 'console-error');
 });
 test('both consoles color severity without interpreting untrusted output as HTML', async () => {
   const f = await fixture();
@@ -230,5 +227,33 @@ test('polling preserves reading position and follows new output only near the co
 test('legacy failures without saved logs remain visible in the single console', async () => {
   const f = await fixture({ running: false, logs: [], result: { success: false, error: 'Remote deployment failed.' } });
   assert.equal(f.element('#deployment-status').textContent, 'Deployment failed');
-  assert.equal(f.element('#deployment-console').textContent, 'Remote deployment failed.');
+  assert.equal(f.element('#deployment-console').textContent, '--- Upload deployment ---\nRemote deployment failed.');
+});
+test('one action panel and one console retain both operation logs without polling overwrites', async () => {
+  const status = { running: true, logs: [{ at: 1, message: 'Upload verified' }] };
+  const f = await fixture(status, { available: true, running: false, logs: [{ at: 2, message: 'Git build complete' }] });
+  const html = vm.runInContext('deploymentControlsHtml()', f.context);
+  assert.equal((html.match(/role="log"/g) || []).length, 1);
+  assert.doesNotMatch(html, /id="self-sync-console"/);
+  const { parse } = require('parse5');
+  const tree = parse(html), parents = new Map(), nodes = new Map();
+  const walk = (node, parent) => {
+    parents.set(node, parent);
+    const id = node.attrs?.find(attr => attr.name === 'id')?.value;
+    if (id) nodes.set(id, node);
+    for (const child of node.childNodes || []) walk(child, node);
+  };
+  walk(tree);
+  const section = node => node.tagName === 'section' ? node : section(parents.get(node));
+  assert.equal(section(nodes.get('deployment-start')), section(nodes.get('self-sync-start')));
+  const output = () => f.element('#deployment-console').textContent;
+  assert.match(output(), /Upload deployment[\s\S]*Upload verified[\s\S]*Git self-sync[\s\S]*Git build complete/);
+  status.logs.push({ at: 3, message: 'Upload complete' });
+  await f.refresh();
+  assert.match(output(), /Upload complete[\s\S]*Git self-sync[\s\S]*Git build complete/);
+  f.setSelfStatus({ available: true, running: false, logs: [{ at: 4, message: '<unsafe> Git failed' }] });
+  await f.click('#self-sync-refresh');
+  assert.match(output(), /Upload complete[\s\S]*<unsafe> Git failed/);
+  assert.equal(output().split('Upload complete').length - 1, 1);
+  assert(!f.element('#deployment-console').children.some(child => child.innerHTML));
 });

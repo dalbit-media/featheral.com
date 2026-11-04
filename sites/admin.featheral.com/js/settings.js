@@ -22,7 +22,7 @@ function changedServiceSettings(form, fields) {
 VIEWS.settings = async (_q, token) => {
   renderSidebar("settings"); setCrumbs("<b>Settings</b>");
   setView(`<div class="server-profile-dashboard"><section class="server-profile-heading"><h1>Settings</h1><span id="settings-status" role="status">Loading...</span></section>
-    <section class="card form-grid settings-deployment"><h2>Deployment</h2>
+    <section class="card form-grid settings-deployment"><h2>Deployment &amp; Git sync</h2>
     <form id="operations-settings" class="form-grid" autocomplete="off">
         <h3>1. Connection</h3>
         <label>Server host<input name="host" placeholder="featheral.com" required></label>
@@ -116,7 +116,6 @@ VIEWS.settings = async (_q, token) => {
   });
   await load();
   if (active()) await mountDeploymentControls(token, () => loaded && !saving && snapshot() === saved);
-  if (active()) await mountSelfDeploymentControls(token, () => loaded && !saving && snapshot() === saved);
 };
 
 VIEWS["site-server"] = async (key, _q, token) => {

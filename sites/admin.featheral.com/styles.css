@@ -46,6 +46,8 @@
 .settings-deployment .deployment-plan { max-height: clamp(18rem, calc(100dvh - 29rem), 48rem); }
 .deployment-review-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .deployment-review-heading h3 { margin: 0; }
+.settings-deployment h4 { margin: 0; }
+.deployment-self-sync { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 8px; }
 .deployment-summary { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--brand-soft); white-space: pre-line; overflow-wrap: anywhere; }
 .deployment-technical { min-width: 0; }
 .deployment-technical summary { cursor: pointer; color: var(--muted); padding: 6px 0; }

@@ -297,8 +297,8 @@ test('traffic defaults to hourly lines and switches periods with a shared scale'
     assert.doesNotMatch(settings, /Admin access|Advanced server settings|name="runtimeConfirmation"|name="enabled"/);
     assert.match(settings, /settings-deployment/);
     assert.match(settings, /1\. Connection/);
-    assert.match(deployment, /deployment-review-heading">2\. Review/);
-    assert.match(deployment, /deployment-console-heading">3\. Deployment console/);
+    assert.match(deployment, /deployment-review-heading">2\. Deploy or sync/);
+    assert.match(deployment, /deployment-console-heading">3\. Deployment &amp; sync console/);
     assert.match(deployment, /role="log" aria-labelledby="deployment-console-heading"/);
   });
 

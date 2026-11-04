@@ -65,7 +65,10 @@ unexpired plan. A new review clears the old phrase; a failed wallet challenge
 shows its error and allows retry without leaving Settings.
 
 **Sign & self-sync** is available only on the active deployed Linux Admin
-server. It requires wallet approval, server-side Git access to
+server. Settings groups upload deployment and Git self-sync in one action panel
+with a single source-labelled console. Both operations retain their logs when
+the other refreshes; self-sync status can be refreshed after a restart.
+It requires wallet approval, server-side Git access to
 `https://github.com/dalbit-media/featheral.com.git`, Git installed on the server,
 and non-interactive sudo for deployment operations. It does not require the SSH
 upload deployment enable switch or SSH target credentials: it updates the local

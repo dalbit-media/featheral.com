@@ -108,7 +108,8 @@ function renderConsole(element, text) {
 function deploymentControlsHtml() {
   return `<div class="deployment-controls">
     <section class="form-grid deployment-review" aria-labelledby="deployment-review-heading">
-    <div class="deployment-review-heading"><h3 id="deployment-review-heading">2. Review &amp; deploy</h3>
+    <h3 id="deployment-review-heading">2. Deploy or sync</h3>
+    <div class="deployment-review-heading"><h4>Upload reviewed code</h4>
     <button class="btn" type="button" id="deployment-plan">Review release</button></div>
     <p class="muted small">Code is compressed into a verified ZIP before upload. One release for all assigned servers; installation is detected automatically and existing data and keys are preserved. Database/uploads sync remains a separate file transfer.</p>
     <p id="deployment-summary" class="deployment-summary" role="status">Save the connection, then review the release.</p>
@@ -118,24 +119,40 @@ function deploymentControlsHtml() {
     <label>Enter phrase to approve<input id="deployment-approval" autocomplete="off" spellcheck="false" placeholder="DEPLOY ..." disabled></label>
     <button class="btn primary deployment-launch" type="button" id="deployment-start" disabled>Sign &amp; deploy</button>
     <p class="muted small">Restarts services. New sites contain published content only, without source ownership, balances, rewards, uploads or history. Back up existing data first.</p>
-    </section>
-    <section class="form-grid deployment-output" aria-labelledby="deployment-console-heading">
-    <div class="deployment-console-heading"><h3 id="deployment-console-heading">3. Deployment console</h3>
-    <span id="deployment-status" class="muted small" role="status" aria-live="polite">Checking deployment status...</span></div>
-    <pre id="deployment-console" class="deployment-console" role="log" aria-labelledby="deployment-console-heading" aria-live="polite" tabindex="0">No deployment logs yet.</pre>
-    <p class="muted small">Live installer output appears here with known credentials redacted. The full server log remains in shared/logs/deployment.log. Logs may contain operational data; review before sharing. Back up existing private data before deploying.</p>
-    </section>
-    <section class="form-grid" aria-labelledby="self-sync-heading">
-    <h3 id="self-sync-heading">Self-sync this Admin server</h3>
+    <p id="deployment-status" class="muted small" role="status" aria-live="polite">Checking deployment status...</p>
+    <div class="form-grid deployment-self-sync" role="group" aria-labelledby="self-sync-heading">
+    <h4 id="self-sync-heading">Pull latest code on this Admin server</h4>
     <p class="muted small">Pull this repository's default branch on the deployed Linux Admin server, build a fresh release and restart with health checks and code rollback. No database or upload transfer; custom published pages, private data and writer authority are preserved. Shipped default designs receive their normal safe upgrades. This does not require enabling SSH upload deployment. Server Git access and non-interactive deployment sudo are required.</p>
     <button id="self-sync-start" class="btn" type="button" disabled>Sign &amp; self-sync</button>
     <button id="self-sync-refresh" class="btn" type="button">Refresh self-sync status</button>
     <p id="self-sync-status" role="status" aria-live="polite">Checking self-sync availability...</p>
-    <pre id="self-sync-console" class="deployment-console" role="log" aria-label="Self-sync output" tabindex="0">No self-sync logs yet.</pre>
+    </div>
+    </section>
+    <section class="form-grid deployment-output" aria-labelledby="deployment-console-heading">
+    <div class="deployment-console-heading"><h3 id="deployment-console-heading">3. Deployment &amp; sync console</h3></div>
+    <pre id="deployment-console" class="deployment-console" role="log" aria-labelledby="deployment-console-heading" aria-live="polite" tabindex="0">No deployment or self-sync logs yet.</pre>
+    <p class="muted small">Live installer output from both actions appears here, labelled by source, with known credentials redacted. Deployment logs remain in shared/logs/deployment.log; Git self-sync status and logs remain in shared/self-deployment/status.json. Logs may contain operational data; review before sharing.</p>
     </section>
   </div>`;
 }
-async function mountSelfDeploymentControls(token, ready = () => true) {
+function deploymentConsoleOutput() {
+  const sources = new Map();
+  let loaded = false;
+  return (source, lines) => {
+    sources.set(source, lines);
+    const text = [...sources].filter(([, entries]) => entries.length)
+      .map(([name, entries]) => `--- ${name} ---\n${entries.join('\n')}`).join('\n\n')
+      || 'No deployment or self-sync logs yet.';
+    const element = $('#deployment-console');
+    if (element.textContent !== text) {
+      const follow = !loaded || element.scrollHeight - element.scrollTop - element.clientHeight < 32;
+      renderConsole(element, text);
+      if (follow) element.scrollTop = element.scrollHeight;
+    }
+    loaded = true;
+  };
+}
+async function mountSelfDeploymentControls(token, ready, output) {
   const hash = location.hash, active = () => token === state.seq && location.hash === hash;
   const button = $('#self-sync-start'), feedback = $('#self-sync-status');
   let timer, submitting = false, current;
@@ -147,7 +164,7 @@ async function mountSelfDeploymentControls(token, ready = () => true) {
       current = await api('/api/settings/self-sync');
       if (!active()) return;
       feedback.textContent = current.message || (current.running ? 'Self-sync running; reconnect after restart.' : 'Ready to pull, rebuild and restart this Admin server.');
-      renderConsole($('#self-sync-console'), (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`).join('\n') || 'No self-sync logs yet.');
+      output('Git self-sync', (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`));
       update();
       if (current.running && !timer) timer = setInterval(refresh, 3000);
       if (!current.running) { clearInterval(timer); timer = null; }
@@ -177,7 +194,7 @@ async function mountSelfDeploymentControls(token, ready = () => true) {
 async function mountDeploymentControls(token, ready = () => true) {
   let plan;
   let deploymentTimer;
-  let consoleLoaded = false;
+  const output = deploymentConsoleOutput();
   let submitting = false, reviewing = false, running = false;
   const viewHash = location.hash, active = () => token === state.seq && location.hash === viewHash;
   const approval = $('#deployment-approval'), start = $('#deployment-start'), review = $('#deployment-plan');
@@ -200,20 +217,13 @@ async function mountDeploymentControls(token, ready = () => true) {
       updateStart();
       $('#deployment-status').textContent = current.running ? 'Running'
         : current.result ? current.result.success ? 'Verified successfully' : 'Deployment failed' : 'No deployment started';
-      const consoleView = $('#deployment-console');
       const lines = (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`);
       for (const target of current.result?.targets || []) {
         lines.push(`${target.host}: ${target.success ? 'verified' : 'failed'} (${target.hosts.join(', ')})`);
         if (target.error && !lines.some(line => line.includes(target.error))) lines.push(target.error);
       }
       if (!current.logs?.length && current.result?.error && !lines.some(line => line.includes(current.result.error))) lines.push(current.result.error);
-      const text = lines.length ? lines.join('\n') : 'No deployment logs yet.';
-      if (consoleView.textContent !== text) {
-        const follow = !consoleLoaded || consoleView.scrollHeight - consoleView.scrollTop - consoleView.clientHeight < 32;
-        renderConsole(consoleView, text);
-        if (follow) consoleView.scrollTop = consoleView.scrollHeight;
-      }
-      consoleLoaded = true;
+      output('Upload deployment', lines);
       if (current.running && !deploymentTimer) deploymentTimer = setInterval(status, 2000);
       if (!current.running) { clearInterval(deploymentTimer); deploymentTimer = null; }
     } catch (error) { clearInterval(deploymentTimer); deploymentTimer = null; if (active()) $('#deployment-status').textContent = error.message; }
@@ -272,6 +282,7 @@ async function mountDeploymentControls(token, ready = () => true) {
     }
   });
   await status();
+  if (active()) await mountSelfDeploymentControls(token, ready, output);
 }
 VIEWS.deployment = async () => { location.hash = '#/settings'; };
 
