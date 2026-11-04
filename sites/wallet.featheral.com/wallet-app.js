@@ -11,6 +11,7 @@
     throw new Error("Wallet embedding origin does not match.");
   document.body.dataset.embedded = String(config.embedded); document.body.dataset.compact = String(config.compact);
   document.body.dataset.primary = config.primary;
+  let browserProvider = config.embedded ? null : window.ethereum;
   const defaultStandaloneTheme = !config.embedded && !config.parentOrigin && !new URLSearchParams(location.search).has("theme");
   document.body.style.setProperty("--brand", defaultStandaloneTheme ? "#e2b13c" : config.theme.accent);
   const themeProperties = { accent: "--brand", background: "--wallet-bg", panel: "--panel", text: "--txt",
@@ -72,7 +73,7 @@
     siteApproval.address = owner;
     window.parent.postMessage({ type: "featheral:wallet-auth-ready", nonce: siteApproval.nonce, address: owner }, config.parentOrigin);
   }
-  if (savedVault && !window.ethereum) token = "";
+  if (savedVault && !browserProvider) token = "";
   const publicAddress = () => config.followActive ? returnedAddress || selectedAddress() || config.address
     : config.address || returnedAddress || (!token ? selectedAddress() : null);
   if (!interactive) token = "";
@@ -190,7 +191,7 @@
     $("portfolio-usd").title = "Estimated portfolio USD total";
   }
   function connectionLabel() {
-    const label = !interactive ? "Read-only wallet" : token ? "Disconnect wallet" : publicAddress() ? "Authorize wallet" : !window.ethereum ? "Connect / create wallet" : "Connect wallet";
+    const label = !interactive ? "Read-only wallet" : token ? "Disconnect wallet" : publicAddress() ? "Authorize wallet" : !browserProvider ? "Connect / create wallet" : "Connect wallet";
     const button = $("wallet-connect");
     button.title = label; button.setAttribute("aria-label", label); button.dataset.tooltip = label;
     button.dataset.state = token ? "authorized" : publicAddress() ? "selected" : "disconnected";
@@ -249,13 +250,13 @@
       if (!builtInActive || owner !== address || epoch !== current) throw new Error("Active wallet changed while signing.");
       return signature;
     }
-    if (!window.ethereum) throw new Error("Connect an Ethereum-compatible wallet.");
+    if (!browserProvider) throw new Error("Connect an Ethereum-compatible wallet.");
     const signer = owner;
-    const accounts = await window.ethereum.request({ method: "eth_accounts" });
+    const accounts = await browserProvider.request({ method: "eth_accounts" });
     if (accounts[0]?.toLowerCase() !== signer.toLowerCase()) throw new Error("Wallet changed. Reconnect.");
     const hex = "0x" + [...new TextEncoder().encode(message)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-    const signature = await window.ethereum.request({ method: "personal_sign", params: [hex, signer] });
-    if (owner !== signer || (await window.ethereum.request({ method: "eth_accounts" }))[0]?.toLowerCase() !== signer.toLowerCase())
+    const signature = await browserProvider.request({ method: "personal_sign", params: [hex, signer] });
+    if (owner !== signer || (await browserProvider.request({ method: "eth_accounts" }))[0]?.toLowerCase() !== signer.toLowerCase())
       throw new Error("Wallet changed while signing. Reconnect.");
     return signature;
   }
@@ -556,13 +557,13 @@
   async function ensureSession() {
     if (token) return true;
     if (!interactive) throw new Error("This address view is read-only.");
-    if (vault && !window.ethereum) {
+    if (vault && !browserProvider) {
       tab("account"); $("local-wallet").open = true;
       $("vault-action").value = vault.read() ? "unlock" : "create"; updateVault();
       $("vault-password").focus(); return false;
     }
-    if (!window.ethereum) throw new Error("Create or restore a built-in wallet in Account, or enable your browser wallet.");
-    const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+    if (!browserProvider) throw new Error("Create or restore a built-in wallet in Account, enable your browser wallet, or open the full wallet in a new tab.");
+    const accounts = await browserProvider.request({ method: "eth_requestAccounts" });
     if (!/^0x[0-9a-f]{40}$/i.test(accounts?.[0] || "")) throw new Error("No wallet account was selected.");
     owner = accounts[0];
     const challenge = await api("/challenge", { address: owner }), signature = await sign(challenge.message);
@@ -678,8 +679,8 @@
       const use = el("button", `Use external ${link.address.slice(0, 6)}…${link.address.slice(-4)}`);
       use.type = "button";
       use.addEventListener("click", () => vaultWork(async () => {
-        if (!window.ethereum) throw new Error("Open your linked Ethereum wallet to authorize spending from that account.");
-        const selected = (await window.ethereum.request({ method: "eth_requestAccounts" }))[0];
+        if (!browserProvider) throw new Error("Open your linked Ethereum wallet to authorize spending from that account.");
+        const selected = (await browserProvider.request({ method: "eth_requestAccounts" }))[0];
         if (selected?.toLowerCase() !== link.address.toLowerCase()) throw new Error("Select the linked account in your external wallet first.");
         await loginWallet(selected, false);
       }));
@@ -792,9 +793,9 @@
       await loginWallet(vault.signer.address, true);
     }));
     $("vault-link").addEventListener("click", () => vaultWork(async () => {
-      if (!window.ethereum) throw new Error("Install or open an external Ethereum wallet first. Your built-in wallet already has its own Ethereum address.");
+      if (!browserProvider) throw new Error("Install or open an external Ethereum wallet first. Your built-in wallet already has its own Ethereum address.");
       if (!await review("Link this external wallet? Both accounts must sign. Balances stay separate and no transfers are authorized.")) return;
-      await vault.link(window.ethereum); await refresh();
+      await vault.link(browserProvider); await refresh();
     }));
     for (const name of ["pointerdown", "keydown"]) document.addEventListener(name, () => { expireVault(); idleAt = Date.now(); }, true);
     setInterval(expireVault, 10000);
@@ -820,7 +821,7 @@
     });
     updateVault();
   } else $("local-wallet").hidden = true;
-  window.ethereum?.on?.("accountsChanged", accounts => {
+  browserProvider?.on?.("accountsChanged", accounts => {
     if (builtInActive || !interactive) return;
     returnedAddress = accounts[0] || null;
     if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress); else storage.removeItem(ACTIVE_ACCOUNT);
@@ -892,8 +893,8 @@
     window.addEventListener("message", event => {
       if (event.source !== window.parent || event.origin !== config.parentOrigin) return;
       if (interactive && event.data?.type === "featheral:wallet-provider-status") {
-        if (event.data.available && !window.ethereum) {
-          window.ethereum = providerProxy;
+        if (event.data.available && browserProvider !== providerProxy) {
+          browserProvider = providerProxy;
           providerProxy.on("accountsChanged", accounts => {
             if (builtInActive) return;
             returnedAddress = accounts[0] || null;
@@ -907,6 +908,13 @@
             returnedAddress = accounts[0]; storage.setItem(ACTIVE_ACCOUNT, accounts[0]);
             refresh().catch(status);
           }).catch(status);
+        } else if (!event.data.available && browserProvider === providerProxy) {
+          browserProvider = null; connectionLabel();
+        }
+        if (!event.data.available && config.view === "account" && vault) {
+          $("local-wallet").open = true;
+          $("vault-action").value = vault.read() ? "unlock" : "create";
+          updateVault();
         }
         return;
       }
@@ -914,7 +922,8 @@
         const pending = providerRequests.get(event.data.id);
         if (!pending) return;
         providerRequests.delete(event.data.id); clearTimeout(pending.timer);
-        if (event.data.error) pending.reject(new Error(event.data.error));
+        if (event.data.error) pending.reject(Object.assign(new Error(event.data.error),
+          Number.isInteger(event.data.code) ? { code: event.data.code } : {}));
         else pending.resolve(event.data.result);
         return;
       }
@@ -923,7 +932,9 @@
         return;
       }
       if (event.source === window.parent && event.origin === config.parentOrigin && event.data?.type === "featheral:wallet-theme") {
-        applyTheme(event.data.theme); return;
+        applyTheme(event.data.theme);
+        window.parent.postMessage({ type: "featheral:wallet-themed" }, config.parentOrigin);
+        return;
       }
       if (event.source === window.parent && event.origin === config.parentOrigin && event.data?.type === "featheral:wallet-updated") {
         refreshVisible(); return;
@@ -989,21 +1000,22 @@
       if (siteApproval) window.parent.postMessage({ type: "featheral:wallet-signature", nonce: siteApproval.nonce, error: "Wallet sign-in cancelled." }, config.parentOrigin);
       siteApproval = null; $("site-approval").hidden = true;
     });
+    document.body.dataset.walletReady = "true";
     window.parent.postMessage?.({ type: "featheral:wallet-ready" }, config.parentOrigin);
     $("wallet-connect-action").hidden = false;
     $("world-sync").target = "_blank"; $("world-funds").target = "_blank"; $("world-play").target = "_blank";
     for (const link of [$("world-sync"), $("world-funds"), $("world-play")]) link.rel = "noopener";
   }
   connectionLabel();
-  if (!window.ethereum && config.view === "account" && vault) {
+  if (!config.embedded && !browserProvider && config.view === "account" && vault) {
     $("local-wallet").open = true;
     $("vault-action").value = vault.read() ? "unlock" : "create";
     updateVault();
   }
   if (!storageAvailable) $("status").textContent = "Browser wallet storage is blocked. Allow storage for this site's wallet to create or restore a built-in account.";
-  if (interactive && !token && !publicAddress() && window.ethereum) {
+  if (interactive && !token && !publicAddress() && browserProvider) {
     try {
-      const accounts = await window.ethereum.request({ method: "eth_accounts" });
+      const accounts = await browserProvider.request({ method: "eth_accounts" });
       if (accounts[0] && /^0x[0-9a-fA-F]{40}$/.test(accounts[0])) storage.setItem(ACTIVE_ACCOUNT, accounts[0]);
     } catch (error) { status(error); }
   }
@@ -1012,4 +1024,7 @@
   console.error("Central wallet initialization failed:", error);
   const status = document.getElementById("status");
   if (status) status.textContent = error.message;
+  const origin = new URLSearchParams(location.search).get("parentOrigin");
+  if (document.body.dataset.walletReady !== "true" && window.parent !== window && origin && document.referrer && new URL(document.referrer).origin === origin)
+    window.parent.postMessage({ type: "featheral:wallet-error" }, origin);
 });

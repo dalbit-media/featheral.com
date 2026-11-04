@@ -5,6 +5,8 @@
   const site = location.hostname.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar"].includes(site) ? "FTH$" : "FTHX";
   const frames = new Set();
+  const frameStates = new WeakMap();
+  const rootFrames = new WeakMap();
   const headerButtons = new Map();
   let avatarAccount, avatarUrl, avatarError = "";
   let authorization, selectedPublicAddress;
@@ -103,7 +105,8 @@
           resolve(result);
         }
       };
-      const pending = { frame, nonce, address: null, started: Date.now() };
+      const pending = { frame, nonce, address: null, started: Date.now(),
+        cancel: () => finish(new Error("Wallet was reloaded or could not start. Retry the connection.")) };
       authorization = pending;
       async function receive(event) {
         if (event.origin !== walletOrigin || event.source !== frame.contentWindow || event.data?.nonce !== nonce) return;
@@ -156,13 +159,84 @@
   }
   function sendTheme(frame) {
     const theme = hostTheme();
-    if (theme) frame.contentWindow?.postMessage({ type: "featheral:wallet-theme", theme }, walletOrigin);
+    frame.contentWindow?.postMessage({ type: "featheral:wallet-theme", theme: theme || {} }, walletOrigin);
+  }
+  const boundProviders = new WeakSet();
+  const announcedProviders = new Map();
+  let chosenProvider;
+  function providerChoices() {
+    if (announcedProviders.size) return [...announcedProviders].map(([provider, name]) => ({ provider, name }));
+    return [...new Set(window.ethereum?.providers || [window.ethereum])].filter(provider => typeof provider?.request === "function")
+      .map(provider => ({ provider, name: provider.isMetaMask ? "MetaMask" : provider.isCoinbaseWallet ? "Coinbase Wallet" : "Browser wallet" }));
+  }
+  function browserProvider() {
+    const choices = providerChoices();
+    const provider = chosenProvider || window.FeatheralProfile?.getProvider?.() || (choices.length === 1 ? choices[0].provider : null);
+    if (provider && !boundProviders.has(provider)) {
+      boundProviders.add(provider);
+      provider.on?.("accountsChanged", accounts => {
+        if (browserProvider() !== provider) return;
+        for (const frame of frames) if (frame.isConnected && frame.dataset.walletFollowActive === "true")
+          frame.contentWindow?.postMessage({ type: "featheral:wallet-provider-event", name: "accountsChanged", accounts }, walletOrigin);
+      });
+    }
+    return provider;
+  }
+  function updateProviderChoices(notify = true) {
+    const choices = providerChoices(), selected = browserProvider();
+    const picker = document.getElementById("featheral-wallet-provider");
+    if (picker) {
+      picker.replaceChildren();
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Choose browser wallet";
+      picker.append(placeholder);
+      choices.forEach((choice, index) => {
+        const option = document.createElement("option"); option.value = String(index); option.textContent = choice.name;
+        picker.append(option);
+      });
+      picker.value = String(choices.findIndex(choice => choice.provider === selected));
+      picker.hidden = choices.length < 2;
+    }
+    if (notify) for (const frame of frames) if (frame.isConnected)
+      frame.contentWindow?.postMessage({ type: "featheral:wallet-provider-status", available: choices.length > 0 || !!selected }, walletOrigin);
+  }
+  window.addEventListener?.("eip6963:announceProvider", event => {
+    if (typeof event.detail?.provider?.request !== "function") return;
+    announcedProviders.set(event.detail.provider, String(event.detail.info?.name || "Browser wallet").slice(0, 80));
+    updateProviderChoices();
+  });
+  window.addEventListener?.("ethereum#initialized", updateProviderChoices);
+  if (window.dispatchEvent && typeof Event !== "undefined") window.dispatchEvent(new Event("eip6963:requestProvider"));
+  function frameFailed(frame, message) {
+    const state = frameStates.get(frame);
+    if (!state) return;
+    clearTimeout(state.timer);
+    frame.style.visibility = "hidden";
+    frame.setAttribute("aria-hidden", "true");
+    state.root.setAttribute("aria-busy", "false");
+    state.status.hidden = false;
+    state.message.textContent = message;
+    state.retry.hidden = false;
+    if (authorization?.frame === frame) authorization.cancel();
   }
   const providerBusy = new Set();
   window.addEventListener?.("message", async event => {
     if (event.origin !== walletOrigin) return;
     const frame = [...frames].find(frame => frame.isConnected && frame.contentWindow === event.source);
     if (!frame) return;
+    if (event.data?.type === "featheral:wallet-error") {
+      frameFailed(frame, "Wallet could not load. Retry or open the full wallet in a new tab.");
+      return;
+    }
+    if (event.data?.type === "featheral:wallet-themed") {
+      const state = frameStates.get(frame);
+      if (!state) return;
+      clearTimeout(state.timer);
+      frame.style.visibility = "visible";
+      frame.setAttribute("aria-hidden", "false");
+      state.status.hidden = true;
+      state.root.setAttribute("aria-busy", "false");
+      return;
+    }
     if (event.data?.type === "featheral:wallet-provider") {
       if (frame.dataset.walletFollowActive !== "true" || typeof event.data.id !== "string" || event.data.id.length > 100) return;
       const id = event.data.id, request = event.data.request;
@@ -172,23 +246,38 @@
       }
       providerBusy.add(frame);
       try {
-        if (!window.ethereum) throw new Error("No browser wallet is available. Create or restore a built-in wallet in Account.");
+        const provider = browserProvider();
         if (!request || !["eth_accounts", "eth_requestAccounts", "personal_sign"].includes(request.method))
           throw new Error("Unsupported site wallet provider method.");
+        if (!provider?.request) {
+          if (providerChoices().length > 1 && request.method === "eth_accounts" && request.params === undefined) {
+            event.source.postMessage({ type: "featheral:wallet-provider-result", id, result: [] }, walletOrigin);
+            return;
+          }
+          throw new Error(providerChoices().length > 1 ? "Choose your browser wallet at the top of this panel, then retry."
+            : "No browser wallet is available. Create or restore a built-in wallet in Account, or open the full wallet.");
+        }
         if (request.method === "personal_sign") {
           if (!Array.isArray(request.params) || request.params.length !== 2
             || !/^0x[0-9a-f]{1,32768}$/i.test(request.params[0] || "")
             || !/^0x[0-9a-f]{40}$/i.test(request.params[1] || ""))
             throw new Error("Invalid wallet signature request.");
-          const accounts = await window.ethereum.request({ method: "eth_accounts" });
+          const accounts = await provider.request({ method: "eth_accounts" });
           if (accounts[0]?.toLowerCase() !== request.params[1].toLowerCase())
             throw new Error("Wallet account changed. Reconnect in the site panel.");
         } else if (request.params !== undefined) throw new Error("Unexpected account request parameters.");
-        const result = await window.ethereum.request({ method: request.method, ...(request.method === "personal_sign" ? { params: request.params } : {}) });
+        const result = await provider.request({ method: request.method, ...(request.method === "personal_sign" ? { params: request.params } : {}) });
+        if (provider !== browserProvider()) throw new Error("Wallet provider changed. Reconnect in the site panel.");
+        if (request.method === "personal_sign") {
+          const accounts = await provider.request({ method: "eth_accounts" });
+          if (accounts[0]?.toLowerCase() !== request.params[1].toLowerCase())
+            throw new Error("Wallet account changed. Reconnect in the site panel.");
+        }
         event.source.postMessage({ type: "featheral:wallet-provider-result", id, result }, walletOrigin);
       } catch (error) {
         console.error("Site wallet provider:", error);
-        event.source.postMessage({ type: "featheral:wallet-provider-result", id, error: error.message }, walletOrigin);
+        event.source.postMessage({ type: "featheral:wallet-provider-result", id, error: error.message,
+          ...(Number.isInteger(error.code) ? { code: error.code } : {}) }, walletOrigin);
       } finally { providerBusy.delete(frame); }
       return;
     }
@@ -203,7 +292,7 @@
       if (!frame.isConnected) frames.delete(frame);
       else if (frame.contentWindow === event.source) {
         sendTheme(frame);
-        frame.contentWindow.postMessage({ type: "featheral:wallet-provider-status", available: !!window.ethereum }, walletOrigin);
+        frame.contentWindow.postMessage({ type: "featheral:wallet-provider-status", available: providerChoices().length > 0 || !!browserProvider()?.request }, walletOrigin);
         if (authorization?.frame === frame)
           frame.contentWindow.postMessage({ type: "featheral:wallet-auth-start", nonce: authorization.nonce }, walletOrigin);
         if (selectedPublicAddress && frame.dataset.walletFollowActive === "true")
@@ -214,6 +303,11 @@
   });
   function mount(root, options = {}) {
     if (root.dataset.walletMounted) return;
+    const previous = rootFrames.get(root);
+    if (previous) {
+      clearTimeout(frameStates.get(previous)?.timer); frames.delete(previous);
+      if (authorization?.frame === previous) authorization.cancel();
+    }
     root.dataset.walletMounted = "true";
     const primary = options.primary || defaultPrimary, view = options.view || "assets";
     if (!["FTHG", "FTH$", "FTHX", "FTHS"].includes(primary) || !["assets", "send", "receive", "swap", "tip", "activity", "account"].includes(view))
@@ -228,12 +322,14 @@
       url.searchParams.set("address", address);
     }
     const frame = document.createElement("iframe");
+    rootFrames.set(root, frame);
     frame.dataset.walletFollowActive = String(!!followActive);
     frames.add(frame);
     frame.src = url.href; frame.title = `Featheral ${primary} wallet`;
-    frame.referrerPolicy = "origin"; frame.loading = "lazy";
-    frame.style.cssText = "display:block;width:calc(100% + 36px);max-width:none;margin-left:-18px;height:100%;min-height:0;flex:1;border:0;background:var(--panel,#16161f)";
-    frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-downloads allow-storage-access-by-user-activation");
+    frame.referrerPolicy = "origin"; frame.loading = "eager";
+    frame.style.cssText = "display:block;width:calc(100% + 36px);max-width:none;margin-left:-18px;height:100%;min-height:0;flex:1;border:0;background:var(--panel,#16161f);visibility:hidden";
+    frame.setAttribute("aria-hidden", "true");
+    frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-popups-to-escape-sandbox allow-storage-access-by-user-activation");
     frame.setAttribute("allow", "clipboard-write");
     const link = document.createElement("a");
     url.searchParams.delete("embedded");
@@ -242,11 +338,26 @@
       url.searchParams.set("followActive", "1");
     }
     link.href = url.href; link.target = "_blank"; link.rel = "noopener";
-    link.href = walletOrigin;
-    link.textContent = "Powered by Wallet";
-    link.setAttribute("aria-label", "Powered by wallet.featheral.com");
+    link.textContent = "Open full wallet ↗";
+    link.setAttribute("aria-label", "Open full wallet in a new tab");
     link.style.cssText = "align-self:center;color:inherit;opacity:.6;font:10px/1.6 system-ui,sans-serif;margin-top:4px";
-    root.replaceChildren(frame, link);
+    const status = document.createElement("div"), message = document.createElement("span"), retry = document.createElement("button");
+    status.setAttribute("role", "status");
+    status.style.cssText = "position:absolute;inset:40px 18px auto;padding:24px 12px;text-align:center;font:13px/1.6 system-ui,sans-serif;color:inherit";
+    message.textContent = "Loading wallet...";
+    retry.type = "button"; retry.textContent = "Retry wallet"; retry.hidden = true;
+    retry.style.cssText = "margin:12px auto;padding:8px 12px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer";
+    retry.addEventListener("click", () => {
+      clearTimeout(frameStates.get(frame)?.timer);
+      frames.delete(frame); delete root.dataset.walletMounted; mount(root, options);
+    });
+    status.append(message, retry);
+    root.style.position = "relative";
+    root.setAttribute("aria-busy", "true");
+    const timer = setTimeout(() => frameFailed(frame, "Wallet is taking longer than expected. Retry or open the full wallet."), 20000);
+    frameStates.set(frame, { root, status, message, retry, timer });
+    frame.addEventListener("error", () => frameFailed(frame, "Wallet could not load. Retry or open the full wallet."));
+    root.replaceChildren(frame, status, link);
   }
   function open(options = {}) {
     options = { ...options, followActive: options.followActive !== false };
@@ -257,6 +368,18 @@
       dialog.setAttribute("aria-label", "Featheral wallet");
       const heading = document.createElement("div"); heading.dataset.walletHeading = "true";
       const title = document.createElement("b");
+      const picker = document.createElement("select"); picker.id = "featheral-wallet-provider";
+      picker.setAttribute("aria-label", "Browser wallet provider");
+      picker.style.cssText = "max-width:180px;min-width:0;font:12px system-ui;padding:5px;border:1px solid var(--line,#262633);border-radius:6px;background:inherit;color:inherit";
+      picker.addEventListener("change", () => {
+        const choices = providerChoices();
+        if (!/^\d+$/.test(picker.value) || !choices[+picker.value]) return;
+        chosenProvider = choices[+picker.value].provider;
+        browserProvider();
+        for (const frame of frames) if (frame.isConnected && frame.dataset.walletFollowActive === "true")
+          frame.contentWindow?.postMessage({ type: "featheral:wallet-provider-event", name: "accountsChanged", accounts: [] }, walletOrigin);
+        updateProviderChoices();
+      });
       const close = document.createElement("button"); close.type = "button"; close.textContent = "\u00d7";
       close.setAttribute("aria-label", "Close wallet");
       close.addEventListener("click", () => dialog.close());
@@ -268,7 +391,7 @@
         const bounds = dialog.getBoundingClientRect();
         if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close();
       });
-      heading.append(title, close);
+      heading.append(title, picker, close);
       const root = document.createElement("div"); mount(root, options);
       root.dataset.walletRoot = "true";
       dialog.append(heading, root); document.body.append(dialog);
@@ -299,7 +422,7 @@
     heading.querySelector("b").textContent = "Wallet";
     heading.querySelector("button").title = "Close wallet";
     heading.querySelector("button").style.cssText = "display:grid;place-items:center;box-sizing:border-box;width:28px;height:28px;min-width:28px;min-height:28px;padding:0;border:1px solid var(--line,#262633);border-radius:5px;background:transparent;color:inherit;font:18px/1 system-ui,sans-serif;cursor:pointer";
-    root.style.cssText = "display:flex;flex-direction:column;height:calc(100% - 28px);min-height:0";
+    root.style.cssText = "position:relative;display:flex;flex-direction:column;height:calc(100% - 28px);min-height:0";
     {
       const trigger = document.querySelector("header .central-wallet-button");
       if (trigger) {
@@ -310,6 +433,7 @@
       }
     }
     if (!dialog.open) dialog.showModal();
+    updateProviderChoices(false);
   }
   function apply() {
     for (const root of document.querySelectorAll("[data-wallet-embed]")) mount(root, {
@@ -350,10 +474,7 @@
     }
   }
   window.FeatheralWallet = { mount, open, apply, authenticate, account, connect };
-  window.ethereum?.on?.("accountsChanged", accounts => {
-    for (const frame of frames) if (frame.isConnected && frame.dataset.walletFollowActive === "true")
-      frame.contentWindow?.postMessage({ type: "featheral:wallet-provider-event", name: "accountsChanged", accounts }, walletOrigin);
-  });
+  browserProvider();
   if (window.MutationObserver) {
     const observer = new window.MutationObserver(() => {
       for (const frame of frames) { if (frame.isConnected) sendTheme(frame); else frames.delete(frame); }

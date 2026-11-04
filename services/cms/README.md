@@ -1219,6 +1219,21 @@ parent site or a validated `theme` site name, not just the primary token.
 The embed sends `featheral:wallet-theme` on readiness and host theme changes.
 The renderer accepts only bounded color values and light/dark scheme from the exact
 configured parent origin and window; no arbitrary CSS, assets or credentials are passed.
+The iframe loads eagerly behind a host-colored loading surface and becomes visible
+only after acknowledging that its host palette has been applied. Initialization
+errors or a 20-second startup timeout show Retry and a full-wallet link instead of
+a blank panel. Retrying replaces only the renderer and cancels any pending sign-in.
+The full-wallet link retains the currency, view and site context without credentials.
+User-initiated external wallet tools open outside the iframe sandbox; arbitrary
+top-level navigation remains disallowed.
+Embedded extension requests always use the validated parent bridge, even when an
+extension injects a different or non-writable provider inside the frame. Only
+account access and `personal_sign` are bridged; account/provider changes invalidate
+signatures. The site's selected profile provider takes precedence over a generic
+injected provider. EIP-6963-only wallets and legacy multi-provider extensions are
+supported; when multiple providers are available, the panel offers a browser-wallet
+selector rather than silently choosing one. Built-in wallets remain inside the
+central renderer, and pinned public-address embeds receive no signing authority.
 Normal `FeatheralWallet.open` panels set `followActive=1`: the central-origin
 `featheral-wallet-active-account` public address takes priority over a site's login
 address. Explicit `mount({address})` views remain pinned by default. Embedded views

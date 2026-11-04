@@ -103,12 +103,16 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     console: { error: error => errors.push(error.message) }, history: { replaceState() {} },
     window: { parent: { postMessage(data, origin) {
       messages.push({ data, origin });
+      if (embedded && !noProvider && data.type === 'featheral:wallet-ready') queueMicrotask(() => {
+        for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
+          data: { type: 'featheral:wallet-provider-status', available: true } });
+      });
       if (readySelection && data.type === 'featheral:wallet-ready') queueMicrotask(() => {
         for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
           data: { type: 'featheral:wallet-selection', address: readySelection } });
       });
-      if (parentProvider && data.type === 'featheral:wallet-provider') {
-        Promise.resolve().then(() => parentProvider(data.request)).then(result => {
+      if ((parentProvider || !noProvider) && data.type === 'featheral:wallet-provider') {
+        Promise.resolve().then(() => parentProvider ? parentProvider(data.request) : context.window.ethereum.request(data.request)).then(result => {
           for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
             data: { type: 'featheral:wallet-provider-result', id: data.id, result } });
         }, error => {
