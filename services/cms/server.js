@@ -601,7 +601,8 @@ function logSearch(req, place, q, total) {
 }
 app.post('/api/public/hit', wrap((req, res) => res.json(publicSite(req).analytics.hit(req.body || {}, { userAgent: req.get('user-agent'), host: req.get('host') }))));
 app.get('/api/public/info', wrap((req, res) => {
-  const info = publicSite(req).info();
+  const info = publicSite(req).info({ counts: req.query.bootstrap !== '1' });
+  res.set('Cache-Control', 'no-store');
   res.json({ ...info, ageGate: info.siteSettings.ageGate ?? CONFIG.ageGate !== false });
 }));
 app.get('/api/public/sites', wrap((req, res) => {

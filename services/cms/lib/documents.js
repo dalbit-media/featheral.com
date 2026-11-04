@@ -58,17 +58,30 @@ class Documents {
   constructor(root) {
     this.directory = path.join(root, 'sites', 'admin.featheral.com', 'documents');
     this.readOnlyReplica = Boolean(require('../../operations/replica').readReplica(root));
+    this.templates = new Map();
+    this.rendered = new Map();
   }
   files(hostname) {
     if (!documentHosts.includes(hostname)) return [];
     const directory = path.join(this.directory, hostname);
     if (!fs.existsSync(directory)) return [];
-    return fs.readdirSync(directory).filter(file => file.endsWith('.json')).map(file => JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')));
+    const files = fs.readdirSync(directory).filter(file => file.endsWith('.json')).sort();
+    const signature = files.map(file => {
+      const stat = fs.statSync(path.join(directory, file));
+      return `${file}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    }).join('|');
+    const cached = this.templates.get(hostname);
+    if (cached?.signature === signature) return cached.documents;
+    const documents = files.map(file => JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')));
+    this.templates.set(hostname, { signature, documents });
+    for (const key of this.rendered.keys()) if (key.startsWith(hostname + '/')) this.rendered.delete(key);
+    return documents;
   }
   template(hostname, file) { return this.files(hostname).find(document => document.file === file); }
   pages(hostname, store) {
+    const existing = new Map(store.list().map(page => [page.slug, page]));
     return this.files(hostname).map(document => {
-      let page = store.list().find(page => page.slug === document.slug);
+      let page = existing.get(document.slug);
       if (!this.readOnlyReplica && page && page.status === 'publish' && document.replaces?.includes(crypto.createHash('sha256')
         .update(JSON.stringify({ title: page.title, excerpt: page.excerpt, body: page.body })).digest('hex'))) {
         const fragment = parseFragment(document.body);
@@ -81,7 +94,7 @@ class Documents {
           body: validateBody(serialize(fragment), document.widgets, document.layout), revision: page.revision }, page.id);
       }
       if (!page) {
-        const legacy = new Map(store.list().map(page => [page.slug, page.body]));
+        const legacy = new Map([...existing].map(([slug, page]) => [slug, page.body]));
         const fragment = parseFragment(document.body);
         const migrate = node => {
           const key = attr(node, 'data-cms-copy');
@@ -119,13 +132,18 @@ class Documents {
     const template = this.template(hostname, file);
     if (!template) throw Object.assign(new Error('CMS document not found'), { status: 404 });
     const page = this.pages(hostname, store).find(page => page.slug === template.slug);
+    const key = `${hostname}/${file}`, cached = this.rendered.get(key);
+    if (cached?.template === template && cached.body === page.body && cached.title === page.title && cached.excerpt === page.excerpt)
+      return cached.html;
     let html = validateBody(page.body, template.widgets, template.layout);
     if (hostname === 'gold.featheral.com') html = html.replace(/src="\/shared\/logo\.svg"/g, 'src="/shared/logo-gold.svg"');
     html = html.replace(/<cms-widget name="([^"]+)"><\/cms-widget>/g, (_, name) => template.widgets[name]);
-    return template.layout.replace('{{CMS_DOCUMENT}}', () => html)
+    html = template.layout.replace('{{CMS_DOCUMENT}}', () => html)
       .replace(/<title>[\s\S]*?<\/title>/, () => `<title>${escape(page.title)}</title>`)
       .replace(/<meta name="description" content="[^"]*">/, () => `<meta name="description" content="${escape(page.excerpt)}">`)
       .replace(/<body class="([^"]*)">/, (_, classes) => `<body class="${classes} cms-layout">`);
+    this.rendered.set(key, { template, body: page.body, title: page.title, excerpt: page.excerpt, html });
+    return html;
   }
 }
 module.exports = { Documents, documentHosts, validateBody };

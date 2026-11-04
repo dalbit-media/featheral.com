@@ -186,7 +186,7 @@ class PublicSite {
     this.thumbMaxSide = THUMB_MAX_SIDE;
   }
 
-  info() {
+  info({ counts = true } = {}) {
     const options = this.site.options(['blogdescription']);
     const settings = this.cms.siteSettings();
     return {
@@ -194,12 +194,14 @@ class PublicSite {
       tagline: settings.description || this.tagline || T.decodeEntities(options.blogdescription || ''),
       theme: this.cms.theme(),
       pages: this.cms.publicPages(),
-      siteSettings: this.cms.siteSettings(),
-      types: PUBLIC_TYPES.map((id) => ({ id, label: id === 'jpeg' ? 'JPG' : id.toUpperCase(), ...this.status(id) })),
-      mix: this.mixStatus(),
-      thumbs: this.thumbList({ limit: 1 }).total,
-      texts: this.textList({ limit: 1 }).total,
-      trash: this.site.trashed.size,
+      siteSettings: settings,
+      ...(counts ? {
+        types: PUBLIC_TYPES.map((id) => ({ id, label: id === 'jpeg' ? 'JPG' : id.toUpperCase(), ...this.status(id) })),
+        mix: this.mixStatus(),
+        thumbs: this.thumbList({ limit: 1 }).total,
+        texts: this.textList({ limit: 1 }).total,
+        trash: this.site.trashed.size,
+      } : {}),
       token: { ...FTHX, native: true, ...(this.store.notes ? { global: true, rewardProgram: effectiveProgram(this.store.db.prepare('SELECT symbol,chance,amount,enabled FROM notes.notes_programs WHERE site=?').get(this.site.key) || { symbol: 'FTHX', chance: 10, amount: 1, enabled: 0 }) } : {}) },
     };
   }

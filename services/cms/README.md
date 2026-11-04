@@ -945,6 +945,27 @@ To turn the original sync features back on, set `allowSync` to `true` and restar
 The public site is at `http://127.0.0.1:5178/` and the CMS is at `http://127.0.0.1:5178/admin` for local development. In deployment, use `https://x.featheral.com/` and `https://admin.featheral.com/`.
 
 - **Standalone X**: X is not advertised in family headers, footers or Foundation discovery cards. Its own app has no ecosystem header/footer, but retains the shared wallet, age gate, posting, saved likes and existing routes. Its host-scoped visual theme uses warm gradients, rounded discovery cards, prominent action buttons and a compact mobile tab strip with visible labels. Other CMS-hosted sites retain their selected themes. This is a visual refresh, not a dating/matching feature or a change to vote semantics.
+
+### Public startup performance
+
+The shared X/CMS frontend loads `/api/public/info?bootstrap=1` for branding,
+features, wallet configuration and the age gate, without building every media
+index or calculating unrelated gallery/text totals. The regular info endpoint
+keeps its full response. The selected feed supplies its own current round and
+counts, avoiding a second metadata request before the first card.
+
+Swipe media gives the visible card high fetch priority and starts background
+downloads only after it loads. Lookahead is limited to three cards and 12 MiB
+including the visible card; an oversized current card is still allowed.
+Data Saver and 2G connections fetch only the current card. Card construction
+does not bypass this budget, and obsolete requests are cancelled.
+
+CMS templates and parsed classic blocks are cached per source file and refreshed
+when file size or timestamps change. Validated document output is reused only
+while its template, body, title and description match; published edits and theme
+changes appear on the next render. These caches retain one entry per shipped
+template, never visitor-specific or wallet responses. Managed Nginx compresses
+JavaScript, CSS, SVG and text assets; JSON APIs are not added to gzip types.
 - **Discover** (the existing Swipe route): one shuffled deck of every GIF and image post, mixed together, with the title, description and like count (all rounds) overlaid. Swipe right (or press →) to like and keep a post. Swipe left (or press ←) to dislike it: in round 1 this deletes the post and its media; from round 2 the dislike is only counted. Undo with ↺ or Backspace. Each post shows its largest attached GIF, or its largest image if it has no GIF. The shuffle is stable within a round, so leaving and coming back continues where you stopped; each new round is shuffled differently. Only published posts with a downloaded file are included. The next cards' media is downloaded and decoded in the background (always the next 5, and up to 12 within a 600 MB budget). Each card's still frame and blurred backdrop are prepared off the main thread, so swiping never waits on loading or decoding. Only the card on top plays; the cards behind it show a still frame. Each card shows up to 6 of its keyword tags as `#tag` chips (most used first); clicking one opens that tag's Trending gallery.
 - **Read**: a separate menu that lists every published post with text. You can search it and sort it by length (longest by default) or date, and open any post in a clean reader view.
 - **Trending**: a gap-free gallery of all photos (thumbnails included) and GIFs from the posts of the trending tags. GIFs are scattered: one after every 5 photos. It is sorted by likes + comments by default; it can also be sorted by most liked, most commented or newest. Tag heat is the sum over the tag's posts of likes + 2 × comments. More recent activity counts for more (up to 3×, fading over about a week), and the sum is divided by √(posts) so big tags don't always win. When fewer than 12 tags have activity, the most used tags fill the list. Click a tag chip to see only that tag. **＋ More tags** keeps loading the rest of the tags, 40 at a time (most active first, then by size). The search box searches every post's title and text (all words must match) plus tag names; matching tags show as chips. The viewer lists each post's tags, and clicking one opens that tag's gallery. 👍 likes the post (in its deck's current round), with infinite scroll. Tags come from **Keyword tags** below.

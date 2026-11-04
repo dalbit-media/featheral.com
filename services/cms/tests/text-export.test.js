@@ -375,7 +375,7 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => {
         const text = Buffer.concat(chunks).toString();
-        resolve({ status: res.statusCode, location: res.headers.location, data: res.headers['content-type']?.includes('json') ? JSON.parse(text) : text });
+        resolve({ status: res.statusCode, headers: res.headers, location: res.headers.location, data: res.headers['content-type']?.includes('json') ? JSON.parse(text) : text });
       });
     });
     req.on('error', reject);
@@ -416,6 +416,12 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   assert.equal(info.data.siteSettings.displayName, `one-${suffix}`);
   assert.equal(info.data.siteSettings.homepage, 'content');
   assert.equal(info.data.siteSettings.ageGate, false);
+  const bootstrap = await request(prefix + '/api/public/info?bootstrap=1');
+  const { types, mix, thumbs, texts, trash, ...metadata } = info.data;
+  assert.equal(bootstrap.status, 200);
+  assert.equal(bootstrap.headers['cache-control'], 'no-store');
+  assert.deepEqual(bootstrap.data, metadata);
+  assert(Object.hasOwn(info.data, 'mix'), 'ordinary API clients retain the full contract');
   const store = new (require('../lib/cms'))(path.join(first.data.localDir, 'cms.sqlite'));
   try { store.setTheme('editorial'); } finally { store.close(); }
   assert.equal((await request(prefix + '/api/public/info')).data.theme, 'editorial');

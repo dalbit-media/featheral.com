@@ -281,6 +281,8 @@ else
   fi
   as_root sed -i -E '/^[[:space:]]*proxy_request_buffering[[:space:]]/d; /proxy_pass http:/a\        proxy_request_buffering off;' "$nginx_file"
 fi
+# JSON APIs are deliberately omitted from the additional compression types.
+as_root sed -i -E '/^[[:space:]]*gzip(_types|_vary|_min_length)?[[:space:]]/d; /proxy_request_buffering off;/a\        gzip on;\n        gzip_vary on;\n        gzip_min_length 1024;\n        gzip_types text/plain text/css text/javascript application/javascript image/svg+xml;' "$nginx_file"
 as_root nginx -t
 # Resolve every assigned hostname before activation; Certbot subsequently verifies public reachability.
 step=dns

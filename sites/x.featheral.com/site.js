@@ -297,7 +297,6 @@ async function render() {
     if (parts[0] === 'trending') { setTab('trending'); return trendingView(q); }
     if (parts[0] === 'post') { setTab('post'); return postView(); }
     setTab('swipe');
-    info = { ...info, ...(await api('/api/public/info')) };
     return swipeView('mix');
   } catch (e) {
     view().innerHTML = `<div class="empty"><div class="big">⚠️</div>${esc(e.message)}</div>`;
@@ -306,6 +305,12 @@ async function render() {
 
 // ---------- swipe deck ----------
 // One deck of every GIF and image post, shuffled. Each vote is stored under the post's own media type.
+function mediaPreloadPolicy(connection = navigator.connection) {
+  const constrained = connection?.saveData || /^(slow-)?2g$/.test(connection?.effectiveType || '');
+  return constrained
+    ? { maxCards: 1, bytes: 0, parallel: 1, history: 1 }
+    : { maxCards: 3, bytes: 12 * 1024 * 1024, parallel: 2, history: 1 };
+}
 function swipeView(type) {
   const t = info.mix || {};
   const state = { queue: [], loading: null, history: [], more: true, after: null, round: t.round || 1, total: t.total || 0, remaining: t.remaining || 0, busy: false };
@@ -333,26 +338,29 @@ function swipeView(type) {
     else if (e.key === 'Backspace') { e.preventDefault(); undo(); }
     else if (e.key === 'c' || e.key === 'C') { e.preventDefault(); openComments(); }
   };
+  let disposed = false;
   document.addEventListener('keydown', onKey);
   cleanup = () => {
+    disposed = true;
     document.removeEventListener('keydown', onKey);
     for (const m of media.values()) if (!m.done) m.img.removeAttribute('src');
     media.clear();
   };
 
-  // Media is fetched and decoded ahead of the top card, in deck order. A byte budget keeps
-  // decks of very large GIFs from downloading gigabytes at once, but the next few cards are
-  // always preloaded. The decoded <img> nodes are reused by the cards.
-  const PRELOAD = { minCards: 5, maxCards: 12, bytes: 600 * 1024 * 1024, parallel: 3, history: 2 };
+  // Large GIFs must not crowd out the visible card or consume unbounded bandwidth.
+  const PRELOAD = mediaPreloadPolicy();
   const media = new Map();
   function preload() {
-    const keep = new Set(state.history.slice(-PRELOAD.history).map((h) => h.item.id));
+    if (disposed) return;
+    const keep = new Set(state.history.slice(-PRELOAD.history).filter(h => media.get(h.item.id)?.done).map(h => h.item.id));
+    for (const item of state.queue.slice(0, 2)) keep.add(item.id);
     const wanted = [];
     let bytes = 0;
     for (let i = 0; i < state.queue.length && i < PRELOAD.maxCards; i++) {
       const item = state.queue[i];
-      bytes += item.media.size || 0;
-      if (i >= PRELOAD.minCards && bytes > PRELOAD.bytes) break;
+      const size = item.media.size || 1024 * 1024;
+      if (i > 0 && bytes + size > PRELOAD.bytes) break;
+      bytes += size;
       wanted.push(item);
       keep.add(item.id);
     }
@@ -361,12 +369,17 @@ function swipeView(type) {
     }
     let active = [...media.values()].filter((m) => m.started && !m.done).length;
     for (const item of wanted) {
-      if (active >= PRELOAD.parallel) break;
+      if (item !== state.queue[0] && !media.get(state.queue[0].id)?.done) break;
       let m = media.get(item.id);
+      if (m) {
+        m.img.fetchPriority = item === state.queue[0] ? 'high' : 'low';
+        if (m.started) continue;
+      }
+      if (active >= PRELOAD.parallel) break;
       if (!m) { m = mediaFor(item); }
-      if (m.started) continue;
       m.started = true;
       active++;
+      m.img.fetchPriority = item === state.queue[0] ? 'high' : 'low';
       m.img.src = item.media.url;
     }
   }
@@ -417,6 +430,7 @@ function swipeView(type) {
     const params = { type, limit: 20, ...(state.after ? { after: state.after } : {}) };
     state.loading = api(`/api/public/feed?${new URLSearchParams(params)}`)
       .then((r) => {
+        if (disposed) return;
         const queued = new Set(state.queue.map((x) => x.id));
         r.items.forEach((item) => { if (!queued.has(item.id)) state.queue.push(item); });
         if (r.items.length) state.after = r.items[r.items.length - 1].id;
@@ -443,8 +457,8 @@ function swipeView(type) {
 
   function progress() {
     $('#progress').textContent = state.total ? `Round ${fmtNum(state.queue[0]?.round ?? state.round)} · ${fmtNum(Math.max(0, state.remaining))} left` : '';
-    $('#b-undo').disabled = !state.history.length;
-    $('#b-like').disabled = $('#b-nope').disabled = !state.queue.length;
+    $('#b-undo').disabled = state.busy || !state.history.length;
+    $('#b-like').disabled = $('#b-nope').disabled = state.busy || !state.queue.length;
     const deletes = state.queue[0]?.deletes ?? true;
     $('#b-nope').title = deletes ? 'Dislike and delete (←)' : 'Dislike (←)';
     $('.swipe .hint').innerHTML = `Right = like &amp; keep · Left = ${deletes ? 'dislike &amp; delete (round 1)' : 'dislike, kept and counted (round 2+)'} · ← → keys · C comments · Backspace undoes`;
@@ -481,7 +495,6 @@ function swipeView(type) {
     if (m.done && m.ok) shown();
     else m.img.addEventListener('load', shown, { once: true });
     m.ready.then(finish);
-    if (!m.started) { m.started = true; m.img.src = item.media.url; }
     const more = $('.more', el);
     const cbtn = $('.cbtn', el);
     cbtn.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -562,6 +575,7 @@ function swipeView(type) {
   }
 
   function paint() {
+    if (disposed) return;
     const wanted = state.queue.slice(0, 2).map((x) => String(x.id));
     [...stack.querySelectorAll('.card')].forEach((c) => { if (!wanted.includes(c.dataset.id) || c.classList.contains('gone')) c.remove(); });
     if (state.queue.length) ending = false;
@@ -643,6 +657,7 @@ function swipeView(type) {
 
   // Promote the next card immediately so it is ready while the old one flies away.
   function paintNext() {
+    if (disposed) return;
     const item = state.queue[0];
     if (!item) return;
     let el = stack.querySelector(`.card[data-id="${item.id}"]:not(.gone)`);
@@ -651,17 +666,19 @@ function swipeView(type) {
     setLive(el, true);
     seen(item, el);
     progress();
+    preload();
   }
 
   function undo() {
+    if (disposed || state.busy || !state.history.length) return;
     const last = state.history.pop();
-    if (!last || state.busy) return;
     const { item } = last;
     send(item, 'none');
     state.remaining++;
     state.queue.unshift(item);
     stack.querySelector(`.card[data-id="${item.id}"]`)?.remove();
     paint();
+    preload();
   }
 
   ensure();
@@ -1543,7 +1560,7 @@ function gate() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   $('.skip-link')?.addEventListener('click', (event) => { event.preventDefault(); view().focus(); });
-  try { info = await api('/api/public/info'); } catch (e) {
+  try { info = await api('/api/public/info?bootstrap=1'); } catch (e) {
     view().innerHTML = `<div class="empty"><div class="big">⚠️</div>${esc(e.message)}</div>`; return;
   }
   document.title = info.brand;

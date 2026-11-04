@@ -26,6 +26,7 @@ class SitePages {
     this.root = root;
     this.directory = path.join(dataDir, 'site-pages');
     this.cache = new Map();
+    this.blockCache = new Map();
     this.documents = new Documents(root);
     this.hosts = [...new Set([...hosts, ...fs.readdirSync(path.join(root, 'sites'), { withFileTypes: true })
       .filter(entry => entry.isDirectory() && /^[a-z0-9-]+\.featheral\.com$/.test(entry.name)).map(entry => entry.name)])];
@@ -85,7 +86,11 @@ class SitePages {
   }
   blocks(hostname, file) {
     if (!this.templates(hostname).includes(file)) throw fail(404, 'Unknown content template');
-    const html = fs.readFileSync(path.join(this.root, 'sites', hostname, ...file.split('/')), 'utf8');
+    const source = path.join(this.root, 'sites', hostname, ...file.split('/'));
+    const stat = fs.statSync(source), signature = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    const cached = this.blockCache.get(source);
+    if (cached?.signature === signature) return cached.result;
+    const html = fs.readFileSync(source, 'utf8');
     const tree = parse(html, { sourceCodeLocationInfo: true });
     const blocks = [];
     const walk = (node, blocked = false) => {
@@ -106,7 +111,9 @@ class SitePages {
       for (const child of node.childNodes || []) walk(child, excluded);
     };
     walk(tree);
-    return { html, blocks };
+    const result = { html, blocks };
+    this.blockCache.set(source, { signature, result });
+    return result;
   }
   pages(hostname) {
     const store = this.store(hostname);
@@ -160,6 +167,9 @@ class SitePages {
   close() {
     for (const store of this.cache.values()) store.close();
     this.cache.clear();
+    this.blockCache.clear();
+    this.documents.templates.clear();
+    this.documents.rendered.clear();
   }
   snapshot() {
     return this.catalog().filter(site => this.templates(site.hostname).length).map(site => ({
