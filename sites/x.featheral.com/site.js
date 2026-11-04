@@ -758,10 +758,15 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
   function pump() {
     if (stopped || paused || document.hidden) return;
     const bounds = grid.getBoundingClientRect();
-    const visible = [...mounted.values()].filter(tile =>
-      tile.position.y + tile.position.h > -bounds.top && tile.position.y < innerHeight - bounds.top);
-    visible.sort((a, b) => Math.abs(a.position.y + a.position.h / 2 + bounds.top - innerHeight / 2)
-      - Math.abs(b.position.y + b.position.h / 2 + bounds.top - innerHeight / 2));
+    const inViewport = tile => tile.position.y + tile.position.h > -bounds.top && tile.position.y < innerHeight - bounds.top;
+    const visible = [...mounted.values()].filter(tile => inViewport(tile)
+      || (tile.state === 'ready' && tile.position.y + tile.position.h > -bounds.top - 160
+        && tile.position.y < innerHeight - bounds.top + 160));
+    const priority = tile => tile.state === 'ready' ? 0 : tile.state === 'loading' ? 1 : 2;
+    visible.sort((a, b) => priority(a) - priority(b)
+      || Number(inViewport(b)) - Number(inViewport(a))
+      || Math.abs(a.position.y + a.position.h / 2 + bounds.top - innerHeight / 2)
+        - Math.abs(b.position.y + b.position.h / 2 + bounds.top - innerHeight / 2));
     const wanted = new Set();
     let bytes = 0, pixels = 0, gifs = 0;
     for (const tile of visible) {
@@ -778,10 +783,12 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
         const img = tile.el.querySelector('img');
         img.onload = img.onerror = null;
         img.removeAttribute('src');
+        tile.loadId++;
         tile.state = '';
         tile.el.dataset.mediaState = 'paused';
       }
     }
+    for (const tile of wanted) if (!tile.state) tile.el.dataset.mediaState = 'queued';
     if (scrolling) return;
     let active = [...mounted.values()].filter(tile => tile.state === 'loading').length;
     for (const tile of wanted) {
@@ -789,8 +796,9 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
       if (tile.state) continue;
       tile.state = 'loading'; tile.el.dataset.mediaState = 'loading'; active++;
       const img = tile.el.querySelector('img');
+      const loadId = ++tile.loadId;
       const settle = state => {
-        if (stopped || mounted.get(tile.position.index) !== tile || tile.state !== 'loading') return;
+        if (stopped || mounted.get(tile.position.index) !== tile || tile.state !== 'loading' || tile.loadId !== loadId) return;
         tile.state = state; tile.el.dataset.mediaState = state;
         schedule();
       };
@@ -825,7 +833,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
       let tile = mounted.get(position.index);
       if (!tile) {
         const item = items[position.index], el = tileFor(item);
-        tile = { el, item, position, state: '' };
+        tile = { el, item, position, state: '', loadId: 0 };
         mounted.set(position.index, tile);
         el.dataset.i = position.index; el.dataset.mediaState = 'paused';
         grid.append(el);

@@ -109,6 +109,52 @@ test('Data Saver uses one in-flight request; hidden tabs and viewers release all
   assert.equal(f.grid.children.length, 0);
 });
 
+test('loaded previews stay visible when viewport priorities shift, without increasing resource budgets', () => {
+  for (const media of [{ type: 'gif' }, { size: 10 * 1024 * 1024 }, { width: 4000, height: 3000 }]) {
+    const f = fixture(Array.from({ length: 200 }, (_, i) => item(i, media)));
+    f.gallery.layout(); f.flush();
+    for (let i = 0; i < 10; i++) f.complete();
+    const loaded = f.loaded(), requested = f.requests;
+    assert.equal(loaded.length, 2);
+    for (const y of [20, 70, 110, 30, 0]) {
+      f.scroll(y); f.settleScroll();
+      assert(loaded.every(el => el.img.src && el.dataset.mediaState === 'ready'), 'visible previews must not be evicted for closer unloaded tiles');
+      assert.equal(f.requests, requested);
+      assert.equal(f.loaded().length, 2);
+    }
+    f.gallery.close();
+  }
+});
+
+test('ready previews survive small viewport-edge movements but unload beyond the retention margin', () => {
+  const f = fixture(Array.from({ length: 200 }, (_, i) => item(i)));
+  f.gallery.layout(); f.flush();
+  for (let i = 0; i < 20; i++) f.complete();
+  const first = f.grid.children.find(el => +el.dataset.i === 0);
+  assert.equal(first.dataset.mediaState, 'ready');
+  f.scroll(250);
+  assert(first.img.src, 'a loaded preview just above the viewport stays decoded');
+  f.scroll(400);
+  assert(!first.img.src, 'previews outside the 160px retention margin release their source');
+  f.gallery.close();
+});
+
+test('queued previews have a loading state and obsolete callbacks cannot complete a restarted request', () => {
+  const f = fixture(Array.from({ length: 200 }, (_, i) => item(i)));
+  f.gallery.layout(); f.flush();
+  assert(f.grid.children.some(el => el.dataset.mediaState === 'queued'));
+  const tile = f.active()[0], oldLoad = tile.img.onload;
+  f.scroll(470);
+  assert(!tile.img.src);
+  f.scroll(0); f.settleScroll();
+  assert.equal(tile.dataset.mediaState, 'loading');
+  oldLoad(); f.flush();
+  assert.equal(tile.dataset.mediaState, 'loading', 'the cancelled request cannot reveal incomplete media');
+  tile.img.onload(); f.flush();
+  assert.equal(tile.dataset.mediaState, 'ready');
+  f.gallery.close();
+});
+
 test('appending, deleting and restoring items preserves visible identity, indexes and full scroll height', () => {
   const items = Array.from({ length: 100 }, (_, i) => item(i));
   const f = fixture(items, { justified: true, maxH: 250 });

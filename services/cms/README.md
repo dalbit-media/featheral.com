@@ -968,10 +968,15 @@ Trending, Gallery and Liked use viewport-windowed grids: at most 80 tile
 elements are mounted, and only visible media is fetched. Fast scrolling defers
 new downloads until scrolling settles for 120 ms; scrolling away, hiding the
 tab, opening a viewer or leaving the route releases image sources and decoded
-tile references. At most two images load concurrently (one with Data Saver/2G).
+tile references. Already loaded previews take priority over new candidates and
+remain loaded within a 160px viewport-edge margin, avoiding visible images
+flipping back to placeholders during small scrolls. This retention shares the
+same resource budget; it is not an unbounded media cache. At most two images load concurrently (one with Data Saver/2G).
 Visible previews are limited to 24 media sources, 24 MiB, 24 megapixels and two
 animated GIFs (one on constrained connections). A single oversized visible item
-is allowed. Tiles outside these budgets say "Open media" and still open the
+is allowed. Queued previews show a loading surface, active requests show a
+spinner, and successfully loaded images fade in; reduced-motion preferences
+disable these effects. Tiles outside these budgets say "Open media" and still open the
 original at full quality in the viewer. Grid paging, sorting, votes, undo and
 viewer navigation retain their original semantics. Layout uses bounded row
 lookahead rather than repeatedly compacting the full list. Pagination reuses
