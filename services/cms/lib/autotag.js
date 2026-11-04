@@ -6,7 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const { open } = require('../../database/sqlite');
 const { htmlToText, decodeEntities } = require('./text');
-const { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName } = require('./celebrity-keywords');
+const { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName, canonicalCelebrityName } = require('./celebrity-keywords');
+const { meaningfulKeyword, canonicalKeyword } = require('./keyword-quality');
 
 const AUTO_MARK = 'auto-tag';
 // every tag must group at least this many posts
@@ -304,6 +305,7 @@ function buildTags(posts, opts = {}) {
     for (const name of names) merged.set(slugify(name), name);
     out.set(id, [...merged.values()]);
   }
+  for (const [id, tags] of out) out.set(id, [...new Set(tags.filter(meaningfulKeyword).map(name => canonicalCelebrityName(name) || canonicalKeyword(name)))]);
   return out;
 }
 
@@ -323,11 +325,12 @@ function loadPosts(db, prefix) {
 }
 
 // Replaces auto tags by default; additive mode preserves every existing relationship.
-function applyTags(db, prefix, tagsByPost, { replaceAuto = true, marker = AUTO_MARK } = {}) {
+function applyTags(db, prefix, tagsByPost, { replaceAuto = true, marker = AUTO_MARK, removeTagIds = [], recountAll = false } = {}) {
   const [TM, TT, TR] = ['terms', 'term_taxonomy', 'term_relationships'].map((t) => prefix + t);
   db.exec('BEGIN IMMEDIATE');
   try {
-    const old = replaceAuto ? db.prepare(`SELECT term_taxonomy_id AS tt, term_id AS t FROM ${TT} WHERE taxonomy = 'post_tag' AND description = ?`).all(AUTO_MARK) : [];
+    const old = db.prepare(`SELECT term_taxonomy_id AS tt, term_id AS t, description FROM ${TT} WHERE taxonomy = 'post_tag'`).all()
+      .filter(row => (replaceAuto && row.description === AUTO_MARK) || removeTagIds.includes(row.tt));
     const delRel = db.prepare(`DELETE FROM ${TR} WHERE term_taxonomy_id = ?`);
     const delTT = db.prepare(`DELETE FROM ${TT} WHERE term_taxonomy_id = ?`);
     const delTerm = db.prepare(`DELETE FROM ${TM} WHERE term_id = ? AND NOT EXISTS (SELECT 1 FROM ${TT} WHERE term_id = ?)`);
@@ -357,7 +360,8 @@ function applyTags(db, prefix, tagsByPost, { replaceAuto = true, marker = AUTO_M
       for (const n of names) { const tt = ttFor(n); created.add(tt); links += Number(insRel.run(id, tt).changes); }
     }
     const recount = db.prepare(`UPDATE ${TT} SET count = (SELECT COUNT(*) FROM ${TR} WHERE term_taxonomy_id = ?) WHERE term_taxonomy_id = ?`);
-    for (const id of created) recount.run(id, id);
+    const recountIds = recountAll ? db.prepare(`SELECT term_taxonomy_id AS id FROM ${TT} WHERE taxonomy='post_tag'`).all().map(row => row.id) : created;
+    for (const id of recountIds) recount.run(id, id);
     db.exec('COMMIT');
     return { removed: old.length, tags: created.size, links, posts: tagsByPost.size };
   } catch (e) {
@@ -432,10 +436,11 @@ function matchExistingTags(text, tagNames, limit = 12) {
   const hay = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ') + ' ';
   const hit = [];
   for (const name of tagNames) {
+    if (!meaningfulKeyword(name)) continue;
     const n = name.toLowerCase().replace(/^r\//, '').replace(/ series$/, '').replace(/[^a-z0-9]+/g, ' ').trim();
-    if (n.length >= 3 && hay.includes(' ' + n + ' ')) hit.push(name);
+    if (n.length >= 3 && hay.includes(' ' + n + ' ')) hit.push(canonicalCelebrityName(name) || canonicalKeyword(name));
   }
-  return hit.sort((a, b) => b.length - a.length).slice(0, limit);
+  return [...new Set(hit)].sort((a, b) => b.length - a.length).slice(0, limit);
 }
 
 // Tags a new post with matching existing keywords and reviewed celebrity names.
@@ -455,4 +460,4 @@ function tagPost(dbFile, postId, text, limit = 12) {
   }
 }
 
-module.exports = { AUTO_MARK, MIN_POSTS, buildTags, applyTags, autotag, tagPost, tagCelebrities, buildCelebrityTags, titleLabels, tokens, slugify, matchExistingTags, tablePrefix };
+module.exports = { AUTO_MARK, MIN_POSTS, buildTags, applyTags, autotag, tagPost, tagCelebrities, buildCelebrityTags, titleLabels, tokens, slugify, matchExistingTags, tablePrefix, loadPosts, bodyText };

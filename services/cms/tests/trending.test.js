@@ -37,10 +37,11 @@ test('trending shows photos with scattered GIFs from hot tags, sorted by likes +
   writeJson(path.join(dir, 'manifest.json'), manifest);
   const raw = open(dbFile);
   const p = raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE '%term_taxonomy'").get().name.replace(/term_taxonomy$/, '');
-  raw.prepare(`INSERT INTO ${p}terms VALUES (1, 'beach', 'beach', 0), (2, 'night', 'night', 0)`).run();
-  raw.prepare(`INSERT INTO ${p}term_taxonomy VALUES (1, 1, 'post_tag', 'auto-tag', 0, 12), (2, 2, 'post_tag', 'auto-tag', 0, 5)`).run();
+  raw.prepare(`INSERT INTO ${p}terms VALUES (1, 'beach', 'beach', 0), (2, 'night', 'night', 0), (3, 'lee', 'lee', 0), (4, 'sarah', 'sarah', 0)`).run();
+  raw.prepare(`INSERT INTO ${p}term_taxonomy VALUES (1, 1, 'post_tag', 'auto-tag', 0, 12), (2, 2, 'post_tag', 'auto-tag', 0, 5), (3, 3, 'post_tag', 'auto-tag', 0, 17), (4, 4, 'post_tag', 'auto-tag', 0, 17)`).run();
   const rel = raw.prepare(`INSERT INTO ${p}term_relationships VALUES (?, ?, 0)`);
   for (let id = 1; id <= 17; id++) rel.run(id, (id <= 8 || (id >= 13 && id <= 16)) ? 1 : 2);
+  for (let id = 1; id <= 17; id++) { rel.run(id, 3); rel.run(id, 4); }
   raw.close();
 
   pub = new PublicSite(getSite(key), { brand: 'Public' });

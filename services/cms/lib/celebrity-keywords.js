@@ -36,5 +36,6 @@ function celebrityKeywords(text, inCelebrityCategory = false) {
 }
 
 const contextualCelebrityName = name => CONTEXTUAL.has(normalizeName(name));
+const canonicalCelebrityName = name => aliases.get(normalizeName(name));
 
-module.exports = { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName };
+module.exports = { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName, canonicalCelebrityName };

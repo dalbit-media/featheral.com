@@ -213,6 +213,9 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.doesNotMatch(trashLink, /<span>|🦝/);
   assert.doesNotMatch(html, /data-cms-page="fthx/);
   assert.match(css, /\.reading-cards \{[^}]+repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.liked-timeline, \.reading-library \{ max-width: 1200px; \}/);
+  assert.match(css, /\.read \{[^}]+padding: 22px 16px 60px;/);
+  assert.doesNotMatch(css, /\.reading-library \{[^}]*padding-inline/);
   assert.match(css, /@media \(max-width: 600px\)/);
   assert.match(source, /label for="q">Search readings/);
   assert.match(source, /setSelectionRange\(selection, selection\)/);
@@ -241,10 +244,67 @@ test('category keyword chips preserve search, sort and category, reset paging an
   assert.match(html, /Clear keyword filter/);
   assert.match(context.readingKeywords([], { category: '6' }), /No keywords yet/);
   assert.match(context.readingKeywords([], { category: '6', tag: '999' }), /Clear keyword filter/);
+  assert.match(context.readingKeywords([], { category: '6' }, true), /data-more-keywords>Show more keywords/);
+  assert.doesNotMatch(context.readingKeywords([], { category: '6' }), /data-more-keywords>/);
   const list = source.slice(source.indexOf('async function readListView('), source.indexOf('async function readerView('));
   assert.match(list, /sort, category, tag, \.\.\.patch/);
   assert.match(list, /sort, category, tag, page: r\.page - 1/);
   assert.match(list, /sort, category, tag, page: r\.page \+ 1/);
+});
+
+test('category views start with search and load more keywords without dropping filters or hiding errors', async () => {
+  const nodes = new Map(), calls = [];
+  const node = selector => {
+    if (!nodes.has(selector)) nodes.set(selector, { innerHTML: '', textContent: '', hidden: false, addEventListener() {}, focus() {} });
+    return nodes.get(selector);
+  };
+  const root = node('root');
+  let fail = false, hold = false, resume;
+  const keywords = Array.from({ length: 85 }, (_, i) => ({ id: i + 1, name: `Keyword ${i + 1}`, count: 2 }));
+  const context = vm.createContext({ AbortController, URLSearchParams, setTimeout, clearTimeout,
+    document: { activeElement: null }, location: {}, info: { pages: [{ slug: 'fthx', title: 'FTHX' }] },
+    fmtNum: String, esc: String, view: () => root, $: node,
+    href: (parts, query) => '#/' + parts.join('/') + '?' + new URLSearchParams(query),
+    api: async url => {
+      calls.push(url);
+      if (fail) throw new Error('Keyword request failed');
+      if (hold) await new Promise(resolve => { resume = resolve; });
+      const offset = +(new URL(url, 'http://example.test').searchParams.get('keywordOffset') || 0);
+      return { total: 0, page: 1, limit: 30, items: [], category: { name: 'Essays' }, keywords: keywords.slice(offset, offset + 40), keywordTotal: 85 };
+    },
+  });
+  vm.runInContext(source.slice(source.indexOf('function readingKeywords('), source.indexOf('async function readerView(')), context);
+  await context.readListView({ category: '10', tag: '2', q: 'sample', sort: 'newest' });
+  assert.match(root.innerHTML, /^\s*<section[^>]*>\s*<div class="tools reading-tools"/);
+  assert.doesNotMatch(root.innerHTML, /reading-heading|reading-pages|FTHX/);
+  assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 40);
+  fail = true;
+  await node('[data-more-keywords]').onclick();
+  assert.equal(node('[data-keyword-error]').textContent, 'Keyword request failed');
+  assert.equal(node('[data-more-keywords]').disabled, false);
+  fail = false;
+  await node('[data-more-keywords]').onclick();
+  assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 80);
+  await node('[data-more-keywords]').onclick();
+  assert.equal((node('#reading-keywords').innerHTML.match(/#Keyword /g) || []).length, 85);
+  assert.doesNotMatch(node('#reading-keywords').innerHTML, /data-more-keywords>/);
+  assert.match(node('#reading-keywords').innerHTML, /q=sample.*sort=newest.*category=10.*tag=85/);
+  assert(calls.some(url => url.includes('keywordOffset=40')));
+  assert(calls.some(url => url.includes('keywordOffset=80')));
+  context.cleanup();
+  await context.readListView({});
+  assert.match(root.innerHTML, /reading-heading/);
+  assert.match(root.innerHTML, /FTHX/);
+  context.cleanup();
+  await context.readListView({ category: '10' });
+  hold = true;
+  const pending = node('[data-more-keywords]').onclick();
+  assert.equal(node('[data-more-keywords]').disabled, true);
+  const before = node('#reading-keywords').innerHTML;
+  context.cleanup();
+  resume();
+  await pending;
+  assert.equal(node('#reading-keywords').innerHTML, before, 'disposed requests never repaint');
 });
 
 test('reading thumbnails use lazy bounded previews, site scoping, and reject invalid media', () => {

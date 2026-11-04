@@ -10,6 +10,7 @@ const { Analytics } = require('./analytics');
 const CmsStore = require('./cms');
 const { Economy } = require('./economy');
 const { isNativeNote, effectiveProgram } = require('../../notes/ledger');
+const { meaningfulKeyword } = require('./keyword-quality');
 
 const PUBLIC_TYPES = ['gif', 'jpeg', 'png'];
 const VOTES = ['like', 'dislike', 'none'];
@@ -57,6 +58,7 @@ function tagIndex(site) {
     const rows = site.all(`SELECT r.object_id AS post, tt.term_taxonomy_id AS tag, t.name FROM ${site.t('term_relationships')} r
       JOIN ${site.t('term_taxonomy')} tt ON tt.term_taxonomy_id = r.term_taxonomy_id JOIN ${site.t('terms')} t ON t.term_id = tt.term_id WHERE tt.taxonomy = 'post_tag'`);
     for (const r of rows) {
+      if (!meaningfulKeyword(r.name)) continue;
       const tag = tags.get(r.tag) || tags.set(r.tag, { id: r.tag, name: T.decodeEntities(r.name), posts: [] }).get(r.tag);
       tag.posts.push(r.post);
       (byPost.get(r.post) || byPost.set(r.post, []).get(r.post)).push(r.tag);
@@ -1166,6 +1168,7 @@ class PublicSite {
     const metrics = this.site.postMetrics();
     let list = publishedPosts(this.site).filter((r) => !this.site.trashed.has(r.ID) && (metrics.get(r.ID)?.wordCount || 0) >= 1);
     let category = null;
+    let keywordTotal = 0;
     const keywords = [];
     for (const key of ['category', 'tag']) {
       if (q[key] && (!/^[1-9]\d*$/.test(String(q[key])) || !Number.isSafeInteger(+q[key]))) throw httpError(400, `Invalid ${key}`);
@@ -1186,9 +1189,12 @@ class PublicSite {
       }
       const ranked = [...counts].map(([id, count]) => ({ id, name: tags.get(id).name, count }))
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name) || a.id - b.id);
-      keywords.push(...ranked.slice(0, 12));
+      const keywordLimit = clampInt(q.keywordLimit, 40, 1000, 40);
+      const keywordOffset = clampInt(q.keywordOffset, 0, Number.MAX_SAFE_INTEGER, 0);
+      keywords.push(...ranked.slice(keywordOffset, keywordOffset + keywordLimit));
       const selected = ranked.find(tag => tag.id === +q.tag);
-      if (selected && !keywords.some(tag => tag.id === selected.id)) keywords.push(selected);
+      if (!keywordOffset && selected && !keywords.some(tag => tag.id === selected.id)) keywords.push(selected);
+      keywordTotal = ranked.length;
     }
     if (q.tag) {
       const posts = new Set(tagIndex(this.site).tags.get(+q.tag)?.posts || []);
@@ -1216,7 +1222,7 @@ class PublicSite {
     const rows = postRows(this.site, slice.filter((r) => !r.cms).map((r) => r.ID));
     const seen = this.store.viewCounts(slice.map((r) => r.ID));
     return {
-      total: list.length, page, limit, sort, category, keywords,
+      total: list.length, page, limit, sort, category, keywords, keywordTotal,
       items: slice.map((r) => {
         const row = rows.get(r.ID);
         const title = r.cms ? r.cms.title : T.decodeEntities(row?.post_title || '') || 'Untitled';

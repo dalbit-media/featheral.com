@@ -123,9 +123,9 @@ test('reading sidebar categories filter kept readings without including CMS page
 test('category keywords count all kept readings before search and paging and stay category-scoped when clicked', t => {
   const f = fixture(t), raw = require('../../database/sqlite').open(path.join(f.dir, 'db.sqlite'));
   const prefix = f.pub.site.prefix;
-  raw.exec(`INSERT INTO ${prefix}terms VALUES(30,'Alpha','alpha',0),(40,'Beta','beta',0),(50,'Private','private',0);
-    INSERT INTO ${prefix}term_taxonomy VALUES(30,30,'post_tag','',0,999),(40,40,'post_tag','',0,999),(50,50,'post_tag','',0,999);
-    INSERT INTO ${prefix}term_relationships VALUES(1,30,0),(2,30,0),(3,30,0),(1,40,0),(4,10,0),(4,50,0),(5,10,0),(5,50,0);
+  raw.exec(`INSERT INTO ${prefix}terms VALUES(30,'Alpha','alpha',0),(40,'Beta','beta',0),(50,'Private','private',0),(60,'lee','lee',0),(70,'sarah','sarah',0);
+    INSERT INTO ${prefix}term_taxonomy VALUES(30,30,'post_tag','',0,999),(40,40,'post_tag','',0,999),(50,50,'post_tag','',0,999),(60,60,'post_tag','',0,999),(70,70,'post_tag','',0,999);
+    INSERT INTO ${prefix}term_relationships VALUES(1,30,0),(2,30,0),(3,30,0),(1,40,0),(4,10,0),(4,50,0),(5,10,0),(5,50,0),(1,60,0),(2,70,0);
     UPDATE ${prefix}posts SET post_status='draft' WHERE ID=4;
     UPDATE ${prefix}posts SET post_password='secret' WHERE ID=5;`);
   raw.close();
@@ -141,6 +141,7 @@ test('category keywords count all kept readings before search and paging and sta
   assert.deepEqual(pub.textList({ category: '10', tag: '40' }).keywords, expected);
   assert.equal(pub.textList({ category: '20', tag: '40' }).total, 0);
   assert.equal(pub.textList({ category: '10', tag: '999' }).total, 0);
+  assert.equal(pub.textList({ category: '10', tag: '60' }).total, 0, 'ambiguous fragments are not public filter keywords');
   assert.deepEqual(pub.textList({ category: '999' }).keywords, []);
   assert.deepEqual(pub.textList({}).keywords, []);
   assert.throws(() => pub.textList({ tag: 'bad' }), { status: 400 });
@@ -151,9 +152,9 @@ test('category keywords count all kept readings before search and paging and sta
   assert.deepEqual(pub.textList({ category: '10' }).keywords, expected);
 });
 
-test('category keywords have a deterministic top twelve and retain a selected less-used keyword', t => {
+test('category keywords start with forty, page through all tags and retain a selected less-used keyword', t => {
   const f = fixture(t), raw = require('../../database/sqlite').open(path.join(f.dir, 'db.sqlite')), prefix = f.pub.site.prefix;
-  for (let id = 100; id <= 113; id++) {
+  for (let id = 100; id <= 184; id++) {
     const name = `Keyword ${id}`;
     raw.prepare(`INSERT INTO ${prefix}terms VALUES(?,?,?,0)`).run(id, name, `keyword-${id}`);
     raw.prepare(`INSERT INTO ${prefix}term_taxonomy VALUES(?,?,'post_tag','',0,1)`).run(id, id);
@@ -162,9 +163,16 @@ test('category keywords have a deterministic top twelve and retain a selected le
   raw.close();
   const pub = f.reopen();
   const top = pub.textList({ category: '10' }).keywords;
-  assert.equal(top.length, 12);
-  assert.deepEqual(top.map(tag => tag.id), Array.from({ length: 12 }, (_, i) => 100 + i));
-  assert.deepEqual(pub.textList({ category: '10', tag: '113' }).keywords.map(tag => tag.id), [...top.map(tag => tag.id), 113]);
+  assert.equal(top.length, 40);
+  assert.deepEqual(top.map(tag => tag.id), Array.from({ length: 40 }, (_, i) => 100 + i));
+  assert.equal(pub.textList({ category: '10' }).keywordTotal, 85);
+  assert.deepEqual(pub.textList({ category: '10', tag: '184' }).keywords.map(tag => tag.id), [...top.map(tag => tag.id), 184]);
+  const second = pub.textList({ category: '10', keywordOffset: '40' }).keywords;
+  assert.equal(second.length, 40);
+  const last = pub.textList({ category: '10', keywordOffset: '80' }).keywords;
+  assert.equal(last.length, 5);
+  assert.equal(new Set([...top, ...second, ...last].map(tag => tag.id)).size, 85);
+  assert.deepEqual(pub.textList({ category: '10', keywordOffset: '120' }).keywords, []);
 });
 
 test('reading review rounds advance only after all kept readings were reviewed', t => {
