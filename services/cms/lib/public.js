@@ -1201,6 +1201,7 @@ class PublicSite {
         const snippet = r.cms ? T.htmlToText(r.cms.excerpt || r.cms.body).slice(0, 220) : row ? describe(row).slice(0, 220) : '';
         return {
           id: r.ID, title, date: r.post_date, words: words(r), views: seen.get(r.ID) || 0, snippet, thumbnail: this.readingThumbnail(r.ID),
+          ...(q.curation === '1' ? { curation: this.curation(r.ID, 'read') } : {}),
           ...(r.cms ? { type: r.cms.type, slug: r.cms.slug } : {}),
         };
       }),

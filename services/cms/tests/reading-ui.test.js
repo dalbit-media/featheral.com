@@ -7,7 +7,7 @@ const votes = source.slice(source.indexOf('function readingVotes('), source.inde
 const tabs = source.slice(source.indexOf('function likedTabs('), source.indexOf('async function likedView('));
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function fixture(api) {
+function fixture(api, options) {
   const calls = [], errors = [], events = new Map(), target = { innerHTML: '',
     addEventListener: (key, fn) => events.set(key, fn), removeEventListener: key => events.delete(key) };
   const context = vm.createContext({
@@ -16,7 +16,7 @@ function fixture(api) {
     rewardNote() {}, loadReadingNavigation() {},
   });
   vm.runInContext(votes, context);
-  const stop = context.readingVotes({ id: -10 }, target);
+  const stop = context.readingVotes({ id: -10 }, target, options);
   return { calls, errors, target, stop, events, click(kind) {
     events.get('click')({ target: { closest: selector => selector === '[data-reading-vote]' ? { dataset: { readingVote: kind } } : null } });
   } };
@@ -42,6 +42,31 @@ test('reading vote controls never vote on load, deduplicate clicks, and support 
   resolve(); await tick();
   assert.doesNotMatch(f.target.innerHTML, /In Trash/);
   f.stop(); assert.equal(f.events.size, 0);
+});
+
+test('Read card controls reuse list state without extra requests and share delete, undo and later-round rules', async () => {
+  const initialState = { type: 'read', round: 1, likes: 0, dislikes: 0, vote: null, canRestore: true };
+  const f = fixture(async (_url, opts) => ({ ...initialState, deleted: opts.json.vote === 'dislike',
+    dislikes: opts.json.vote === 'dislike' ? 1 : 0 }), { compact: true, initialState });
+  assert.equal(f.calls.length, 0);
+  assert.match(f.target.innerHTML, />Delete 0/);
+  assert.doesNotMatch(f.target.innerHTML, /href=/);
+  f.click('dislike'); await tick();
+  assert.equal(f.calls[0].opts.json.type, 'read');
+  assert.equal(f.calls[0].opts.json.round, 1);
+  assert.match(f.target.innerHTML, /In Trash/);
+  f.click('dislike'); await tick();
+  assert.equal(f.calls[1].opts.json.vote, 'none');
+  assert.doesNotMatch(f.target.innerHTML, /In Trash/);
+  f.stop();
+  const later = fixture(async () => ({}), { compact: true, initialState: { ...initialState, round: 2 } });
+  assert.doesNotMatch(later.target.innerHTML, />Delete/);
+  assert.match(later.target.innerHTML, /Dislike 0/);
+  assert.match(later.target.innerHTML, /without removing this reading/);
+  later.stop();
+  const list = source.slice(source.indexOf('async function readListView('), source.indexOf('async function readerView('));
+  assert.match(list, /<\/a><div class="reading-card-votes"/);
+  assert.match(list, /stopVotes.forEach\(stop => stop\(\)\)/);
 });
 
 test('reading controls handle errors and disposal without reintroducing stale buttons', async () => {

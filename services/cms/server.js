@@ -621,6 +621,7 @@ app.get('/api/public/sites', wrap((req, res) => {
 }));
 app.get('/api/public/feed', wrap((req, res) => res.json(publicSite(req).feed(req.query))));
 app.get('/api/public/texts', wrap((req, res) => {
+  if (req.query.curation === '1') res.set('Cache-Control', 'no-store');
   const r = publicSite(req).textList(req.query);
   if (req.query.q && r.page === 1) logSearch(req, 'read', req.query.q, r.total);
   res.json(r);

@@ -795,7 +795,8 @@ async function readListView(q) {
   const selection = searchFocused ? document.activeElement.selectionStart : null;
   const request = new AbortController();
   let disposed = false, timer;
-  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); };
+  const stopVotes = [];
+  cleanup = () => { disposed = true; request.abort(); clearTimeout(timer); stopVotes.forEach(stop => stop()); };
   const sort = q.sort || 'longest';
   const page = +q.page || 1;
   const category = q.category || '';
@@ -811,15 +812,19 @@ async function readListView(q) {
   const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, ...patch, page: patch.page || '' }); };
   $('#sort').addEventListener('change', (e) => go({ sort: e.target.value }));
   $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => go({ q: e.target.value.trim() }), 450); });
-  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, page, limit: 30 })}`, { signal: request.signal });
+  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, page, limit: 30 })}&curation=1`, { signal: request.signal });
   if (disposed) return;
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
-    <div class="reading-cards">${r.items.map((t) => `<a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
+    <div class="reading-cards">${r.items.map((t) => `<div class="reading-card"><a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
-      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a>`).join('')}</div>
+      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a><div class="reading-card-votes" data-reading-id="${t.id}" role="group" aria-label="Votes for ${esc(t.title)}"></div></div>`).join('')}</div>
     <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
+  for (const item of r.items) {
+    const target = $(`[data-reading-id="${item.id}"]`, $('#list'));
+    stopVotes.push(readingVotes(item, target, { compact: true, initialState: item.curation }));
+  }
 }
 
 async function readerView(id, q, bySlug = false) {
@@ -863,16 +868,16 @@ async function readerView(id, q, bySlug = false) {
   stopVotes = readingVotes(t, $('#reading-votes'));
 }
 
-function readingVotes(reading, target) {
+function readingVotes(reading, target, { compact = false, initialState = null } = {}) {
   const request = new AbortController();
   let state = null, busy = false, disposed = false;
   function paint() {
     if (disposed || !state) return;
     const disabled = busy || !state.canRestore ? 'disabled' : '';
     target.innerHTML = `<div class="row"><button class="btn" data-reading-vote="like" aria-pressed="${state.vote === 'like'}" ${disabled}>♥ Like ${fmtNum(state.likes)}</button>
-      <button class="btn" data-reading-vote="dislike" aria-pressed="${state.vote === 'dislike'}" ${disabled}>👎 Dislike ${fmtNum(state.dislikes)}</button></div>
+      <button class="btn" data-reading-vote="dislike" aria-pressed="${state.vote === 'dislike'}" ${disabled}>${compact && state.round === 1 ? 'Delete' : '👎 Dislike'} ${fmtNum(state.dislikes)}</button></div>
       <p class="count" role="status">${state.deleted ? 'In Trash. Like or undo this dislike to restore when available.' : state.round === 1 ? 'Round 1: a dislike moves this reading to Trash.' : `Round ${fmtNum(state.round)}: dislikes are counted without removing this reading.`}${!state.canRestore ? ' Restore through Admin.' : ''}</p>
-      <a class="btn" href="#/liked?kind=read">Liked readings</a> <a class="btn" href="#/trash">Trash</a>`;
+      ${compact ? '' : '<a class="btn" href="#/liked?kind=read">Liked readings</a> <a class="btn" href="#/trash">Trash</a>'}`;
   }
   async function load() {
     state = null;
@@ -897,7 +902,7 @@ function readingVotes(reading, target) {
     finally { busy = false; paint(); }
   };
   target.addEventListener('click', click);
-  load();
+  if (initialState) { state = initialState; paint(); } else load();
   return () => { disposed = true; request.abort(); target.removeEventListener('click', click); };
 }
 

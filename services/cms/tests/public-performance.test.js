@@ -26,6 +26,13 @@ test('reading lists, details and liked summaries expose only available local thu
   assert(!Object.hasOwn(subject.readingSummary(1), 'paragraphs'));
   assert.equal(subject.readingThumbnail(-10), null);
   assert.equal(subject.cmsText({ id: 10, title: 'Page', body: 'Words here' }).thumbnail, null);
+  const calls = [];
+  subject.curation = (id, type) => { calls.push([id, type]); return { id, type, round: 2, likes: 3, dislikes: 1, vote: 'like', canRestore: true }; };
+  assert(list.items.every(item => !Object.hasOwn(item, 'curation')), 'default text API remains lightweight');
+  const cards = subject.textList({ curation: '1' });
+  assert.equal(calls.length, cards.items.length);
+  assert(calls.every(([, type]) => type === 'read'));
+  assert(cards.items.every(item => item.curation.round === 2 && item.curation.vote === 'like'));
 });
 
 test('bootstrap metadata skips all media indexes and totals while preserving gate, pages, theme and features', () => {
