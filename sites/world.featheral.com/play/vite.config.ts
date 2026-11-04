@@ -14,10 +14,10 @@ export function worldProfileAssets(): Plugin {
       handler(html) {
         if (!html.includes('src="/src/main.ts"')) return;
         return [
-          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/wallet-profile.css' }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/wallet-profile.js' }, injectTo: 'head' },
-          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/featheral.css' }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/site-links.js', defer: true }, injectTo: 'head' },
+          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/wallet-profile.css', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'script', attrs: { src: '/shared/wallet-profile.js', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/featheral.css', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'script', attrs: { src: '/shared/site-links.js', defer: true, 'vite-ignore': true }, injectTo: 'head' },
         ];
       },
     },

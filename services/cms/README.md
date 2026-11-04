@@ -67,7 +67,11 @@ shows its error and allows retry without leaving Settings.
 **Sign & self-sync** is available only on the active deployed Linux Admin
 server. Settings groups upload deployment and Git self-sync in one action panel
 with a single source-labelled console. Both operations retain their logs when
-the other refreshes; self-sync status can be refreshed after a restart.
+the other refreshes. Self-sync status automatically reconnects through restart
+outages, reports compact HTTP errors instead of gateway HTML, and keeps starting
+another sync disabled until a fresh status is received. Prolonged outages remain
+unconfirmed and direct operators to the deployment journal and application logs;
+reconnecting never implies successful deployment.
 Wallet approval failures are logged in the browser's request section and remain
 visible after refreshing server status. Finished receipts are labelled as the
 last recorded job with their ID, start time and commit, not a new successful

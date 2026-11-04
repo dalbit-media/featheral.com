@@ -21,7 +21,12 @@ async function api(url, opts = {}) {
   const ct = r.headers.get('content-type') || '';
   const data = ct.includes('json') ? await r.json() : await r.text();
   if (r.status === 401) location.reload();
-  if (!r.ok) throw new Error((data && data.error) || data || r.statusText);
+  if (!r.ok) {
+    const message = ct.includes('text/html') || (typeof data === 'string' && /^\s*<(?:!doctype|html)\b/i.test(data))
+      ? `HTTP ${r.status}${r.statusText ? ` ${r.statusText}` : ''}`
+      : (data && data.error) || data || r.statusText;
+    throw Object.assign(new Error(message), { status: r.status });
+  }
   return data;
 }
 

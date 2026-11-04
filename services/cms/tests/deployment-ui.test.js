@@ -14,7 +14,7 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   };
   const plan = { id: 'reviewed', enabled: true, walletApprovalRequired: true, digest: 'source', contentDigest: 'content',
     expiresAt: Date.now() + 600000, target: 'root@server.example', files: 100, steps: ['Upload release'] };
-  let failure, signingFailure, startFailure, ready = true, confirmed = 0, signed = 0, poll;
+  let failure, signingFailure, startFailure, statusFailure, statusPending, ready = true, confirmed = 0, signed = 0, poll;
   const context = vm.createContext({
     document: {
       createDocumentFragment: () => ({ children: [], append(child) { this.children.push(child); } }),
@@ -32,7 +32,11 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
       calls.push({ url, input: options?.json, cache: options?.cache });
       if (url === '/api/deployment/status') return currentStatus;
       if (url === '/api/deployment/plan') return { ...plan };
-      if (url === '/api/settings/self-sync') return selfStatus;
+      if (url === '/api/settings/self-sync') {
+        if (statusFailure) throw statusFailure;
+        if (statusPending) return statusPending;
+        return selfStatus;
+      }
       if (url.endsWith('/challenge')) {
         if (failure) { const error = failure; failure = null; throw error; }
         return { challengeId: 'approved' };
@@ -51,6 +55,8 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   return { element, calls, plan, context, setFailure(error) { failure = error; }, setReady(value) { ready = value; },
     setSigningFailure(error) { signingFailure = error; },
     setStartFailure(error) { startFailure = error; },
+    setStatusFailure(error) { statusFailure = error; },
+    setStatusPending(promise) { statusPending = promise; },
     setSelfStatus(value) { selfStatus = value; },
     async refresh() { await poll(); },
     get confirmed() { return confirmed; }, get signed() { return signed; },
@@ -114,10 +120,90 @@ test('a lost start response reports uncertainty rather than claiming no job ran'
   const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
   f.setStartFailure(new Error('Connection interrupted'));
   await f.click('#self-sync-start');
+  assert.equal(f.element('#self-sync-start').disabled, true);
   await f.click('#self-sync-refresh');
   assert.match(f.element('#self-sync-status').textContent, /submission not confirmed: Connection interrupted/);
   assert.doesNotMatch(f.element('#self-sync-status').textContent, /Self-sync not started/);
   assert.match(f.element('#deployment-console').textContent, /inspect the job before retrying/);
+});
+
+test('self-sync reconnects after gateway restart errors without losing logs or enabling a second job', async () => {
+  const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
+  f.setStatusFailure(Object.assign(new Error('HTTP 502 Bad Gateway'), { status: 502 }));
+  await f.click('#self-sync-start');
+  assert.equal(f.element('#self-sync-start').disabled, true);
+  assert.match(f.element('#self-sync-status').textContent, /temporarily unreachable during self-sync/);
+  assert.match(f.element('#deployment-console').textContent, /completion is not yet confirmed/);
+  await f.click('#self-sync-start');
+  assert.equal(f.calls.filter(call => call.url.endsWith('/self-sync/start')).length, 1);
+  f.setStatusFailure(undefined);
+  f.setSelfStatus({ available: true, running: true, phase: 'running', logs: [{ at: 1, message: 'Building release' }] });
+  await f.refresh();
+  assert.match(f.element('#deployment-console').textContent, /Building release/);
+  assert.doesNotMatch(f.element('#deployment-console').textContent, /Self-sync status errors/);
+  f.setStatusFailure(Object.assign(new Error('HTTP 503 Service Unavailable'), { status: 503 }));
+  await f.refresh();
+  assert.match(f.element('#deployment-console').textContent, /Building release/);
+  f.setStatusFailure(undefined);
+  f.setSelfStatus({ available: true, running: false, phase: 'complete', message: 'Health verified', logs: [] });
+  await f.refresh();
+  assert.match(f.element('#self-sync-status').textContent, /Health verified/);
+  assert.equal(f.element('#self-sync-start').disabled, false);
+  assert.doesNotMatch(f.element('#deployment-console').textContent, /Self-sync status errors/);
+});
+test('prolonged self-sync outage stays unconfirmed and reports inspection guidance', async () => {
+  const f = await fixture(undefined, { available: true, running: true, phase: 'running', logs: [] });
+  vm.runInContext('Date.now = () => 1000', f.context);
+  f.setStatusFailure(Object.assign(new Error('HTTP 504 Gateway Timeout'), { status: 504 }));
+  await f.refresh();
+  vm.runInContext('Date.now = () => 121001', f.context);
+  await f.refresh();
+  assert.match(f.element('#self-sync-status').textContent, /Status refresh failed.*journalctl -u featheral-deployment/);
+  assert.equal(f.element('#self-sync-start').disabled, true);
+});
+test('an idle status failure also disables sync until an automatic refresh succeeds', async () => {
+  const f = await fixture(undefined, { available: true, running: false, phase: 'idle', logs: [] });
+  f.setStatusFailure(new Error('Connection interrupted'));
+  await f.click('#self-sync-refresh');
+  assert.equal(f.element('#self-sync-start').disabled, true);
+  assert.match(f.element('#self-sync-status').textContent, /Status refresh failed/);
+  f.setStatusFailure(undefined);
+  await f.refresh();
+  assert.equal(f.element('#self-sync-start').disabled, false);
+});
+test('self-sync status polls never overlap and a disposed view ignores the response', async () => {
+  const f = await fixture(undefined, { available: true, running: true, phase: 'running', logs: [] });
+  let resolve;
+  f.setStatusPending(new Promise(done => { resolve = done; }));
+  const before = f.calls.length, pending = f.refresh();
+  await f.click('#self-sync-refresh');
+  assert.equal(f.calls.length, before + 1);
+  const previous = f.element('#self-sync-status').textContent;
+  f.context.state.seq++;
+  resolve({ available: true, running: false, phase: 'complete', message: 'Old view response', logs: [] });
+  await pending;
+  assert.equal(f.element('#self-sync-status').textContent, previous);
+});
+test('Admin API errors keep HTTP status without dumping gateway HTML and retain JSON validation errors', async () => {
+  const context = vm.createContext({ window: { addEventListener() {} },
+    document: { addEventListener() {}, querySelector: () => ({ addEventListener() {} }) },
+    location: { hash: '#/settings', reload() {} } });
+  vm.runInContext(fs.readFileSync(path.resolve(__dirname, '../../../sites/admin.featheral.com/js/core.js'), 'utf8'), context);
+  for (const contentType of ['text/html', 'text/plain']) {
+    context.fetch = async () => new Response('<html><head><title>502 Bad Gateway</title></head></html>', {
+      status: 502, statusText: 'Bad Gateway', headers: { 'content-type': contentType },
+    });
+    await assert.rejects(context.api('/api/settings/self-sync'), error =>
+      error.status === 502 && error.message === 'HTTP 502 Bad Gateway');
+  }
+  context.fetch = async () => Response.json({ error: 'Wallet approval required' }, { status: 403 });
+  await assert.rejects(context.api('/api/settings/self-sync'), error =>
+    error.status === 403 && error.message === 'Wallet approval required');
+  context.fetch = async () => new Response('Deployment is locked', { status: 409, headers: { 'content-type': 'text/plain' } });
+  await assert.rejects(context.api('/api/settings/self-sync'), error =>
+    error.status === 409 && error.message === 'Deployment is locked');
+  context.fetch = async () => Response.json({ running: false });
+  assert.equal((await context.api('/api/settings/self-sync')).running, false);
 });
 
 test('deployment waits for exact approval before requesting a wallet challenge and starts the signed release', async () => {

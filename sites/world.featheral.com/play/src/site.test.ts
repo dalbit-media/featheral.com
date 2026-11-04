@@ -32,6 +32,12 @@ test('every Play game entry loads the canonical World wallet/profile assets', ()
     const tags = transform(html, { path: file, filename: file });
     assert.ok(Array.isArray(tags));
     assert.deepEqual(tags.map(tag => tag.attrs?.href ?? tag.attrs?.src), ['/shared/wallet-profile.css', '/shared/wallet-profile.js', '/shared/featheral.css', '/shared/site-links.js']);
+    assert.ok(tags.every(tag => tag.attrs?.['vite-ignore'] === true));
+    assert.ok(tags.filter(tag => tag.tag === 'script').every(tag => !tag.attrs?.type));
+  }
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  for (const asset of ['featheral.css', 'wallet-profile.css', 'site-links.js', 'wallet-profile.js']) {
+    assert.ok(landing.includes(`/shared/${asset}" vite-ignore`));
   }
   assert.equal(transform('<script src="/src/landing.ts"></script>', { path: '/about/', filename: 'about/index.html' }), undefined);
 });

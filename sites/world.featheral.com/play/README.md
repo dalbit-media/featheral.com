@@ -4,6 +4,10 @@ A responsive, map-first civic world prototype for desktop and mobile browsers. O
 
 Existing database paths, session cookie names, and legacy browser-save keys are retained across the rebrand so existing worlds remain accessible.
 
+The shared wallet/profile and site-navigation scripts and styles are served by the
+gateway at `/shared/`, not bundled by Vite. Their HTML tags use `vite-ignore` to
+preserve the runtime URLs and classic-script ordering without build warnings.
+
 ## Languages
 
 The public site and simulator default to **English**, independent of the browser's preferred language. The 한국어 / English selector appears in the landing-page footer and the game's account settings. An explicit selection is saved as `featheral-language` in local storage and survives navigation/reloads. `?lang=ko` and `?lang=en` explicitly override the saved preference for the current page; the selector saves its choice and updates this URL. Homepage/game links carry the selected language. If storage is unavailable, an explicit console warning is emitted and these URLs retain the choice across navigation.

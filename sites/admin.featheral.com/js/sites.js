@@ -155,7 +155,7 @@ function deploymentConsoleOutput() {
 async function mountSelfDeploymentControls(token, ready, output) {
   const hash = location.hash, active = () => token === state.seq && location.hash === hash;
   const button = $('#self-sync-start'), feedback = $('#self-sync-status');
-  let timer, submitting = false, current, attemptMessage = '';
+  let timer, submitting = false, refreshing = false, statusFresh = false, disconnectedAt, current, attemptMessage = '';
   const attemptLogs = [];
   const reportAttempt = message => {
     attemptMessage = message;
@@ -172,24 +172,39 @@ async function mountSelfDeploymentControls(token, ready, output) {
   };
   const cleanup = viewCleanup;
   viewCleanup = () => { clearInterval(timer); cleanup?.(); };
-  const update = () => { button.disabled = submitting || !ready() || !current?.available || current.running || current.phase === 'uncertain'; };
+  const update = () => { button.disabled = submitting || !statusFresh || !ready() || !current?.available || current.running || current.phase === 'uncertain'; };
   const refresh = async () => {
+    if (!active() || refreshing) return;
+    refreshing = true;
+    statusFresh = false;
+    update();
     try {
-      current = await api('/api/settings/self-sync', { cache: 'no-store' });
+      const next = await api('/api/settings/self-sync', { cache: 'no-store' });
       if (!active()) return;
+      current = next; statusFresh = true; disconnectedAt = undefined;
       feedback.textContent = [attemptMessage, recordedStatus()].filter(Boolean).join('\n');
       const lines = (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`);
       if (current.id || current.startedAt) lines.unshift(recordedStatus());
       output('Git self-sync', lines);
+      output('Self-sync status errors', []);
       update();
       if (current.running && !timer) timer = setInterval(refresh, 3000);
       if (!current.running) { clearInterval(timer); timer = null; }
     } catch (error) {
       if (active()) {
-        const message = `Status refresh failed: ${error.message} Reconnect and refresh status before retrying; the server job may still be running.`;
+        statusFresh = false;
+        disconnectedAt ??= Date.now();
+        const restarting = current?.running && (error instanceof TypeError || [502, 503, 504].includes(error.status));
+        const message = restarting && Date.now() - disconnectedAt < 120000
+          ? `Admin is temporarily unreachable during self-sync (${error.message}). Retrying status automatically; completion is not yet confirmed.`
+          : `Status refresh failed: ${error.message} Retrying automatically; the server job may still be running. If this persists, inspect journalctl -u featheral-deployment and the application logs before retrying self-sync.`;
         feedback.textContent = [attemptMessage, message].filter(Boolean).join('\n');
         output('Self-sync status errors', [message]);
+        update();
+        if (!timer) timer = setInterval(refresh, 3000);
       }
+    } finally {
+      refreshing = false;
     }
   };
   $('#self-sync-refresh').addEventListener('click', refresh);
@@ -206,13 +221,21 @@ async function mountSelfDeploymentControls(token, ready, output) {
       if (!active()) return;
       submitted = true;
       const receipt = await api('/api/settings/self-sync/start', { json: signed });
+      if (!active()) return;
+      current = receipt; statusFresh = true;
       reportAttempt(`Self-sync accepted${receipt.id ? ` (job ${receipt.id})` : ''}. The independent job continues through the Admin restart.`);
       if (!timer) timer = setInterval(refresh, 3000);
       await refresh();
     } catch (error) {
-      if (active()) reportAttempt(submitted
-        ? `Self-sync submission not confirmed: ${error.message} Refresh status and inspect the job before retrying.`
-        : `Self-sync not started: ${error.message}`);
+      if (active()) {
+        reportAttempt(submitted
+          ? `Self-sync submission not confirmed: ${error.message} Refresh status and inspect the job before retrying.`
+          : `Self-sync not started: ${error.message}`);
+        if (submitted) {
+          statusFresh = false;
+          if (!timer) timer = setInterval(refresh, 3000);
+        }
+      }
     }
     finally { submitting = false; if (active()) update(); }
   });
