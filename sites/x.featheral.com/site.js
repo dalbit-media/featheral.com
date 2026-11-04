@@ -292,7 +292,7 @@ async function render() {
       return await readerView(parts[1], q, true);
     }
     if (parts[0] === 'read') { setTab('read'); return readListView(q); }
-    if (parts[0] === 'liked') { setTab('liked'); return await likedView(); }
+    if (parts[0] === 'liked') { setTab('liked'); return await likedView(q); }
     if (parts[0] === 'thumbs') { setTab('thumbs'); return thumbsView(q); }
     if (parts[0] === 'trending') { setTab('trending'); return trendingView(q); }
     if (parts[0] === 'post') { setTab('post'); return postView(); }
@@ -738,11 +738,13 @@ async function readerView(id, q, bySlug = false) {
 }
 
 // ---------- liked ----------
-function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity } = {}) {
+function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, minWidth = 150, groupBy = null } = {}) {
   const mounted = new Map();
+  const headings = new Map();
   const constrained = navigator.connection?.saveData || /^(slow-)?2g$/.test(navigator.connection?.effectiveType || '');
   const limit = constrained ? 1 : 2;
-  let positions = [], bottom = [], rowCache = {}, frame = 0, resizeFrame = 0, timer = 0, stopped = false, scrolling = false, paused = false;
+  let positions = [], groups = [], bottom = [], rowCache = {}, frame = 0, resizeFrame = 0, timer = 0, stopped = false, scrolling = false, paused = false;
+  function clearHeadings() { for (const el of headings.values()) el.remove(); headings.clear(); }
   function release(index) {
     const tile = mounted.get(index);
     if (!tile) return;
@@ -802,6 +804,14 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity } 
     frame = 0;
     if (stopped || paused || document.hidden) return;
     const bounds = grid.getBoundingClientRect(), top = -bounds.top - 240, end = innerHeight - bounds.top + 240;
+    const visibleGroups = groups.filter(group => group.y + 36 >= top && group.y <= end);
+    const keys = new Set(visibleGroups.map(group => group.key));
+    for (const [key, el] of headings) if (!keys.has(key)) { el.remove(); headings.delete(key); }
+    for (const group of visibleGroups) {
+      let el = headings.get(group.key);
+      if (!el) { el = document.createElement('h2'); el.className = 'timeline-heading'; headings.set(group.key, el); grid.append(el); }
+      el.textContent = group.label; el.style.cssText = `top:${group.y}px`;
+    }
     let lo = 0, hi = bottom.length;
     while (lo < hi) { const mid = (lo + hi) >>> 1; if (bottom[mid] < top) lo = mid + 1; else hi = mid; }
     const wanted = [];
@@ -838,16 +848,26 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity } 
     if (!append) rowCache = {};
     if (justified) positions = justifyRows(grid, items, width, 6, { maxH, cache: rowCache });
     else {
-      const columns = Math.max(1, Math.floor((width + 8) / 158)), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
-      positions = items.map((item, index) => ({ index, x: (index % columns) * (w + 8), y: Math.floor(index / columns) * (h + 8), w, h }));
-      grid.style.height = `${Math.ceil(items.length / columns) * (h + 8)}px`;
+      const columns = Math.max(1, Math.floor((width + 8) / (minWidth + 8))), w = (width - (columns - 1) * 8) / columns, h = w * 4 / 3;
+      positions = []; groups = [];
+      let y = 0, column = 0, previous = null;
+      items.forEach((item, index) => {
+        const group = groupBy?.(item);
+        if (group && group.key !== previous) {
+          if (column) { y += h + 8; column = 0; }
+          groups.push({ ...group, y }); y += 42; previous = group.key;
+        }
+        positions.push({ index, x: column * (w + 8), y, w, h });
+        if (++column === columns) { column = 0; y += h + 8; }
+      });
+      grid.style.height = `${y + (column ? h + 8 : 0)}px`;
     }
     let max = 0;
     bottom = positions.map(p => (max = Math.max(max, p.y + p.h)));
     schedule();
   }
   function visibility() {
-    if (document.hidden) for (const index of mounted.keys()) release(index);
+    if (document.hidden) { for (const index of mounted.keys()) release(index); clearHeadings(); }
     else schedule();
   }
   window.addEventListener('scroll', onScroll, { passive: true });
@@ -862,61 +882,176 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity } 
   resize.observe(grid);
   return { layout, pause(value) {
     paused = value;
-    if (paused) for (const index of mounted.keys()) release(index);
+    if (paused) { for (const index of mounted.keys()) release(index); clearHeadings(); }
     else schedule();
   }, close() {
     stopped = true; clearTimeout(timer); cancelAnimationFrame(frame); cancelAnimationFrame(resizeFrame); resize.disconnect();
     window.removeEventListener('scroll', onScroll);
     document.removeEventListener('visibilitychange', visibility);
     for (const index of mounted.keys()) release(index);
+    clearHeadings();
   } };
 }
 
-// A new shuffle of equal-score posts each time the page is opened; kept while it stays open.
-let likedSeed = Math.random().toString(36).slice(2);
-async function likedView(reshuffle = true) {
+function likedDate(item, grouping = 'day') {
+  const date = new Date(item.likedAt);
+  if (!Number.isFinite(date.getTime()) || !item.likedAt) return { key: 'unknown', label: 'Earlier likes' };
+  const year = date.getFullYear(), month = date.getMonth() + 1, day = date.getDate();
+  return { key: grouping === 'month' ? `${year}-${month}` : `${year}-${month}-${day}`,
+    label: date.toLocaleDateString(undefined, grouping === 'month'
+      ? { year: 'numeric', month: 'long' } : { year: 'numeric', month: 'long', day: 'numeric' }) };
+}
+async function likedView(q = {}) {
   cleanup?.();
-  let disposed = false, gallery = null, closeViewer = null;
+  const sort = q.sort === 'likes' ? 'likes' : 'recent', grouping = q.group === 'month' ? 'month' : q.group === 'none' ? 'none' : 'day';
+  const collection = q.collection || '';
+  let disposed = false, gallery = null, closeViewer = null, folderDialog = null, pending = null, refreshOnClose = false, more = true, offset = 0;
+  let folderNames = new Map();
+  const items = [];
   const request = new AbortController();
-  cleanup = () => { disposed = true; request.abort(); gallery?.close(); closeViewer?.(); };
-  if (reshuffle) likedSeed = Math.random().toString(36).slice(2);
-  let r;
-  try { r = await api(`/api/public/liked?limit=200&seed=${likedSeed}`, { signal: request.signal }); }
-  catch (error) { if (disposed) return; throw error; }
-  if (disposed) return;
-  view().innerHTML = `<section class="read" style="max-width:1100px"><h1>♥ Liked <span class="count">${fmtNum(r.total)}</span></h1>
-    <p class="m">Posts that are still kept, most liked first, with GIFs scattered among the images. ▲ counts how many rounds liked each one.</p>
-    ${r.items.length ? '<div class="grid media-grid"></div>'
-      : '<div class="empty"><div class="big">💔</div>Nothing liked yet. <a href="#/">Start swiping</a></div>'}</section>`;
+  const onWallet = () => {
+    if (disposed) return;
+    if (collection) history.replaceState(null, '', href(['liked'], { sort, group: grouping }));
+    render();
+  };
+  document.addEventListener('wallet', onWallet);
+  cleanup = () => { disposed = true; request.abort(); gallery?.close(); closeViewer?.(); folderDialog?.close(); folderDialog?.remove(); document.removeEventListener('wallet', onWallet); };
+  view().innerHTML = `<section class="read liked-timeline"><h1>♥ Liked <span class="count" id="liked-count"></span></h1>
+    <p class="m">Shared site-wide likes. Newest likes first. Folders are private to your signed-in wallet. Browsing never changes likes.</p>
+    <div class="liked-tools">
+      <label>Sort <select id="liked-sort"><option value="recent">Recently liked</option><option value="likes">Most liked</option></select></label>
+      <label>Group <select id="liked-group"><option value="day">By day</option><option value="month">By month</option><option value="none">No groups</option></select></label>
+      <label>Folder <select id="liked-folder"><option value="">All shared likes</option></select></label>
+      <button class="btn" id="folder-create">${wallet.token ? 'New folder' : 'Sign in for folders'}</button>
+      ${collection && wallet.token ? '<button class="btn" id="folder-rename">Rename folder</button><button class="btn" id="folder-delete">Delete folder</button>' : ''}
+    </div><p class="m" id="liked-status" role="status"></p>
+    <div class="grid media-grid"></div><button class="btn" id="liked-more">Load more</button></section>`;
   const grid = $('.grid', view());
-  if (!grid) return;
-  gallery = mediaGrid(grid, r.items, v => {
-    const tile = document.createElement('button');
+  const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, collection, ...patch }); };
+  $('#liked-sort').value = sort; $('#liked-group').value = grouping; $('#liked-group').disabled = sort === 'likes';
+  $('#liked-sort').onchange = e => navigate({ sort: e.target.value });
+  $('#liked-group').onchange = e => navigate({ group: e.target.value });
+  $('#liked-folder').onchange = e => navigate({ collection: e.target.value });
+  gallery = mediaGrid(grid, items, v => {
+    const tile = document.createElement('div');
     tile.className = 'tile'; tile.title = v.title;
-    tile.innerHTML = `<img alt="">${ytBadge(v)}<span>▲ ${fmtNum(v.likes)} · 👁 ${fmtNum(v.views || 0)} · ${esc(v.title)}</span>`;
+    tile.innerHTML = `<button class="liked-open" aria-label="Open ${esc(v.title)} with comments"><img alt="">${ytBadge(v)}
+      <span>${esc(v.title)}<br>♥ ${fmtNum(v.likes)} · 💬 ${fmtNum(v.comments)} · ${esc(likedDate(v).label)}</span></button>
+      <button class="btn liked-save" data-folders aria-label="Organize ${esc(v.title)} in folders">Folders</button>`;
     return tile;
-  });
-  gallery.layout();
+  }, { minWidth: 320, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
+  function loadMore() {
+    if (disposed || !more) return Promise.resolve();
+    if (!pending) pending = fetchPage().finally(() => { pending = null; });
+    return pending;
+  }
+  async function fetchPage() {
+    $('#liked-more').disabled = true;
+    $('#liked-status').textContent = 'Loading likes...';
+    try {
+      const r = await api(`/api/public/liked?${new URLSearchParams({ sort, offset, limit: 24, ...(collection ? { collection } : {}) })}`, { signal: request.signal });
+      if (disposed) return;
+      const known = new Set(items.map(item => item.id));
+      items.push(...r.items.filter(item => !known.has(item.id)));
+      offset = r.offset + r.items.length; more = offset < r.total && r.items.length > 0;
+      $('#liked-count').textContent = fmtNum(r.total);
+      $('#liked-status').textContent = items.length ? `${fmtNum(items.length)} of ${fmtNum(r.total)} shown` : collection ? 'No currently liked media in this folder.' : 'Nothing liked yet.';
+      $('#liked-more').hidden = !more;
+      gallery.layout();
+    } catch (error) {
+      if (!disposed) { $('#liked-status').textContent = error.message; throw error; }
+    } finally { if (!disposed) $('#liked-more').disabled = false; }
+  }
+  async function refreshFolders() {
+    if (!wallet.token) return;
+    let r;
+    try { r = await api('/api/public/collections', { signal: request.signal }); }
+    catch (error) { if (disposed) return; throw error; }
+    if (disposed) return;
+    folderNames = new Map(r.items.map(folder => [folder.id, folder.name]));
+    $('#liked-folder').innerHTML = '<option value="">All shared likes</option>' +
+      r.items.map(folder => `<option value="${esc(folder.id)}">${esc(folder.name)} (${fmtNum(folder.count)})</option>`).join('');
+    $('#liked-folder').value = collection;
+  }
+  function folderInput(action) {
+    folderDialog?.close();
+    const dialog = document.createElement('dialog'); folderDialog = dialog; dialog.className = 'collection-dialog';
+    const deleting = action === 'delete';
+    dialog.setAttribute('aria-label', deleting ? 'Delete folder' : action === 'create' ? 'New folder' : 'Rename folder');
+    dialog.innerHTML = `<form><h2>${deleting ? 'Delete folder' : action === 'create' ? 'New folder' : 'Rename folder'}</h2>
+      ${deleting ? '<p>Delete this private folder? Media and shared likes will not change.</p>' : `<label>Folder name <input name="name" required maxlength="80" value="${esc(action === 'create' ? '' : folderNames.get(collection) || '')}" autofocus></label>`}
+      <div class="row"><button class="btn" type="button" data-cancel>Cancel</button><button class="btn primary" type="submit">${deleting ? 'Delete folder' : 'Save folder'}</button></div></form>`;
+    return new Promise(resolve => {
+      let value = null;
+      $('form', dialog).onsubmit = event => {
+        event.preventDefault();
+        const name = deleting ? 'delete' : $('input', dialog).value.trim();
+        if (!name) { $('input', dialog).setCustomValidity('Enter a folder name'); $('input', dialog).reportValidity(); return; }
+        value = name; dialog.close();
+      };
+      $('input', dialog)?.addEventListener('input', event => event.target.setCustomValidity(''));
+      $('[data-cancel]', dialog).onclick = () => dialog.close();
+      dialog.addEventListener('close', () => { dialog.remove(); if (folderDialog === dialog) folderDialog = null; resolve(value); }, { once: true });
+      document.body.append(dialog); dialog.showModal();
+    });
+  }
+  async function folderAction(action) {
+    if (!wallet.token) { await connectWallet(); return; }
+    const id = action === 'create' ? '' : collection;
+    const name = await folderInput(action);
+    if (name === null || disposed) return;
+    if (action === 'delete') {
+      await api(`/api/public/collections/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!disposed) navigate({ collection: '' });
+      return;
+    }
+    const folder = await api('/api/public/collections' + (id ? '/' + encodeURIComponent(id) : ''), { method: id ? 'PUT' : 'POST', json: { name } });
+    if (!disposed) { if (action === 'create') navigate({ collection: folder.id }); else await refreshFolders(); }
+  }
+  for (const action of ['create', 'rename', 'delete']) $('#folder-' + action)?.addEventListener('click', () => folderAction(action).catch(error => toast(error.message)));
+  async function organize(v) {
+    if (!wallet.token) { await connectWallet(); return; }
+    const r = await api(`/api/public/collections?post=${v.id}`, { signal: request.signal });
+    if (disposed) return;
+    folderDialog?.close();
+    const dialog = document.createElement('dialog'); folderDialog = dialog; dialog.className = 'collection-dialog';
+    dialog.setAttribute('aria-label', 'Organize in folders');
+    dialog.innerHTML = `<form method="dialog"><h2>Organize ${esc(v.title)}</h2><p>Private folders for your wallet. Shared likes stay unchanged.</p>
+      ${r.items.length ? r.items.map(folder => `<label><input type="checkbox" value="${esc(folder.id)}" ${folder.saved ? 'checked' : ''}> ${esc(folder.name)}</label>`).join('') : '<p>Create a folder using “New folder” above.</p>'}
+      <button class="btn">Done</button></form><p role="status"></p>`;
+    dialog.addEventListener('change', async event => {
+      const input = event.target;
+      if (!input.matches('input[type=checkbox]')) return;
+      const saved = input.checked; input.disabled = true;
+      try {
+        await api(`/api/public/collections/${input.value}/posts/${v.id}`, { method: saved ? 'PUT' : 'DELETE' });
+        if (disposed) return;
+        $('p[role=status]', dialog).textContent = saved ? 'Saved to folder.' : 'Removed from folder.';
+        if (collection === input.value) refreshOnClose = true;
+        await refreshFolders();
+      } catch (error) { input.checked = !saved; $('p[role=status]', dialog).textContent = error.message; }
+      finally { input.disabled = false; }
+    });
+    dialog.addEventListener('close', () => {
+      dialog.remove(); if (folderDialog === dialog) folderDialog = null;
+      if (!disposed && !closeViewer && refreshOnClose) render();
+    });
+    document.body.append(dialog); dialog.showModal();
+  }
   grid.addEventListener('click', event => {
     const b = event.target.closest('.tile');
     if (!b) return;
-    const v = r.items[+b.dataset.i];
-    const box = document.createElement('div');
-    box.className = 'viewer';
-    box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">▲ ${fmtNum(v.likes)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${esc(fmtBytes(v.media.size))}</span>
-      <button class="btn" data-delete>Dislike</button><button class="btn" data-close>✕</button></div><img src="${esc(v.media.url)}" alt="">`;
-    const close = () => { $('img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onEsc); closeViewer = null; gallery.pause(false); };
-    closeViewer?.(); closeViewer = close; gallery.pause(true);
-    const onEsc = (e) => { if (e.key === 'Escape') close(); };
-    document.addEventListener('keydown', onEsc);
-    $('[data-close]', box).addEventListener('click', close);
-    $('[data-delete]', box).addEventListener('click', async () => {
-      if (!confirm('Dislike this post? In round 1 this also deletes it and its media (to the admin trash, where it can still be restored).')) return;
-      try { const d = await api('/api/public/vote', { json: { id: v.id, type: v.deck || v.media.type, vote: 'dislike' } }); close(); if (disposed) return; toast(d.deleted ? 'Deleted' : 'Disliked'); likedView(false).catch(error => toast(error.message)); } catch (e) { if (!disposed) toast(e.message); }
+    const v = items[+b.dataset.i];
+    if (!v) return;
+    if (event.target.closest('[data-folders]')) { organize(v).catch(error => { if (!disposed) toast(error.message); }); return; }
+    closeViewer?.(); gallery.pause(true);
+    closeViewer = openViewer(items, +b.dataset.i, {
+      onClose: () => { closeViewer = null; if (!disposed && refreshOnClose) render(); else gallery.pause(false); }, hasMore: () => more, loadMore,
+      organize: v => organize(v).catch(error => { if (!disposed) toast(error.message); }),
     });
-    document.body.append(box);
-    countView(v, (x) => { const e = $('#v-views', box); if (e) e.textContent = `👁 ${fmtNum(x.views)}`; const s = $('span', b); if (s) s.textContent = `▲ ${fmtNum(x.likes)} · 👁 ${fmtNum(x.views)} · ${x.title}`; });
   });
+  $('#liked-more').onclick = () => loadMore().catch(error => toast(error.message));
+  await Promise.all([loadMore(), refreshFolders()]);
 }
 
 // ---------- thumbnail gallery ----------
@@ -1249,9 +1384,11 @@ function openViewer(list, i, opts = {}) {
   };
   const show = () => {
     const v = list[i];
+    $('.vmedia img', box)?.removeAttribute('src');
     const dims = v.media.width && v.media.height ? `${v.media.width}×${v.media.height}` : '';
     box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">${i + 1} / ${fmtNum(list.length)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${dims ? `${dims} · ` : ''}${esc(fmtBytes(v.media.size))}</span>
-      <button class="btn" data-prev ${i ? '' : 'disabled'}>←</button><button class="btn" data-next ${i < list.length - 1 ? '' : 'disabled'}>→</button><button class="btn" data-close>✕</button></div>
+      ${opts.organize ? '<button class="btn" data-organize>Folders</button>' : ''}
+      <button class="btn" data-prev aria-label="Previous media" ${i ? '' : 'disabled'}>←</button><button class="btn" data-next aria-label="Next media" ${i < list.length - 1 || opts.hasMore?.() ? '' : 'disabled'}>→</button><button class="btn" data-close aria-label="Close media">✕</button></div>
       <div class="vbody">
         <div class="vmedia">${v.video ? `<figure><div class="ytbox"></div><figcaption>▶ YouTube video · <a href="${esc(ytWatch(v.video))}" target="_blank" rel="noopener noreferrer">open on YouTube ↗</a></figcaption></figure>` : `<figure><img src="${esc(v.media.url)}" alt=""${v.media.width ? ` width="${v.media.width}" height="${v.media.height}"` : ''}>
           <figcaption id="v-size">${dims ? `Original size ${dims}` : ''}</figcaption></figure>`}
@@ -1344,10 +1481,34 @@ function openViewer(list, i, opts = {}) {
       $('#c-count', box).textContent = fmtNum(v.comments);
     } catch (e) { toast(e.message); if (!wallet.address) paintForm(); } finally { if (ta.isConnected) { ta.disabled = false; ta.focus(); } }
   }
-  const step = (d) => { const j = i + d; if (j >= 0 && j < list.length) { i = j; show(); } };
+  let stepping = false, swipe = null;
+  const step = async d => {
+    if (closed || stepping) return;
+    stepping = true;
+    try {
+      const j = i + d;
+      if (j >= list.length && opts.hasMore?.()) {
+        $('[data-next]', box).disabled = true;
+        await opts.loadMore();
+      }
+      if (!closed && j >= 0 && j < list.length) { i = j; show(); }
+    } catch (error) { if (!closed) toast(error.message); }
+    finally { stepping = false; if (!closed) $('[data-next]', box).disabled = i >= list.length - 1 && !opts.hasMore?.(); }
+  };
+  box.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'mouse' || !event.target.closest('.vmedia') || event.target.closest('button,a,input,textarea,iframe')) return;
+    swipe = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  });
+  box.addEventListener('pointerup', event => {
+    if (!swipe || swipe.id !== event.pointerId) return;
+    const dx = event.clientX - swipe.x, dy = event.clientY - swipe.y; swipe = null;
+    if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+  });
+  box.addEventListener('pointercancel', () => { swipe = null; });
   const onWallet = () => { paintForm(); const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadComments(list[i], ++seq); };
   const close = () => { if (closed) return; closed = true; seq++; $('.vmedia img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); };
   const onKey = (e) => {
+    if (document.querySelector('dialog[open]')) return;
     if (e.target.closest?.('textarea, input')) {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } else if (e.key === 'Escape') e.target.blur();
       return;
@@ -1358,6 +1519,7 @@ function openViewer(list, i, opts = {}) {
     if (e.target.closest('[data-close]')) close();
     else if (e.target.closest('[data-prev]')) step(-1);
     else if (e.target.closest('[data-next]')) step(1);
+    else if (e.target.closest('[data-organize]')) opts.organize?.(list[i]);
     else if (e.target.closest('[data-connect]')) connectWallet();
     else if (e.target.closest('[data-tip]')) { const b = e.target.closest('[data-tip]'); tip(+b.dataset.tip, b); }
     else if (e.target.closest('[data-cdel]')) {

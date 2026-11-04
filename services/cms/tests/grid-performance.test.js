@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const source = fs.readFileSync(path.resolve(__dirname, '../../../sites/x.featheral.com/site.js'), 'utf8');
-const controller = source.slice(source.indexOf('function mediaGrid('), source.indexOf('// A new shuffle'));
+const controller = source.slice(source.indexOf('function mediaGrid('), source.indexOf('function likedDate('));
 const rows = source.slice(source.indexOf('function justifyRows('), source.indexOf('// Gap-free justified rows'));
 const item = (id, media = {}) => ({ id, media: { url: `/media/${id}`, width: 160, height: 120, size: 1024, type: 'jpeg', ...media } });
 
@@ -17,6 +17,7 @@ function fixture(items, options = {}, connection = {}) {
   const context = vm.createContext({
     navigator: { connection }, innerHeight: 800, document: {
       hidden: false, addEventListener: (key, fn) => docHandlers.set(key, fn), removeEventListener: key => docHandlers.delete(key),
+      createElement: () => ({ style: {}, remove() { grid.children = grid.children.filter(child => child !== this); } }),
     },
     window: { addEventListener: (key, fn) => handlers.set(key, fn), removeEventListener: key => handlers.delete(key) },
     requestAnimationFrame: fn => { frames.set(++serial, fn); return serial; },
@@ -40,12 +41,12 @@ function fixture(items, options = {}, connection = {}) {
   return {
     grid, gallery, context, handlers, frames, timers,
     get created() { return created; }, get requests() { return requests; },
-    loaded: () => grid.children.filter(el => el.img.src),
-    active: () => grid.children.filter(el => el.dataset.mediaState === 'loading'),
+    loaded: () => grid.children.filter(el => el.img?.src),
+    active: () => grid.children.filter(el => el.dataset?.mediaState === 'loading'),
     flush, scroll(y) { top = -y; handlers.get('scroll')(); flush(); },
     settleScroll() { const work = [...timers.values()]; timers.clear(); work.forEach(fn => fn()); flush(); },
     hidden(value) { context.document.hidden = value; docHandlers.get('visibilitychange')(); flush(); },
-    complete() { const active = grid.children.filter(el => el.dataset.mediaState === 'loading'); active.forEach(el => el.img.onload()); flush(); },
+    complete() { const active = grid.children.filter(el => el.dataset?.mediaState === 'loading'); active.forEach(el => el.img.onload()); flush(); },
   };
 }
 
@@ -147,6 +148,21 @@ test('justified layout preserves original row selection without quadratic list c
   for (const p of positions) assert(p.x >= 0 && p.x + p.w <= 1000 && p.h > 0 && p.h <= 240);
 });
 
+test('Liked uses large cards and windowed date headings without increasing media budgets', () => {
+  const items = Array.from({ length: 240 }, (_, i) => item(i));
+  const f = fixture(items, { minWidth: 320, groupBy: v => ({ key: String(Math.floor(v.id / 24)), label: 'Date' }) });
+  f.gallery.layout(); f.flush();
+  const tiles = f.grid.children.filter(el => el.img);
+  assert(tiles.length <= 9);
+  assert(tiles.every(el => /width:328px/.test(el.style.cssText)));
+  assert.equal(f.grid.children.filter(el => !el.img).length, 1);
+  assert.equal(f.active().length, 2);
+  f.scroll(3600); f.settleScroll();
+  assert(f.grid.children.filter(el => !el.img).length <= 2);
+  f.gallery.pause(true); assert.equal(f.grid.children.length, 0);
+  f.gallery.close();
+});
+
 test('pagination reflows only unfinished lookahead rows with exact full-layout geometry', () => {
   const context = vm.createContext({});
   vm.runInContext(rows, context);
@@ -171,7 +187,7 @@ test('all three routes use the bounded grid and only viewers directly load origi
   const routes = source.slice(source.indexOf('async function likedView('), source.indexOf('function openViewer('));
   assert.equal((routes.match(/mediaGrid\(grid,/g) || []).length, 3);
   assert.equal((routes.match(/gallery\.close\(\)/g) || []).length, 2);
-  assert.equal((routes.match(/signal: request.signal/g) || []).length, 4);
+  assert.equal((routes.match(/signal: request.signal/g) || []).length, 6);
   assert.doesNotMatch(routes, /loading="lazy"/);
-  assert.equal((routes.match(/<img src=/g) || []).length, 1, 'only the single Liked viewer loads media directly');
+  assert.equal((routes.match(/<img src=/g) || []).length, 0, 'all routes leave source loading to the bounded grid and shared viewer');
 });

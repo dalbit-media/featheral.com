@@ -642,7 +642,20 @@ app.post('/api/public/vote', wrap((req, res) => {
 app.get('/api/public/round', wrap((req, res) => res.json(publicSite(req).status(String(req.query.type || '')))));
 app.post('/api/public/round', wrap((req, res) => res.json(publicSite(req).nextRound(String(req.body?.type || '')))));
 app.post('/api/public/import', wrap((req, res) => res.json(publicSite(req).importVotes(req.body?.votes))));
-app.get('/api/public/liked', wrap((req, res) => res.json(publicSite(req).liked(req.query))));
+app.get('/api/public/liked', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).liked(req.query, walletToken(req)))));
+app.use('/api/public/collections', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const protocol = req.get('x-forwarded-proto') === 'https' ? 'https' : req.protocol;
+  if (req.get('origin') !== `${protocol}://${req.get('host')}`) return res.status(403).json({ error: 'A same-origin site is required to organize folders' });
+  next();
+});
+app.get('/api/public/collections', wrap((req, res) => res.set('Cache-Control', 'no-store').json(publicSite(req).collections(walletToken(req), req.query.post))));
+app.post('/api/public/collections', wrap((req, res) => res.status(201).json(publicSite(req).saveCollection(walletToken(req), null, req.body?.name))));
+app.put('/api/public/collections/:id', wrap((req, res) => res.json(publicSite(req).saveCollection(walletToken(req), req.params.id, req.body?.name))));
+app.delete('/api/public/collections/:id', wrap((req, res) => res.json(publicSite(req).deleteCollection(walletToken(req), req.params.id))));
+app.put('/api/public/collections/:id/posts/:post', wrap((req, res) => res.json(publicSite(req).collectMedia(walletToken(req), req.params.id, req.params.post, true))));
+app.delete('/api/public/collections/:id/posts/:post', wrap((req, res) => res.json(publicSite(req).collectMedia(walletToken(req), req.params.id, req.params.post, false))));
 app.get('/api/public/thumbs', wrap((req, res) => res.json(publicSite(req).thumbList(req.query))));
 app.get('/api/public/trending', wrap((req, res) => {
   const r = publicSite(req).trending(req.query);

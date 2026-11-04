@@ -612,34 +612,97 @@ class PublicSite {
     return { liked, deleted };
   }
 
-  // Most liked first within each media type, with GIFs spread evenly among the images (like the swipe
-  // deck's mix): an item's place is its rank within its type as a fraction of that type's count, plus
-  // a seeded jitter so the pattern isn't rigid. GIFs liked in more rounds no longer bunch at the top.
-  liked(q) {
-    const seed = String(q.seed || 'liked').slice(0, 40);
-    const ranked = this.store.likedPosts().filter((r) => isPublic(this.site, r.post_id) && this.likedMedia(r));
-    const isGif = (r) => this.likedMedia(r).type === 'gif';
-    const counts = { gif: 0, still: 0 };
-    for (const r of ranked) counts[isGif(r) ? 'gif' : 'still']++;
-    const seen = { gif: 0, still: 0 };
-    const all = ranked.map((r) => {
-      const k = isGif(r) ? 'gif' : 'still';
-      return { r, key: (seen[k]++ + hash32(`${seed}:${r.post_id}`) / 2 ** 32) / counts[k] };
-    }).sort((a, b) => a.key - b.key).map((x) => x.r);
+  liked(q = {}, token = '') {
+    const sort = q.sort === undefined ? 'recent' : q.sort;
+    if (!['recent', 'likes'].includes(sort)) throw httpError(400, 'Choose recent or likes sorting');
+    let saved;
+    if (q.collection) {
+      const address = this.walletOf(token, 'open your folders');
+      this.ownedCollection(address, q.collection);
+      saved = new Set(this.store.db.prepare('SELECT post_id FROM saved_media WHERE collection_id=?').all(q.collection).map(row => row.post_id));
+    }
+    const all = this.store.likedPosts().filter(r => (!saved || saved.has(r.post_id)) && isPublic(this.site, r.post_id) && this.likedMedia(r));
+    all.sort((a, b) => (sort === 'likes' ? b.likes - a.likes : 0) || b.at - a.at || b.post_id - a.post_id);
     const offset = clampInt(q.offset, 0, all.length, 0);
-    const limit = clampInt(q.limit, 1, 200, 60);
+    const limit = clampInt(q.limit, 1, 200, 24);
     const slice = all.slice(offset, offset + limit);
     const rows = postRows(this.site, slice.map((r) => r.post_id));
     const viewed = this.store.viewCounts(slice.map((r) => r.post_id));
     const members = this.store.memberInfo(slice.map((r) => r.post_id));
+    const comments = this.commentCounts(slice.map(r => r.post_id));
     return {
-      total: all.length, offset, limit,
+      total: all.length, offset, limit, sort,
       items: slice.map((r) => ({
         ...memberFields(members.get(r.post_id)),
         id: r.post_id, title: T.decodeEntities(rows.get(r.post_id)?.post_title || '') || 'Untitled', likes: r.likes, dislikes: r.dislikes,
-        score: r.likes - r.dislikes, views: viewed.get(r.post_id) || 0, media: this.likedMedia(r), deck: r.type,
+        score: r.likes - r.dislikes, likedAt: r.at, description: rows.get(r.post_id) ? describe(rows.get(r.post_id)) : '',
+        comments: comments.get(r.post_id) || 0, views: viewed.get(r.post_id) || 0, media: this.likedMedia(r), deck: r.type,
       })),
     };
+  }
+
+  ownedCollection(address, id) {
+    if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) throw httpError(400, 'Invalid folder');
+    const folder = this.store.db.prepare('SELECT id,name,at FROM media_collections WHERE id=? AND address=?').get(id, address);
+    if (!folder) throw httpError(404, 'Folder not found');
+    return folder;
+  }
+
+  collections(token, post) {
+    const address = this.walletOf(token, 'organize your folders');
+    if (post !== undefined && (!Number.isSafeInteger(+post) || +post < 1)) throw httpError(400, 'Invalid post');
+    return { items: this.store.db.prepare(`SELECT c.id,c.name,c.at,COUNT(s.post_id) AS count,
+      MAX(CASE WHEN s.post_id=? THEN 1 ELSE 0 END) AS saved
+      FROM media_collections c LEFT JOIN saved_media s ON s.collection_id=c.id
+      WHERE c.address=? GROUP BY c.id ORDER BY c.name COLLATE NOCASE,c.id`).all(post === undefined ? 0 : +post, address) };
+  }
+
+  saveCollection(token, id, name) {
+    const address = this.walletOf(token, 'organize your folders');
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw httpError(400, 'Folder names must contain 1 to 80 characters');
+    name = name.trim();
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (id) this.ownedCollection(address, id);
+      else if (this.store.db.prepare('SELECT COUNT(*) AS n FROM media_collections WHERE address=?').get(address).n >= 100)
+        throw httpError(400, 'You can create up to 100 folders');
+      if (this.store.db.prepare('SELECT id FROM media_collections WHERE address=? AND name=? COLLATE NOCASE AND id<>?').get(address, name, id || ''))
+        throw httpError(409, 'A folder with that name already exists');
+      if (id) this.store.db.prepare('UPDATE media_collections SET name=? WHERE id=? AND address=?').run(name, id, address);
+      else {
+        id = crypto.randomUUID();
+        this.store.db.prepare('INSERT INTO media_collections(id,address,name,at) VALUES (?,?,?,?)').run(id, address, name, Date.now());
+      }
+      const folder = this.ownedCollection(address, id);
+      this.store.db.exec('COMMIT');
+      return folder;
+    } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
+  }
+
+  deleteCollection(token, id) {
+    const address = this.walletOf(token, 'organize your folders');
+    this.ownedCollection(address, id);
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.store.db.prepare('DELETE FROM saved_media WHERE collection_id=?').run(id);
+      this.store.db.prepare('DELETE FROM media_collections WHERE id=? AND address=?').run(id, address);
+      this.store.db.exec('COMMIT');
+    } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
+    return { ok: true };
+  }
+
+  collectMedia(token, id, post, saved) {
+    const address = this.walletOf(token, 'organize your folders');
+    this.ownedCollection(address, id);
+    if (!Number.isSafeInteger(+post) || +post < 1) throw httpError(400, 'Invalid post');
+    post = +post;
+    if (saved) {
+      const liked = this.store.likedPosts().find(row => row.post_id === post);
+      if (!isPublic(this.site, post) || !liked || !this.likedMedia(liked))
+        throw httpError(404, 'Liked media not found');
+      this.store.db.prepare('INSERT INTO saved_media(collection_id,post_id,at) VALUES (?,?,?) ON CONFLICT(collection_id,post_id) DO NOTHING').run(id, post, Date.now());
+    } else this.store.db.prepare('DELETE FROM saved_media WHERE collection_id=? AND post_id=?').run(id, post);
+    return { ok: true, saved };
   }
 
   // Likes from the thumbnail gallery are stored under 'thumbs'; those posts show their main image.
@@ -1065,6 +1128,11 @@ class Curation {
       CREATE INDEX IF NOT EXISTS member_posts_address ON member_posts (address);
       CREATE TABLE IF NOT EXISTS like_rewards (post_id INTEGER NOT NULL, voter TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (post_id, voter));
       CREATE TABLE IF NOT EXISTS views (post_id INTEGER PRIMARY KEY, n INTEGER NOT NULL, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS media_collections (id TEXT PRIMARY KEY, address TEXT NOT NULL, name TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS media_collections_owner ON media_collections(address);
+      CREATE UNIQUE INDEX IF NOT EXISTS media_collections_name ON media_collections(address,name COLLATE NOCASE);
+      CREATE TABLE IF NOT EXISTS saved_media (collection_id TEXT NOT NULL, post_id INTEGER NOT NULL, at INTEGER NOT NULL,
+        PRIMARY KEY(collection_id,post_id));
     `);
     // Added after member posts first shipped: the YouTube video a member post plays.
     if (!this.db.prepare('PRAGMA table_info(member_posts)').all().some((c) => c.name === 'video')) this.db.exec('ALTER TABLE member_posts ADD COLUMN video TEXT');

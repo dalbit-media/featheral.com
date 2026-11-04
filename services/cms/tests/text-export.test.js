@@ -366,9 +366,10 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
     }
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const request = (route, payload, admin = false, host = admin ? 'admin.featheral.com' : 'sites.localhost') => new Promise((resolve, reject) => {
-    const req = http.request(new URL(route, base), { method: payload === undefined ? 'GET' : 'POST', headers: {
-      Host: host, Origin: `http://${host}`, 'Content-Type': 'application/json',
+  const request = (route, payload, admin = false, host = admin ? 'admin.featheral.com' : 'sites.localhost', options = {}) => new Promise((resolve, reject) => {
+    const req = http.request(new URL(route, base), { method: options.method || (payload === undefined ? 'GET' : 'POST'), headers: {
+      Host: host, Origin: options.origin || `http://${host}`, 'Content-Type': 'application/json',
+      ...(options.token ? { 'X-Wallet-Token': options.token } : {}),
       ...(admin ? { ...auth, Origin: 'https://admin.featheral.com' } : {}),
     } }, res => {
       const chunks = [];
@@ -422,6 +423,31 @@ test('free websites use path-scoped CMS datasets, public APIs, media, previews a
   assert.equal(bootstrap.headers['cache-control'], 'no-store');
   assert.deepEqual(bootstrap.data, metadata);
   assert(Object.hasOwn(info.data, 'mix'), 'ordinary API clients retain the full contract');
+  const liked = await request(prefix + '/api/public/liked');
+  assert.equal(liked.status, 200);
+  assert.equal(liked.data.sort, 'recent');
+  assert.equal(liked.data.limit, 24);
+  assert.equal(liked.headers['cache-control'], 'no-store');
+  assert.equal((await request(prefix + '/api/public/collections')).status, 401);
+  const wallet = require('ethers').Wallet.createRandom();
+  const nonce = await request(prefix + '/api/public/wallet/nonce', { address: wallet.address });
+  const login = await request(prefix + '/api/public/wallet/login', {
+    address: wallet.address, signature: await wallet.signMessage(nonce.data.message),
+  });
+  assert.equal(login.status, 200);
+  const options = { token: login.data.token };
+  const created = await request(prefix + '/api/public/collections', { name: 'HTTP folder' }, false, 'sites.localhost', options);
+  assert.equal(created.status, 201);
+  const folderRoute = prefix + '/api/public/collections/' + created.data.id;
+  const folders = await request(prefix + '/api/public/collections', undefined, false, 'sites.localhost', options);
+  assert.equal(folders.headers['cache-control'], 'no-store');
+  assert.equal(folders.data.items[0].name, 'HTTP folder');
+  assert.equal((await request(second.data.path + '/api/public/collections', undefined, false, 'sites.localhost', options)).status, 401);
+  assert.equal((await request(folderRoute, { name: 'Renamed' }, false, 'sites.localhost', { ...options, method: 'PUT' })).data.name, 'Renamed');
+  assert.equal((await request(folderRoute + '/posts/999999', undefined, false, 'sites.localhost', { ...options, method: 'PUT' })).status, 404);
+  assert.equal((await request(folderRoute + '/posts/999999', undefined, false, 'sites.localhost', { ...options, method: 'DELETE' })).status, 200);
+  assert.equal((await request(folderRoute, undefined, false, 'sites.localhost', { ...options, method: 'DELETE', origin: 'https://unrelated.example' })).status, 403);
+  assert.equal((await request(folderRoute, undefined, false, 'sites.localhost', { ...options, method: 'DELETE' })).status, 200);
   const store = new (require('../lib/cms'))(path.join(first.data.localDir, 'cms.sqlite'));
   try { store.setTheme('editorial'); } finally { store.close(); }
   assert.equal((await request(prefix + '/api/public/info')).data.theme, 'editorial');
