@@ -216,7 +216,7 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.match(css, /@media \(max-width: 600px\)/);
   assert.match(source, /label for="q">Search readings/);
   assert.match(source, /setSelectionRange\(selection, selection\)/);
-  assert.match(source, /category, page, limit: 30/);
+  assert.match(source, /category, tag, page, limit: 30/);
   assert.match(source, /kind: 'read'/);
   assert.match(source, /if \(readings\) grid.className = 'reading-liked-list reading-cards'/);
   const liked = source.slice(source.indexOf('async function likedView('), source.indexOf('function justifyRows('));
@@ -225,6 +225,26 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.doesNotMatch(trash, /originalSize: true|tile original-tile/);
   assert.match(liked, /previews: true, minWidth: 250, minColumns: 2, groupBy:/);
   assert.doesNotMatch(source, /data-folders|data-organize|folder-create|folderDialog|\/api\/public\/collections/);
+});
+
+test('category keyword chips preserve search, sort and category, reset paging and escape names', () => {
+  const context = vm.createContext({ fmtNum: String,
+    esc: value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
+    href: (parts, query) => '#/' + parts.join('/') + '?' + new URLSearchParams(Object.entries(query).filter(([, value]) => value)).toString() });
+  vm.runInContext(source.slice(source.indexOf('function readingKeywords('), source.indexOf('async function readListView(')), context);
+  const html = context.readingKeywords([{ id: 8, name: '<Name>', count: 15 }], { category: '6', tag: '8', q: 'sample', sort: 'newest', page: '3' });
+  assert.match(html, /aria-label="Category keywords"/);
+  assert.match(html, /aria-current="true"/);
+  assert.match(html, /#&lt;Name>/);
+  assert.doesNotMatch(html, /<Name>|page=|trending/);
+  assert.match(html, /q=sample&sort=newest&category=6&tag=8/);
+  assert.match(html, /Clear keyword filter/);
+  assert.match(context.readingKeywords([], { category: '6' }), /No keywords yet/);
+  assert.match(context.readingKeywords([], { category: '6', tag: '999' }), /Clear keyword filter/);
+  const list = source.slice(source.indexOf('async function readListView('), source.indexOf('async function readerView('));
+  assert.match(list, /sort, category, tag, \.\.\.patch/);
+  assert.match(list, /sort, category, tag, page: r\.page - 1/);
+  assert.match(list, /sort, category, tag, page: r\.page \+ 1/);
 });
 
 test('reading thumbnails use lazy bounded previews, site scoping, and reject invalid media', () => {

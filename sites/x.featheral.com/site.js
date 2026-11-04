@@ -790,6 +790,16 @@ function swipeView(type) {
 }
 
 // ---------- reading ----------
+function readingKeywords(keywords, q) {
+  const link = tag => href(['read'], { q: q.q || '', sort: q.sort || 'longest', category: q.category, tag });
+  return `<section class="reading-keywords" aria-labelledby="reading-keywords-title"><h2 id="reading-keywords-title">Top keywords</h2>
+    ${keywords.length ? `<nav class="ttags" aria-label="Category keywords">
+      <a class="chip ${q.tag ? '' : 'on'}" ${q.tag ? '' : 'aria-current="true"'} href="${link('')}">All keywords</a>
+      ${keywords.map(tag => `<a class="chip ${String(tag.id) === String(q.tag) ? 'on' : ''}" ${String(tag.id) === String(q.tag) ? 'aria-current="true"' : ''}
+        href="${link(tag.id)}">#${esc(tag.name)} <span class="count">${fmtNum(tag.count)}</span></a>`).join('')}</nav>` : '<p class="count">No keywords yet.</p>'}
+    ${q.tag ? `<a class="btn" href="${link('')}">Clear keyword filter</a>` : ''}</section>`;
+}
+
 async function readListView(q) {
   const searchFocused = document.activeElement?.id === 'q';
   const selection = searchFocused ? document.activeElement.selectionStart : null;
@@ -800,26 +810,31 @@ async function readListView(q) {
   const sort = q.sort || 'longest';
   const page = +q.page || 1;
   const category = q.category || '';
+  const tag = q.tag || '';
   view().innerHTML = `<section class="read reading-library">
     <div class="reading-heading"><div><p class="reading-kicker">Your reading space</p><h1>Find your next good read.</h1></div><a class="btn" href="#/liked?kind=read">♥ Liked readings</a></div>
     <nav class="reading-pages" aria-label="Read pages">${(info.pages || []).map(page => `<a class="chip" href="${href(['page', page.slug], { from: '/read' })}">${esc(page.title)}</a>`).join('')}</nav>
     <div class="tools reading-tools" role="search" aria-label="Find readings">
       <label for="q">Search readings<input type="search" id="q" placeholder="Titles, stories, ideas…" value="${esc(q.q || '')}"></label>
       <label for="sort">Sort by<select id="sort">${[['longest', 'Longest first'], ['shortest', 'Quick reads'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    </div>${category ? `<div class="reading-filter"><span>Filtered by category</span><a class="btn" href="${href(['read'], { q: q.q || '', sort })}">Clear filter ×</a></div>` : ''}
+    </div>${category ? `<div class="reading-filter"><span id="reading-category-name">Filtered by category</span><a class="btn" href="${href(['read'], { q: q.q || '', sort })}">Clear filter ×</a></div><div id="reading-keywords"></div>` : ''}
     <div id="list" aria-live="polite"><div class="loading">Loading…</div></div></section>`;
   if (searchFocused) { $('#q').focus({ preventScroll: true }); $('#q').setSelectionRange(selection, selection); }
-  const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, ...patch, page: patch.page || '' }); };
+  const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, tag, ...patch, page: patch.page || '' }); };
   $('#sort').addEventListener('change', (e) => go({ sort: e.target.value }));
   $('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => go({ q: e.target.value.trim() }), 450); });
-  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, page, limit: 30 })}&curation=1`, { signal: request.signal });
+  const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, tag, page, limit: 30 })}&curation=1`, { signal: request.signal });
   if (disposed) return;
+  if (category) {
+    $('#reading-category-name').textContent = r.category?.name || 'Filtered by category';
+    $('#reading-keywords').innerHTML = readingKeywords(r.keywords || [], { ...q, sort, category, tag });
+  }
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count" id="reading-list-count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
     <div class="reading-cards">${r.items.map((t) => `<div class="reading-card"><a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
       <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a><div class="reading-card-votes" data-reading-id="${t.id}" role="group" aria-label="Votes for ${esc(t.title)}"></div></div>`).join('')}</div>
-    <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
+    <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, tag, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, tag, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
   for (const item of r.items) {
     const target = $(`[data-reading-id="${item.id}"]`, $('#list'));

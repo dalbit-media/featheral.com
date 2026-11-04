@@ -120,6 +120,53 @@ test('reading sidebar categories filter kept readings without including CMS page
   assert.deepEqual(pub.textList({ category: 10 }).items.map(row => row.id), [2]);
 });
 
+test('category keywords count all kept readings before search and paging and stay category-scoped when clicked', t => {
+  const f = fixture(t), raw = require('../../database/sqlite').open(path.join(f.dir, 'db.sqlite'));
+  const prefix = f.pub.site.prefix;
+  raw.exec(`INSERT INTO ${prefix}terms VALUES(30,'Alpha','alpha',0),(40,'Beta','beta',0),(50,'Private','private',0);
+    INSERT INTO ${prefix}term_taxonomy VALUES(30,30,'post_tag','',0,999),(40,40,'post_tag','',0,999),(50,50,'post_tag','',0,999);
+    INSERT INTO ${prefix}term_relationships VALUES(1,30,0),(2,30,0),(3,30,0),(1,40,0),(4,10,0),(4,50,0),(5,10,0),(5,50,0);
+    UPDATE ${prefix}posts SET post_status='draft' WHERE ID=4;
+    UPDATE ${prefix}posts SET post_password='secret' WHERE ID=5;`);
+  raw.close();
+  const pub = f.reopen();
+  pub.cms.save({ title: 'CMS page', type: 'page', body: 'Page text', status: 'publish' });
+  const expected = [{ id: 30, name: 'Alpha', count: 2 }, { id: 40, name: 'Beta', count: 1 }];
+  const page = pub.textList({ category: '10', page: '2', limit: '1' });
+  assert.deepEqual(page.category, { id: 10, name: 'Essays' });
+  assert.deepEqual(page.keywords, expected, 'counts ignore stale global term counts and exclude other categories, drafts and protected posts');
+  assert.equal(page.total, 2);
+  assert.deepEqual(pub.textList({ category: '10', q: 'Post 2' }).keywords, expected, 'search does not erase the category keyword overview');
+  assert.deepEqual(pub.textList({ category: '10', tag: '40' }).items.map(row => row.id), [1]);
+  assert.deepEqual(pub.textList({ category: '10', tag: '40' }).keywords, expected);
+  assert.equal(pub.textList({ category: '20', tag: '40' }).total, 0);
+  assert.equal(pub.textList({ category: '10', tag: '999' }).total, 0);
+  assert.deepEqual(pub.textList({ category: '999' }).keywords, []);
+  assert.deepEqual(pub.textList({}).keywords, []);
+  assert.throws(() => pub.textList({ tag: 'bad' }), { status: 400 });
+  assert.throws(() => pub.textList({ category: '9007199254740992' }), { status: 400 });
+  pub.vote(1, 'read', 'dislike');
+  assert.deepEqual(pub.textList({ category: '10' }).keywords, [{ id: 30, name: 'Alpha', count: 1 }], 'trash updates counts even with a warm tag cache');
+  pub.vote(1, 'read', 'none');
+  assert.deepEqual(pub.textList({ category: '10' }).keywords, expected);
+});
+
+test('category keywords have a deterministic top twelve and retain a selected less-used keyword', t => {
+  const f = fixture(t), raw = require('../../database/sqlite').open(path.join(f.dir, 'db.sqlite')), prefix = f.pub.site.prefix;
+  for (let id = 100; id <= 113; id++) {
+    const name = `Keyword ${id}`;
+    raw.prepare(`INSERT INTO ${prefix}terms VALUES(?,?,?,0)`).run(id, name, `keyword-${id}`);
+    raw.prepare(`INSERT INTO ${prefix}term_taxonomy VALUES(?,?,'post_tag','',0,1)`).run(id, id);
+    raw.prepare(`INSERT INTO ${prefix}term_relationships VALUES(1,?,0)`).run(id);
+  }
+  raw.close();
+  const pub = f.reopen();
+  const top = pub.textList({ category: '10' }).keywords;
+  assert.equal(top.length, 12);
+  assert.deepEqual(top.map(tag => tag.id), Array.from({ length: 12 }, (_, i) => 100 + i));
+  assert.deepEqual(pub.textList({ category: '10', tag: '113' }).keywords.map(tag => tag.id), [...top.map(tag => tag.id), 113]);
+});
+
 test('reading review rounds advance only after all kept readings were reviewed', t => {
   const { pub } = fixture(t);
   assert.equal(pub.status('read').remaining, 30);

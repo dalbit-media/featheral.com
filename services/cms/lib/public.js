@@ -1165,20 +1165,42 @@ class PublicSite {
   textList(q) {
     const metrics = this.site.postMetrics();
     let list = publishedPosts(this.site).filter((r) => !this.site.trashed.has(r.ID) && (metrics.get(r.ID)?.wordCount || 0) >= 1);
+    let category = null;
+    const keywords = [];
+    for (const key of ['category', 'tag']) {
+      if (q[key] && (!/^[1-9]\d*$/.test(String(q[key])) || !Number.isSafeInteger(+q[key]))) throw httpError(400, `Invalid ${key}`);
+    }
+    if (q.category) {
+      const members = this.site.has('term_relationships') && this.site.has('term_taxonomy')
+        ? new Set(this.site.all(`SELECT r.object_id FROM ${this.site.t('term_relationships')} r JOIN ${this.site.t('term_taxonomy')} tt
+          ON tt.term_taxonomy_id=r.term_taxonomy_id WHERE tt.taxonomy='category' AND tt.term_taxonomy_id=?`, +q.category).map(row => row.object_id)) : new Set();
+      list = list.filter(row => members.has(row.ID));
+      if (this.site.has('terms') && this.site.has('term_taxonomy')) {
+        const row = this.site.get(`SELECT t.name FROM ${this.site.t('terms')} t JOIN ${this.site.t('term_taxonomy')} tt USING(term_id)
+          WHERE tt.taxonomy='category' AND tt.term_taxonomy_id=?`, +q.category);
+        if (row) category = { id: +q.category, name: T.decodeEntities(row.name) };
+      }
+      const { tags, byPost } = tagIndex(this.site), counts = new Map();
+      for (const row of list) {
+        for (const id of new Set(byPost.get(row.ID) || [])) counts.set(id, (counts.get(id) || 0) + 1);
+      }
+      const ranked = [...counts].map(([id, count]) => ({ id, name: tags.get(id).name, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name) || a.id - b.id);
+      keywords.push(...ranked.slice(0, 12));
+      const selected = ranked.find(tag => tag.id === +q.tag);
+      if (selected && !keywords.some(tag => tag.id === selected.id)) keywords.push(selected);
+    }
+    if (q.tag) {
+      const posts = new Set(tagIndex(this.site).tags.get(+q.tag)?.posts || []);
+      list = list.filter(row => posts.has(row.ID));
+    }
     const search = String(q.q || '').trim().toLowerCase();
     if (search && this.site.has('posts')) {
       const s = `%${search}%`;
       const hits = new Set(this.site.all(`SELECT ID FROM ${this.site.t('posts')} WHERE post_title LIKE ? OR post_content LIKE ? OR post_excerpt LIKE ?`, s, s, s).map((r) => r.ID));
       list = list.filter((r) => hits.has(r.ID));
     }
-    if (q.category) {
-      if (!/^[1-9]\d*$/.test(String(q.category))) throw httpError(400, 'Invalid category');
-      const members = this.site.has('term_relationships') && this.site.has('term_taxonomy')
-        ? new Set(this.site.all(`SELECT r.object_id FROM ${this.site.t('term_relationships')} r JOIN ${this.site.t('term_taxonomy')} tt
-          ON tt.term_taxonomy_id=r.term_taxonomy_id WHERE tt.taxonomy='category' AND tt.term_taxonomy_id=?`, +q.category).map(row => row.object_id)) : new Set();
-      list = list.filter(row => members.has(row.ID));
-    }
-    const cmsPosts = this.cms.published().filter((r) => !q.category && !this.site.trashed.has(-r.id) && T.wordCount(r.body) >= 1 && (!search ||
+    const cmsPosts = this.cms.published().filter((r) => !q.category && !q.tag && !this.site.trashed.has(-r.id) && T.wordCount(r.body) >= 1 && (!search ||
       `${r.title}\n${r.excerpt}\n${r.body}`.toLowerCase().includes(search)))
       .map((r) => ({ ID: -r.id, post_title: r.title, post_date: r.createdAt, cms: r }));
     list.push(...cmsPosts);
@@ -1194,7 +1216,7 @@ class PublicSite {
     const rows = postRows(this.site, slice.filter((r) => !r.cms).map((r) => r.ID));
     const seen = this.store.viewCounts(slice.map((r) => r.ID));
     return {
-      total: list.length, page, limit, sort,
+      total: list.length, page, limit, sort, category, keywords,
       items: slice.map((r) => {
         const row = rows.get(r.ID);
         const title = r.cms ? r.cms.title : T.decodeEntities(row?.post_title || '') || 'Untitled';

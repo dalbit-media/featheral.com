@@ -1,10 +1,12 @@
 // Automatic keyword tagging. Each published post gets "post_tag" terms from the [bracket] / (paren)
 // labels in its title, JAV code series and TF-IDF keywords from the title and body (no subreddit
 // tags). Longer posts get more keyword tags; tags on fewer than MIN_POSTS posts are dropped. Auto tags carry the description AUTO_MARK, so a
-// rerun replaces them without touching hand-made tags.
+// rerun replaces them without touching hand-made tags. Reviewed celebrity names bypass the minimum.
 const path = require('path');
+const fs = require('fs');
 const { open } = require('../../database/sqlite');
 const { htmlToText, decodeEntities } = require('./text');
+const { CELEBRITY_MARK, celebrityKeywords, contextualCelebrityName } = require('./celebrity-keywords');
 
 const AUTO_MARK = 'auto-tag';
 // every tag must group at least this many posts
@@ -297,6 +299,11 @@ function buildTags(posts, opts = {}) {
       if (kept.length !== tags.length) { out.set(id, kept); changed = true; }
     }
   }
+  for (const [id, names] of buildCelebrityTags(posts)) {
+    const merged = new Map((out.get(id) || []).map(name => [slugify(name), name]));
+    for (const name of names) merged.set(slugify(name), name);
+    out.set(id, [...merged.values()]);
+  }
   return out;
 }
 
@@ -307,21 +314,26 @@ function tablePrefix(db) {
 }
 
 function loadPosts(db, prefix) {
-  return db.prepare(`SELECT ID AS id, post_title AS title, post_content AS content FROM ${prefix}posts WHERE post_type = 'post' AND post_status = 'publish' ORDER BY ID`).all();
+  return db.prepare(`SELECT p.ID AS id, p.post_title AS title, p.post_content AS content, p.post_excerpt AS excerpt,
+    EXISTS(SELECT 1 FROM ${prefix}term_relationships r JOIN ${prefix}term_taxonomy tt USING(term_taxonomy_id)
+      JOIN ${prefix}terms t USING(term_id) WHERE r.object_id=p.ID AND tt.taxonomy='category'
+      AND (lower(t.slug)='celebrities' OR lower(t.name)='celebrities')) AS celebrity
+    FROM ${prefix}posts p WHERE p.post_type='post' AND p.post_status='publish'
+    AND COALESCE(p.post_password, '')='' ORDER BY p.ID`).all();
 }
 
-// Replaces all previous auto tags with tagsByPost (Map id -> names). Returns stats.
-function applyTags(db, prefix, tagsByPost) {
+// Replaces auto tags by default; additive mode preserves every existing relationship.
+function applyTags(db, prefix, tagsByPost, { replaceAuto = true, marker = AUTO_MARK } = {}) {
   const [TM, TT, TR] = ['terms', 'term_taxonomy', 'term_relationships'].map((t) => prefix + t);
-  db.exec('BEGIN');
+  db.exec('BEGIN IMMEDIATE');
   try {
-    const old = db.prepare(`SELECT term_taxonomy_id AS tt, term_id AS t FROM ${TT} WHERE taxonomy = 'post_tag' AND description = ?`).all(AUTO_MARK);
+    const old = replaceAuto ? db.prepare(`SELECT term_taxonomy_id AS tt, term_id AS t FROM ${TT} WHERE taxonomy = 'post_tag' AND description = ?`).all(AUTO_MARK) : [];
     const delRel = db.prepare(`DELETE FROM ${TR} WHERE term_taxonomy_id = ?`);
     const delTT = db.prepare(`DELETE FROM ${TT} WHERE term_taxonomy_id = ?`);
     const delTerm = db.prepare(`DELETE FROM ${TM} WHERE term_id = ? AND NOT EXISTS (SELECT 1 FROM ${TT} WHERE term_id = ?)`);
     for (const o of old) { delRel.run(o.tt); delTT.run(o.tt); delTerm.run(o.t, o.t); }
 
-    const existing = new Map(db.prepare(`SELECT t.name AS name, tt.term_taxonomy_id AS tt FROM ${TT} tt JOIN ${TM} t ON t.term_id = tt.term_id WHERE tt.taxonomy = 'post_tag'`).all().map((r) => [r.name.toLowerCase(), r.tt]));
+    const existing = new Map(db.prepare(`SELECT t.name AS name, tt.term_taxonomy_id AS tt FROM ${TT} tt JOIN ${TM} t ON t.term_id = tt.term_id WHERE tt.taxonomy = 'post_tag' ORDER BY tt.term_taxonomy_id DESC`).all().map((r) => [slugify(r.name), r.tt]));
     const slugs = new Set(db.prepare(`SELECT slug FROM ${TM}`).all().map((r) => r.slug));
     let termId = db.prepare(`SELECT COALESCE(MAX(term_id), 0) AS m FROM ${TM}`).get().m;
     let ttId = db.prepare(`SELECT COALESCE(MAX(term_taxonomy_id), 0) AS m FROM ${TT}`).get().m;
@@ -329,13 +341,13 @@ function applyTags(db, prefix, tagsByPost) {
     const insTT = db.prepare(`INSERT INTO ${TT} (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (?, ?, 'post_tag', ?, 0, 0)`);
     const insRel = db.prepare(`INSERT OR IGNORE INTO ${TR} (object_id, term_taxonomy_id, term_order) VALUES (?, ?, 0)`);
     const ttFor = (name) => {
-      const key = name.toLowerCase();
+      const key = slugify(name);
       if (existing.has(key)) return existing.get(key);
       let slug = slugify(name);
       for (let i = 2; slugs.has(slug); i++) slug = `${slugify(name)}-${i}`;
       slugs.add(slug);
       insTerm.run(++termId, name, slug);
-      insTT.run(++ttId, termId, AUTO_MARK);
+      insTT.run(++ttId, termId, marker);
       existing.set(key, ttId);
       return ttId;
     };
@@ -344,13 +356,60 @@ function applyTags(db, prefix, tagsByPost) {
     for (const [id, names] of tagsByPost) {
       for (const n of names) { const tt = ttFor(n); created.add(tt); links += Number(insRel.run(id, tt).changes); }
     }
-    db.exec(`UPDATE ${TT} SET count = (SELECT COUNT(*) FROM ${TR} r WHERE r.term_taxonomy_id = ${TT}.term_taxonomy_id) WHERE taxonomy = 'post_tag'`);
+    const recount = db.prepare(`UPDATE ${TT} SET count = (SELECT COUNT(*) FROM ${TR} WHERE term_taxonomy_id = ?) WHERE term_taxonomy_id = ?`);
+    for (const id of created) recount.run(id, id);
     db.exec('COMMIT');
     return { removed: old.length, tags: created.size, links, posts: tagsByPost.size };
   } catch (e) {
     db.exec('ROLLBACK');
     throw e;
   }
+}
+
+function buildCelebrityTags(posts) {
+  const out = new Map();
+  for (const post of posts) {
+    const names = new Set([
+      ...celebrityKeywords(post.title, !!post.celebrity),
+      ...celebrityKeywords(bodyText(`${post.excerpt || ''}\n${post.content || ''}`)),
+    ]);
+    if (names.size) out.set(post.id, [...names]);
+  }
+  return out;
+}
+
+function tagCelebrities(dbFile, { apply = false, backupFile } = {}) {
+  if (!fs.existsSync(dbFile)) throw new Error('The selected site database does not exist');
+  if (apply && (!backupFile || !path.isAbsolute(backupFile) || fs.existsSync(backupFile)))
+    throw new Error('Applying celebrity keywords requires a new absolute backup file path');
+  const db = open(dbFile, { readOnly: !apply });
+  try {
+    if (apply && db.readOnlyReplica) throw new Error('This is a read-only replica. Apply celebrity keywords on the writable source server.');
+    const prefix = tablePrefix(db);
+    const trashed = require('./wp').loadTrashed(path.join(path.dirname(dbFile), 'public.sqlite'));
+    const posts = loadPosts(db, prefix).filter(post => !trashed.has(post.id));
+    const byPost = buildCelebrityTags(posts);
+    const counts = new Map();
+    for (const tags of byPost.values()) for (const name of tags) counts.set(name, (counts.get(name) || 0) + 1);
+    let stats;
+    if (apply) {
+      db.exec(`VACUUM INTO '${backupFile.replace(/'/g, "''")}'`);
+      const backup = open(backupFile, { readOnly: true });
+      try {
+        if (backup.prepare('PRAGMA integrity_check').get().integrity_check !== 'ok') throw new Error('Celebrity keyword backup failed integrity verification');
+      } finally { backup.close(); }
+      stats = applyTags(db, prefix, byPost, { replaceAuto: false, marker: CELEBRITY_MARK });
+      const manifest = path.join(path.dirname(dbFile), 'manifest.json');
+      if (fs.existsSync(manifest)) { const now = new Date(); fs.utimesSync(manifest, now, now); }
+    }
+    return {
+      applied: apply, reviewed: posts.filter(post => post.celebrity).length, matchedPosts: byPost.size,
+      keywords: counts.size, matchedLinks: [...counts.values()].reduce((sum, count) => sum + count, 0),
+      ...(stats ? { addedLinks: stats.links, backupFile } : {}),
+      unmatchedCelebrityPosts: posts.filter(post => post.celebrity && !byPost.has(post.id)).map(post => post.id),
+      topKeywords: [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 20),
+    };
+  } finally { db.close(); }
 }
 
 function autotag(dbFile, opts = {}) {
@@ -379,22 +438,21 @@ function matchExistingTags(text, tagNames, limit = 12) {
   return hit.sort((a, b) => b.length - a.length).slice(0, limit);
 }
 
-// Tags one new post with the existing tags its text mentions. Returns the tag names used.
+// Tags a new post with matching existing keywords and reviewed celebrity names.
 function tagPost(dbFile, postId, text, limit = 12) {
   const db = open(dbFile);
   try {
     const prefix = tablePrefix(db);
-    const [TM, TT, TR] = ['terms', 'term_taxonomy', 'term_relationships'].map((t) => prefix + t);
-    const rows = db.prepare(`SELECT t.name, tt.term_taxonomy_id AS id FROM ${TT} tt JOIN ${TM} t ON t.term_id = tt.term_id WHERE tt.taxonomy = 'post_tag' AND tt.count >= 2 AND t.name NOT LIKE 'r/%'`).all();
+    const [TM, TT] = ['terms', 'term_taxonomy'].map((t) => prefix + t);
+    const rows = db.prepare(`SELECT t.name, tt.term_taxonomy_id AS id FROM ${TT} tt JOIN ${TM} t ON t.term_id = tt.term_id WHERE tt.taxonomy = 'post_tag' AND (tt.count >= 2 OR tt.description = ?) AND t.name NOT LIKE 'r/%'`).all(CELEBRITY_MARK);
     const byName = new Map(rows.map((r) => [r.name, r.id]));
-    const names = matchExistingTags(text, byName.keys(), limit);
-    const add = db.prepare(`INSERT OR IGNORE INTO ${TR} (object_id, term_taxonomy_id, term_order) VALUES (?, ?, 0)`);
-    const bump = db.prepare(`UPDATE ${TT} SET count = count + 1 WHERE term_taxonomy_id = ?`);
-    for (const n of names) if (add.run(postId, byName.get(n)).changes) bump.run(byName.get(n));
-    return names;
+    const names = new Map(matchExistingTags(text, [...byName.keys()].filter(name => !contextualCelebrityName(name)), limit).map(name => [slugify(name), name]));
+    for (const name of celebrityKeywords(bodyText(text))) names.set(slugify(name), name);
+    applyTags(db, prefix, new Map([[postId, [...names.values()]]]), { replaceAuto: false, marker: CELEBRITY_MARK });
+    return [...names.values()];
   } finally {
     db.close();
   }
 }
 
-module.exports = { AUTO_MARK, MIN_POSTS, buildTags, applyTags, autotag, tagPost, titleLabels, tokens, slugify, matchExistingTags, tablePrefix };
+module.exports = { AUTO_MARK, MIN_POSTS, buildTags, applyTags, autotag, tagPost, tagCelebrities, buildCelebrityTags, titleLabels, tokens, slugify, matchExistingTags, tablePrefix };
