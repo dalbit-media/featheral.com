@@ -7,19 +7,54 @@ const { reviewKeywords } = require('../lib/keyword-review');
 const { buildTags, matchExistingTags } = require('../lib/autotag');
 
 test('keyword quality removes name fragments and boilerplate, not meaningful short topics or stage names', () => {
-  for (const name of ['lee', 'Sarah', 'KIM', 'emily', 'williams', 'haul transparent', 'Final Part', 'r/example'])
+  for (const name of ['lee', 'Sarah', 'KIM', 'emily', 'williams', 'haul transparent', 'Final Part', 'r/example',
+    'Yoo', 'YOON', 'Yu', 'Seo', 'Soo', 'Yui', 'Yua', 'Hikaru', 'Nagi', 'Miku', 'Asuka', 'Rei'])
     assert.equal(meaningfulKeyword(name), false, name);
-  for (const name of ['Sarah Shahi', 'Jamie Lee Curtis', 'IU', 'Lisa', 'gym', 'art', 'cosplay', 'SONE series', 'Genshin Impact'])
+  for (const name of ['Sarah Shahi', 'Jamie Lee Curtis', 'IU', 'CL', 'BIBI', 'Lisa', 'gym', 'art', 'cosplay', 'SONE series', 'Genshin Impact',
+    'Kim Yoo-jung', 'Yoo Ji-won', 'Hikaru Nagi', 'Rei Kamiki', 'Hatsune Miku', 'Asuka Langley'])
     assert.equal(meaningfulKeyword(name), true, name);
   assert.deepEqual(matchExistingTags('Sarah Shahi and Jamie Lee Curtis', ['Sarah', 'lee', 'Sarah Shahi', 'Jamie Lee Curtis']).sort(),
     ['Jamie Lee Curtis', 'Sarah Shahi']);
   assert.deepEqual(matchExistingTags('Han Sohee and Han So-hee', ['han sohee', 'Han So-hee']), ['Han So-hee']);
   assert.deepEqual(matchExistingTags('Outdoor Star War scene', ['outdoor', 'star war']).sort(), ['Star Wars', 'outdoors']);
+  assert.deepEqual(matchExistingTags('Yoo and Yua Mikami meet Rei Kamiki', ['Yoo', 'Yua', 'Rei', 'Yua Mikami', 'Rei Kamiki']).sort(),
+    ['Rei Kamiki', 'Yua Mikami']);
   const posts = Array.from({ length: 15 }, (_, id) => ({ id, title: 'Sarah Shahi and Jamie Lee Curtis interview', content: '' }));
   for (const tags of buildTags(posts, { minPosts: 2 }).values()) {
     assert(tags.includes('Sarah Shahi') && tags.includes('Jamie Lee Curtis'));
     assert(tags.every(meaningfulKeyword));
   }
+});
+
+test('name review removes Yoo without guessing identities and merges Japanese aliases with a verified backup', t => {
+  const f = fixture(t), db = open(f.file);
+  db.exec(`INSERT INTO wp_terms VALUES(8,'Yoo','yoo',0),(9,'Mikami Yua','mikami-yua',0),(10,'Yui','yui',0);
+    INSERT INTO wp_term_taxonomy VALUES(8,8,'post_tag','',0,2),(9,9,'post_tag','',0,2),(10,10,'post_tag','',0,1);
+    INSERT INTO wp_posts VALUES(6,'post','publish','','Kim Yoojung and Nagi Hikaru','',''),
+      (7,'post','publish','','Yoo and Yui','',''),(8,'post','publish','','Mikami Yua and Yua Mikami','',''),
+      (9,'post','draft','','Mikami Yua','','');
+    INSERT INTO wp_term_relationships VALUES(6,8,0),(7,8,0),(7,10,0),(8,9,0),(9,9,0);`);
+  db.close();
+  const before = f.snapshot(), preview = reviewKeywords(f.file);
+  assert(preview.removedTags.includes('Yoo'));
+  assert(preview.removedTags.includes('Yui'));
+  assert(preview.mergedTags.some(tag => tag.from === 'Mikami Yua' && tag.to === 'Yua Mikami'));
+  assert.deepEqual(f.snapshot(), before);
+  const backupFile = path.join(f.dir, 'names-before.sqlite');
+  reviewKeywords(f.file, { apply: true, backupFile });
+  const read = open(f.file, { readOnly: true }), backup = open(backupFile, { readOnly: true });
+  try {
+    const tagsFor = id => read.prepare(`SELECT t.name FROM wp_terms t JOIN wp_term_taxonomy tt USING(term_id)
+      JOIN wp_term_relationships r USING(term_taxonomy_id) WHERE tt.taxonomy='post_tag' AND object_id=? ORDER BY t.name`).all(id).map(row => row.name);
+    assert.deepEqual(tagsFor(6), ['Hikaru Nagi', 'Kim Yoo-jung']);
+    assert.deepEqual(tagsFor(7), [], 'surname and given-name fragments alone infer no identity');
+    assert.deepEqual(tagsFor(8), ['Yua Mikami']);
+    assert.deepEqual(tagsFor(9), ['Yua Mikami'], 'an existing alias link survives even on a draft');
+    assert.deepEqual(read.prepare('SELECT * FROM wp_posts').all(), before[0]);
+    assert.deepEqual(backup.prepare('SELECT * FROM wp_term_relationships').all(), before[3]);
+    assert.equal(read.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  } finally { read.close(); backup.close(); }
+  assert.equal(reviewKeywords(f.file, { apply: true, backupFile: path.join(f.dir, 'names-again.sqlite') }).addedLinks, 0);
 });
 
 function fixture(t) {

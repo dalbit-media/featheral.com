@@ -123,9 +123,9 @@ test('reading sidebar categories filter kept readings without including CMS page
 test('category keywords count all kept readings before search and paging and stay category-scoped when clicked', t => {
   const f = fixture(t), raw = require('../../database/sqlite').open(path.join(f.dir, 'db.sqlite'));
   const prefix = f.pub.site.prefix;
-  raw.exec(`INSERT INTO ${prefix}terms VALUES(30,'Alpha','alpha',0),(40,'Beta','beta',0),(50,'Private','private',0),(60,'lee','lee',0),(70,'sarah','sarah',0);
-    INSERT INTO ${prefix}term_taxonomy VALUES(30,30,'post_tag','',0,999),(40,40,'post_tag','',0,999),(50,50,'post_tag','',0,999),(60,60,'post_tag','',0,999),(70,70,'post_tag','',0,999);
-    INSERT INTO ${prefix}term_relationships VALUES(1,30,0),(2,30,0),(3,30,0),(1,40,0),(4,10,0),(4,50,0),(5,10,0),(5,50,0),(1,60,0),(2,70,0);
+  raw.exec(`INSERT INTO ${prefix}terms VALUES(30,'Alpha','alpha',0),(40,'Beta','beta',0),(50,'Private','private',0),(60,'lee','lee',0),(70,'sarah','sarah',0),(80,'Yoo','yoo',0);
+    INSERT INTO ${prefix}term_taxonomy VALUES(30,30,'post_tag','',0,999),(40,40,'post_tag','',0,999),(50,50,'post_tag','',0,999),(60,60,'post_tag','',0,999),(70,70,'post_tag','',0,999),(80,80,'post_tag','',0,999);
+    INSERT INTO ${prefix}term_relationships VALUES(1,30,0),(2,30,0),(3,30,0),(1,40,0),(4,10,0),(4,50,0),(5,10,0),(5,50,0),(1,60,0),(2,70,0),(1,80,0);
     UPDATE ${prefix}posts SET post_status='draft' WHERE ID=4;
     UPDATE ${prefix}posts SET post_password='secret' WHERE ID=5;`);
   raw.close();
@@ -142,6 +142,8 @@ test('category keywords count all kept readings before search and paging and sta
   assert.equal(pub.textList({ category: '20', tag: '40' }).total, 0);
   assert.equal(pub.textList({ category: '10', tag: '999' }).total, 0);
   assert.equal(pub.textList({ category: '10', tag: '60' }).total, 0, 'ambiguous fragments are not public filter keywords');
+  assert.equal(pub.textList({ tag: '80' }).total, 0, 'Yoo is excluded before a source cleanup, even with a stale high term count');
+  assert(!pub.tagList({ limit: 200 }).tags.some(tag => tag.name === 'Yoo'), 'Trending uses the same reviewed keyword policy');
   assert.deepEqual(pub.textList({ category: '999' }).keywords, []);
   const allKeywords = [{ id: 30, name: 'Alpha', count: 3 }, { id: 40, name: 'Beta', count: 1 }];
   assert.deepEqual(pub.textList({}).keywords, allKeywords);

@@ -7,6 +7,8 @@ charlotte scarlett lilly mary luna lola amanda bella jin maria alice eve amber
 wendy joo lim armas bin cho kana katie lana melissa sophia taylor alex grace ivy
 rae smith diana holly uehara shinoda liz lulu woo yuki anya gyu hana kanna lea
 veronica williams aika
+yoo yoon yu seo soo jeong jung choi kwon park jang hyo
+miku asuka yui yua aoi rina rei suzu nanami miyu minami hikaru nagi seto kamiki mikami hatano
 `.trim().split(/\s+/));
 const NOISE = new Set(['haul transparent', 'tutorial brazilian', 'korean thai', 'transparent sheer', 'perky korean']);
 const ALIASES = new Map([

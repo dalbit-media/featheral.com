@@ -14,6 +14,8 @@ test('reviewed interests match complete phrases, aliases, punctuation and Unicod
   assert.deepEqual(interestKeywords('A bodypainting photography workshop and music video'),
     ['Body painting', 'Photography', 'Photography workshop', 'Music video']);
   assert.deepEqual(interestKeywords('Sarah Lee; star; fantasy; rail; resident; bikini one piece'), []);
+  assert.deepEqual(interestKeywords('Miku, Asuka, Rei'), []);
+  assert.deepEqual(interestKeywords('Hatsune Miku / Asuka Langley / Rei Ayanami'), ['Hatsune Miku', 'Asuka Langley', 'Rei Ayanami']);
   assert.deepEqual(interestKeywords('One Piece cosplay by Lada Lyumos'), ['Lada Lyumos', 'One Piece']);
   assert.deepEqual(interestKeywords('NotResident Evilness, roadway, dancer, campingground'), []);
   assert.deepEqual(interestKeywords('Music.\nVideo; Resident / Evil'), [], 'phrases never bridge sentences or unrelated fields');

@@ -5,6 +5,30 @@ const { open } = require('../../database/sqlite');
 const { celebrityKeywords, CELEBRITY_MARK } = require('../lib/celebrity-keywords');
 const { buildTags, autotag, tagCelebrities, tagPost } = require('../lib/autotag');
 
+test('Korean full-name spellings and reviewed Japanese name orders resolve without guessing from fragments', () => {
+  for (const [canonical, variants] of [
+    ['Kim Yoo-jung', ['Kim Yoo Jung', 'Kim Yoojung', 'Kimyoojung', 'KIM YOO-JUNG']],
+    ['Park Ji-hyun', ['Park Ji Hyun', 'Park Jihyun', 'Park Ji‑hyun']],
+    ['Shin Yu-ju', ['Shin Yu Ju', 'Shin YuJu']],
+    ['Jung So-min', ['Jung So Min', 'Jung Somin']],
+    ['Kim Tae-ri', ['Kim Tae Ri', 'Kim Taeri']],
+    ['Moon Ga-young', ['Moon Ga Young', 'Moon Gayoung', 'Moon Kayoung']],
+    ['Hikaru Nagi', ['Hikaru Nagi', 'Nagi Hikaru', 'NAGI-HIKARU']],
+    ['Kanna Seto', ['Kanna Seto', 'Seto Kanna']],
+    ['Rei Kamiki', ['Rei Kamiki', 'Kamiki Rei']],
+    ['Yua Mikami', ['Yua Mikami', 'Mikami Yua']],
+    ['Yui Hatano', ['Yui Hatano', 'Hatano Yui']],
+    ['Sakura Miura', ['Sakura Miura', 'Miura Sakura']],
+  ]) {
+    for (const variant of variants) assert.deepEqual(celebrityKeywords(`${variant}'s interview`), [canonical], variant);
+    assert.deepEqual(celebrityKeywords(variants.join(' / ')), [canonical], 'aliases never create duplicate names');
+  }
+  for (const fragment of ['Yoo', 'Yoon', 'Yu', 'Seo', 'Soo', 'Yui', 'Yua', 'Rei', 'Hikaru', 'Nagi', 'Kanna', 'Miku', 'Asuka'])
+    assert.deepEqual(celebrityKeywords(fragment, true), [], fragment);
+  assert.deepEqual(celebrityKeywords('Nagi Hikaruson and Kim Yoojungson'), []);
+  assert.deepEqual(celebrityKeywords('Sakura Miura and Miyawaki Sakura'), ['Sakura Miura', 'Sakura'], 'a full Japanese name does not become an unrelated stage name');
+});
+
 test('reviewed names match aliases, Unicode, punctuation, possessives and multiple people without substring matches', () => {
   assert.deepEqual(celebrityKeywords('SYDNEY SWEENEY and Ana de Armas'), ['Sydney Sweeney', 'Ana de Armas']);
   assert.deepEqual(celebrityKeywords('Léa Seydoux & Lily-Rose Depp’s interview'), ['Léa Seydoux', 'Lily-Rose Depp']);
@@ -74,6 +98,18 @@ function fixture(t) {
   };
   return { dir, file, snapshot };
 }
+
+test('new uploads create and reuse canonical Korean and Japanese full-name tags, never short fragments', t => {
+  const f = fixture(t);
+  const expected = ['Hikaru Nagi', 'Kim Yoo-jung', 'Rei Kamiki', 'Yua Mikami'];
+  assert.deepEqual(tagPost(f.file, 7, 'Kim Yoojung / Nagi Hikaru / Kamiki Rei / Mikami Yua / Yoo / Yui').sort(), expected);
+  assert.deepEqual(tagPost(f.file, 7, 'Kim Yoo Jung / Hikaru Nagi / Rei Kamiki / Yua Mikami').sort(), expected);
+  const db = open(f.file, { readOnly: true });
+  try {
+    for (const name of expected) assert.equal(db.prepare('SELECT COUNT(*) AS n FROM wp_terms WHERE name=?').get(name).n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM wp_terms WHERE lower(name) IN ('yoo','yui','nagi hikaru','mikami yua')").get().n, 0);
+  } finally { db.close(); }
+});
 
 test('celebrity backfill is additive, backed up, idempotent and applies across categories but never to protected or trashed posts', t => {
   const f = fixture(t), before = f.snapshot();
