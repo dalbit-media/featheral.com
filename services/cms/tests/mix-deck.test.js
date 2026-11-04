@@ -36,7 +36,16 @@ test('the mixed deck shuffles GIF and image posts and keeps votes per media type
   writeJson(path.join(dir, 'manifest.json'), manifest);
 
   pub = new PublicSite(getSite(key), { brand: 'Public' });
+  const changes = () => pub.store.db.prepare('SELECT total_changes() AS n').get().n;
+  const beforeWarmup = changes();
+  pub.warmFeed();
+  assert(pub.site.memo.postMetrics);
+  assert(pub.site.memo.postTags);
+  assert(Object.keys(pub.site.memo.publicDecks).some(key => key.startsWith('mix:')));
+  assert.equal(changes(), beforeWarmup, 'startup indexing must not record views, votes, or change rounds');
   const first = pub.feed({ type: 'mix', limit: 3 });
+  pub.warmFeed();
+  assert.deepEqual(pub.feed({ type: 'mix', limit: 3 }), first, 'warmup preserves exact feed order and counts');
   assert.equal(first.total, 8);
   assert.equal(first.items.length, 3);
   assert.ok(first.more);

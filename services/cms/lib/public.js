@@ -213,6 +213,11 @@ class PublicSite {
   }
 
   // The mixed deck keeps each post's vote under its own media type and that type's round.
+  warmFeed() {
+    this.mixState();
+    tagIndex(this.site);
+  }
+
   mixState() {
     const rounds = Object.fromEntries(PUBLIC_TYPES.map((t) => [t, this.store.round(t)]));
     const reviewed = Object.fromEntries(PUBLIC_TYPES.map((t) => [t, this.store.reviewed(t, rounds[t])]));

@@ -29,6 +29,27 @@ test('bootstrap metadata skips all media indexes and totals while preserving gat
   assert.equal(full.mix.total, 30);
   assert.equal(full.texts, 8);
 });
+test('startup warms only the primary media site before accepting requests and exposes indexing failures', () => {
+  const server = fs.readFileSync(path.join(root, 'services', 'cms', 'server.js'), 'utf8');
+  const start = server.indexOf('const primaryPublicKey =');
+  const code = server.slice(start, server.indexOf('notes.validateBalances();', start));
+  assert(start < server.indexOf('module.exports = app;'));
+  const calls = [];
+  const context = {
+    CONFIG: { publicHost: 'x.featheral.com', siteKey: 'single' },
+    siteManager: { records: [{ hostname: 'other.example', key: 'other' }, { hostname: 'x.featheral.com', key: 'primary' }] },
+    publicByKey: key => ({ cms: { siteSettings: () => ({ homepage: 'media' }) }, warmFeed: () => calls.push(key) }),
+  };
+  vm.runInNewContext(code, context);
+  assert.deepEqual(calls, ['primary']);
+  vm.runInNewContext(code, { ...context, siteManager: null });
+  assert.deepEqual(calls, ['primary', 'single']);
+  vm.runInNewContext(code, { ...context, publicByKey: () => ({ cms: { siteSettings: () => ({ homepage: 'content' }) } }) });
+  assert.deepEqual(calls, ['primary', 'single']);
+  assert.throws(() => vm.runInNewContext(code, { ...context, publicByKey: () => {
+    throw new Error('Primary media indexing failed');
+  } }), /Primary media indexing failed/);
+});
 
 function preloadFixture(connection, items) {
   const policySource = source.slice(source.indexOf('function mediaPreloadPolicy('), source.indexOf('function swipeView('));

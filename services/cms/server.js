@@ -1151,6 +1151,13 @@ app.close = () => {
   database.sqlite.closeAll();
 };
 if (siteManager) for (const record of siteManager.records) publicByKey(record.key);
+const primaryPublicKey = siteManager
+  ? siteManager.records.find(record => record.hostname === CONFIG.publicHost && !record.path)?.key
+  : CONFIG.siteKey;
+if (primaryPublicKey) {
+  const primary = publicByKey(primaryPublicKey);
+  if (primary.cms.siteSettings().homepage === 'media') primary.warmFeed();
+}
 notes.validateBalances();
 module.exports = app;
 if (require.main === module) {

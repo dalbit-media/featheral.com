@@ -953,6 +953,10 @@ features, wallet configuration and the age gate, without building every media
 index or calculating unrelated gallery/text totals. The regular info endpoint
 keeps its full response. The selected feed supplies its own current round and
 counts, avoiding a second metadata request before the first card.
+The primary media site's deck and tag indexes are built before the process
+accepts requests, including after restarts, so its first visitor does not pay
+the cold indexing cost. Other sites remain lazy. This warmup records no views
+or votes and does not change rounds; an indexing failure prevents readiness.
 
 Swipe media gives the visible card high fetch priority and starts background
 downloads only after it loads. Lookahead is limited to three cards and 12 MiB
