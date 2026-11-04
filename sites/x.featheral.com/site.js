@@ -815,7 +815,7 @@ async function readListView(q) {
   const r = await api(`/api/public/texts?${new URLSearchParams({ q: q.q || '', sort, category, page, limit: 30 })}&curation=1`, { signal: request.signal });
   if (disposed) return;
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
-  $('#list').innerHTML = r.items.length ? `<div class="count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
+  $('#list').innerHTML = r.items.length ? `<div class="count" id="reading-list-count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
     <div class="reading-cards">${r.items.map((t) => `<div class="reading-card"><a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
       <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a><div class="reading-card-votes" data-reading-id="${t.id}" role="group" aria-label="Votes for ${esc(t.title)}"></div></div>`).join('')}</div>
@@ -823,7 +823,20 @@ async function readListView(q) {
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
   for (const item of r.items) {
     const target = $(`[data-reading-id="${item.id}"]`, $('#list'));
-    stopVotes.push(readingVotes(item, target, { compact: true, initialState: item.curation }));
+    const stop = readingVotes(item, target, { compact: true, initialState: item.curation, onDeleted() {
+      stop();
+      const card = target.closest('.reading-card');
+      const next = card.nextElementSibling || card.previousElementSibling;
+      const focused = card.contains(document.activeElement);
+      card.remove();
+      r.total--;
+      $('#reading-list-count').textContent = `${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(Math.max(1, Math.ceil(r.total / r.limit)))}`;
+      if (!$('#list .reading-card')) {
+        $('.reading-cards', $('#list')).innerHTML = '<p class="empty" role="status">No readings left on this page.</p>';
+      }
+      if (focused) (next?.querySelector('a') || $('#q')).focus({ preventScroll: true });
+    } });
+    stopVotes.push(stop);
   }
 }
 
@@ -868,7 +881,7 @@ async function readerView(id, q, bySlug = false) {
   stopVotes = readingVotes(t, $('#reading-votes'));
 }
 
-function readingVotes(reading, target, { compact = false, initialState = null } = {}) {
+function readingVotes(reading, target, { compact = false, initialState = null, onDeleted } = {}) {
   const request = new AbortController();
   let state = null, busy = false, disposed = false;
   function paint() {
@@ -897,6 +910,7 @@ function readingVotes(reading, target, { compact = false, initialState = null } 
       state = { ...state, ...result, vote: vote === 'none' ? null : vote };
       if (vote === 'like') rewardNote(result);
       toast(result.deleted ? 'Reading moved to Trash' : vote === 'none' ? 'Vote undone' : vote === 'like' ? 'Reading liked' : 'Reading disliked');
+      if (result.deleted && vote === 'dislike') onDeleted?.();
       loadReadingNavigation();
     } catch (error) { if (!disposed) { toast(error.message); await load(); } }
     finally { busy = false; paint(); }
@@ -1563,7 +1577,7 @@ async function trashView() {
   const items = [], request = new AbortController();
   view().innerHTML = `<section class="read liked-timeline"><h1><span aria-hidden="true">🗑</span> Trash <span class="count" id="trash-count"></span></h1>
     <p class="m">Trashed posts and readings, plus posts with more dislikes than likes. A round-1 dislike moves an item to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
-    <p class="m" id="trash-status" role="status"></p><div id="trash-readings"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
+    <p class="m" id="trash-status" role="status"></p><div id="trash-readings" class="reading-cards"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
   const grid = $('.grid', view()), readingIds = new Set();
   const gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('button');

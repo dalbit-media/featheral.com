@@ -90,6 +90,46 @@ test('reading controls handle errors and disposal without reintroducing stale bu
   error.stop();
 });
 
+test('Read cards are removed only after confirmed deletion, never for a pending, failed or later-round dislike', async () => {
+  let resolve, removed = 0;
+  const initialState = { type: 'read', round: 1, likes: 0, dislikes: 0, vote: null, canRestore: true };
+  const f = fixture(() => new Promise(done => { resolve = done; }), {
+    compact: true, initialState, onDeleted() { removed++; f.stop(); },
+  });
+  f.click('dislike');
+  assert.equal(removed, 0);
+  resolve({ ...initialState, deleted: true });
+  await tick();
+  assert.equal(removed, 1);
+  assert.equal(f.events.size, 0);
+  const later = fixture(async () => ({ ...initialState, round: 2, deleted: false }), {
+    compact: true, initialState: { ...initialState, round: 2 }, onDeleted() { removed++; },
+  });
+  later.click('dislike'); await tick();
+  assert.equal(removed, 1);
+  later.stop();
+  const failed = fixture(async url => {
+    if (url.includes('/curation?')) return initialState;
+    throw Error('Vote failed');
+  }, { compact: true, initialState, onDeleted() { removed++; } });
+  failed.click('dislike'); await tick();
+  assert.equal(removed, 1);
+  assert.deepEqual(failed.errors, ['Vote failed']);
+  failed.stop();
+  const list = source.slice(source.indexOf('async function readListView('), source.indexOf('async function readerView('));
+  assert.match(list, /card.remove\(\)/);
+  assert.match(list, /r.total--/);
+  assert.match(list, /No readings left on this page/);
+  assert.match(list, /focus\(\{ preventScroll: true \}\)/);
+});
+
+test('Trash readings use the shared responsive card grid with equal-height rows', () => {
+  assert.match(source, /id="trash-readings" class="reading-cards"/);
+  const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
+  assert.match(css, /#trash-readings \{ grid-auto-rows: 1fr/);
+  assert.doesNotMatch(css, /#trash-readings \.entry \{ display: block/);
+});
+
 test('Liked offers only media and readings, drops legacy folder filters and supports keyboard navigation', () => {
   const context = vm.createContext({ fmtNum: String,
     esc: value => String(value).replace(/</g, '&lt;'),
