@@ -155,5 +155,9 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.match(source, /category, page, limit: 30/);
   assert.match(source, /kind: 'read'/);
   assert.match(source, /if \(readings\) grid.className = 'reading-liked-list reading-cards'/);
-  assert.match(source, /originalSize: true, previews: true/);
+  const liked = source.slice(source.indexOf('async function likedView('), source.indexOf('function justifyRows('));
+  const trash = source.slice(source.indexOf('async function trashView('), source.indexOf('async function trashView(') + 1800);
+  assert.doesNotMatch(liked, /originalSize: true|tile original-tile/);
+  assert.doesNotMatch(trash, /originalSize: true|tile original-tile/);
+  assert.match(liked, /previews: true, groupBy:/);
 });

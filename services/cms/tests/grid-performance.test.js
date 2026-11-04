@@ -52,6 +52,25 @@ function fixture(items, options = {}, connection = {}) {
   };
 }
 
+test('Liked and Trash thumbnail grids fit multiple media per row on phones, tablets and desktops with date groups', () => {
+  for (const width of [343, 773, 1168]) {
+    const items = Array.from({ length: 48 }, (_, i) => item(i));
+    const f = fixture(items, { previews: true, groupBy: v => ({ key: String(Math.floor(v.id / 24)), label: 'Date' }) });
+    f.grid.clientWidth = width;
+    f.gallery.layout(); f.flush();
+    const tiles = f.grid.children.filter(el => el.dataset?.i != null);
+    const positions = tiles.map(el => {
+      const style = el.style.cssText;
+      return { x: +/left:([\d.]+)px/.exec(style)[1], y: +/top:([\d.]+)px/.exec(style)[1], w: +/width:([\d.]+)px/.exec(style)[1] };
+    });
+    assert(positions.filter(p => p.y === positions[0].y).length >= 2, `multiple tiles at ${width}px`);
+    assert(positions.every(p => p.x + p.w <= width + 0.01));
+    assert(positions.every(p => p.y >= 42), 'date heading reserves its own row');
+    assert(f.active().length <= 2);
+    f.gallery.close();
+  }
+});
+
 test('10,000 grid items retain at most 80 tiles and two in-flight images during fast scrolling', () => {
   const items = Array.from({ length: 10000 }, (_, i) => item(i));
   const f = fixture(items);

@@ -1124,12 +1124,12 @@ async function likedView(q = {}) {
   if (readings) grid.className = 'reading-liked-list reading-cards';
   else gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('div');
-    tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
+    tile.className = 'tile'; tile.title = v.title; v.el = tile;
     tile.innerHTML = `<button class="liked-open" aria-label="Open ${esc(v.title)} with comments"><img alt="">${ytBadge(v)}
       <span>${esc(v.title)}<br>♥ ${fmtNum(v.likes)} · 💬 ${fmtNum(v.comments)} · ${esc(likedDate(v).label)}</span></button>
       <button class="btn liked-save" data-folders aria-label="Organize ${esc(v.title)} in folders">Folders</button>`;
     return tile;
-  }, { originalSize: true, previews: true, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
+  }, { previews: true, groupBy: sort === 'recent' && grouping !== 'none' ? v => likedDate(v, grouping) : null });
   function loadMore() {
     if (disposed || !more) return Promise.resolve();
     if (!pending) pending = fetchPage().then(() => {
@@ -1586,11 +1586,11 @@ async function trashView() {
   const grid = $('.grid', view()), readingIds = new Set();
   const gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('button');
-    tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
+    tile.className = 'tile'; tile.title = v.title; v.el = tile;
     tile.setAttribute('aria-label', `Open ${v.title} with comments`);
     tile.innerHTML = `<img alt=""><span>${esc(v.title)}<br>${v.deleted ? 'Trashed' : 'More dislikes than likes'} · ♥ ${fmtNum(v.likes)} · 👎 ${fmtNum(v.dislikes)}</span>`;
     return tile;
-  }, { originalSize: true, previews: true });
+  }, { previews: true });
   async function fetchPage() {
     $('#trash-more').disabled = true;
     $('#trash-status').textContent = 'Loading Trash...';
