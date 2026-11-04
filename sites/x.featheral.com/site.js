@@ -1121,7 +1121,7 @@ async function likedView(q = {}) {
   $('#liked-sort').onchange = e => navigate({ sort: e.target.value });
   $('#liked-group').onchange = e => navigate({ group: e.target.value });
   $('#liked-group').disabled = readings || sort === 'likes';
-  if (readings) grid.className = 'reading-liked-list';
+  if (readings) grid.className = 'reading-liked-list reading-cards';
   else gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('div');
     tile.className = 'tile original-tile'; tile.title = v.title; v.el = tile;
@@ -1580,7 +1580,7 @@ function trendingView(q) {
 async function trashView() {
   let disposed = false, pending = null, more = true, offset = 0, closeViewer = null, changed = false;
   const items = [], request = new AbortController();
-  view().innerHTML = `<section class="read liked-timeline"><h1><span aria-hidden="true">🦝</span> Trash <span class="count" id="trash-count"></span></h1>
+  view().innerHTML = `<section class="read liked-timeline"><h1><span aria-hidden="true">🗑</span> Trash <span class="count" id="trash-count"></span></h1>
     <p class="m">Trashed posts and readings, plus posts with more dislikes than likes. A round-1 dislike moves an item to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
     <p class="m" id="trash-status" role="status"></p><div id="trash-readings"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
   const grid = $('.grid', view()), readingIds = new Set();

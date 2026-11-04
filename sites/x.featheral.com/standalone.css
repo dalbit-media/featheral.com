@@ -86,6 +86,7 @@ body[data-standalone="x"] #gate h2 { font-size: 32px; letter-spacing: -1px; }
   body[data-standalone="x"] .fab { width: 46px; height: 46px; right: 12px; }
 }
 body[data-standalone="x"]:has(header.top[data-wallet-header]) { --top: 80px; }
+body[data-standalone="x"] header.top .tabs .trash-button { flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; }
 @media (max-width: 760px) {
   body[data-standalone="x"]:has(header.top[data-wallet-header]) { --top: calc(116px + env(safe-area-inset-top)); }
 }

@@ -142,9 +142,11 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
   assert.match(html, /class="site-sidebar"[^>]+hidden/);
   assert.doesNotMatch(html, /<body class="has-site-sidebar">/);
-  assert.match(html, /class="trash-link"><span aria-hidden="true">🦝<\/span> Trash/);
+  assert.match(html, /class="trash-link trash-button" aria-label="Trash" title="Trash"><svg/);
   assert.match(html, /href="#\/trash" data-tab="trash" aria-label="Trash"/);
-  assert.match(html, /class="tab-icon" aria-hidden="true">🦝/);
+  const trashLink = html.match(/<a href="#\/trash" data-tab="trash"[\s\S]*?<\/a>/)[0];
+  assert.match(trashLink, /<svg class="trash-icon"[^>]+aria-hidden="true"/);
+  assert.doesNotMatch(trashLink, /<span>|🦝/);
   assert.doesNotMatch(html, /data-cms-page="fthx/);
   assert.match(css, /\.reading-cards \{[^}]+repeat\(2, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(max-width: 600px\)/);
@@ -152,4 +154,6 @@ test('Trash stays in the header with a decorative icon and Read alone owns the r
   assert.match(source, /setSelectionRange\(selection, selection\)/);
   assert.match(source, /category, page, limit: 30/);
   assert.match(source, /kind: 'read'/);
+  assert.match(source, /if \(readings\) grid.className = 'reading-liked-list reading-cards'/);
+  assert.match(source, /originalSize: true, previews: true/);
 });
