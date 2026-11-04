@@ -22,7 +22,7 @@ Services are named by ownership: `database`, `gold`, `notes` (including Dollar a
 
 Header title links return to the current site's landing page. Foundation, Gold, Dollar, Silver, Stats, World and Media share an identical compact family bar with exactly those seven links in that order and the same 11px text, spacing and layout. Readable foreground and panel colors follow each site's theme, with the current page marked in bold. Other sites retain their current-site and same-currency links alongside the family links. Every non-embedded site has the full core-site hierarchy in its footer, including cross-currency destinations and Admin.
 
-The seven family sites align header contents and page containers to a shared 1280px width, with 24px side gutters (16px on mobile) and padded site headers. Media retains its feed columns inside that container. Active family links use themed foreground and button colors so they stay readable on light and dark backgrounds.
+The seven family sites align header contents and page containers to a shared 1280px width, with 24px side gutters (16px on mobile) and padded site headers. The top family bar links Foundation, Gold, Dollar, Silver, World and Media; Stats keeps the family layout but is linked from the footer's Tools group (its own bar still shows it as the current site). Links to World's Explore game (`/explore/`, `/play/`) open it in a centered, chrome-free popup window sized to the screen (up to 1600×1000); modifier-clicks and blocked popups fall back to normal navigation. World game pages (Explore, Settlement, Market, Inbox, Federation and the other `#app` pages) are full-viewport apps: they omit the family bar, ecosystem footer and family layout. Their topbar carries `data-no-central-wallet`, so the shared wallet loader adds no header button; the game uses its own FTH$ chip and account menu instead. Media retains its feed columns inside that container. Active family links use themed foreground and button colors so they stay readable on light and dark backgrounds.
 The family bar stays hidden until its links are initialized, avoiding a flash of legacy page navigation before the shared header takes over.
 Wallet and Exchange join App, Media, X, Notes and Sites in the FTHX family navigation. Reapplying shared navigation preserves unchanged links and keyboard focus. Fixed-header public pages grow with their content instead of overlapping the ecosystem footer.
 Public pages without their own skip link receive a keyboard-accessible skip-to-content control that preserves SPA routes. The ecosystem footer spans the page and uses two-column groups with larger link targets on mobile.
@@ -452,7 +452,8 @@ Gold's reserve admin is publicly linked in its header; token writes remain role-
 
 ## FTHG site and admin
 
-- `sites/gold.featheral.com/` is the FTHG landing page. It shows live Mainnet statistics without a wallet: supply, estimated USD value, holders, transfers, supply distribution across the fixed wallets, the FTHG/FTH$ rate and bridge status, recent transfers, and top holders. Gold uses a labeled temporary **1 FTHG = $0.01** estimate until the read-only Uniswap v4 ETH/FTHG valuation pool has price data.
+- `sites/gold.featheral.com/` is the FTHG landing page. It shows live Mainnet statistics without a wallet: supply, estimated USD value, holders, transfers, supply distribution across the fixed wallets and the Uniswap ETH/FTHG pool (the pool's own reconstructed FTHG reserves, falling back to the v4 PoolManager balance), the FTHG/FTH$ rate and bridge status, recent transfers, and top holders. Gold uses a labeled temporary **1 FTHG = $0.01** estimate until the read-only Uniswap v4 ETH/FTHG valuation pool has price data.
+- `sites/gold.featheral.com/buy.js` renders the **Buy Featheral Gold now** panel on the Gold home (`/#buy`), Docs and Conversion pages as one card: a highlighted early pool price (USD per FTHG, FTHG per $1, fully diluted value) with a risk note, an ETH amount with the estimated FTHG and price impact (0.25% fee included), a **Buy FTHG now** button that opens the prefilled Uniswap swap, the connected wallet's address with its ETH and FTHG balances, icon buttons to connect, switch to Ethereum, add FTHG (`wallet_watchAsset`), copy the address and open the pool. Pages without the live statistics grid (Docs, Conversion) also get pool ETH/FTHG amounts below the card; on the Gold home, the **Live token & pool statistics** grid merges price, fully diluted value, pool liquidity and reserves with supply, circulating, holders and transfers. Swaps always execute on Uniswap from the user's own wallet; Featheral never holds funds. Foundation and Dollar home heroes link to it.
 - `sites/gold.featheral.com/admin/` is a static admin for managing that existing contract. Read-only stats use a public Ethereum Mainnet RPC without wallet connection; transactions require an authorized wallet. The contract address is fixed, and there is no token deployment workflow.
 - The admin artifact contains the contract ABI and verification metadata only; it does not contain deployment bytecode.
 
@@ -642,7 +643,7 @@ Foundation and Dollar project access uses `FEATHERAL_ADMIN_WALLETS` and configur
 ## Notes
 
 - Consider hosting the management API/console behind additional authentication (e.g. IP allowlist/basic auth); on-chain roles are the real access control.
-- The $0.01/FTHG figure is an admin reference estimate only. It must not be used in exchange applications as market price, valuation, or evidence of liquidity.
+- The $0.01/FTHG fallback and the Uniswap pool spot estimate are indicative only. They must not be used in exchange applications as a quote, redemption value or evidence of deep liquidity; the Buy panel shows price impact and sends every swap to Uniswap for wallet confirmation.
 - Creating a DEX pair, approving token spending, adding/removing liquidity, and trading are separate, irreversible on-chain actions that require wallet confirmation. A task checkbox or listing URL never performs these actions.
 # Central wallet
 
@@ -671,6 +672,11 @@ pool or ETH/USD read fails,
 it publishes the explicitly labeled temporary **1 FTHG = $0.01** reference.
 The lookup is retried after a one-minute cache; successful pool estimates replace
 the reference automatically. `GET /api/v1/gold/valuation` returns the setting and current estimate. Neither price is a redemption guarantee or swap quote.
+The estimate also includes exact pool reserves (`market.reserves`: ETH, FTHG and USD
+value). Uniswap v4 holds every pool's tokens in one PoolManager, so Gold rebuilds this
+pool's liquidity ranges from its `ModifyLiquidity` events (scanned incrementally in
+blocks of less than 5,000 from the pool's creation block) and converts them to token amounts at the
+current price. Uncollected LP fees are excluded.
 Internal assets still require verified Gold conversion ratios; native ETH keeps
 its independent live USD feed.
 Wallet portfolio totals sit below the available balance. Each asset shows smaller

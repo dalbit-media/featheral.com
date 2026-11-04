@@ -309,6 +309,7 @@ const server = http.createServer(async (req, res) => {
         "/gold-channel/reserve.js": path.join(sitesRoot, "gold.featheral.com", "conversion", "reserve.js"),
         "/reserve.css": path.join(sitesRoot, "gold.featheral.com", "reserve.css"),
         "/reserve-view.js": path.join(sitesRoot, "gold.featheral.com", "reserve-view.js"),
+        "/buy.js": path.join(sitesRoot, "gold.featheral.com", "buy.js"),
         "/fth.js": path.join(sitesRoot, "dollar.featheral.com", "fth.js"),
         "/ethers.js": path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js"),
       };

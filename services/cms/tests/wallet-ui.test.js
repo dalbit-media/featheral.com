@@ -568,13 +568,16 @@ test("shared skip links focus the content without changing SPA routes or duplica
 });
 test("ecosystem navigation has compact family headers and the full footer hierarchy without embedded duplication", () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
-  function fixture(host, embedded = false, query = "", initialSites = []) {
+  function fixture(host, embedded = false, query = "", initialSites = [], game = false) {
     class Node {
       constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.attributes = {}; }
       append(...children) { this.children.push(...children); }
+      remove() { body.children = body.children.filter(child => child !== this); }
       replaceChildren(...children) { this.children = children; }
       setAttribute(key, value) { this.attributes[key] = value; }
       querySelectorAll(selector) {
+        if (selector === ".eco-bar, .eco-footer")
+          return [...this.querySelectorAll(".eco-bar"), ...this.querySelectorAll(".eco-footer")];
         return this.children.flatMap(child => [
           ...((selector === ".eco-bar" && child.className === "eco-bar")
             || (selector === ".eco-footer" && child.className === "eco-footer")
@@ -586,6 +589,7 @@ test("ecosystem navigation has compact family headers and the full footer hierar
       }
       querySelector(selector) {
         if (selector === 'script[data-central-wallet-loader]') return {};
+        if (selector === "#app") return game ? {} : undefined;
         if (selector === "body > header, #app > header, header.topbar, #app header.topbar") return header;
         const site = selector.match(/^a\[data-site="(.+)"\]$/)?.[1];
         if (site) return this.querySelectorAll("a[data-site]").find(link => link.dataset.site === site);
@@ -611,32 +615,34 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   const ui = fixture("gold"), links = ui.footer.querySelectorAll("a[data-site]");
   assert.equal(ui.body.querySelectorAll(".eco-footer").length, 1);
   const familySites = ["foundation", "gold", "dollar", "silver", "stats", "world", "media"];
+  const barSites = familySites.filter(site => site !== "stats");
   for (const host of ["foundation", "gold", "silver", "dollar", "stats", "world", "app", "media", "wallet"]) {
     const { bar } = fixture(host);
     const headerLinks = bar.querySelectorAll("a[data-site]");
     assert.equal(bar.attributes["aria-label"], "Featheral family sites");
     assert.equal(bar.dataset.familyReady, "true", "only reveal the bar after its final links are initialized");
-    for (const site of familySites) {
+    for (const site of barSites) {
       assert.equal(headerLinks.filter(link => link.dataset.site === site).length, 1, `${host} shows ${site} once`);
       assert.equal(headerLinks.find(link => link.dataset.site === site).href,
         `http://${site === "foundation" ? "" : `${site}.`}localhost:8080/`);
     }
+    if (host !== "stats") assert.ok(!headerLinks.some(link => link.dataset.site === "stats"), `${host} leaves Stats to the footer`);
     assert.ok(headerLinks.some(link => link.dataset.site === host), "the current site remains in its header");
     assert.equal(headerLinks.filter(link => link.attributes["aria-current"] === "page").length, 1);
   }
-  assert.equal(ui.bar.querySelectorAll("a[data-site]").length, 7);
+  assert.equal(ui.bar.querySelectorAll("a[data-site]").length, 6);
   for (const host of familySites) {
     const { bar, body } = fixture(host, false, "", ["world", "gold", "gold", "foundation"]);
     assert.equal(body.dataset.familyLayout, "true");
     const headerLinks = bar.querySelectorAll("a[data-site]");
-    const expected = familySites;
+    const expected = host === "stats" ? familySites : barSites;
     assert.deepEqual(headerLinks.map(link => link.dataset.site), expected,
       `${host} replaces stale, duplicate and reordered links with the exact family list`);
     for (const site of expected)
       assert.equal(headerLinks.find(link => link.dataset.site === site).href,
         `http://${site === "foundation" ? "" : `${site}.`}localhost:8080/`);
   }
-  assert.ok(fixture("dollar").bar.querySelector('a[data-site="world"]'), "all core sites share the seven family links");
+  assert.ok(fixture("dollar").bar.querySelector('a[data-site="world"]'), "all core sites share the six family links");
   assert.ok(fixture("app").bar.querySelector('a[data-site="media"]'), "FTHX siblings remain available");
   const fthxSites = ["app", "media", "x", "ex", "notes", "sites", "wallet"];
   for (const host of fthxSites) {
@@ -661,6 +667,10 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   assert.equal(fixture("wallet", true).footer, undefined, "embedded wallets do not repeat host navigation");
   assert.equal(fixture("wallet", false, "?embedded=1").footer, undefined, "embedding is detected before async wallet initialization");
   assert.equal(fixture("admin").footer, undefined, "Admin keeps navigation inside its viewport-height workspace");
+  const play = fixture("world", false, "explore/", [], true);
+  assert.equal(play.body.querySelectorAll(".eco-bar").length, 0, "World game pages drop the family bar");
+  assert.equal(play.footer, undefined, "World game pages drop the family footer");
+  assert.equal(play.body.dataset.familyLayout, undefined, "World game pages keep their own full-viewport layout");
   const css = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.css"), "utf8");
   assert.match(css, /\.eco-bar:not\(\[data-family-ready\]\)\{visibility:hidden\}/);
   assert.match(css, /\.eco-bar\[data-family-ready\]\{[^}]*font:11px\/1\.5/);

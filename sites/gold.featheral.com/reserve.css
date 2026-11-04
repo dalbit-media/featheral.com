@@ -42,5 +42,49 @@
 .safety-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
 .safety-grid form{min-width:0}
 [hidden]{display:none!important}
+.buy-section{scroll-margin-top:24px}
+.buy-panel{margin-top:12px}
+.buy-card{overflow:hidden;border:1px solid var(--gold);border-radius:16px;background:radial-gradient(circle at 0 0,color-mix(in srgb,var(--gold) 20%,transparent),transparent 55%),var(--panel);box-shadow:0 14px 40px color-mix(in srgb,var(--gold) 10%,transparent)}
+.buy-hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px;align-items:center;padding:22px 22px 18px}
+.buy-body{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;padding:18px 22px;border-top:1px solid color-mix(in srgb,var(--gold) 30%,var(--line));background:color-mix(in srgb,var(--bg) 45%,transparent)}
+.buy-foot{display:flex;justify-content:space-between;align-items:center;gap:6px 16px;flex-wrap:wrap;padding:10px 22px;border-top:1px solid var(--line)}
+.buy-form{display:grid;gap:8px;min-width:0;align-content:start}
+.buy-label{display:flex;justify-content:space-between;gap:8px;color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.buy-get{margin-top:6px;padding-top:12px;border-top:1px dashed var(--line)}
+.buy-unit{color:var(--gold);font-weight:700}
+.buy-panel input{width:100%;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--txt);font:inherit;font-size:22px;font-variant-numeric:tabular-nums}
+.buy-panel input:focus{outline:2px solid var(--gold);outline-offset:1px}
+.buy-presets,.buy-actions{display:flex;flex-wrap:wrap;gap:8px}
+.buy-receive{font-size:30px;line-height:1.1;color:var(--gold-2);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.buy-impact[data-level=low]{color:var(--ok)}.buy-impact[data-level=medium]{color:#ffd189}.buy-impact[data-level=high]{color:var(--bad)}
+.buy-side{display:grid;gap:10px;align-content:start;min-width:0}
+.buy-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;text-decoration:none}
+.buy-actions .buy-action{min-width:40px;padding-inline:10px}
+.buy-icon{display:inline-flex}
+.buy-status{font-size:12px;margin:0}
+.buy-badge{display:inline-block;padding:3px 10px;border-radius:999px;background:var(--gold);color:var(--on-accent);font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.buy-price{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:10px 0 6px}
+.buy-price>span{color:var(--mut);font-size:18px}
+.buy-price-value{font-size:clamp(34px,6vw,54px);line-height:1;color:var(--gold-2);font-variant-numeric:tabular-nums}
+.buy-price-note{color:var(--txt);font-size:14px}
+.buy-per{display:grid;justify-items:center;gap:2px;padding:16px;border-radius:12px;background:var(--bg);border:1px solid var(--line);text-align:center}
+.buy-per span{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.buy-per-dollar{font-size:clamp(26px,4vw,38px);color:var(--gold);font-variant-numeric:tabular-nums}
+.buy-risk{color:var(--mut);font-size:12px}
+.buy-now{min-height:56px;font-size:18px;width:100%;box-sizing:border-box}
+.buy-wallet{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.buy-wallet-head{display:flex;align-items:center;gap:8px;color:var(--gold)}
+.buy-address{font-size:14px;color:var(--txt)}
+.buy-balances{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.buy-balances span{display:block;color:var(--mut);font-size:11px;letter-spacing:.06em}
+.buy-balances b{font-size:18px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.buy-metrics{margin-top:12px}
+#primaryStats{grid-template-columns:repeat(4,minmax(0,1fr))}
+#primaryStats .stat.feature{border-color:var(--gold);background:radial-gradient(circle at 0 0,color-mix(in srgb,var(--gold) 14%,transparent),transparent 70%),var(--panel)}
+#primaryStats .stat.feature b{color:var(--gold-2)}
+#supplyLegend{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:900px){#primaryStats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){#supplyLegend{grid-template-columns:1fr}}
+@media(max-width:700px){.buy-hero,.buy-body{grid-template-columns:1fr;padding:16px}.buy-foot{padding:10px 16px}.buy-receive{font-size:24px}}
 @media(max-width:900px){.reserve-metrics,.safety-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.gold-header{padding:10px 12px;gap:8px}.gold-header nav{gap:2px}.gold-header nav a{padding:6px;font-size:12px}.gold-header .brand b{font-size:14px}.reserve-main{padding:18px 12px}.wallet-flow-grid,.conversion-grid,.safety-grid{grid-template-columns:1fr}.reserve-panel{padding:16px!important}.reserve-metrics{grid-template-columns:1fr 1fr}.reserve-metric strong{font-size:17px}.flow-totals{font-size:13px}}

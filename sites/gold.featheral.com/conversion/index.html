@@ -15,12 +15,13 @@
   <script src="/reserve-view.js" defer></script>
   <script src="/shared/gold-pricing.js" defer></script>
   <script src="./reserve.js" defer></script>
+  <script src="/buy.js" defer></script>
 </head>
 <body class="site-gold">
   <nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
   <header class="top gold-header">
     <a class="brand" href="/"><img src="/shared/logo-gold.svg" alt="" width="34" height="34"><b>Featheral Gold</b></a>
-    <nav aria-label="Gold navigation"><a href="/">Overview</a><a href="/conversion/" aria-current="page">Conversion</a><a href="/admin/">Admin</a><a href="/docs/">Docs</a><button type="button" data-central-wallet data-wallet-primary="FTHG">Wallet</button><button id="wallet" class="wallet-icon" type="button" title="Connect Ethereum signer" aria-label="Connect Ethereum signer"></button></nav>
+    <nav aria-label="Gold navigation"><a href="/">Overview</a><a data-site="gold" data-path="/#buy" href="/#buy">Buy</a><a href="/conversion/" aria-current="page">Conversion</a><a href="/admin/">Admin</a><a href="/docs/">Docs</a><button type="button" data-central-wallet data-wallet-primary="FTHG">Wallet</button><button id="wallet" class="wallet-icon" type="button" title="Connect Ethereum signer" aria-label="Connect Ethereum signer"></button></nav>
   </header>
   <main class="reserve-main">
     <div class="reserve-toolbar"><div><h1>FTHG ↔ FTH$</h1><p id="reserve-mode" class="muted">Loading reserve policy...</p></div><span id="sync-state" class="reserve-badge pending">Checking sync status</span></div>
@@ -45,6 +46,11 @@
         <form id="redeem"><h3>FTH$ → confirmed FTHG backing</h3><p id="redeem-reason" class="muted">Checking eligibility...</p><label>FTH$ amount<input id="dollars" type="text" inputmode="decimal" required aria-describedby="redeem-preview redeem-reason"></label><p id="redeem-preview" class="muted" aria-live="polite">Enter an amount to preview.</p><button id="redeem-button" class="btn" disabled>Review redemption</button></form>
       </div>
       <p class="muted">Redemption locks FTH$; it does not burn it or make it available to markets. Returned FTHG must be confirmed before reconversion can unlock that same currency. No interest, staking or new supply is created by reconversion.</p>
+    </section>
+    <section id="buy" class="reserve-panel buy-section">
+      <div class="reserve-toolbar"><h2>Buy Featheral Gold now</h2><a class="muted" href="https://app.uniswap.org/explore/pools/ethereum/0x3f1f8a9867d8f4a59f206b9644fafe05e9546323c0219dd1352187bbb5738fdd" target="_blank" rel="noopener noreferrer">Uniswap pool ↗</a></div>
+      <p class="muted">A public ETH → FTHG market swap from your own wallet. It is separate from the reserve and conversion above.</p>
+      <div class="buy-panel" data-buy-fthg></div>
     </section>
     <section id="manual-sync" class="reserve-panel">
       <h2>Admin Ethereum reserve sync · preview only</h2>

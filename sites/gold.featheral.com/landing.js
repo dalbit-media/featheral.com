@@ -3,6 +3,9 @@
 const TOKEN = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
 const SOURCE_WALLET = "0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c";
 const RESERVE_WALLET = "0x706CCb6109046a6a4A08dbAD4444A46408703ccb";
+const POOL_ID = "0x3f1f8a9867d8f4a59f206b9644fafe05e9546323c0219dd1352187bbb5738fdd";
+const POOL_URL = `https://app.uniswap.org/explore/pools/ethereum/${POOL_ID}`;
+const POOL_MANAGER = "0x000000000004444c5dc75cB358380D2e3dE08A90";
 const RPC_URL = `${location.origin}/api/v1/gold/rpc`;
 const BLOCKSCOUT_API = "https://eth.blockscout.com/api/v2";
 const BLOCKSCOUT_URL = "https://eth.blockscout.com";
@@ -11,6 +14,7 @@ let usdMarket = null;
 const KNOWN = {
   [SOURCE_WALLET.toLowerCase()]: "Source wallet",
   [RESERVE_WALLET.toLowerCase()]: "FTH$ reserve",
+  [POOL_MANAGER.toLowerCase()]: "Uniswap pool",
   "0x0000000000000000000000000000000000000000": "Mint",
 };
 
@@ -73,9 +77,16 @@ function addressCell(address) {
     el("a", { href: `${BLOCKSCOUT_URL}/address/${address}`, target: "_blank", rel: "noopener noreferrer", textContent: short(address) }),
     label ? el("span", { className: "tag", textContent: label }) : null);
 }
-function stat(label, value, note = "") {
-  return el("div", { className: "stat" }, el("span", { textContent: label }), el("b", { textContent: value }), el("small", { textContent: note }));
+function stat(label, value, note = "", className = "") {
+  return el("div", { className: `stat ${className}`.trim() }, el("span", { textContent: label }), el("b", { textContent: value }), el("small", { textContent: note }));
 }
+const fromWei = (raw) => Number(BigInt(raw || "0")) / 1e18;
+function dollars(value) {
+  if (!Number.isFinite(value)) return "—";
+  if (value > 0 && value < 0.01) return `$${value.toPrecision(3)}`;
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+const pooled = () => usdMarket && !usdMarket.fallback && /^\d+$/.test(usdMarket.usdPerFthg || "") && /^\d+$/.test(usdMarket.fthgPerEth || "");
 function skeleton(container, count) {
   container.replaceChildren(...Array.from({ length: count }, () =>
     el("div", { className: "stat skeleton" }, el("span", { textContent: "Loading" }), el("b", { textContent: "000,000" }), el("small", { textContent: " " }))));
@@ -90,12 +101,13 @@ function relativeTime(iso) {
 
 async function loadChainStats() {
   const block = await rpc("eth_blockNumber", []);
-  const [supply, source, reserve] = await Promise.all([
+  const [supply, source, reserve, poolManager] = await Promise.all([
     call("0x18160ddd", block),
     call(`0x70a08231${padAddress(SOURCE_WALLET)}`, block),
     call(`0x70a08231${padAddress(RESERVE_WALLET)}`, block),
+    call(`0x70a08231${padAddress(POOL_MANAGER)}`, block),
   ]);
-  return { block: Number(BigInt(block)), supply, source, reserve };
+  return { block: Number(BigInt(block)), supply, source, reserve, poolManager };
 }
 async function loadExplorerStats() {
   const [info, counters] = await Promise.all([
@@ -116,13 +128,21 @@ async function loadApiStats() {
 function renderPrimary(chain, explorer) {
   const outside = chain ? chain.supply - chain.source - chain.reserve : null;
   const count = (value) => Number.isFinite(value) ? value.toLocaleString("en-US") : "—";
+  const live = pooled();
+  const reserves = live && usdMarket.reserves?.tvlUsd ? usdMarket.reserves : null;
+  const compactNumber = (value) => value.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 2 });
   $("primaryStats").replaceChildren(
+    stat("FTHG price", /^\d+$/.test(usdMarket?.usdPerFthg || "") ? dollars(fromWei(usdMarket.usdPerFthg)) : "—", live
+      ? `Uniswap spot · ${compactNumber(fromWei(usdMarket.fthgPerEth))} per ETH` : "Reference price until the pool has data", "feature"),
+    stat("Fully diluted value", chain ? usd(chain.supply) : "—", "Total supply × pool price"),
+    stat("Pool liquidity", reserves ? dollars(fromWei(reserves.tvlUsd)) : "—", reserves
+      ? `${reserves.positions} position${reserves.positions === 1 ? "" : "s"} · 0.25% fee tier` : "Uniswap v4 ETH/FTHG"),
+    stat("Pool reserves", reserves ? `${compactNumber(fromWei(reserves.fthg))} FTHG` : "—", reserves
+      ? `+ ${fromWei(reserves.eth).toLocaleString("en-US", { maximumFractionDigits: 4 })} ETH (${dollars(fromWei(reserves.eth) * fromWei(usdMarket.usdPerEth))})` : "Reading pool…"),
     stat("Total supply", chain ? `${compact(chain.supply)} FTHG` : "—", chain ? `${tokens(chain.supply, 0)} · fixed, no minting` : "Unavailable"),
-    stat("Estimated value", chain ? usd(chain.supply) : "—", `Fully diluted · ${usdMarket?.source || "FTHG/USD estimate unavailable"}`),
+    stat("Circulating", outside === null ? "—" : `${compact(outside)} FTHG`, outside === null ? "" : `${share(outside, chain.supply)} outside the fixed wallets`),
     stat("Holders", explorer ? count(explorer.holders) : "—", "Blockscout-indexed addresses"),
     stat("Transfers", explorer ? count(explorer.transfers) : "—", "Blockscout index counter"),
-    stat("Held outside fixed wallets", outside === null ? "—" : `${compact(outside)} FTHG`, outside === null ? "" : `${share(outside, chain.supply)} of supply`),
-    stat("Latest block", chain ? `#${chain.block.toLocaleString("en-US")}` : "—", "Ethereum Mainnet"),
   );
 }
 function renderSupply(chain) {
@@ -130,31 +150,35 @@ function renderSupply(chain) {
     $("supplyLegend").replaceChildren(el("li", { className: "muted", textContent: "Supply distribution is unavailable right now." }));
     return;
   }
-  const outside = chain.supply - chain.source - chain.reserve;
+  const rest = chain.supply - chain.source - chain.reserve;
+  // v4 pools hold no balance of their own; prefer this pool's reconstructed reserves over the shared PoolManager balance.
+  const reported = /^\d+$/.test(usdMarket?.reserves?.fthg || "") ? BigInt(usdMarket.reserves.fthg) : chain.poolManager;
+  const pool = reported > rest ? rest : reported < 0n ? 0n : reported;
   const parts = [
     ["Source wallet", chain.source, "#e2b13c", SOURCE_WALLET],
     ["FTH$ reserve wallet", chain.reserve, "#7fa8e0", RESERVE_WALLET],
-    ["All other holders & contracts", outside, "#5fbf6a", ""],
+    ["Uniswap ETH/FTHG pool", pool, "#d97ad6", POOL_ID, POOL_URL],
+    ["All other holders & contracts", rest - pool, "#5fbf6a", ""],
   ];
   const total = Number(chain.supply / ONE) || 1;
   $("supplyBar").replaceChildren(...parts.map(([label, value, color]) =>
     el("i", { title: `${label}: ${share(value, chain.supply)}`, style: `width:${(Number(value / ONE) / total) * 100}%;background:${color}` })));
-  $("supplyLegend").replaceChildren(...parts.map(([label, value, color, address]) =>
+  $("supplyLegend").replaceChildren(...parts.map(([label, value, color, address, link]) =>
     el("li", {},
       el("span", { className: "swatch", style: `background:${color}` }),
       el("div", {},
         el("b", { textContent: `${label} · ${share(value, chain.supply)}` }),
         el("small", { textContent: `${tokens(value, 0)} FTHG · ${usd(value)}` }),
-        address ? el("small", {}, el("a", { href: `${BLOCKSCOUT_URL}/address/${address}`, target: "_blank", rel: "noopener noreferrer", textContent: short(address) })) : null))));
+        address ? el("small", {}, el("a", { href: link || `${BLOCKSCOUT_URL}/address/${address}`, title: address, target: "_blank", rel: "noopener noreferrer", textContent: short(address) })) : null))));
 }
 function renderEconomy(api) {
   if (api?.goldReserve?.enabled) {
     const reserve = api.goldReserve;
     const dynamic = reserve.pricingPolicy === "origin-linear-v1";
     const rate = dynamic ? tokens(reserve.spotRateFthDollarPerFthg) : Number(reserve.rate).toLocaleString("en-US");
-    $("rateValue").textContent = `1 FTHG = ${rate} FTH$`;
+    $("rateValue").textContent = `1 FTHG ${dynamic ? "≈" : "="} ${rate} FTH$`;
     $("rateNote").textContent = dynamic
-      ? "Demand-based origin curve: starts at 10,000 FTH$ and rises gradually with net Gold allocation; returns lower the price. Trade quotes include movement across the curve. No Mainnet transfers are submitted."
+      ? "Current spot price on a demand-based curve, not a fixed rate. It starts at 10,000 FTH$, rises as Gold is allocated and falls as it is returned; larger trades move the price. No Mainnet transfers are submitted."
       : `Legacy fixed-rate ${reserve.mode === "live" ? "live off-chain reserve" : "isolated reserve test"}. No Mainnet transfers are submitted.`;
     $("economyStats").replaceChildren(
       stat("Reserve mode", reserve.initialized ? "Initialized" : "Not initialized", reserve.mode === "live" ? "Live off-chain allocation" : "Separate test journal"),
@@ -202,7 +226,7 @@ function renderHolders(items, supply) {
 }
 
 async function load() {
-  skeleton($("primaryStats"), 6);
+  skeleton($("primaryStats"), 8);
   skeleton($("economyStats"), 4);
   const walletHost = location.hostname.endsWith(".localhost") ? "wallet.localhost" : "wallet.featheral.com";
   const referenceUrl = `${location.protocol}//${walletHost}${location.port ? ":" + location.port : ""}/api/creation/economy/reference`;
@@ -212,10 +236,13 @@ async function load() {
     loadApiStats(),
     getJson(`${BLOCKSCOUT_API}/tokens/${TOKEN}/transfers`).then((data) => data.items || []),
     getJson(`${BLOCKSCOUT_API}/tokens/${TOKEN}/holders`).then((data) => data.items || []),
-    fetch(referenceUrl, { credentials: "omit", cache: "no-store" }).then(response => {
+    fetch("/api/v1/gold/valuation", { cache: "no-store" }).then((response) => {
       if (!response.ok) throw new Error(`Gold valuation HTTP ${response.status}`);
       return response.json();
-    }),
+    }).then((body) => ({ usdMarket: body.market })).catch(() => fetch(referenceUrl, { credentials: "omit", cache: "no-store" }).then(response => {
+      if (!response.ok) throw new Error(`Gold valuation HTTP ${response.status}`);
+      return response.json();
+    })),
   ]);
   if (reference.status === "rejected") console.error("Gold USD valuation unavailable:", reference.reason);
   usdMarket = reference.status === "fulfilled" ? reference.value.usdMarket : null;

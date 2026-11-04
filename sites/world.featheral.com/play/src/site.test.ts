@@ -556,7 +556,8 @@ test('resource acquisition shares one header manager while preserving direct cla
 test('desktop Play header presents a readable world clock and keeps resource inventory alongside it', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./collection.css', import.meta.url), 'utf8');
-  const header = main.slice(main.indexOf('<header class="topbar">'), main.indexOf('</header>'));
+  const header = main.slice(main.indexOf('<header class="topbar"'), main.indexOf('</header>'));
+  assert.match(header, /^<header class="topbar" data-no-central-wallet>/);
   assert.doesNotMatch(header, /play-brand|logo-world/);
   assert.doesNotMatch(header, /clock-symbol|icon\('clock'/);
   assert.match(header, /class="server-clock"/);

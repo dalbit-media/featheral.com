@@ -126,7 +126,7 @@ app.innerHTML = `
       <span data-screen-mode-status role="status" aria-live="polite"></span>
     </div>
   </nav>
-  <header class="topbar">
+  <header class="topbar" data-no-central-wallet>
     <div class="server-clock" aria-label="World calendar" title="Game calendar · 7 days per week · 52 weeks per year · 13 weeks per season">
       <div class="clock-heading"><small id="clock-sync-status" hidden>SYNC PAUSED</small><small id="clock-speed" hidden>20x DEV</small></div>
       <strong id="world-time"></strong>

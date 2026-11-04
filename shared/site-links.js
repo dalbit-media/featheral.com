@@ -9,6 +9,8 @@
   const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$",
     app: "FTHX", media: "FTHX", x: "FTHX", ex: "FTHX", notes: "FTHX", sites: "FTHX", wallet: "FTHX" };
   const familySites = ["foundation", "gold", "dollar", "silver", "stats", "world", "media"];
+  // Stats keeps the family layout but is linked from the footer Tools group, not the top bar.
+  const barSites = familySites.filter(site => site !== "stats");
   const { protocol, hostname, port } = window.location;
   const labels = hostname.split(".");
   const isIp = /^[\d.]+$/.test(hostname) || hostname.includes(":");
@@ -43,23 +45,29 @@
       document.body.prepend(skip);
     }
     const header = root.querySelector?.("body > header, #app > header, header.topbar, #app header.topbar");
-    if (familySites.includes(current)) document.body.dataset.familyLayout = "true";
+    // World game pages are full-viewport apps with their own rail, so they skip the family chrome.
+    const game = current === "world" && !!document.querySelector("#app");
+    if (game) {
+      delete document.body.dataset.familyLayout;
+      for (const chrome of document.querySelectorAll(".eco-bar, .eco-footer")) chrome.remove();
+    }
+    if (familySites.includes(current) && !game) document.body.dataset.familyLayout = "true";
     if (!document.querySelector('link[data-site-navigation], link[href="/shared/site-links.css"]')) {
       const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/shared/site-links.css";
       style.dataset.siteNavigation = "true"; document.head.append(style);
     }
-    if (!root.querySelector?.(".eco-bar") && header && current !== "admin"
+    if (!game && !root.querySelector?.(".eco-bar") && header && current !== "admin"
       && !window.location.pathname.startsWith("/operations/")) {
       const bar = document.createElement("nav");
       bar.className = "eco-bar";
       bar.setAttribute("aria-label", "Featheral sites");
-      if (current === "world" && document.querySelector("#app .rail")) document.body.prepend(bar);
-      else header.before(bar);
+      header.before(bar);
     }
     for (const bar of root.querySelectorAll(".eco-bar")) {
+      const family = current === "stats" ? familySites : barSites;
       const related = familySites.includes(current)
-        ? familySites.map(site => publicSites.find(([key]) => key === site))
-        : publicSites.filter(([site]) => familySites.includes(site)
+        ? family.map(site => publicSites.find(([key]) => key === site))
+        : publicSites.filter(([site]) => barSites.includes(site)
           || site === current || currencies[current] && currencies[site] === currencies[current]);
       bar.setAttribute("aria-label", "Featheral family sites");
       const links = related.map(([site, label]) => {
@@ -83,7 +91,7 @@
     for (const title of root.querySelectorAll("header .brand, header a.logo, a.game-brand, a.site-brand")) {
       if (title.tagName === "A") { title.dataset.site = current; title.removeAttribute("data-path"); title.href = url(current); }
     }
-    if (current !== "admin" && !window.location.pathname.startsWith("/operations/")
+    if (!game && current !== "admin" && !window.location.pathname.startsWith("/operations/")
       && document.body.dataset.embedded !== "true"
       && !(current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1")
       && !document.querySelector(".eco-footer")) {
@@ -142,6 +150,29 @@
     return;
   }
   window.FeatheralSites = { url, apply, current, SITES, currencies };
+  // The Explore map needs a large, chrome-free viewport, so it opens in its own sized window.
+  const EXPLORE_WINDOW = "featheral-explore";
+  function openExplore(href) {
+    const screenWidth = window.screen?.availWidth || 1440, screenHeight = window.screen?.availHeight || 900;
+    const width = Math.max(960, Math.min(1600, screenWidth - 40)), height = Math.max(640, Math.min(1000, screenHeight - 60));
+    const left = Math.max(0, Math.round((window.screen?.availLeft || 0) + (screenWidth - width) / 2));
+    const top = Math.max(0, Math.round((window.screen?.availTop || 0) + (screenHeight - height) / 2));
+    const popup = window.open(href, EXPLORE_WINDOW, `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
+    if (!popup) return false;
+    popup.focus();
+    return true;
+  }
+  document.addEventListener("click", (event) => {
+    if (window.name === EXPLORE_WINDOW || event.defaultPrevented || event.button !== 0
+      || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
+    if (!link || link.hasAttribute("download")) return;
+    const target = new URL(link.href, window.location.href);
+    const world = new URL(url("world"));
+    if (target.host !== world.host || !/^\/(?:explore|play)(?:\/(?:index\.html)?)?$/.test(target.pathname)) return;
+    if (openExplore(target.href)) event.preventDefault();
+  });
+  window.FeatheralSites.openExplore = openExplore;
   document.addEventListener("featheral:site-ready", () => apply());
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => apply());
   else apply();

@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { portfolio } = require('../../notes/portfolio');
-const { createMarketPriceReader, VALUATION_POOL } = require('../../gold/prices');
+const { createMarketPriceReader, positionAmounts, sqrtPriceAtTick, VALUATION_POOL } = require('../../gold/prices');
 const unit = 10n ** 18n;
 function openingGold() {
   return { chain: { id: 1, tokenAddress: '0xba658127d93b17e577e1b8e8995cab3ae7d7c665' }, checkedAt: new Date().toISOString(),
@@ -314,6 +314,37 @@ test('Gold values FTHG from the read-only Uniswap v4 ETH/FTHG pool and otherwise
   assert.equal(priced.usdValue, expected, 'every currency derives from the pool FTHG value');
   state.offline = true; time += 60001;
   assert.equal((await read()).fallback, true, 'pool failure returns to the explicit reference, not a stale quote');
+});
+test('Gold reports exact Uniswap v4 pool reserves from this pool\'s liquidity ranges, scanning logs incrementally', async () => {
+  const { ethers } = require('ethers');
+  assert.equal(sqrtPriceAtTick(887272), 1461446703485210103287273052203988822378723970342n);
+  assert.equal(sqrtPriceAtTick(-887272), 4295128739n);
+  assert.equal(sqrtPriceAtTick(0), 2n ** 96n);
+  const event = new ethers.Interface(['event ModifyLiquidity(bytes32 indexed id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)']);
+  const log = (tickLower, tickUpper, delta) => event.encodeEventLog('ModifyLiquidity',
+    [VALUATION_POOL.poolId, ethers.ZeroAddress, tickLower, tickUpper, delta, ethers.ZeroHash]);
+  // The pool's opening full-range position at its on-chain sqrtPriceX96: 0.02 ETH and 1,000,000 FTHG.
+  const sqrt = 560222128702570272483239940334470n, liquidity = 141422765105245725354n;
+  const [eth, fthg] = positionAmounts(liquidity, -887250, 887250, sqrt);
+  assert.ok(eth > 19999n * 10n ** 12n && eth < 20001n * 10n ** 12n, String(eth));
+  assert.ok(fthg > 999999n * unit && fthg <= 1000000n * unit, String(fthg));
+  const ranges = [];
+  const provider = { ...poolProvider({ sqrt, liquidity }), async getLogs(filter) {
+    assert.equal(filter.address, VALUATION_POOL.poolManager);
+    assert.equal(filter.topics[1], VALUATION_POOL.poolId);
+    assert.ok(filter.toBlock - filter.fromBlock < 5000, 'public RPC log ranges stay under 5,000 blocks');
+    ranges.push([filter.fromBlock, filter.toBlock]);
+    return filter.fromBlock === 26337402 ? [log(-887250, 887250, liquidity), log(-100, 100, 5n), log(-100, 100, -5n)].map((entry) => ({ ...entry })) : [];
+  } };
+  let time = 1793570000000;
+  const read = createMarketPriceReader({ provider, ethUsd: async () => ({ usdPerEth: String(2000n * unit) }), clock: () => time, logger: { error() {} } });
+  const result = await read();
+  assert.deepEqual(result.reserves, { eth: eth.toString(), fthg: fthg.toString(), positions: 1, decimals: 18,
+    tvlUsd: ((eth * 2000n * unit + fthg * BigInt(result.usdPerFthg)) / unit).toString() });
+  assert.deepEqual(ranges, [[26337402, 26337500]]);
+  time += 60001;
+  await read();
+  assert.equal(ranges.length, 1, 'already-scanned blocks are not requested again');
 });
 test('portfolio retains arbitrary integer precision and never prices reserved notes', () => {
   const huge = 10n ** 55n + 17n;
