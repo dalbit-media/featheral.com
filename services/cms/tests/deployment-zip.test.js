@@ -9,6 +9,22 @@ const crypto = require("node:crypto");
 const { prepareRelease, fileHash } = require("../lib/deployment");
 const script = fs.readFileSync(path.resolve(__dirname, "../../../scripts/deploy-release.sh"), "utf8").replace(/\r\n/g, "\n");
 const extraction = script.slice(script.indexOf("step=extract\n"), script.indexOf("node -e 'const fs=require(\"node:fs\");fs.writeFileSync"));
+test("self-sync reuses installed HTTPS without an outbound email; upload deployment still registers certificates", () => {
+  const header = script.slice(0, script.indexOf('sudo_password=""'));
+  const https = script.slice(script.indexOf("certificate_args=()"), script.indexOf("as_root install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy"));
+  const run = (mode, email) => spawnSync(process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash",
+    ["-c", `${header}\nas_root(){ printf 'ROOT:%s\\n' "$*"; }\nphase(){ :; }\n${https}`, "installer",
+      "/opt/featheral", "release-1-aaaaaaaaaaaa", email, "admin.featheral.com", "32", "120", "true", "", "", mode],
+    { encoding: "utf8", timeout: 10000 });
+  const self = run("self", "");
+  assert.equal(self.status, 0, self.stdout + self.stderr);
+  assert.match(self.stdout, /Preserving installed HTTPS certificates/);
+  assert.doesNotMatch(self.stdout, /ROOT:certbot/);
+  assert.notEqual(run("upload", "").status, 0);
+  const upload = run("upload", "fixture@example.test");
+  assert.equal(upload.status, 0, upload.stdout + upload.stderr);
+  assert.match(upload.stdout, /ROOT:certbot --nginx .*--email fixture@example.test/);
+});
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "deployment-zip-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

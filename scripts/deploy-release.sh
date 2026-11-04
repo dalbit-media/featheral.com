@@ -3,7 +3,7 @@ set -Eeuo pipefail
 umask 077
 root="${1:?Deployment root required}"
 release_id="${2:?Release ID required}"
-email="${3:?TLS registration email required}"
+email="${3-}"
 hostnames="${4:?Public hostnames required}"
 upload_mib="${5:-16}"
 request_timeout="${6:-90}"
@@ -12,6 +12,10 @@ archive="${8:-}"
 archive_hash="${9:-}"
 deployment_mode="${10:-upload}"
 [[ "$deployment_mode" == upload || "$deployment_mode" == self ]]
+if [[ "$deployment_mode" == upload && -z "$email" ]]; then
+  echo "TLS registration email required for upload deployment."
+  exit 1
+fi
 [[ "$primary" == true || "$primary" == false ]]
 [[ "$upload_mib" =~ ^[0-9]+$ && "$upload_mib" -ge 1 && "$upload_mib" -le 1024 ]]
 [[ "$request_timeout" =~ ^[0-9]+$ && "$request_timeout" -ge 5 && "$request_timeout" -le 3600 ]]
@@ -348,7 +352,11 @@ certificate_args=()
 for host in $hostnames; do certificate_args+=(-d "$host"); done
 phase https
 step=https
-as_root certbot --nginx --non-interactive --agree-tos --email "$email" --redirect "${certificate_args[@]}"
+if [[ "$deployment_mode" == self ]]; then
+  echo "Preserving installed HTTPS certificates; renewal remains managed by certbot.timer."
+else
+  as_root certbot --nginx --non-interactive --agree-tos --email "$email" --redirect "${certificate_args[@]}"
+fi
 as_root install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
 printf '%s\n' '#!/bin/sh' 'set -eu' '/usr/sbin/nginx -t' '/bin/systemctl reload nginx' > "$release/renew-nginx"
 as_root install -m 755 "$release/renew-nginx" /etc/letsencrypt/renewal-hooks/deploy/featheral-nginx

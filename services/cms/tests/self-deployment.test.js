@@ -13,7 +13,8 @@ function fixture(t) {
   const root = path.join(directory, "releases", "release-1-aaaaaaaaaaaa");
   fs.mkdirSync(root, { recursive: true });
   fs.symlinkSync(root, path.join(directory, "current"), process.platform === "win32" ? "junction" : "dir");
-  fs.writeFileSync(path.join(root, ".deployment-hosts.json"), JSON.stringify({ primary: true, hosts: ["admin.featheral.com", "featheral.com"] }));
+  fs.writeFileSync(path.join(root, ".deployment-hosts.json"), JSON.stringify({ primary: true,
+    hosts: ["admin.featheral.com", "featheral.com"], uploadLimitMiB: 32, requestTimeoutSeconds: 120 }));
   const wallet = Wallet.createRandom(), context = { origin: "https://admin.featheral.com", session: "test", wallet: wallet.address };
   const settings = { value: { enabled: true, revision: 1 }, approvals: new OriginApprovals({ wallet: wallet.address }) };
   const calls = [], state = { active: false, failLaunch: false, busy: false };
@@ -180,6 +181,9 @@ for (const fails of [false, true]) test(`self-sync worker persists ${fails ? "fa
         assert.equal(program, "/bin/bash");
         assert.equal(args.at(-1), "self");
         assert.equal(args[1], f.directory);
+        assert.equal(args[3], "", "an existing HTTPS installation needs no outbound TLS registration email");
+        assert.equal(args[5], "32", "preserve installed upload limits, not outbound deployment defaults");
+        assert.equal(args[6], "120", "preserve installed request timeouts");
         assert.match(args[2], /^release-\d+-a{12}$/);
         assert.equal(fs.existsSync(args[8]), true, "fresh ZIP exists before the installer starts");
         output = fails ? "FEATHERAL_FAILURE:health:1\n" : "FEATHERAL_PHASE:verified\n";
@@ -195,7 +199,7 @@ for (const fails of [false, true]) test(`self-sync worker persists ${fails ? "fa
       if (name === "node:child_process") return { spawn };
       if (name === "../services/cms/lib/deployment") return { ...helper, releaseFiles: () => ["scripts/deploy-release.sh", "sites/code.js"] };
       if (name === "../services/operations/settings") return { OperationsSettings: class {
-        constructor() { this.value = { tlsEmail: "fixture@example.test", uploadLimitMiB: 16, requestTimeoutSeconds: 90 }; }
+        constructor() { this.value = { tlsEmail: "", uploadLimitMiB: 16, requestTimeoutSeconds: 90 }; }
       } };
       return actualRequire(name);
     },

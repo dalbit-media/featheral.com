@@ -74,6 +74,10 @@ Admin installation, not another server. The independent
 `git pull --ff-only` into `<deployment-root>/shared/self-deployment/checkout`,
 refuses local checkout edits or a changed origin, packages a fresh release,
 builds, restarts and verifies it with the existing code rollback safeguards.
+Self-sync preserves the active release's upload and timeout limits and reuses
+installed HTTPS certificates, still verifying every assigned HTTPS hostname.
+It needs no outbound TLS registration email; the existing Certbot timer handles
+renewal.
 Private storage stays linked in place; published CMS pages are not re-imported.
 Custom content, storage-origin mappings and the current writer authority remain
 intact. Recognized shipped page defaults receive their normal versioned design

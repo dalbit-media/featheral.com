@@ -85,7 +85,7 @@ async function run(root, id) {
     const { OperationsSettings } = require("../services/operations/settings");
     const settings = new OperationsSettings({ root: current });
     await command("/bin/bash", [archive.installer.file, root, releaseId, settings.value.tlsEmail,
-      assignment.hosts.join(" "), String(settings.value.uploadLimitMiB), String(settings.value.requestTimeoutSeconds),
+      assignment.hosts.join(" "), String(assignment.uploadLimitMiB), String(assignment.requestTimeoutSeconds),
       "true", archive.file, archive.hash, "self"], current);
     receipt.phase = "complete"; receipt.running = false; receipt.release = releaseId;
     receipt.message = "Default branch pulled, fresh release built and restarted; deployment health verified.";
