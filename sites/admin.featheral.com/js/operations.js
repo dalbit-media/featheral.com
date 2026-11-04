@@ -1,12 +1,15 @@
 "use strict";
 window.FeatheralAdminControllers = {};
 async function approveAdminAction(challenge, active) {
-  const provider = window.FeatheralProfile.getProvider(), account = window.FeatheralProfile.snapshot().account;
+  if (!active()) throw new Error("Admin view changed. No operation was submitted.");
+  const { provider, account } = await window.FeatheralProfile.ensureSigner(challenge.wallet);
   const sameWallet = () => provider === window.FeatheralProfile.getProvider()
     && window.FeatheralProfile.snapshot().account?.toLowerCase() === account?.toLowerCase();
   if (!active()) throw new Error("Admin view changed. No operation was submitted.");
-  if (!provider || !account || account.toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error(`Connect the Admin signing wallet ${challenge.wallet} in the header.`);
+  if (!sameWallet() || account.toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error("Wallet changed. No operation was submitted.");
   const signature = await provider.request({ method: "personal_sign", params: [ethers.hexlify(ethers.toUtf8Bytes(challenge.message)), account] });
+  const accounts = await provider.request({ method: "eth_accounts" });
+  if (accounts?.[0]?.toLowerCase() !== account.toLowerCase()) throw new Error("Wallet changed. No operation was submitted.");
   if (!active() || !sameWallet()) throw new Error("View or wallet changed. No operation was submitted.");
   if (ethers.verifyMessage(challenge.message, signature).toLowerCase() !== challenge.wallet.toLowerCase()) throw new Error("Invalid Admin-wallet signature.");
   return { challengeId: challenge.challengeId, signature };

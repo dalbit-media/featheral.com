@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "sites", "wallet.feath
 const account = "0x1111111111111111111111111111111111111111";
 const preferenceKey = "featheral.walletDisconnected";
 
-function widget(hostname, { accounts = [], preference = null, storedPreference = null, multiple = false, legacy = false, reject = false, onConnect, adminWallets = [], fthgAdminWallets = [], moderators = adminWallets, role = false, configFailure = false, delayedConfig = null, delayedBalances = null, publicAdmin = false, inlineProfile = false, rejectProfile = false, signProfile, walletFailure = false, central = false, ethereumProvider = false } = {}) {
+function widget(hostname, { accounts = [], otherAccounts = [], preference = null, storedPreference = null, multiple = false, legacy = false, reject = false, onConnect, adminWallets = [], fthgAdminWallets = [], moderators = adminWallets, role = false, configFailure = false, delayedConfig = null, delayedBalances = null, publicAdmin = false, inlineProfile = false, rejectProfile = false, signProfile, walletFailure = false, central = false, ethereumProvider = false } = {}) {
   const requests = [];
   const walletListeners = {};
   const alerts = [];
@@ -23,7 +23,7 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
       listeners: {},
       children: [],
       dataset: {},
-      classList: { toggle() {} },
+      classList: { toggle() {}, contains() { return false; } },
       append(...children) { this.children.push(...children); },
       prepend() {},
       after() {},
@@ -77,6 +77,7 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
   const otherProvider = {
     async request({ method }) {
       otherRequests.push(method);
+      if (method === "eth_accounts") return otherAccounts;
       if (method === "eth_requestAccounts") {
         if (reject) throw Object.assign(new Error("Rejected"), { code: 4001 });
         return [account];
@@ -141,12 +142,58 @@ function widget(hostname, { accounts = [], preference = null, storedPreference =
       };
     },
   });
-  window.FeatheralSites = { current: hostname.split(".")[0] === "featheral" ? "foundation" : hostname.split(".")[0] };
+
+  window.FeatheralSites = { current: hostname.split(".")[0] === "featheral" ? "foundation" : hostname.split(".")[0],
+    url: (site, pathname) => `https://${site}.featheral.com${pathname}` };
   if (central) window.FeatheralWallet = { open: config => centralCalls.push(config) };
   window.FeatheralProfile.mount(button, { onConnect, profileRoot, ethereumProvider });
   return { profile: window.FeatheralProfile, button, requests, otherRequests, otherProvider, walletListeners, alerts, elements, errors, events, profileRoot, profileWrites, centralCalls, adminLink: headerNav.children[0] };
 }
 
+describe("Admin signing restoration", () => {
+    it("restores the matching connected signer when multiple providers prevent automatic header restoration", async () => {
+      const app = widget("admin.featheral.com", { multiple: true, otherAccounts: [account], ethereumProvider: true });
+      await settle();
+      expect(app.profile.getProvider()).to.equal(null);
+      const signer = await app.profile.ensureSigner(account);
+      expect(signer.provider).to.equal(app.otherProvider);
+      expect(signer.account).to.equal(account);
+      expect(app.profile.snapshot().account).to.equal(account);
+      expect(app.otherRequests).not.to.include("eth_requestAccounts");
+    });
+    it("requests origin permission on a signing click when the only provider is not yet authorized", async () => {
+      const app = widget("admin.featheral.com", { ethereumProvider: true });
+      await settle();
+      expect(app.requests).not.to.include("eth_requestAccounts");
+      const signer = await app.profile.ensureSigner(account);
+      expect(signer.account).to.equal(account);
+      expect(app.requests).to.include("eth_requestAccounts");
+    });
+    it("refreshes stale profile state from the selected provider before signing", async () => {
+      const app = widget("admin.featheral.com", { accounts: [account], ethereumProvider: true });
+      await settle();
+      await app.profile.setAccount("");
+      const signer = await app.profile.ensureSigner(account);
+      expect(signer.account).to.equal(account);
+      expect(app.requests).not.to.include("eth_requestAccounts");
+    });
+    it("does not substitute a different wallet for the wallet bound to the Admin session", async () => {
+      const app = widget("admin.featheral.com", { accounts: [account], ethereumProvider: true });
+      await settle();
+      let error;
+      try { await app.profile.ensureSigner("0x2222222222222222222222222222222222222222"); } catch (value) { error = value; }
+      expect(error.message).to.include("other authorized origin or reserve wallet");
+      expect(app.requests).not.to.include("personal_sign");
+    });
+    it("does not choose arbitrarily between two matching wallet extensions", async () => {
+      const app = widget("admin.featheral.com", { multiple: true, accounts: [account], otherAccounts: [account], ethereumProvider: true });
+      await settle();
+      let error;
+      try { await app.profile.ensureSigner(account); } catch (value) { error = value; }
+      expect(error.message).to.include("Choose the Admin signing wallet");
+      expect(app.profile.getProvider()).to.equal(null);
+    });
+  });
 describe("Central wallet consistency", () => {
   for (const [host, primary] of [["featheral.com", "FTHX"], ["gold.featheral.com", "FTHG"], ["dollar.featheral.com", "FTH$"], ["world.featheral.com", "FTH$"]]) {
     it(`opens the common account-following renderer on ${host}`, async () => {

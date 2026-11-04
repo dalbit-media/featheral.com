@@ -72,6 +72,11 @@ Wallet approval failures are logged in the browser's request section and remain
 visible after refreshing server status. Finished receipts are labelled as the
 last recorded job with their ID, start time and commit, not a new successful
 request. An Admin session alone does not replace the required signing wallet.
+Action buttons recheck the selected Ethereum provider and restore the
+session's signer before requesting a signature, including after reloads with
+multiple wallet extensions. Both origin and reserve wallets can approve using
+their own Admin sessions. Ambiguous extensions require choosing one in the
+header; switching to the other authorized wallet requires signing in with it.
 It requires wallet approval, server-side Git access to
 `https://github.com/dalbit-media/featheral.com.git`, Git installed on the server,
 and non-interactive sudo for deployment operations. It does not require the SSH

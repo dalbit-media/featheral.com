@@ -595,6 +595,33 @@
     await setAccount(accounts[0]);
   }
 
+  async function ensureSigner(address) {
+    if (!options.ethereumProvider) throw new Error("Use the Admin Ethereum signing wallet, not the shared funds wallet.");
+    const matches = accounts => accounts?.[0]?.toLowerCase() === address.toLowerCase();
+    let provider = getProvider();
+    if (!provider) {
+      const available = discoverWallets();
+      const results = await Promise.allSettled(available.map(async wallet => ({
+        provider: wallet.provider, accounts: await wallet.provider.request({ method: "eth_accounts" }),
+      })));
+      for (const result of results) if (result.status === "rejected") console.error("Signing wallet discovery failed:", result.reason);
+      const authorized = results.filter(result => result.status === "fulfilled" && matches(result.value.accounts));
+      if (authorized.length === 1) provider = authorized[0].value.provider;
+      else if (available.length === 1) provider = available[0].provider;
+      else throw new Error(`Choose the Admin signing wallet ${address} in the header, then retry signing.`);
+      if (getProvider() && getProvider() !== provider) throw new Error("Wallet changed. Review the action again.");
+      useProvider(provider);
+    }
+    let accounts = await provider.request({ method: "eth_accounts" });
+    if (!accounts?.length) accounts = await provider.request({ method: "eth_requestAccounts" });
+    if (getProvider() !== provider) throw new Error("Wallet changed. Review the action again.");
+    if (!matches(accounts)) throw new Error(`This Admin session requires ${address}. Select it in your wallet, or sign out and sign in with the other authorized origin or reserve wallet.`);
+    setDisconnected(false);
+    await setAccount(accounts[0]);
+    if (getProvider() !== provider || state.account.toLowerCase() !== address.toLowerCase()) throw new Error("Wallet changed. Review the action again.");
+    return { provider, account: state.account };
+  }
+
   async function onButtonClick(forProfile = false) {
     try {
       if (forProfile !== true && !options.ethereumProvider) {
@@ -778,7 +805,7 @@
   window.addEventListener("focus", refreshProfile);
 
   window.FeatheralProfile = {
-    mount, setAccount, setRate, disconnect, isDisconnected, snapshot, getProvider,
+    mount, setAccount, setRate, disconnect, isDisconnected, snapshot, getProvider, ensureSigner,
     refresh: refreshProfile,
   };
 })();
