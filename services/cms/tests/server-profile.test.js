@@ -173,8 +173,25 @@ test("disk growth history is bounded to 24 hours and resets after gaps, clock ch
   assert.equal(profile.snapshot().disk.available, false);
 });
 
+test("capacity refresh reflects cleanup immediately even while the storage inventory is scanning", async t => {
+  let free = 2, now = 1000;
+  const profile = new ServerProfile({ root: os.tmpdir(), autoStart: false, now: () => now,
+    statfs: async () => ({ blocks: 50, bsize: 1024 ** 3, bavail: free }) });
+  t.after(() => profile.close());
+  await profile.refreshDisk();
+  assert.equal(profile.snapshot().disk.freeBytes, 2 * 1024 ** 3);
+  profile.storage.scanning = true;
+  free = 12; now += 1000;
+  await profile.refreshDisk();
+  assert.equal(profile.snapshot().disk.freeBytes, 12 * 1024 ** 3);
+  assert.equal(profile.snapshot().disk.sampledAt, now);
+  assert.equal(profile.storage.scanning, true);
+  assert.equal(profile.storage.updatedAt, null);
+});
+
 test("profile API requires an authenticated Admin host and protects storage refresh with same-origin checks", async t => {
-  const app = express(), service = { snapshot: () => ({ protected: true }), refreshes: 0, refreshStorage() { this.refreshes++; } };
+  const app = express(), service = { snapshot: () => ({ protected: true }), refreshes: 0, diskRefreshes: 0,
+    async refreshDisk() { this.diskRefreshes++; }, refreshStorage() { this.refreshes++; } };
   const cmsAuth = (req, res, next) => req.get("authorization") === "Basic YWRtaW46cGFzcw==" ? next() : res.sendStatus(401);
   app.use("/api/server-profile", serverProfileApi({ service, cmsAuth, passwordConfigured: true }));
   app.use("/api/local-server-profile", serverProfileApi({
@@ -205,6 +222,7 @@ test("profile API requires an authenticated Admin host and protects storage refr
   assert.equal((await request("/api/server-profile", { authorization: "" })).status, 401);
   assert.deepEqual((await request("/api/server-profile")).json(), { protected: true });
   assert.deepEqual((await request("/api/local-server-profile")).json(), { protected: true });
+  assert.equal(service.diskRefreshes, 2, "each authenticated read refreshes capacity without scanning storage");
   assert.equal((await request("/api/local-server-profile", { host: `admin.featheral.com:${port}`,
     headers: { "X-Forwarded-Proto": "https" } })).status, 503);
   const badOrigin = await request("/api/server-profile/refresh", { method: "POST", headers: { Origin: "http://attacker.localhost", "Content-Type": "application/json" }, body: "{}" });

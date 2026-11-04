@@ -317,7 +317,10 @@ ledger / upload / source inventory and Linux account browsing. Credentials are
 managed separately in **Settings**. `GET /api/server-profile` requires the Admin
 host, HTTPS (except loopback `admin.localhost`) and Admin authentication.
 Storage is scanned at startup and every five minutes; an authenticated same-origin
-`POST /api/server-profile/refresh` requests an early scan. The source inventory
+`POST /api/server-profile/refresh` requests an early scan. Filesystem capacity
+is sampled separately: each authenticated dashboard read samples
+current available space immediately, without waiting for the inventory scan.
+The source inventory
 skips `.git`, `node_modules`, `artifacts`, `cache`, `coverage`, `dist` and `out`;
 those names are still counted inside data, upload and trash trees. Symlinks are
 not followed. Set network capacity in **Settings** to a positive bytes-per-

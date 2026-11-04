@@ -220,19 +220,7 @@ class ServerProfile {
         }
         await visit(root.directory, [], false, root.category || null);
       }
-      let disk;
-      try {
-        const stat = await this.statfs(this.root);
-        const totalBytes = Number(stat.blocks) * Number(stat.bsize);
-        const freeBytes = Number(stat.bavail) * Number(stat.bsize);
-        if (!Number.isFinite(totalBytes) || totalBytes <= 0 || !Number.isFinite(freeBytes) || freeBytes < 0 || freeBytes > totalBytes)
-          throw new RangeError("Invalid filesystem capacity.");
-        disk = this.diskSample(totalBytes, freeBytes);
-      } catch {
-        this.diskSamples = [];
-        disk = { available: false, error: "Filesystem capacity is unavailable on this platform." };
-      }
-      this.disk = disk;
+      await this.refreshDisk();
       const values = Object.values(categories);
       this.storage = { updatedAt: this.now(), scanning: false, complete, scanError,
         categories, totalBytes: values.reduce((sum, item) => sum + item.bytes, 0),
@@ -242,6 +230,21 @@ class ServerProfile {
       this.storage = { ...this.storage, scanning: false, complete: false, scanError: "Storage inventory scan failed." };
     } finally {
       if (this.storage.scanning) this.storage.scanning = false;
+    }
+  }
+
+  async refreshDisk() {
+    try {
+      const stat = await this.statfs(this.root);
+      const totalBytes = Number(stat.blocks) * Number(stat.bsize);
+      const freeBytes = Number(stat.bavail) * Number(stat.bsize);
+      if (!Number.isFinite(totalBytes) || totalBytes <= 0 || !Number.isFinite(freeBytes) || freeBytes < 0 || freeBytes > totalBytes)
+        throw new RangeError("Invalid filesystem capacity.");
+      this.disk = this.diskSample(totalBytes, freeBytes);
+    } catch (error) {
+      console.error("Server profile capacity sample failed:", error.code || error.name || "Error");
+      this.diskSamples = [];
+      this.disk = { available: false, error: "Filesystem capacity is unavailable on this platform." };
     }
   }
 
@@ -346,7 +349,12 @@ function serverProfileApi({ service, cmsAuth, passwordConfigured, adminHost = "a
     if (!(typeof passwordConfigured === "function" ? passwordConfigured() : passwordConfigured) && !local) return res.status(503).json({ error: "Configure Admin access in Settings before using the server profile." });
     cmsAuth(req, res, next);
   });
-  router.get("/", (_req, res) => res.json(service.snapshot()));
+  router.get("/", async (_req, res, next) => {
+    try {
+      await service.refreshDisk();
+      res.json(service.snapshot());
+    } catch (error) { next(error); }
+  });
   router.post("/refresh", express.json({ limit: "1kb" }), (req, res) => {
     const protocol = req.secure || req.get("x-forwarded-proto") === "https" ? "https" : "http";
     if (req.get("origin") !== `${protocol}://${req.get("host")}`) return res.status(403).json({ error: "Same-origin server profile requests are required." });
