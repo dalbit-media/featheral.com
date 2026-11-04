@@ -44,7 +44,6 @@ class SelfDeployment {
   }
   binding() {
     const layout = this.layout();
-    if (!this.settings.value.enabled) throw fail(403, "Enable deployment in Settings before self-sync.");
     if (this.deployment.running || this.busy() || this.active() || fs.existsSync(path.join(layout.root, "shared", "site-sync.lock")))
       throw fail(409, "Wait for the current deployment, site sync or Settings operation.");
     if (this.status().phase === "uncertain") throw fail(409, "Inspect the interrupted self-sync before retrying.");

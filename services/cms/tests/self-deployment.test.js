@@ -64,11 +64,19 @@ test("self-sync requires a revision- and session-bound wallet signature and star
   assert.equal(f.service.status().phase, "uncertain");
   assert.throws(() => f.service.challenge(f.context), /interrupted self-sync/);
 });
-test("self-sync rejects concurrent operations, disabled deployment, and fails explicitly when launch is denied", async t => {
+test("self-sync is independent of SSH upload deployment enablement and still requires wallet approval", async t => {
   const f = fixture(t);
   f.settings.value.enabled = false;
-  assert.throws(() => f.service.challenge(f.context), /Enable deployment/);
-  f.settings.value.enabled = true; f.state.busy = true;
+  assert.equal(f.service.status().available, true);
+  assert.throws(() => f.service.start({}, f.context), { status: 403 });
+  const receipt = f.service.start(await f.signed(), f.context);
+  assert.equal(receipt.running, true);
+  assert(f.calls.some(call => call.program === "sudo"));
+  assert.equal(f.settings.value.enabled, false, "local self-sync must not enable remote SSH deployments");
+});
+test("self-sync rejects concurrent operations and fails explicitly when launch is denied", async t => {
+  const f = fixture(t);
+  f.state.busy = true;
   assert.throws(() => f.service.challenge(f.context), /Wait/);
   f.state.busy = false; f.deployment.running = true;
   assert.throws(() => f.service.challenge(f.context), /Wait/);

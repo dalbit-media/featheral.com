@@ -67,12 +67,17 @@ shows its error and allows retry without leaving Settings.
 **Sign & self-sync** is available only on the active deployed Linux Admin
 server. It requires wallet approval, server-side Git access to
 `https://github.com/dalbit-media/featheral.com.git`, Git installed on the server,
-and non-interactive sudo for deployment operations. The independent
+and non-interactive sudo for deployment operations. It does not require the SSH
+upload deployment enable switch or SSH target credentials: it updates the local
+Admin installation, not another server. The independent
 `featheral-deployment.service` job pulls the remote default branch with
 `git pull --ff-only` into `<deployment-root>/shared/self-deployment/checkout`,
 refuses local checkout edits or a changed origin, packages a fresh release,
 builds, restarts and verifies it with the existing code rollback safeguards.
 Private storage stays linked in place; published CMS pages are not re-imported.
+Custom content, storage-origin mappings and the current writer authority remain
+intact. Recognized shipped page defaults receive their normal versioned design
+upgrades when rendered; custom published edits are never replaced by Git content.
 It never uses source-machine edits: commit and push them first. Status and bounded
 redacted logs persist in `shared/self-deployment/status.json`; refresh Settings
 after the Admin restart. An interrupted job without a completion receipt reports

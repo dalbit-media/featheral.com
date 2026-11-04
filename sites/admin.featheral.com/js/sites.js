@@ -127,7 +127,7 @@ function deploymentControlsHtml() {
     </section>
     <section class="form-grid" aria-labelledby="self-sync-heading">
     <h3 id="self-sync-heading">Self-sync this Admin server</h3>
-    <p class="muted small">Pull this repository's default branch on the deployed Linux Admin server, build a fresh release and restart with health checks and code rollback. No database or upload transfer; published pages and private data stay unchanged. Server Git access and non-interactive deployment sudo are required.</p>
+    <p class="muted small">Pull this repository's default branch on the deployed Linux Admin server, build a fresh release and restart with health checks and code rollback. No database or upload transfer; custom published pages, private data and writer authority are preserved. Shipped default designs receive their normal safe upgrades. This does not require enabling SSH upload deployment. Server Git access and non-interactive deployment sudo are required.</p>
     <button id="self-sync-start" class="btn" type="button" disabled>Sign &amp; self-sync</button>
     <button id="self-sync-refresh" class="btn" type="button">Refresh self-sync status</button>
     <p id="self-sync-status" role="status" aria-live="polite">Checking self-sync availability...</p>
