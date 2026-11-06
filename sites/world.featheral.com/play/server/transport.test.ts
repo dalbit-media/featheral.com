@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { apply, accrue, createAccount, migrateEconomy, snapshot } from './economy.ts';
+import { apply, accrue, migrateEconomy, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import { build, buildingCosts, discover, newGame, stages, upgrade } from '../src/engine.ts';
 import { dollarsScale } from '../src/dollars.ts';
 import { emptyAllocation, fundAllocation, resourceAccess, resourceKeys } from '../src/workforce.ts';
@@ -9,7 +10,7 @@ import { worldWeekMs } from '../src/environment.ts';
 import { waterFacilities } from '../src/water-facilities.ts';
 
 test('basic Wood and Water crews are free; advanced transport uses FTH$ and never Metal', () => {
-  const game = newGame(); game.seed = 1542; discover(game); upgrade(game);
+  const game = createAccount(1000000).game; game.seed = 1542; discover(game); upgrade(game);
   game.stage = 6; game.bank = true;
   const access = resourceAccess(game), allocation = { wood: 1, water: 1, metal: 1, oil: 1 };
   for (const resource of resourceKeys) {

@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { apply, accrue, createAccount, execute, snapshot } from './economy.ts';
+import { apply, accrue, execute, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import type { Account } from './economy.ts';
 import type { Command } from '../src/api-types.ts';
 import { radius, terrainAt, terrainDetails } from '../src/engine.ts';

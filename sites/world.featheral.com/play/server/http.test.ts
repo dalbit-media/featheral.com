@@ -12,13 +12,13 @@ import type { ApiState, Command } from '../src/api-types.ts';
 import { environmentAt, worldWeekMs } from '../src/environment.ts';
 import { resourceCapacity } from '../src/workforce.ts';
 import { dollarsScale } from '../src/dollars.ts';
-import { automateFixtureCollections, fundFixtureFromReserves } from './test-support.ts';
+import { automateFixtureCollections, fundFixtureFromReserves, fundFixtureResources } from './test-support.ts';
 
 const origin = 'http://127.0.0.1:5173';
 test('item actions use authoritative inventory, strict payloads, durable retry receipts and rollback', async () => {
   let time = 1000000;
   const store = new SqliteStore(':memory:', () => time), identity = store.create();
-  store.transaction(identity.token, session => { session.account.game.dollars = 500 * dollarsScale; });
+  store.transaction(identity.token, session => { fundFixtureResources(session.account); session.account.game.dollars = 500 * dollarsScale; });
   const server = createApi(store, origin);
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -127,8 +127,10 @@ test('public statistics are anonymous, cacheable, read-only and use the exact ga
     assert.equal(data.dollars, 0);
     assert.ok(Math.abs(Date.now() - data.updatedAt) < 5000);
     const session = store.create();
-    store.transaction(session.token, (record, now) => apply(record.account,
-      { id: randomUUID(), revision: 0, command: { type: 'upgrade' } }, now));
+    store.transaction(session.token, (record, now) => {
+      fundFixtureResources(record.account);
+      return apply(record.account, { id: randomUUID(), revision: 0, command: { type: 'upgrade' } }, now);
+    });
     const before = store.read(session.token, record => structuredClone(record.account));
     const stats = await (await fetch(`${base}/stats`, { headers: { Cookie: 'terra-dev=invalid' } })).json();
     const stateResponse = await fetch(`${base}/state`, { headers: { Cookie: `terra-dev=${session.token}` } });
@@ -408,6 +410,7 @@ test('state GET durably bills weekly transport once and failed actions roll back
   try {
     store.transaction(identity.token, (session, now) => {
       const account = session.account, work = account.workforce!;
+      fundFixtureResources(account);
       automateFixtureCollections(account);
       account.game.stage = 0; account.game.population = 12;
       account.game.home = { x: 20, y: 0 }; account.game.stock.metal = 50;
@@ -454,6 +457,7 @@ test('HTTP expeditions support independent launches while duplicate requests and
   const store = new SqliteStore(':memory:', () => time), server = createApi(store, origin), identity = store.create();
   store.transaction(identity.token, session => {
     const account = session.account, work = snapshot(account).workforce;
+    fundFixtureResources(account);
     account.game.stage = 0; account.game.population = 12; account.game.home = { x: 0, y: 0 };
     account.game.stock.metal = 1000; account.game.dollars = 1000 * 10000; work.automatic = false; account.workforce = work;
   });
@@ -518,6 +522,7 @@ test('development API exposes one accelerated game clock with baseline rules and
     assert.equal(state.clockSpeed, 20);
     assert.equal('growthMultiplier' in state, false);
     store.transaction(cookie.split('=')[1], session => {
+      fundFixtureResources(session.account);
       automateFixtureCollections(session.account);
       session.account.game.dollars = 500 * dollarsScale;
       session.account.game.stock.wood = 60;
@@ -549,10 +554,11 @@ test('development API exposes one accelerated game clock with baseline rules and
     store.transaction(cookie.split('=')[1], session => { session.account.pending.wood = 50 * 60000; });
     state = await (await action({ type: 'claim' })).json() as ApiState;
     assert.equal(state.game.stock.wood, yieldWood + 50);
-    time += 999;
+    time += 499;
     const rejected = await action({ type: 'claim' });
     assert.equal(rejected.status, 429);
-    assert.match((await rejected.json()).error, /one second/);
+    assert.equal(rejected.headers.get('retry-after'), '1');
+    assert.match((await rejected.json()).error, /half a second/);
     time += 1;
     store.transaction(cookie.split('=')[1], session => {
       session.account.game.dollars += 10000 * 10000;
@@ -588,6 +594,7 @@ test('HTTP development accepts explicit loopback aliases only on the configured 
       assert.equal(session.status, 201);
       const cookie = session.headers.get('set-cookie')!.split(';')[0];
       const { csrf } = await session.json();
+      store.transaction(cookie.split('=')[1], session => fundFixtureResources(session.account));
       const action = await fetch(`${base}/actions`, {
         method: 'POST', headers: { ...headers, Cookie: cookie, 'X-CSRF-Token': csrf },
         body: JSON.stringify({ id: randomUUID(), revision: 0, command: { type: 'upgrade' } }),

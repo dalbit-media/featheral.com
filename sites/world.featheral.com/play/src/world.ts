@@ -19,6 +19,7 @@ export class World {
   private fringe = new Map<string, number>();
   private exploredRef: string[] | null = null;
   private lastFrame = 0;
+  private minimapKey = '';
   private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private canvas: HTMLCanvasElement;
   private minimap: HTMLCanvasElement;
@@ -77,6 +78,7 @@ export class World {
     this.canvas.width = Math.round(rect.width * dpr); this.canvas.height = Math.round(rect.height * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.minimap.width = 300; this.minimap.height = 190;
+    this.minimapKey = '';
     this.fogCanvas.width = Math.ceil(rect.width) + 64; this.fogCanvas.height = Math.ceil(rect.height) + 64;
   }
   private diamond(x: number, y: number, fill: string): void {
@@ -90,13 +92,15 @@ export class World {
   }
   private frame = (time: number): void => {
     requestAnimationFrame(this.frame);
-    if (time - this.lastFrame < (this.reducedMotion ? 200 : 33)) return;
+    if (document.hidden || !this.canvas.isConnected || !this.width || !this.height
+      || time - this.lastFrame < (this.reducedMotion ? 200 : this.drag ? 16 : 50)) return;
     this.lastFrame = time;
     const c = this.ctx, g = this.game();
     if (g.explored !== this.exploredRef) {
       const known = new Set(g.explored);
       if (known.size !== this.known.size || [...known].some(key => !this.known.has(key))) {
         this.known = known; this.fringe = explorationFringe(known);
+        this.minimapKey = '';
       }
       this.exploredRef = g.explored;
     }
@@ -199,7 +203,10 @@ export class World {
     fog.addColorStop(0, '#0b151000'); fog.addColorStop(0.65, '#0b151045'); fog.addColorStop(1, '#0a100eed');
     c.fillStyle = fog; c.fillRect(0, 0, this.width, this.height);
     this.drawEnvironment(time);
-    this.drawMinimap(g);
+    const minimapKey = `${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${this.known.size}:${this.environment().season}`;
+    if (this.minimapKey !== minimapKey) {
+      this.drawMinimap(g); this.minimapKey = minimapKey;
+    }
   };
   private drawFog(tiles: WorldTile[]): void {
     const fog = this.fog;

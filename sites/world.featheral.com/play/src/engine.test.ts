@@ -11,12 +11,17 @@ function wealthy(): Game {
   for (const resource of Object.keys(game.stock) as (keyof Game['stock'])[]) game.stock[resource] = 1000000;
   return game;
 }
+function supplied(): Game {
+  const game = newGame();
+  game.stock = { wood: 180, water: 2560, metal: 80, oil: 0 };
+  return game;
+}
 
-test('new worlds have primary resources but no settlement or advanced stock', () => {
+test('new worlds have zero resources, funds, residents and no settlement', () => {
   const g = newGame();
   assert.equal(g.stage, -1);
   assert.equal(g.population, 0);
-  assert.equal(g.stock.oil, 0);
+  assert.deepEqual(g.stock, { wood: 0, water: 0, metal: 0, oil: 0 });
   assert.equal(g.dollars, 0);
   assert.equal(Object.hasOwn(g.stock, 'lithium'), false);
   assert.equal(terrainAt(0, 0, g.seed), 'meadow');
@@ -41,7 +46,7 @@ test('three permanent Water facilities cost owned Wood and Metal once and stack 
   assert.equal(waterProductionMultiplier(game), 8);
   assert.equal(before.wood - game.stock.wood, 420);
   assert.equal(before.metal - game.stock.metal, 155);
-  const poor = newGame(); upgrade(poor); poor.dollars = 280 * dollarsScale; poor.stock.wood = 59;
+  const poor = supplied(); upgrade(poor); poor.dollars = 280 * dollarsScale; poor.stock.wood = 59;
   const saved = structuredClone(poor);
   assert.throws(() => build(poor, 'well'), /resources/);
   assert.deepEqual(poor, saved);
@@ -125,7 +130,7 @@ test('movement rejects unreachable and fractional locations without mutation', (
 });
 
 test('settlement establishes a home and consumes exact resource amounts', () => {
-  const g = newGame();
+  const g = supplied();
   upgrade(g);
   assert.equal(g.stage, 0);
   assert.equal(g.population, 12);
@@ -166,7 +171,7 @@ test('all upgrade stages enforce exact population thresholds and resource costs'
 });
 
 test('upgrades and resident invitations fail atomically without resources', () => {
-  const g = newGame();
+  const g = supplied();
   assert.throws(() => invite(g), /first settlement/);
   upgrade(g);
   g.population = 100;
@@ -226,7 +231,7 @@ test('market requires a settlement and a city bank for advanced resources', () =
 });
 
 test('market rejects invalid quantities and insufficient balances without partial trades', () => {
-  const g = newGame();
+  const g = supplied();
   upgrade(g);
   for (const amount of [0, -1, 0.1, NaN, Infinity, 10001]) assert.throws(() => trade(g, 'wood', 'buy', amount), /Use the marketplace/);
   const initial = structuredClone(g);
@@ -290,7 +295,7 @@ test('legacy global rewards cannot generate FTH$ at any membership or cooldown b
   assert.throws(() => claim(g, 100000), /rewards are disabled/);
   assert.equal(g.rewards, 0);
   assert.equal(g.contribution, 129);
-  assert.equal(g.stock.metal, 80);
+  assert.equal(g.stock.metal, 0);
   assert.equal(g.dollars, 0);
   assert.throws(() => claim(g, 159999), /rewards are disabled/);
   assert.throws(() => claim(g, 160000), /rewards are disabled/);
@@ -307,7 +312,7 @@ test('saves roundtrip and invalid or incomplete saves are explicitly rejected', 
 });
 
 test('the first camp is achievable with funded recruitment and supplied resources', () => {
-  const g = newGame();
+  const g = supplied();
   discover(g);
   upgrade(g);
   g.dollars = 1500 * dollarsScale;

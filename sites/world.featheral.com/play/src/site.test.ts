@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { formatPublicTotal, publicSite, resolvePublicSite } from './site.ts';
 import { landingSeo, whitepaperPage, worldProfileAssets } from '../vite.config.ts';
 import { newGame, stages, terrainDetails } from './engine.ts';
@@ -21,6 +22,35 @@ import { waterFacilityKeys, waterFacilities } from './water-facilities.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
+
+test('deadline refresh includes off-cycle crews and retries without polling hidden or busy views', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const timer = main.slice(main.indexOf('let nextDeadlineSyncAt = 0;'), main.indexOf('settlementHalfSale = new SettlementHalfSale'));
+  const crews: Record<string, { readyAt: number }> = { wood: { readyAt: 1000 } };
+  let tick = () => { throw new Error('Deadline timer was not registered.'); };
+  let timestamp = 999, realTime = 0, requests = 0, confirming = false;
+  const context = {
+    state: { workforce: { cycleAt: 60000, crews, expeditions: [{ readyAt: 2000 }] }, recruitment: { readyAt: 3000 }, serverTime: 0, clockSpeed: 168 },
+    game: { stage: 0 }, document: { hidden: false }, busy: false, synchronizedAt: 0,
+    performance: { now: () => realTime }, renderEnvironment: () => {},
+    displayServerTime: () => timestamp, confirmationOpen: () => confirming,
+    syncProduction: () => { requests++; },
+    setInterval: (callback: () => void, interval: number) => { assert.equal(interval, 1000); tick = callback; },
+  };
+  runInNewContext(timer, context);
+  tick(); assert.equal(requests, 0);
+  timestamp = 1000; tick(); assert.equal(requests, 1);
+  realTime = 4999; tick(); assert.equal(requests, 1);
+  realTime = 5000; tick(); assert.equal(requests, 2);
+  delete crews.wood; tick(); assert.equal(requests, 2);
+  timestamp = 2000; realTime = 10000;
+  context.document.hidden = true; tick(); assert.equal(requests, 2);
+  context.document.hidden = false; context.busy = true; tick(); assert.equal(requests, 2);
+  context.busy = false; confirming = true; tick(); assert.equal(requests, 2);
+  confirming = false; tick(); assert.equal(requests, 3);
+  context.state.workforce.expeditions = []; timestamp = 3000; realTime = 15000;
+  tick(); assert.equal(requests, 4);
+});
 
 test('every Play game entry loads the canonical World wallet/profile assets', () => {
   const plugin = worldProfileAssets();
@@ -552,7 +582,7 @@ test('resource acquisition shares one header manager while preserving direct cla
   assert.match(main, /resources.map\(resource => crewManagementCard\(resource\)\)/);
   assert.match(main, /resources.map\(resourceStockCard\)/);
   assert.match(main, /queueClaim\(resource, target\)/);
-  assert.match(main, /nextClaimAt = performance.now\(\) \+ 1050/);
+  assert.match(main, /nextClaimAt = performance.now\(\) \+ claimCooldownMs \+ 50/);
   assert.match(main, /if \(success\)[\s\S]*collectionReceiptQuantity\(state.message, resource\)/);
   assert.match(main, /crewManagementCard\(resource, false\)/);
   const sale = readFileSync(new URL('./settlement-sale.ts', import.meta.url), 'utf8');

@@ -128,7 +128,8 @@ export class SettlementMap {
   }
   private frame = (time: number): void => {
     requestAnimationFrame(this.frame);
-    if (!this.canvas.isConnected || time - this.lastFrame < (this.reducedMotion ? 200 : 33)) return;
+    if (document.hidden || !this.canvas.isConnected || !this.width || !this.height
+      || time - this.lastFrame < (this.reducedMotion ? 200 : this.drag ? 16 : 50)) return;
     this.lastFrame = time;
     const c = this.ctx, view = this.getState(), { game, inventory } = view.state, positions = settlementPositions(game, inventory);
     const occupants = new Map(positionEntries(positions).map(([id, position]) => [cellKey(position), id]));

@@ -111,6 +111,15 @@ body[data-primary]:not([data-embedded=true]) .recent-heading button{min-height:4
 body[data-primary]:not([data-embedded=true]) .wallet-safety{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;max-width:680px;margin:0 auto 36px;padding:0 24px;text-align:left;font-size:12px;line-height:1.6}
 .wallet-safety strong{color:var(--txt);font-size:12px}
 .wallet-safety p{margin:6px 0 0}
+.connection-options{display:grid;gap:12px;margin:18px 0}
+.connection-option{border:1px solid var(--line);border-radius:16px;padding:18px;background:var(--panel)}
+.connection-option h3{margin:0;font-size:16px}
+.connection-option p{font-size:13px;line-height:1.6}
+.connection-option button,.connection-option select{width:100%;margin-top:8px;min-height:48px}
+.vault-steps{padding-left:22px;font-size:13px;color:var(--muted);line-height:1.8}
+#site-approval{border:1px solid var(--brand);border-radius:16px;padding:18px;margin:18px 0}
+#site-origin{font-weight:750;color:var(--txt)}
+#site-message{max-height:280px;overflow:auto;font-size:12px}
 .wallet-account-link{grid-column:1/-1;justify-self:start;display:inline-flex;align-items:center;min-height:44px;text-decoration:underline;text-underline-offset:3px}
 [data-embedded=true] .wallet-intro{display:none}
 @media(max-width:600px){

@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sqlite from '../../../../services/database/sqlite.js';
 import { test } from 'node:test';
-import { accrue, apply, createAccount, snapshot } from './economy.ts';
+import { accrue, apply, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import { SqliteStore } from './store.ts';
 import type { Command } from '../src/api-types.ts';
 import { environmentAt, seasonMs, worldDayMs, worldEpoch, worldWeekMs } from '../src/environment.ts';
@@ -14,7 +15,7 @@ import { terrainDetails } from '../src/engine.ts';
 import { waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
 import { isMarketResource, marketAssets, marketBasePrice } from '../src/market.ts';
 import { waterFacilityKeys, waterProductionMultiplier } from '../src/water-facilities.ts';
-import { automateFixtureCollections, fundFixtureFromReserves, seedFixturePools } from './test-support.ts';
+import { automateFixtureCollections, fundFixtureFromReserves, seedFixturePools, fundFixtureResources } from './test-support.ts';
 
 function populationAndMaterialTotals(store: SqliteStore) {
   const { settlements, metal, population } = store.publicTotals();
@@ -144,6 +145,7 @@ test('public totals count settled owned metal, not pending or visitors, and pres
     apply(session.account, { id: randomUUID(), revision: session.account.revision, command }, now));
   try {
     assert.deepEqual(populationAndMaterialTotals(store), { settlements: 0, metal: 0, population: 0 });
+    for (const token of [a.token, b.token]) store.transaction(token, session => fundFixtureResources(session.account));
     store.transaction(a.token, session => {
       session.account.game.seed = 1542;
       session.account.game.explored = ['0,0', '-3,0', '3,0', '0,3'];
@@ -209,6 +211,7 @@ test('census tracks settlement, recruitment and federation changes atomically, n
     apply(session.account, { id: randomUUID(), revision: session.account.revision, command }, now));
   try {
     assert.deepEqual(store.population(null), { global: 0, federation: null });
+    for (const token of [a.token, b.token]) store.transaction(token, session => fundFixtureResources(session.account));
     act(a.token, { type: 'upgrade' });
     act(b.token, { type: 'upgrade' });
     for (const token of [a.token, b.token]) store.transaction(token, session => { session.account.game.stock.water = 1000000; session.account.game.dollars = 1000000 * 10000; });
@@ -687,7 +690,7 @@ test('legacy decoration layouts migrate and free building arrangements survive r
 test('item upgrades debit public metal exactly once and failed full-inventory crafting rolls back all state', () => {
   let time = worldEpoch;
   const store = new SqliteStore(':memory:', () => time), identity = store.create();
-  store.transaction(identity.token, record => { record.account.game.dollars = 500 * 10000; });
+  store.transaction(identity.token, record => { fundFixtureResources(record.account); record.account.game.dollars = 500 * 10000; });
   const act = (command: Command) => store.transaction(identity.token, (record, now) => apply(record.account,
     { id: randomUUID(), revision: record.account.revision, command }, now));
   try {
@@ -722,7 +725,7 @@ test('accelerated game time does not accelerate session expiry or initial grants
     time += 86400000;
     const state = store.read(session.token, (value, now) => ({ account: value.account, now }));
     assert.equal(state.now, worldEpoch + 10 * 86400000);
-    assert.equal(state.account.game.stock.wood, 180);
+    assert.deepEqual(state.account.game.stock, { wood: 0, water: 0, metal: 0, oil: 0 });
     time = worldEpoch + 7 * 86400000 - 1;
     store.read(session.token, () => true);
     time += 1;

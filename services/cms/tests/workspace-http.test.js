@@ -8,6 +8,8 @@ const { Wallet } = require("ethers");
 const { Notes } = require("../../notes/ledger");
 const { Creation } = require("../../notes/creation");
 const { workspaceApi } = require("../lib/workspace-api");
+const { courses } = require("../../notes/work-learning");
+const { WEEK, weekStart } = require("../../notes/workspace-hr");
 
 async function fixture(t, env = {}) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), profiles = new Map(), deliveries = [];
@@ -41,7 +43,7 @@ async function fixture(t, env = {}) {
     const cookie = result.headers["set-cookie"][0].split(";")[0];
     if (role) {
       profiles.set(owner, { username: role, avatar: "" });
-      assert.equal((await call("/apply", { motivation: "Build together" }, { cookie })).status, 200);
+      assert.equal((await call("/apply", { motivation: "Build together", experience: "building", interests: [division] }, { cookie })).status, 200);
       assert.equal((await call(`/admin/members/${owner}`, { status: "active", role, level: "learning", division, team: `${division}-general` },
         { host: "admin.localhost", admin: true, method: "PUT" })).status, 200);
     }
@@ -49,7 +51,45 @@ async function fixture(t, env = {}) {
   }
   return { notes, creation, workspace, call, login, profiles, deliveries };
 }
-test("App HTTP access is wallet-authenticated, approval-gated, host-bound, same-origin and controlled only through Admin", async t => {
+test("public enrollment and quizzes qualify membership without any admin approval; payroll revokes level-scoped access", async t => {
+  const f = await fixture(t);
+  let now = Date.UTC(2026, 10, 2, 12); f.workspace.now = () => now;
+  let visitor = await f.login();
+  f.profiles.set(visitor.owner, { username: "OpenContributor" });
+  assert.equal((await f.call("/organization", undefined, visitor)).status, 403);
+  assert.equal((await f.call("/apply", { motivation: "Deliver useful work", experience: "building", interests: ["engineering"], role: "director", status: "active" }, visitor)).status, 200);
+  const learning = await f.call("/learning", undefined, visitor);
+  assert.equal(learning.body.courses.length, 5);
+  assert.equal(learning.body.courses.every(course => course.questions.every(question => !("answer" in question))), true);
+  for (const course of courses.filter(course => course.level === "orientation")) {
+    assert.equal((await f.call(`/learning/${course.id}/quiz`, { answers: course.questions.map(question => question.answer) }, visitor)).status, 200);
+  }
+  const me = (await f.call("/me", undefined, visitor)).body;
+  assert.equal(me.member.status, "active"); assert.equal(me.member.role, "volunteer"); assert.equal(me.member.level, "learning");
+  assert.ok((await f.call("/organization", undefined, visitor)).body.positions.length >= 42);
+  assert.equal((await f.call("/directory", undefined, visitor)).body.members[0].experience, undefined);
+  const tasks = (await f.call("/missions", undefined, visitor)).body.missions;
+  const task = tasks.find(row => row.id === "orientation-engineering");
+  assert.equal((await f.call(`/missions/${task.id}/claim`, { revision: task.revision }, visitor)).status, 200);
+  assert.equal((await f.call("/missions/ecosystem-wallet/claim", { revision: 1 }, visitor)).status, 404);
+  const policy = { rates: { orientation: 0, learning: 100, practitioner: 200, mentor: 300, steward: 400 }, incentive: 10, approval: "CONFIGURE WEEKLY FTHS" };
+  assert.equal((await f.call("/admin/payroll-policy", policy, { ...visitor, method: "PUT" })).status, 404);
+  assert.equal((await f.call("/admin/payroll-policy", policy, { host: "admin.localhost", method: "PUT" })).status, 401);
+  assert.equal((await f.call("/admin/payroll-policy", policy, { host: "admin.localhost", admin: true, origin: "http://evil.localhost", method: "PUT" })).status, 403);
+  assert.equal((await f.call("/admin/payroll-policy", policy, { host: "admin.localhost", admin: true, method: "PUT" })).status, 200);
+  assert.equal((await f.call("/admin/evaluate", {}, { host: "admin.localhost" })).status, 401);
+  now = weekStart(now) + WEEK;
+  visitor = await f.login(visitor.wallet);
+  const demoted = (await f.call("/me", undefined, visitor)).body;
+  assert.equal(demoted.member.status, "visitor");
+  assert.equal(demoted.org.positions.length, 0);
+  assert.equal(demoted.learning.courses.every(course => !course.progress), true);
+  assert.equal((await f.call("/channels", undefined, visitor)).status, 403);
+  assert.equal((await f.call("/missions", undefined, visitor)).status, 403);
+  assert.equal((await f.call("/organization", undefined, visitor)).status, 403);
+  assert.equal((await f.call("/compensation", undefined, visitor)).body.history[0].status, "unconfigured");
+});
+test("App HTTP access is wallet-authenticated, visitor-learning gated, host-bound and same-origin with protected Admin", async t => {
   const ui = await fixture(t);
   assert.equal((await ui.call("/silver", undefined, { host: "silver.localhost" })).body.supply, 0);
   assert.equal((await ui.call("/me", undefined, { host: "silver.localhost" })).status, 404);
@@ -62,7 +102,8 @@ test("App HTTP access is wallet-authenticated, approval-gated, host-bound, same-
   assert.equal(pending.result.body.token, undefined);
   assert.equal((await ui.call("/apply", { motivation: "Help" }, pending)).status, 409);
   ui.profiles.set(pending.owner, { username: "NewInsider", avatar: "" });
-  assert.equal((await ui.call("/apply", { motivation: "Help", status: "active", role: "director" }, pending)).status, 200);
+  assert.equal((await ui.call("/me", undefined, pending)).body.member.status, "visitor");
+  assert.equal((await ui.call("/apply", { motivation: "Help", status: "active", role: "director", experience: "new", interests: ["learning"] }, pending)).status, 200);
   assert.equal((await ui.call("/directory", undefined, pending)).status, 403);
   assert.equal((await ui.call("/admin", undefined, { ...pending, admin: true })).status, 404);
   assert.equal((await ui.call("/admin", undefined, { host: "admin.localhost" })).status, 401);

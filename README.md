@@ -90,10 +90,15 @@ follow the existing read-only replica rules; never start another ledger writer.
 
 ### Foundation App and Silver
 
-`app.featheral.com` is a mobile-first, installable insider workspace. Connect the
-shared wallet, create your World profile and bio directly in App, request access, and wait for approval in
-Admin's **App insiders & missions** view (`#/intranet`). Administrators assign
-division, team, role and progression level. Approved members have scoped channels,
+`app.featheral.com` is a mobile-first, installable contribution workspace open to
+everyone. Connect the shared wallet, register as a visitor, create your World
+profile and bio, and select experience and work interests through icon buttons.
+Pass all ecosystem orientation quizzes at 80% or more to earn membership without
+administrator approval. Sequential learning levels unlock division agendas;
+management responsibilities and protected Admin credentials remain separate.
+Every member sees the full prefilled Foundation/division/site/contributor chart.
+Admin's **App / organization & HR** view (`#/intranet`) manages all sites, staffing,
+task reviews and next-week compensation policy. Members have scoped channels,
 direct messages, private attachments, revision-checked shared notes, missions with
 evidence/review, and one-to-one audio calls with screen sharing. Work communication
 belongs in App; World gameplay chat and existing World messages remain intact.
@@ -103,9 +108,15 @@ and redemption codes for silver and Featheral collectibles. Featheral does not s
 physical goods. Each listing specifies issuer, sourcing, redeemable region, face value,
 FTHS price and issuer terms. No brands, stock or global acceptance are fabricated.
 Its inline wallet defaults to FTHS; FTH$ conversion uses real Exchange quotes.
-**Featheral Silver (FTHS)** is also called **Featheral Salary**. No automatic
-salary, USD peg, fixed wage or guaranteed liquidity is promised. Each grant
-requires explicit Admin approval; completing a mission does not issue funds.
+**Featheral Silver (FTHS)** is also called **Featheral Salary**. Weekly cycles start
+Monday 00:00 UTC. Strictly more than 60% manager-approved assigned tasks earns the
+configured base plus completed-task incentives. At or below 60%, only completed-task
+incentives are recorded, with no base, and membership returns to visitor with
+fresh quizzes required. No assigned tasks means no salary record and no membership
+loss. Amounts must be explicitly configured before the cycle; unconfigured cycles
+issue nothing. Rewards are recorded atomically once after the week closes; earned
+balances remain yours. Independent grants still require explicit Admin approval.
+Neither employment entitlement, a USD peg nor guaranteed liquidity is promised.
 Notes lists FTHS as a system-native whole-unit currency; Stats includes its
 circulation. Exchange and wallet swaps use the existing FTHS/FTHX pool only when
 explicitly funded with real treasury FTHX. Startup registers the currency but
@@ -787,33 +798,31 @@ FTHG is never offered as an internal L3 trading note.
 
 Notes, Exchange, X and Sites share one Wallet header control and responsive layout:
 brand and Wallet on the first mobile row, horizontally scrollable navigation below.
-Header Swap links open the same panel rather than a separate wallet page.
-Notes/Exchange pass only the signed-in account's public address to the read-only
-embed; site login tokens stay on their original host.
-Normal wallet panels on every site follow the public account selected on the
-central wallet host, rather than a site's separate posting/login account. They
-read the same linked-account portfolio even while the built-in wallet is locked.
-Account switches and completed wallet operations notify other open panels through
-central-origin storage events; visible wallets also refresh periodically. Only public
-addresses and encrypted backup metadata persist, never built-in signing sessions.
-Explicit address-only embeds remain pinned unless `followActive: true` is requested.
-Foundation, Gold, Dollar and World header wallets use the same central renderer;
-World profile authentication and dedicated Ethereum transaction screens retain their
-separate provider connection. Synced World guest estimates are shown for every primary
-currency, not only FTH$.
-Public wallet selection, linked holdings and balances synchronize automatically through
-central-origin storage events, focus/visibility updates and 30-second refreshes.
-There is no public-wallet sync button, popup or parent-provided account handoff.
-Interactive embedded views keep wallet-host sessions inside the iframe; pinned
-address-only views remain read-only. Closing/reopening a panel preserves its
-renderer and connection. The site stores only the public selection for reloads.
-Account requests and extension signing use a narrowly scoped, origin/source-checked
-provider bridge when necessary; no keys or wallet sessions reach the host.
-Site sign-in, wallet authorization and native transfers stay inline with explicit
-approval. The only wallet-site branding is a small **Powered by Wallet** footer.
-Browsers may isolate or block iframe storage (notably across different `*.localhost`
-sites); Account offers in-panel storage access or encrypted-backup restoration.
-This restriction is not bypassed by sharing sessions or keys with parent sites.
+Header Wallet and Swap controls open a frame-free connection panel with a public
+preview and a link to the full wallet. Signing, transfers, creation and unlocking
+run directly on `wallet.featheral.com` in a top-level tab or window. The wallet
+rejects framed execution and serves HTML with `frame-ancestors 'none'`.
+Site login tokens stay on their original host. The requesting site stores only
+the selected public address; pinned address previews remain read-only unless
+`followActive: true` is requested. Public previews refresh on focus and selection
+changes. The full wallet retains linked-account portfolios, World funds and
+periodic balance refreshes.
+
+`FeatheralWallet.authenticate(challenge)` opens the wallet synchronously from a user
+action. A nonce-bound, exact-origin/source-checked handoff returns only the public
+address and approved signature. `FeatheralWallet.account()` selects an account
+without signing a site challenge. No extension RPC bridge, keys, passwords,
+encrypted backups or wallet-host sessions are shared with the requesting site.
+Approve the displayed requesting origin and exact message in the wallet window.
+Closing that window, cancelling, or exceeding ten minutes rejects the connection.
+If popups are blocked, allow them for the requesting site and retry; a separate
+Open full wallet link is available for wallet management.
+
+The wallet discovers extensions through EIP-6963 with a legacy injected-provider
+fallback. One detected extension is the default; multiple extensions require an
+explicit selection. Without an extension, Account opens the built-in create/unlock
+flow automatically. Users can explicitly choose the built-in wallet even with an
+extension installed. Extension rejection never silently creates or switches wallets.
 
 Notes owns native FTH$ chain operations at `/api/v1/notes/*`; existing
 `/api/v1/dollar/*` URLs remain compatibility aliases to the same Note ledger.
@@ -826,7 +835,7 @@ Dollar wallet popups also display positive FTHX and community-note holdings. The
 shared Swap screen lists FTHX pairs when FTHX or the paired note is held; funded
 note swaps remain usable even when the separate Dollar pool is unfunded.
 
-Without MetaMask, use Account in the site wallet panel to create a built-in Ethereum-compatible
+Without an extension, use Account in the full wallet to create a built-in Ethereum-compatible
 FTHX wallet, also usable for FTH$ and community notes. Creation requires a password
 of at least 12 characters and downloading/confirming an encrypted recovery backup
 before saving the wallet. Restore and unlock use the same password; neither passwords
@@ -834,7 +843,7 @@ nor plaintext keys are sent to a server. The encrypted keystore stays in central
 local storage; the unlocked signer and its session remain in memory. Locking, closing
 the page or ten minutes of inactivity locks the signer. Keep the backup and password
 separately: Featheral cannot recover either. Do not clear browser data without a backup.
-Embeds never generate, unlock or receive keys.
+Site previews never generate, unlock or receive keys.
 
 An unlocked built-in wallet can link up to four external accounts with signatures
 from both owners. Their portfolio is combined, but account balances remain separate:
@@ -858,18 +867,20 @@ the central wallet. Public summaries never expose sessions or authorize transact
 
 `wallet.featheral.com` hosts the network wallet, profile compatibility assets and
 Ethereum conversion/staking screens (`/ethereum/`). Public sites keep their Classic
-landing pages; `/wallet/` embeds the central application instead of copying wallet code.
+landing pages; `/wallet/` presents a public preview and opens the central wallet directly.
 Gold defaults to FTHG, World/Dollar to FTH$, and all other sites to FTHX.
 
 Load `https://wallet.featheral.com/embed.js` and add `<div data-wallet-embed></div>`,
 or call `FeatheralWallet.mount(element, {primary: "FTHX", view: "swap", compact: true})`.
 The versioned JSON contract is `/api/wallet/ui?primary=FTHX&view=assets&compact=1`.
-Embeds add `embedded=1&parentOrigin=<origin>`; only Featheral and local development
-origins are allowed. No HTML, arbitrary actions, provider bridge or credentials are
-accepted through configuration. Embedded mutations are blocked; connection/signing
-opens the central wallet top-level. Browser-blocked storage is reported explicitly.
-The embed and its dialog follow the host page's theme (CSS variables, or the body/html
-background and color-scheme), so light sites get a light wallet and dark sites a dark one.
+The historical embed API now mounts a public preview, never an iframe.
+Top-level wallet URLs retain `parentOrigin=<origin>`, primary currency, view and
+payment details; only Featheral and local development origins are allowed.
+`mode=auto|extension|builtin` controls the initial connection preference.
+`authNonce` is reserved for interactive, top-level site approvals and cannot be
+combined with a pinned address or embedded mode. Browser-blocked storage is
+reported explicitly. The connection dialog inherits the site's CSS theme; the
+full wallet uses the requesting site's configured palette.
 
 Combined estimates include wallet FTH$/notes, verified mainnet ERC20 FTHG and linked
 World funds. Legacy direct-wallet World accounts are counted once. Unlinked guest

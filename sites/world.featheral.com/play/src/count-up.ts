@@ -29,7 +29,7 @@ export function createCountUp(render: (value: number) => void) {
       return;
     }
     const started = performance.now();
-    const duration = first ? 2200 : 1400;
+    const duration = first ? 400 : 280;
     paint(from);
     function step(now: number): void {
       frame = undefined;

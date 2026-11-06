@@ -16,7 +16,7 @@ function fixture(t) {
   const members = ["1", "2", "3", "4", "5"].map(character => "0x" + character.repeat(40));
   async function member(index, role = "volunteer", division = "engineering") {
     const owner = members[index]; profiles.set(owner, { username: `person${index}`, avatar: "" });
-    await workspace.apply(owner, { motivation: "Help build Featheral" });
+    await workspace.apply(owner, { motivation: "Help build Featheral", experience: "building", interests: [division] });
     workspace.setMember("admin", owner, { status: "active", role, level: "learning", division, team: `${division}-general` });
     return owner;
   }
@@ -67,14 +67,14 @@ test("App sign-in is origin-bound, nonce-limited, expiring, hashed at rest and s
   assert.throws(() => workspace.login({ address: wallet.address, signature: signature }, origin), /expired/);
   assert.match(stale.message, /No transfer or salary approval/);
 });
-test("profile-first signup requires approval and preserves administrator-only hierarchy assignment", async t => {
+test("profile-first visitor registration keeps management roles separate from quiz-earned membership", async t => {
   const { workspace, members, profiles } = fixture(t), owner = members[0];
   await assert.rejects(workspace.apply(owner, { motivation: "Ready" }), /World profile/);
   profiles.set(owner, { username: "Volunteer", avatar: "" });
-  const pending = await workspace.apply(owner, { motivation: "Ready", role: "director", status: "active" });
-  assert.equal(pending.status, "pending"); assert.equal(pending.role, "volunteer");
-  assert.throws(() => workspace.channels(owner), /approved/);
-  await assert.rejects(workspace.apply(owner, { motivation: "Again" }), /already recorded/);
+  const pending = await workspace.apply(owner, { motivation: "Ready", role: "director", status: "active", experience: "new", interests: ["learning"] });
+  assert.equal(pending.status, "visitor"); assert.equal(pending.role, "volunteer");
+  assert.throws(() => workspace.channels(owner), /membership/);
+  await assert.rejects(workspace.apply(owner, { motivation: "Again" }), /experience/);
   assert.throws(() => workspace.setMember("admin", owner, { ...pending, status: "active", division: "engineering" }), /team/);
   workspace.setMember("admin", owner, { ...pending, status: "active" });
   assert.equal(workspace.active(owner).level, "orientation");
@@ -94,7 +94,7 @@ test("channels, direct messages and private files enforce live membership and te
   assert.equal(Buffer.from(workspace.file(bob, message.file).bytes).toString(), "team draft");
   assert.throws(() => workspace.file(other, message.file), /unavailable/);
   workspace.setMember("admin", bob, { ...workspace.member(bob), status: "suspended" });
-  assert.throws(() => workspace.messages(bob, channel.id), /approved/);
+  assert.throws(() => workspace.messages(bob, channel.id), /membership/);
   assert.throws(() => workspace.send(alice, channel.id, { request: "after-suspend", body: "private" }), /inactive/);
   workspace.setMember("admin", alice, { ...workspace.member(alice), division: "community", team: "community-general" });
   assert.throws(() => workspace.channel(alice, "team-engineering-general"), /unavailable/);
@@ -133,7 +133,7 @@ test("missions enforce scoped leadership, evidence, optimistic revision and sepa
   assert.throws(() => workspace.saveMission(intern, input), /scoped manager/);
   assert.throws(() => workspace.saveMission(other, input), /scope/);
   let mission = workspace.saveMission(lead, input);
-  assert.equal(workspace.missions(other).length, 0);
+  assert.equal(workspace.missions(other).some(row => row.id === mission.id), false);
   assert.throws(() => workspace.saveMission(intern, { ...mission, status: "done" }, mission.id), /manager/);
   mission = workspace.saveMission(intern, { revision: mission.revision, status: "in_progress" }, mission.id);
   assert.throws(() => workspace.saveMission(intern, { revision: mission.revision - 1, status: "review", evidence: "Test passed" }, mission.id), /changed/);
@@ -142,11 +142,12 @@ test("missions enforce scoped leadership, evidence, optimistic revision and sepa
   mission = workspace.saveMission(lead, { ...mission, status: "done" }, mission.id);
   assert.equal(notes.balance(intern, "FTHS"), 0, "mission approval never silently creates salary");
   const grant = { address: intern, amount: 50, reason: "Reviewed onboarding", mission: mission.id, request: "grant-1", approval: "ISSUE 50 FTHS" };
-  assert.equal(workspace.grant("admin", grant).amount, 50);
-  workspace.grant("admin", grant);
+  assert.throws(() => workspace.grant("admin", grant), /weekly payroll/);
+  const independent = { ...grant, mission: null };
+  assert.equal(workspace.grant("admin", independent).amount, 50);
+  workspace.grant("admin", independent);
   assert.equal(notes.balance(intern, "FTHS"), 50);
-  assert.throws(() => workspace.grant("admin", { ...grant, request: "grant-2" }), /already received/);
-  assert.throws(() => workspace.grant("admin", { ...grant, amount: 51, approval: "ISSUE 51 FTHS" }), /parameters changed/);
+  assert.throws(() => workspace.grant("admin", { ...independent, amount: 51, approval: "ISSUE 51 FTHS" }), /parameters changed/);
   assert.throws(() => workspace.grant("admin", { ...grant, request: "grant-3", approval: "yes" }), /exact/);
 });
 test("FTHS trades execute against conserved native balances and feed Exchange history, not a fictional salary price", async t => {
@@ -193,7 +194,7 @@ test("membership, private attachments, revisions and approved Silver survive reo
   notes = new Notes(file);
   let creation = new Creation(notes, {}), workspace = new Workspace(notes, creation.markets, () => ({ username: "PersistentInsider" }));
   const owner = "0x" + "1".repeat(40);
-  await workspace.apply(owner, { motivation: "Persistent work" });
+  await workspace.apply(owner, { motivation: "Persistent work", experience: "building", interests: ["learning"] });
   workspace.setMember("admin", owner, { status: "active", role: "volunteer", level: "learning", division: "learning", team: "learning-general" });
   const message = workspace.send(owner, "foundation", { request: "persistent-file", body: "Archive", attachment: { name: "work.txt", base64: Buffer.from("private work").toString("base64") } });
   workspace.document(owner, "foundation", { body: "Versioned work", revision: 0 });

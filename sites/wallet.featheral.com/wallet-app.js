@@ -2,16 +2,45 @@
 (async () => {
   const $ = id => document.getElementById(id);
   const el = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
+  if (window.parent !== window) throw new Error("Open the wallet directly in a tab or window. Wallet frames are not supported.");
   const configResponse = await fetch("/api/wallet/ui" + location.search, { cache: "no-store" });
   const config = await configResponse.json();
   if (!configResponse.ok) throw new Error(config.error || "Wallet configuration unavailable.");
   if (config.schema !== "featheral.wallet" || config.version !== 1) throw new Error("Unsupported wallet UI schema.");
-  if (window.parent !== window && !config.embedded) throw new Error("Use the configured wallet embed; signing is only available in the full wallet.");
-  if (config.embedded && (window.parent === window || document.referrer && new URL(document.referrer).origin !== config.parentOrigin))
-    throw new Error("Wallet embedding origin does not match.");
+  if (config.embedded) throw new Error("Wallet frames are no longer supported. Open the full wallet.");
+  if (config.authNonce && !window.opener) throw new Error("The requesting site is unavailable. Return to that site and reconnect.");
   document.body.dataset.embedded = String(config.embedded); document.body.dataset.compact = String(config.compact);
   document.body.dataset.primary = config.primary;
-  let browserProvider = config.embedded ? null : window.ethereum;
+  let browserProvider, providerChosen = false, connectionReady = false, builtInPreferred = config.mode === "builtin";
+  const announcedProviders = new Map(), boundProviders = new WeakSet();
+  function providerChoices() {
+    if (announcedProviders.size) return [...announcedProviders].map(([provider, name]) => ({ provider, name }));
+    return [...new Set(window.ethereum?.providers || [window.ethereum])].filter(provider => typeof provider?.request === "function")
+      .map(provider => ({ provider, name: provider.isMetaMask ? "MetaMask" : provider.isCoinbaseWallet ? "Coinbase Wallet" : "Browser wallet" }));
+  }
+  function updateProviders() {
+    const choices = providerChoices(), picker = $("extension-provider");
+    if (!providerChosen || !choices.some(choice => choice.provider === browserProvider))
+      browserProvider = choices.length === 1 ? choices[0].provider : null;
+    picker.replaceChildren(el("option", "Choose extension"));
+    picker.firstChild.value = "";
+    choices.forEach((choice, index) => { const option = el("option", choice.name); option.value = String(index); picker.append(option); });
+    picker.value = browserProvider ? String(choices.findIndex(choice => choice.provider === browserProvider)) : "";
+    picker.hidden = choices.length < 2;
+    $("extension-connect").disabled = !interactive || choices.length === 0;
+    $("builtin-connect").disabled = !interactive;
+    $("extension-connect").textContent = choices.length === 1 ? `Connect ${choices[0].name}` : "Connect extension";
+    $("connection-help").textContent = choices.length ? "Extension detected. Approve in your wallet app. You can still choose the built-in wallet."
+      : "No extension detected. Create or unlock your built-in wallet below. No extension installation needed.";
+    if (browserProvider && connectionReady) bindProvider(browserProvider);
+    if (connectionReady) connectionLabel();
+  }
+  window.addEventListener("eip6963:announceProvider", event => {
+    if (typeof event.detail?.provider?.request !== "function") return;
+    announcedProviders.set(event.detail.provider, String(event.detail.info?.name || "Browser wallet").slice(0, 80));
+    updateProviders();
+  });
+  window.addEventListener("ethereum#initialized", updateProviders);
   const defaultStandaloneTheme = !config.embedded && !config.parentOrigin && !new URLSearchParams(location.search).has("theme");
   document.body.style.setProperty("--brand", defaultStandaloneTheme ? "#e2b13c" : config.theme.accent);
   const themeProperties = { accent: "--brand", background: "--wallet-bg", panel: "--panel", text: "--txt",
@@ -57,7 +86,9 @@
     removeItem(key) { try { localStorage.removeItem(key); } catch (error) { storageAvailable = false; console.error("Wallet storage blocked:", error); } },
   };
   const interactive = config.interactive !== false;
-  let token = interactive ? storage.getItem("featheral-creation-token") || "" : "", owner = "", snapshot, epoch = 0, busy = false;
+  updateProviders();
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+  let token = interactive && !builtInPreferred ? storage.getItem("featheral-creation-token") || "" : "", owner = "", snapshot, epoch = 0, busy = false;
   const vaultReader = window.FeatheralVault ? new window.FeatheralVault.Vault(storage) : null;
   const vault = interactive ? vaultReader : null;
   const savedVault = vaultReader?.read();
@@ -69,9 +100,9 @@
   }
   let builtInActive = false, vaultDraft, idleAt = Date.now(), refreshQueued = false, returnedAddress, siteApproval;
   function announceSiteAccount() {
-    if (!siteApproval || siteApproval.address || !owner) return;
+    if (!siteApproval || siteApproval.address || !owner || !token) return;
     siteApproval.address = owner;
-    window.parent.postMessage({ type: "featheral:wallet-auth-ready", nonce: siteApproval.nonce, address: owner }, config.parentOrigin);
+    window.opener.postMessage({ type: "featheral:wallet-auth-ready", nonce: siteApproval.nonce, address: owner }, config.parentOrigin);
   }
   if (savedVault && !browserProvider) token = "";
   const publicAddress = () => config.followActive ? returnedAddress || selectedAddress() || config.address
@@ -198,11 +229,14 @@
     $("portfolio-usd").title = "Estimated portfolio USD total";
   }
   function connectionLabel() {
-    const label = !interactive ? "Read-only wallet" : token ? "Disconnect wallet" : publicAddress() ? "Authorize wallet" : !browserProvider ? "Connect / create wallet" : "Connect wallet";
+    const local = builtInPreferred || !providerChoices().length;
+    const label = !interactive ? "Read-only wallet" : token ? "Disconnect wallet" : local ? vaultReader?.read() ? "Unlock built-in wallet" : "Create built-in wallet" : "Connect extension";
     const button = $("wallet-connect");
     button.title = label; button.setAttribute("aria-label", label); button.dataset.tooltip = label;
     button.dataset.state = token ? "authorized" : publicAddress() ? "selected" : "disconnected";
-    $("wallet-connect-label").textContent = !interactive ? "Read-only" : token ? "Disconnect" : publicAddress() ? "Authorize wallet" : "Connect wallet";
+    $("wallet-connect-label").textContent = label;
+    $("connect").textContent = label;
+    $("connect").disabled = !interactive || busy;
     button.disabled = !interactive;
   }
   let worldAccount = storage.getItem("featheral-world-account") || "";
@@ -258,19 +292,24 @@
       return signature;
     }
     if (!browserProvider) throw new Error("Connect an Ethereum-compatible wallet.");
-    const signer = owner;
-    const accounts = await browserProvider.request({ method: "eth_accounts" });
+    const signer = owner, provider = browserProvider;
+    const accounts = await provider.request({ method: "eth_accounts" });
     if (accounts[0]?.toLowerCase() !== signer.toLowerCase()) throw new Error("Wallet changed. Reconnect.");
     const hex = "0x" + [...new TextEncoder().encode(message)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-    const signature = await browserProvider.request({ method: "personal_sign", params: [hex, signer] });
-    if (owner !== signer || (await browserProvider.request({ method: "eth_accounts" }))[0]?.toLowerCase() !== signer.toLowerCase())
+    const signature = await provider.request({ method: "personal_sign", params: [hex, signer] });
+    if (provider !== browserProvider || owner !== signer || (await provider.request({ method: "eth_accounts" }))[0]?.toLowerCase() !== signer.toLowerCase())
       throw new Error("Wallet changed while signing. Reconnect.");
     return signature;
   }
   function lock(value) {
     busy = value;
-    for (const element of document.querySelectorAll("form input, form select, form button, #connect, #refresh, #requests button"))
+    for (const element of document.querySelectorAll("form input, form select, form button, #connect, #refresh, #requests button, #extension-provider, #extension-connect, #builtin-connect"))
       element.disabled = value;
+    if (!value) {
+      $("extension-connect").disabled = !interactive || !providerChoices().length;
+      $("builtin-connect").disabled = !interactive;
+      $("connect").disabled = !interactive;
+    }
     if (!value && refreshQueued) { refreshQueued = false; refresh().catch(status); }
   }
   function reset(clearStoredSession = true) {
@@ -282,11 +321,13 @@
     if (clearStoredSession) storage.removeItem("featheral-creation-token");
     renderBalance(emptyBalance); $("address").value = ""; $("address").placeholder = "Not connected";
     $("address").title = ""; $("copy-wallet-address").disabled = true;
+    connectionReady = true;
+    if (browserProvider) bindProvider(browserProvider);
     connectionLabel();
     $("account-label").textContent = `Available ${primarySymbol}`;
     $("account-label").title = "Connect a wallet to view its available balance";
     $("available-balance").textContent = "Available to spend: connect wallet";
-    $("receive-address").textContent = "Connect wallet first"; $("connect").textContent = "Connect wallet";
+    $("receive-address").textContent = "Connect wallet first";
     for (const id of ["holdings", "trading-holdings", "history", "recent-history", "requests", "note-pairs"]) $(id).replaceChildren();
     $("trading-holdings").hidden = true;
     $("note-pairs").hidden = true;
@@ -365,11 +406,9 @@
     if (token && active && active.toLowerCase() !== data.address.toLowerCase()) {
       await api("/logout", {}); reset(); await refresh(); return;
     }
-    snapshot = data; owner = data.address; $("connect").textContent = token ? "Disconnect" : "Connect wallet";
+    snapshot = data; owner = data.address;
     announceSiteAccount();
-    if (config.embedded && interactive)
-      window.parent.postMessage?.({ type: "featheral:wallet-selected", address: owner }, config.parentOrigin);
-    if (!config.embedded && config.selectionNonce && window.opener)
+    if (config.selectionNonce && window.opener)
       window.opener.postMessage({ type: "featheral:wallet-selected", nonce: config.selectionNonce, address: owner }, config.parentOrigin);
     connectionLabel();
     if (token && interactive) storage.setItem(ACTIVE_ACCOUNT, owner);
@@ -564,15 +603,17 @@
   async function ensureSession() {
     if (token) return true;
     if (!interactive) throw new Error("This address view is read-only.");
-    if (vault && !browserProvider) {
+    if (vault && (builtInPreferred || !providerChoices().length)) {
+      if (vault.signer) { await loginWallet(vault.signer.address, true); return true; }
       tab("account"); $("local-wallet").open = true;
       $("vault-action").value = vault.read() ? "unlock" : "create"; updateVault();
       $("vault-password").focus(); return false;
     }
-    if (!browserProvider) throw new Error("Create or restore a built-in wallet in Account, enable your browser wallet, or open the full wallet in a new tab.");
+    if (!browserProvider) throw new Error(providerChoices().length > 1 ? "Choose an extension in Account, then connect." : "Create or restore a built-in wallet in Account, or enable your browser wallet.");
+    providerChosen = true;
     const accounts = await browserProvider.request({ method: "eth_requestAccounts" });
     if (!/^0x[0-9a-f]{40}$/i.test(accounts?.[0] || "")) throw new Error("No wallet account was selected.");
-    owner = accounts[0];
+    builtInActive = false; owner = accounts[0];
     const challenge = await api("/challenge", { address: owner }), signature = await sign(challenge.message);
     const login = await api("/login", { address: owner, signature }); token = login.token;
     builtInActive = false; returnedAddress = owner;
@@ -589,6 +630,24 @@
     finally { lock(false); }
   });
   $("wallet-connect").addEventListener("click", () => $("connect").click());
+  $("extension-provider").addEventListener("change", () => {
+    const picker = $("extension-provider"), choice = providerChoices()[Number(picker.value)];
+    if (picker.value === "" || !choice) return;
+    if (busy || token) { status(new Error("Disconnect before changing wallet providers.")); updateProviders(); return; }
+    browserProvider = choice.provider; providerChosen = true; builtInPreferred = false;
+    bindProvider(browserProvider); connectionLabel();
+  });
+  $("extension-connect").addEventListener("click", async () => {
+    if (busy) return;
+    if (token) { status(new Error("Disconnect before switching wallets.")); return; }
+    builtInPreferred = false; connectionLabel(); $("connect").click();
+  });
+  $("builtin-connect").addEventListener("click", () => {
+    if (busy) return;
+    if (token && !builtInActive) { status(new Error("Disconnect before switching wallets.")); return; }
+    builtInPreferred = true; connectionLabel(); tab("account"); $("local-wallet").open = true;
+    $("vault-action").value = vault?.read() ? "unlock" : "create"; updateVault(); $("vault-password").focus();
+  });
   $("refresh").addEventListener("click", () => refresh().catch(status));
   async function copyAddress() {
     try { if (!owner) throw new Error("Connect your wallet first."); await navigator.clipboard.writeText(owner); $("status").textContent = "Address copied."; }
@@ -679,6 +738,9 @@
     const record = vault.read(), action = $("vault-action").value;
     $("vault-state").textContent = record ? `${record.address.slice(0, 6)}…${record.address.slice(-4)} · ${vault.signer ? "Unlocked" : "Locked"}` : "Create without MetaMask";
     $("vault-confirm-label").hidden = action !== "create";
+    $("vault-password").autocomplete = action === "create" ? "new-password" : "current-password";
+    $("vault-password").minLength = action === "create" ? 12 : 1;
+    $("vault-submit").textContent = action === "create" ? "Create encrypted wallet" : action === "restore" ? "Restore and unlock" : "Unlock wallet";
     $("vault-file-label").hidden = action !== "restore";
     $("vault-backup").disabled = !record; $("vault-lock").disabled = !vault.signer;
     $("vault-link").disabled = !vault.signer; $("vault-use").disabled = !vault.signer;
@@ -704,7 +766,7 @@
   async function loginWallet(address, local) {
     idleAt = Date.now();
     if (token) await api("/logout", {});
-    reset(); owner = address; builtInActive = local;
+    reset(); owner = address; builtInActive = local; builtInPreferred = local;
     const challenge = await api("/challenge", { address: owner }), signature = await sign(challenge.message);
     const login = await api("/login", { address: owner, signature });
     token = login.token;
@@ -829,12 +891,21 @@
     });
     updateVault();
   } else $("local-wallet").hidden = true;
-  browserProvider?.on?.("accountsChanged", accounts => {
-    if (builtInActive || !interactive) return;
-    returnedAddress = accounts[0] || null;
-    if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress); else storage.removeItem(ACTIVE_ACCOUNT);
-    sendRequest = null; reset(); refresh().catch(status);
-  });
+  function bindProvider(provider) {
+    if (boundProviders.has(provider)) return;
+    boundProviders.add(provider);
+    provider.on?.("accountsChanged", accounts => {
+      if (provider !== browserProvider || builtInActive || !interactive) return;
+      returnedAddress = accounts[0] || null;
+      if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress); else storage.removeItem(ACTIVE_ACCOUNT);
+      sendRequest = null; reset(); refresh().catch(status);
+    });
+    provider.on?.("disconnect", () => {
+      if (provider !== browserProvider || builtInActive || !interactive) return;
+      reset(); status(new Error("Extension disconnected. Reconnect before approving an action."));
+      refresh().catch(status);
+    });
+  }
   window.addEventListener("storage", event => {
     if (![ACTIVE_ACCOUNT, "featheral-wallet-updated", "featheral-world-account", "featheral-encrypted-wallet-v1", null].includes(event.key)) return;
     if (vault && (event.key === "featheral-encrypted-wallet-v1" || event.key === null)) return;
@@ -866,97 +937,9 @@
     finally { visibleRefreshPending = false; }
   }
   setInterval(refreshVisible, 30000);
-  if (config.embedded) {
-    if (interactive && document.requestStorageAccess) {
-      $("wallet-storage").hidden = false;
-      $("wallet-storage").addEventListener("click", async () => {
-        try {
-          await document.requestStorageAccess();
-          location.reload();
-        } catch (error) {
-          console.error("Existing device wallet access:", error);
-          $("wallet-storage-status").textContent = "Existing device storage could not be opened. Allow wallet storage in your browser, or restore your encrypted backup below. " + error.message;
-        }
-      });
-    }
-    const providerRequests = new Map(), providerListeners = new Map();
-    const providerProxy = {
-      request(request) {
-        if (!["eth_accounts", "eth_requestAccounts", "personal_sign"].includes(request.method))
-          return Promise.reject(new Error("Unsupported site wallet provider method."));
-        const id = crypto.randomUUID();
-        return new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            providerRequests.delete(id); reject(new Error("Browser wallet request expired. Retry in this panel."));
-          }, 120000);
-          providerRequests.set(id, { resolve, reject, timer });
-          window.parent.postMessage({ type: "featheral:wallet-provider", id, request }, config.parentOrigin);
-        });
-      },
-      on(name, callback) {
-        if (!providerListeners.has(name)) providerListeners.set(name, []);
-        providerListeners.get(name).push(callback);
-      },
-    };
+  if (config.authNonce) {
     window.addEventListener("message", event => {
-      if (event.source !== window.parent || event.origin !== config.parentOrigin) return;
-      if (interactive && event.data?.type === "featheral:wallet-provider-status") {
-        if (event.data.available && browserProvider !== providerProxy) {
-          browserProvider = providerProxy;
-          providerProxy.on("accountsChanged", accounts => {
-            if (builtInActive) return;
-            returnedAddress = accounts[0] || null;
-            if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress);
-            else storage.removeItem(ACTIVE_ACCOUNT);
-            reset(); refresh().catch(status);
-          });
-          connectionLabel();
-          if (!publicAddress() && !token) providerProxy.request({ method: "eth_accounts" }).then(accounts => {
-            if (!/^0x[0-9a-f]{40}$/i.test(accounts?.[0] || "")) return;
-            returnedAddress = accounts[0]; storage.setItem(ACTIVE_ACCOUNT, accounts[0]);
-            refresh().catch(status);
-          }).catch(status);
-        } else if (!event.data.available && browserProvider === providerProxy) {
-          browserProvider = null; connectionLabel();
-        }
-        if (!event.data.available && config.view === "account" && vault) {
-          $("local-wallet").open = true;
-          $("vault-action").value = vault.read() ? "unlock" : "create";
-          updateVault();
-        }
-        return;
-      }
-      if (event.data?.type === "featheral:wallet-provider-result") {
-        const pending = providerRequests.get(event.data.id);
-        if (!pending) return;
-        providerRequests.delete(event.data.id); clearTimeout(pending.timer);
-        if (event.data.error) pending.reject(Object.assign(new Error(event.data.error),
-          Number.isInteger(event.data.code) ? { code: event.data.code } : {}));
-        else pending.resolve(event.data.result);
-        return;
-      }
-      if (event.data?.type === "featheral:wallet-provider-event" && event.data.name === "accountsChanged") {
-        for (const listener of providerListeners.get("accountsChanged") || []) listener(event.data.accounts);
-        return;
-      }
-      if (event.source === window.parent && event.origin === config.parentOrigin && event.data?.type === "featheral:wallet-theme") {
-        applyTheme(event.data.theme);
-        window.parent.postMessage({ type: "featheral:wallet-themed" }, config.parentOrigin);
-        return;
-      }
-      if (event.source === window.parent && event.origin === config.parentOrigin && event.data?.type === "featheral:wallet-updated") {
-        refreshVisible(); return;
-      }
-      if (config.followActive && event.source === window.parent && event.origin === config.parentOrigin
-        && event.data?.type === "featheral:wallet-selection" && /^0x[0-9a-fA-F]{40}$/.test(event.data.address || "")) {
-        if (returnedAddress?.toLowerCase() === event.data.address.toLowerCase()) return;
-        returnedAddress = event.data.address;
-        if (!owner || owner.toLowerCase() !== returnedAddress.toLowerCase()) {
-          if (token && owner) { reset(); vault?.lock(); builtInActive = false; updateVault(); }
-          refresh().catch(status);
-        }
-      }
-      if (event.data?.type === "featheral:wallet-view") tab(event.data.view);
+      if (event.source !== window.opener || event.origin !== config.parentOrigin || event.data?.nonce !== config.authNonce) return;
       if (event.data?.type === "featheral:wallet-auth-cancel" && event.data.nonce === siteApproval?.nonce) {
         siteApproval = null; $("site-approval").hidden = true;
       }
@@ -982,7 +965,7 @@
           $("site-status").textContent = "Review the message and approve. Unlock the built-in wallet below if needed.";
         } catch (error) {
           status(error); $("site-status").textContent = error.message;
-          window.parent.postMessage({ type: "featheral:wallet-signature", nonce: siteApproval.nonce, error: error.message }, config.parentOrigin);
+          window.opener.postMessage({ type: "featheral:wallet-signature", nonce: siteApproval.nonce, error: error.message }, config.parentOrigin);
           siteApproval = null;
         }
       }
@@ -996,7 +979,7 @@
         if (owner?.toLowerCase() !== approval.address.toLowerCase()) throw new Error("Wallet changed. Start sign-in again.");
         const signature = await sign(approval.message);
         if (siteApproval !== approval || owner?.toLowerCase() !== approval.address.toLowerCase()) throw new Error("Sign-in cancelled or wallet changed.");
-        window.parent.postMessage({ type: "featheral:wallet-signature", nonce: approval.nonce, address: owner, signature }, config.parentOrigin);
+        window.opener.postMessage({ type: "featheral:wallet-signature", nonce: approval.nonce, address: owner, signature }, config.parentOrigin);
         siteApproval = null; $("site-approval").hidden = true;
         $("status").textContent = approval.message.startsWith("Pay Featheral Silver order.\n") ? "FTHS payment authorized."
           : approval.message.startsWith("Featheral profile update\n") ? "Profile update approved." : "Site sign-in approved.";
@@ -1005,23 +988,23 @@
       } finally { lock(false); }
     });
     $("site-cancel").addEventListener("click", () => {
-      if (siteApproval) window.parent.postMessage({ type: "featheral:wallet-signature", nonce: siteApproval.nonce, error: "Wallet sign-in cancelled." }, config.parentOrigin);
+      if (siteApproval) window.opener.postMessage({ type: "featheral:wallet-signature", nonce: siteApproval.nonce, error: "Wallet sign-in cancelled." }, config.parentOrigin);
       siteApproval = null; $("site-approval").hidden = true;
     });
     document.body.dataset.walletReady = "true";
-    window.parent.postMessage?.({ type: "featheral:wallet-ready" }, config.parentOrigin);
+    window.opener.postMessage({ type: "featheral:wallet-ready" }, config.parentOrigin);
     $("wallet-connect-action").hidden = false;
     $("world-sync").target = "_blank"; $("world-funds").target = "_blank"; $("world-play").target = "_blank";
     for (const link of [$("world-sync"), $("world-funds"), $("world-play")]) link.rel = "noopener";
   }
   connectionLabel();
-  if (!config.embedded && !browserProvider && config.view === "account" && vault) {
+  if ((builtInPreferred || !providerChoices().length) && config.view === "account" && vault) {
     $("local-wallet").open = true;
     $("vault-action").value = vault.read() ? "unlock" : "create";
     updateVault();
   }
   if (!storageAvailable) $("status").textContent = "Browser wallet storage is blocked. Allow storage for this site's wallet to create or restore a built-in account.";
-  if (interactive && !token && !publicAddress() && browserProvider) {
+  if (interactive && !builtInPreferred && !token && !publicAddress() && browserProvider) {
     try {
       const accounts = await browserProvider.request({ method: "eth_accounts" });
       if (accounts[0] && /^0x[0-9a-fA-F]{40}$/.test(accounts[0])) storage.setItem(ACTIVE_ACCOUNT, accounts[0]);
@@ -1033,6 +1016,7 @@
   const status = document.getElementById("status");
   if (status) status.textContent = error.message;
   const origin = new URLSearchParams(location.search).get("parentOrigin");
-  if (document.body.dataset.walletReady !== "true" && window.parent !== window && origin && document.referrer && new URL(document.referrer).origin === origin)
-    window.parent.postMessage({ type: "featheral:wallet-error" }, origin);
+  const nonce = new URLSearchParams(location.search).get("authNonce");
+  if (window.opener && origin && /^[0-9a-f]{32}$/.test(nonce || "") && document.referrer && new URL(document.referrer).origin === origin)
+    window.opener.postMessage({ type: "featheral:wallet-signature", nonce, error: error.message }, origin);
 });

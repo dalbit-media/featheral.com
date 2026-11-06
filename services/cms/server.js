@@ -362,6 +362,7 @@ if (creation) {
     notes, markets: creation.markets, cmsAuth, profileReader: address => workspaceProfileReader(address),
   });
   app.workspace = workspace;
+  workspace.hr.start();
   app.use('/api/intranet', router);
   const silver = require('./lib/silver-api').silverApi({ notes, markets: creation.markets, cmsAuth });
   app.silverStore = silver.store;
@@ -1169,6 +1170,7 @@ app.resolveHostname = resolveHostname;
 app.renderSitePage = (hostname, file) => sitePages.render(hostname, file);
 app.hasSitePage = (hostname, file) => sitePages.templates(hostname).includes(file);
 app.close = () => {
+  app.workspace?.hr.close();
   app.maintenance?.close();
   app.serverProfile?.close();
   telemetry.close();

@@ -27,31 +27,31 @@ function animationClock(t: TestContext) {
   };
 }
 
-test('arrival counts from zero to the exact real total in 2.2 seconds, then stops', t => {
+test('arrival counts to the exact real total in 400 milliseconds, then stops', t => {
   const clock = animationClock(t), values: number[] = [];
   const counter = createCountUp(value => values.push(value));
   counter.set(1000, true);
   assert.deepEqual(values, [0]);
-  clock.advance(1100);
+  clock.advance(200);
   assert.equal(values.at(-1), 875);
-  clock.advance(1100);
+  clock.advance(200);
   assert.equal(values.at(-1), 1000);
   assert.equal(clock.pending, 0);
   clock.advance(30000);
   assert.deepEqual(values, [0, 875, 1000]);
 });
 
-test('later updates animate actual decreases as well as increases in 1.4 seconds', t => {
+test('later updates animate actual decreases as well as increases in 280 milliseconds', t => {
   const clock = animationClock(t), values: number[] = [];
   const counter = createCountUp(value => values.push(value));
   counter.set(1000, false);
   counter.set(800, true);
-  clock.advance(700);
+  clock.advance(140);
   assert.equal(values.at(-1), 825);
-  clock.advance(700);
+  clock.advance(140);
   assert.equal(values.at(-1), 800);
   counter.set(1200, true);
-  clock.advance(1400);
+  clock.advance(280);
   assert.equal(values.at(-1), 1200);
   assert.equal(clock.pending, 0);
 });
@@ -60,14 +60,14 @@ test('retargeting starts from the displayed value and identical totals do not re
   const clock = animationClock(t), values: number[] = [];
   const counter = createCountUp(value => values.push(value));
   counter.set(1000, true);
-  clock.advance(1100);
+  clock.advance(200);
   counter.set(2000, true);
   assert.equal(values.at(-1), 875);
   assert.equal(clock.pending, 1);
-  clock.advance(700);
+  clock.advance(140);
   assert.ok(values.at(-1)! > 875 && values.at(-1)! < 2000);
   counter.set(2000, true);
-  clock.advance(700);
+  clock.advance(140);
   assert.equal(values.at(-1), 2000);
   assert.equal(clock.pending, 0);
   const length = values.length;

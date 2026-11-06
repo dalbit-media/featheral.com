@@ -25,7 +25,7 @@ export type Command =
   | { type: 'activate-collection'; item: CollectionItem }
   | { type: 'activate-activity'; item: ActivityItem }
   | { type: 'activity-automation'; activity: ActivityKind; enabled: boolean }
-  | { type: 'upgrade' | 'invite' | 'home' | 'warehouse' | 'item-storage' | 'collect-items' };
+  | { type: 'upgrade' | 'invite' | 'home' | 'warehouse' | 'item-storage' | 'collect-items' | 'gather' };
 
 export interface ResourceCrew {
   workers: number;

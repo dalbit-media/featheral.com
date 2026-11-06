@@ -6,7 +6,7 @@
   function validate(address, message, comments = true, parentOrigin) {
     if (typeof address !== "string" || !/^0x[0-9a-f]{40}$/i.test(address) || typeof message !== "string")
       throw new Error("Invalid sign-in request.");
-    const app = comments && /^Sign in to Featheral App\.\n\nOrigin: (https:\/\/app\.featheral\.com|http:\/\/app\.localhost(?::\d+)?)\nWallet: (0x[0-9a-fA-F]{40})\nNonce: ([0-9a-f]{48})\nIssued: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\n\nPrivate Foundation workspace\. No transfer or salary approval\. Insider access requires administrator approval\.$/.exec(message);
+    const app = comments && /^Sign in to Featheral App\.\n\nOrigin: (https:\/\/app\.featheral\.com|http:\/\/app\.localhost(?::\d+)?)\nWallet: (0x[0-9a-fA-F]{40})\nNonce: ([0-9a-f]{48})\nIssued: (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\n\nJoin as a visitor\. Membership follows ecosystem learning and quizzes\. No transfer or salary approval\.$/.exec(message);
     if (app && app[1] !== parentOrigin) throw new Error("App sign-in origin does not match this site.");
     const silverOrigin = "(https:\\/\\/silver\\.featheral\\.com|http:\\/\\/silver\\.localhost(?::\\d+)?)";
     const silver = comments && new RegExp("^Sign in to Featheral Silver\\.\\n\\nOrigin: " + silverOrigin + "\\nWallet: (0x[0-9a-fA-F]{40})\\nNonce: ([0-9a-f]{48})\\nIssued: (\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z)\\n\\nView your digital orders and codes\\. Signing in does not spend FTHS\\. Purchases require separate payment approval\\.$").exec(message);

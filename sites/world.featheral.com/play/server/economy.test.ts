@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { accrue, apply, createAccount, migrateEconomy, snapshot } from './economy.ts';
+import { accrue, apply, migrateEconomy, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import type { Account } from './economy.ts';
 import type { Command } from '../src/api-types.ts';
 import type { Resource } from '../src/engine.ts';
@@ -918,13 +919,13 @@ test('real-time claim and action limits remain independent of accelerated game t
   account.pending.wood = 50 * minute;
   apply(account, envelope(account, { type: 'claim' }), due, start + 10000);
   account.pending.water = 100 * minute;
-  assert.throws(() => apply(account, envelope(account, { type: 'claim' }), due + worldWeekMs, start + 10999), /one second/);
+  assert.throws(() => apply(account, envelope(account, { type: 'claim' }), due + worldWeekMs, start + 10499), /half a second/);
 });
 test('reject forged costs, tile assignments, timestamps, invalid quantities and instant gathering', () => {
   const account = settled();
   for (const command of [
     { type: 'claim', now: 999999999 }, { type: 'claim', amount: 100000 }, { type: 'claim', resource: '__proto__' },
-    { type: 'gather' }, { type: 'reward' }, { type: 'invite', metal: 0 },
+    { type: 'gather', quantity: 35 }, { type: 'reward' }, { type: 'invite', metal: 0 },
     ...[-1, 0.5, 1000001, NaN].map(workers => ({ type: 'assign', resource: 'wood', workers })),
     { type: 'assign', resource: '__proto__', workers: 1 },
     { type: 'assign', resource: 'wood', workers: 1, x: 0, y: 0 },
@@ -932,5 +933,6 @@ test('reject forged costs, tile assignments, timestamps, invalid quantities and 
     { type: 'automatic', enabled: 1 }, { type: 'automatic', enabled: true, cost: 0 },
     { type: 'move', x: 5, y: 0, metal: 0 }, { type: 'move', x: 0.5, y: 0 },
   ]) assert.throws(() => apply(account, { id: randomUUID(), revision: account.revision, command }, start + 1000), /Invalid command/);
+  assert.throws(() => apply(account, envelope(account, { type: 'gather' }), start + 1000), /resident crews/);
   assert.equal(terrainDetails[terrainAt(5, 0, account.game.seed)].weeks >= 1, true);
 });

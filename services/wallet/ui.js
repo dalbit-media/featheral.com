@@ -31,11 +31,13 @@ function walletUi(params) {
   const themeHost = theme === "foundation" || theme === "localhost" || theme === "featheral" ? "featheral.com" : `${theme}.featheral.com`;
   const palette = siteColors[themeHost];
   if (!assets.includes(primary) || !views.includes(view) || origin && !allowedOrigin(origin)
-    || embedded && !origin || params.has("compact") && !["0", "1"].includes(params.get("compact"))
+    || embedded || params.has("compact") && !["0", "1"].includes(params.get("compact"))
     || params.has("embedded") && !["0", "1"].includes(params.get("embedded"))
     || params.has("followActive") && !["0", "1"].includes(params.get("followActive"))
     || params.has("version") && params.get("version") !== "1"
     || params.has("selectionNonce") && (embedded || !origin || !/^[0-9a-f]{32}$/.test(params.get("selectionNonce")))
+    || params.has("authNonce") && (embedded || !origin || params.has("address") || !/^[0-9a-f]{32}$/.test(params.get("authNonce")))
+    || params.has("mode") && !["auto", "builtin", "extension"].includes(params.get("mode"))
     || params.has("theme") && !palette
     || params.has("address") && !/^0x[0-9a-fA-F]{40}$/.test(params.get("address")))
     throw Object.assign(new Error("Unsupported wallet configuration or embedding origin."), { status: 400 });
@@ -43,7 +45,8 @@ function walletUi(params) {
   return { schema: "featheral.wallet", version: 1, primary, view, payment, embedded, interactive, theme: { site: palette ? theme : defaultSite,
     accent: (palette || siteColors[`${defaultSite}.featheral.com`]).color }, compact: params.get("compact") === "1", address: params.get("address") || null,
     followActive: params.get("followActive") === "1", parentOrigin: origin || null,
-    selectionNonce: params.get("selectionNonce") || null, signing: interactive ? "wallet-provider" : "read-only",
+    selectionNonce: params.get("selectionNonce") || null, authNonce: params.get("authNonce") || null,
+    mode: params.get("mode") || "auto", signing: interactive ? "wallet-provider" : "read-only",
     localWallet: interactive, portfolio: { ethereumFthg: true, nativeEthChains: [1, 8453, 42161, 10, 324, 59144],
       internalNotes: true, worldFunds: true, estimates: ["FTHG", "FTH$", "FTHX", "USD"] },
     actions: views, assets };

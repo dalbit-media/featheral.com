@@ -71,7 +71,7 @@ test("Notes market cards link to Exchange instead of rendering executable trade 
 test("versioned wallet JSON validates options and network origin defaults", () => {
   for (const [site, primary] of [["gold", "FTHG"], ["silver", "FTHS"], ["dollar", "FTH$"], ["world", "FTH$"], ["pay", "FTH$"], ["notes", "FTHX"], ["ex", "FTHX"], ["foundation", "FTHG"]]) {
     assert.equal(primaryFor(`${site}.featheral.com`), primary);
-    const config = walletUi(new URLSearchParams({ embedded: "1", parentOrigin: `https://${site}.featheral.com`, compact: "1", view: "swap" }));
+    const config = walletUi(new URLSearchParams({ parentOrigin: `https://${site}.featheral.com`, compact: "1", view: "swap" }));
     assert.equal(config.version, 1); assert.equal(config.primary, primary); assert.equal(config.signing, "wallet-provider"); assert.equal(config.view, "swap");
   }
   for (const params of [{ primary: "FTH!" }, { view: "<script>" }, { compact: "yes" }, { embedded: "1" },
@@ -86,7 +86,7 @@ test("versioned wallet JSON validates options and network origin defaults", () =
 test("wallet palettes follow the parent site rather than its primary token and full-wallet links can retain them", () => {
   const palette = require("../../../shared/site-colors.json");
   for (const [hostname, colors] of Object.entries(palette)) {
-    const config = walletUi(new URLSearchParams({ parentOrigin: `https://${hostname}`, embedded: '1', primary: 'FTHX', view: 'account' }));
+    const config = walletUi(new URLSearchParams({ parentOrigin: `https://${hostname}`, primary: 'FTHX', view: 'account' }));
     assert.equal(config.theme.accent, colors.color);
     assert.equal(config.view, 'account');
     assert.equal(config.assets.includes('FTHX'), true);
@@ -169,7 +169,7 @@ function embedFixture({ withHeader = false, localhost = false, primary, hostStyl
   const elements = [], listeners = {}, messages = [], popups = [], timers = new Set(), timeouts = new Set(), profileCalls = [], errors = [];
   class Element {
     constructor(tag) { this.tag = tag; this.dataset = {}; this.style = {}; this.children = []; this.listeners = {}; this.isConnected = true;
-      if (tag === "iframe") this.contentWindow = { postMessage: (data, origin) => messages.push({ data, origin }) };
+      assert.notEqual(tag, "iframe", "wallet previews must not create frames");
       this.classes = new Set(); this.classList = { add: name => this.classes.add(name) }; elements.push(this); }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
@@ -218,85 +218,6 @@ function embedFixture({ withHeader = false, localhost = false, primary, hostStyl
   return { wallet: window.FeatheralWallet, dialog: () => document.getElementById("featheral-central-wallet"), header, button, swap,
     listeners, messages, popups, timers, timeouts, store, profileCalls, errors };
 }
-test("Dollar embeds and full-wallet fallback retain the same payment recipient and amount", () => {
-  const ui = embedFixture({ localhost: true, hostname: 'dollar.localhost' });
-  const payment = new URLSearchParams({ to: '0x' + '22'.repeat(20), amount: '1.000000000000000001', name: 'Shop & cafe', currency: 'FTH$' });
-  ui.wallet.open({ primary: 'FTH$', view: 'send', payment: payment.toString() });
-  const frame = ui.dialog().querySelector('iframe');
-  for (const [key, value] of payment) assert.equal(new URL(frame.src).searchParams.get(key), value);
-  const links = ui.dialog().children.flatMap(child => child.children || []).filter(child => child.tag === 'a');
-  const fallback = links.find(link => link.textContent === 'Open full wallet ↗');
-  assert.ok(fallback);
-  for (const [key, value] of payment) assert.equal(new URL(fallback.href).searchParams.get(key), value);
-  payment.set('amount', '2');
-  ui.wallet.open({ primary: 'FTH$', view: 'send', payment: payment.toString() });
-  assert.equal(new URL(ui.dialog().querySelector('iframe').src).searchParams.get('amount'), '2');
-  ui.wallet.open({ primary: 'FTH$', view: 'send' });
-  assert.equal(new URL(ui.dialog().querySelector('iframe').src).searchParams.has('to'), false);
-});
-test("site wallet buttons keep their wallet icon beside the public avatar and five-character address suffix", async () => {
-  const address = '0x' + '1'.repeat(35) + 'abcde', avatar = 'data:image/png;base64,YXZhdGFy';
-  for (const primary of ['FTHG', 'FTH$', 'FTHX']) {
-    const ui = embedFixture({ withHeader: true, primary, profileReader: async () => ({ avatar }) });
-    assert.equal(ui.button.children[0].className, 'central-wallet-icon');
-    assert.equal(ui.button.children.at(-1).textContent, 'Wallet');
-    ui.wallet.open({ primary });
-    const frame = ui.dialog().querySelector('iframe');
-    await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow,
-      data: { type: 'featheral:wallet-selected', address } });
-    await new Promise(setImmediate);
-    assert.match(ui.button.children[0].innerHTML, /<rect/);
-    assert.equal(ui.button.children[1].className, 'central-wallet-avatar');
-    assert.equal(ui.button.children[1].children[0].src, avatar);
-    assert.equal(ui.button.children.at(-1).textContent, '..abcde');
-    assert.match(ui.button.title, new RegExp(address));
-    assert.match(ui.button['aria-label'], new RegExp(primary.replace('$', '\\$')));
-    assert.equal(ui.button.dataset.walletState, 'selected');
-    assert.equal(ui.profileCalls[0].url, `/api/v1/notes/profiles/${address}`);
-    assert.equal(ui.profileCalls[0].options.credentials, 'omit');
-    ui.wallet.apply();
-    assert.equal(ui.profileCalls.length, 1, 'applying the header again does not refetch the avatar');
-    ui.button.listeners.click();
-    assert.equal(ui.dialog().querySelector('iframe'), frame, 'identity rendering preserves the inline wallet');
-    const reloaded = embedFixture({ withHeader: true, primary, store: ui.store, profileReader: async () => ({ avatar }) });
-    await new Promise(setImmediate);
-    assert.equal(reloaded.button.children.at(-1).textContent, '..abcde');
-    assert.equal(reloaded.button.children[1].children[0].src, avatar);
-    assert.equal(reloaded.errors.length, 0);
-  }
-});
-test("header identity ignores untrusted and pinned selections, rejects unsafe avatars and avoids stale profile races", async () => {
-  const first = '0x' + '1'.repeat(40), second = '0x' + '2'.repeat(40);
-  let resolveFirst;
-  const ui = embedFixture({ withHeader: true, profileReader: url => url.endsWith(first)
-    ? new Promise(resolve => { resolveFirst = resolve; }) : { avatar: '' } });
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector('iframe');
-  const select = (source, address, origin = 'https://wallet.featheral.com') => ui.listeners.message({
-    origin, source, data: { type: 'featheral:wallet-selected', address } });
-  await select(frame.contentWindow, first, 'https://evil.example');
-  await select({}, first);
-  const root = { dataset: {}, style: {}, setAttribute() {}, replaceChildren(...children) { this.children = children; } };
-  ui.wallet.mount(root, { address: first });
-  await select(root.children[0].contentWindow, first);
-  assert.equal(ui.button.children.at(-1).textContent, 'Wallet');
-  assert.equal(ui.profileCalls.length, 0);
-  await select(frame.contentWindow, first);
-  await new Promise(setImmediate);
-  await select(frame.contentWindow, second);
-  await new Promise(setImmediate);
-  resolveFirst({ avatar: 'data:image/png;base64,YXZhdGFy' });
-  await new Promise(setImmediate);
-  assert.equal(ui.button.children.at(-1).textContent, '..22222');
-  assert.match(ui.button.children[1].innerHTML, /<circle/);
-  assert.equal(ui.button.children[1].children.length, 0);
-  const invalid = embedFixture({ withHeader: true, store: new Map([['featheral-wallet-public-account', first]]),
-    profileReader: async () => ({ avatar: 'https://untrusted.example/tracking.png' }) });
-  await new Promise(setImmediate);
-  assert.match(invalid.button.title, /Avatar unavailable/);
-  assert.match(invalid.button.children[1].innerHTML, /<circle/);
-  assert.equal(invalid.errors.length, 1);
-});
 test("legacy Foundation and Gold controls never restore local accounts or connect providers, including before embed loads", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/wallet-profile.js"), "utf8");
   for (const host of ["featheral.com", "gold.featheral.com", "dollar.featheral.com"]) {
@@ -346,301 +267,6 @@ test("community, creation and trading sign-ins reuse central authorization witho
   assert.equal(creationContext.address, address);
   assert.equal(session.value, "creation-only");
   assert.equal(calls.at(-1).input.signature, signature);
-});
-test("central public selection persists across page reloads while reopening retains the connected renderer", async () => {
-  for (const hostname of ['gold.featheral.com', 'dollar.featheral.com']) {
-    const ui = embedFixture({ hostname }), address = '0x' + '22'.repeat(20);
-    ui.wallet.open();
-    const frame = ui.dialog().querySelector('iframe');
-    ui.wallet.connect();
-    assert.equal(ui.dialog().querySelector('iframe'), frame);
-    const origin = 'https://wallet.featheral.com', data = { type: 'featheral:wallet-selected', address };
-    for (const event of [
-      { origin: 'https://evil.example', source: frame.contentWindow, data },
-      { origin, source: {}, data },
-      { origin, source: frame.contentWindow, data: { ...data, address: 'invalid' } },
-    ]) await ui.listeners.message(event);
-    assert.equal(new URL(frame.src).searchParams.has('address'), false);
-    await ui.listeners.message({ origin, source: frame.contentWindow, data });
-    assert.equal(ui.messages.at(-1).data.address, address);
-    const before = frame.src;
-    await ui.listeners.message({ origin, source: frame.contentWindow, data });
-    assert.equal(frame.src, before);
-    await ui.listeners.message({ origin, source: frame.contentWindow, data: { type: 'featheral:wallet-ready' } });
-    const selection = ui.messages.find(message => message.data.type === 'featheral:wallet-selection');
-    assert.equal(selection.origin, origin);
-    assert.deepEqual(Object.keys(selection.data).sort(), ['address', 'type']);
-    ui.wallet.open();
-    assert.equal(ui.dialog().querySelector('iframe'), frame);
-    const reloaded = embedFixture({ hostname, store: ui.store }); reloaded.wallet.open();
-    assert.equal(new URL(reloaded.dialog().querySelector('iframe').src).searchParams.get('address'), address);
-    assert.deepEqual([...ui.store.keys()], ['featheral-wallet-public-account']);
-    assert.equal(ui.dialog().querySelector('a').textContent, 'Open full wallet ↗');
-    assert.equal(ui.popups.length, 0);
-  }
-});
-test("inline extension bridge trusts only a mounted following renderer and validates methods and accounts", async () => {
-  const address = '0x' + '11'.repeat(20), calls = [];
-  const ui = embedFixture({ provider: { on() {}, async request(request) {
-    calls.push(request); return request.method === 'personal_sign' ? 'signature' : [address];
-  } } });
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector('iframe'), origin = 'https://wallet.featheral.com';
-  const data = { type: 'featheral:wallet-provider', id: 'one', request: { method: 'eth_accounts' } };
-  await ui.listeners.message({ origin: 'https://evil.example', source: frame.contentWindow, data });
-  await ui.listeners.message({ origin, source: {}, data });
-  assert.deepEqual(calls, []);
-  await ui.listeners.message({ origin, source: frame.contentWindow, data });
-  assert.equal(calls.length, 1);
-  assert.equal(ui.messages.at(-1).data.result[0], address);
-  await ui.listeners.message({ origin, source: frame.contentWindow, data: { ...data, id: 'two', request: { method: 'eth_sendTransaction' } } });
-  assert.match(ui.messages.at(-1).data.error, /Unsupported/);
-  assert.equal(calls.length, 1);
-  await ui.listeners.message({ origin, source: frame.contentWindow, data: { ...data, id: 'three',
-    request: { method: 'personal_sign', params: ['0x1234', '0x' + '22'.repeat(20)] } } });
-  assert.match(ui.messages.at(-1).data.error, /account changed/);
-  assert.ok(!calls.some(call => call.method === 'personal_sign'));
-  await ui.listeners.message({ origin, source: frame.contentWindow, data: { ...data, id: 'four',
-    request: { method: 'personal_sign', params: ['0x1234', address] } } });
-  assert.equal(ui.messages.at(-1).data.result, 'signature');
-  const pinned = { dataset: {}, style: {}, setAttribute() {}, replaceChildren(...children) { this.children = children; } };
-  ui.wallet.mount(pinned, { address });
-  const pinnedFrame = pinned.children.find(child => child.tag === 'iframe');
-  const before = calls.length;
-  await ui.listeners.message({ origin, source: pinnedFrame.contentWindow, data });
-  assert.equal(calls.length, before, 'pinned address embeds have no provider authority');
-  assert.ok(frame.sandbox.includes('allow-popups-to-escape-sandbox'));
-  assert.ok(!frame.sandbox.includes('allow-top-navigation'));
-  assert.ok(frame.sandbox.includes('allow-downloads'));
-  assert.ok(frame.sandbox.includes('allow-forms'));
-});
-test("central sign-in transport binds renderer, nonce and account, returning only a signature", async () => {
-  const ui = embedFixture(), address = "0x" + "11".repeat(20), signature = "0x" + "ab".repeat(65), challenges = [];
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector("iframe");
-  const pending = ui.wallet.authenticate(async owner => { challenges.push(owner); return { message: "standard challenge" }; });
-  const popup = frame.contentWindow, nonce = ui.messages.find(message => message.data.type === 'featheral:wallet-auth-start').data.nonce;
-  const ready = { type: "featheral:wallet-auth-ready", nonce, address };
-  await ui.listeners.message({ origin: "https://evil.example", source: popup, data: ready });
-  await ui.listeners.message({ origin: "https://wallet.featheral.com", source: {}, data: ready });
-  assert.deepEqual(challenges, []);
-  await ui.listeners.message({ origin: "https://wallet.featheral.com", source: popup, data: ready });
-  assert.deepEqual(challenges, [address]);
-  assert.equal(ui.messages.find(message => message.data.type === 'featheral:wallet-auth').data.message, "standard challenge");
-  await ui.listeners.message({ origin: "https://wallet.featheral.com", source: popup, data: { type: "featheral:wallet-signature", nonce, address, signature } });
-  const result = await pending;
-  assert.deepEqual(Object.keys(result).sort(), ["address", "signature"]);
-  assert.equal(result.address, address); assert.equal(result.signature, signature);
-  const selection = ui.messages.find(message => message.data.type === "featheral:wallet-selection");
-  assert.equal(selection.data.address, address, "approved central selection updates public views even if iframe storage is isolated");
-  assert.deepEqual(Object.keys(selection.data).sort(), ["address", "type"]);
-  assert.equal(selection.origin, "https://wallet.featheral.com");
-  ui.wallet.open();
-  assert.equal(ui.dialog().querySelector("iframe"), frame);
-  assert.equal(ui.timers.size, 0); assert.equal(ui.popups.length, 0);
-});
-test("profile account selection uses only the mounted trusted wallet and never requests a signature", async () => {
-  const ui = embedFixture(), address = "0x" + "12".repeat(20);
-  const pending = ui.wallet.account(), frame = ui.dialog().querySelector("iframe");
-  const nonce = ui.messages.find(message => message.data.type === "featheral:wallet-auth-start").data.nonce;
-  const ready = { type: "featheral:wallet-auth-ready", nonce, address };
-  await ui.listeners.message({ origin: "https://evil.example", source: frame.contentWindow, data: ready });
-  assert.equal(ui.messages.some(message => message.data.type === "featheral:wallet-auth-cancel"), false);
-  await ui.listeners.message({ origin: "https://wallet.featheral.com", source: frame.contentWindow, data: ready });
-  const result = await pending;
-  assert.equal(result.address, address); assert.deepEqual(Object.keys(result), ["address"]);
-  assert.equal(ui.messages.some(message => message.data.type === "featheral:wallet-auth"), false);
-  assert.equal(ui.messages.some(message => message.data.type === "featheral:wallet-auth-cancel"), true);
-  assert.equal(ui.timers.size, 0);
-});
-test("central sign-in failures and cancellation clear popup listeners without silently connecting", async () => {
-  const ui = embedFixture();
-  const result = ui.wallet.authenticate(async () => { throw new Error("Challenge offline"); });
-  const failed = assert.rejects(result, /Challenge offline/);
-  await assert.rejects(ui.wallet.authenticate(async () => ({})), /existing wallet connection/);
-  const popup = ui.dialog().querySelector('iframe').contentWindow,
-    nonce = ui.messages.find(message => message.data.type === 'featheral:wallet-auth-start').data.nonce;
-  await ui.listeners.message({ origin: "https://wallet.featheral.com", source: popup,
-    data: { type: "featheral:wallet-auth-ready", nonce, address: "0x" + "11".repeat(20) } });
-  await failed; assert.equal(ui.timers.size, 0);
-  const cancelled = ui.wallet.authenticate(async () => ({}));
-  const rejected = assert.rejects(cancelled, /cancelled/);
-  ui.dialog().close(); [...ui.timers][0](); await rejected;
-  assert.equal(ui.timers.size, 0);
-});
-test("API, embedded renderer and compatibility profile agree on every site's primary currency", () => {
-  const profiles = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/wallet-profile.js"), "utf8");
-  const groups = [
-    ["featheral.com", "localhost", "gold.featheral.com", "gold.localhost", "foundation.localhost"],
-    ["dollar.featheral.com", "dollar.localhost", "world.featheral.com", "world.localhost"],
-    ["notes.featheral.com", "notes.localhost", "ex.featheral.com", "ex.localhost", "x.featheral.com",
-      "x.localhost", "sites.featheral.com", "stats.featheral.com", "wallet.featheral.com", "admin.featheral.com", "community.featheral.com"],
-    ["silver.featheral.com", "silver.localhost"],
-  ];
-  groups.forEach((hosts, i) => {
-    const primary = ["FTHG", "FTH$", "FTHX", "FTHS"][i];
-    for (const hostname of hosts) {
-      const localhost = hostname === "localhost" || hostname.endsWith(".localhost");
-      const origin = `${localhost ? "http" : "https"}://${hostname}${localhost ? ":8080" : ""}`;
-      assert.equal(primaryFor(hostname), primary, hostname);
-      assert.equal(walletUi(new URLSearchParams({ parentOrigin: origin, embedded: "1" })).primary, primary, hostname);
-      const ui = embedFixture({ hostname, localhost });
-      ui.wallet.open();
-      const frame = ui.dialog().querySelector("iframe");
-      assert.equal(new URL(frame.src).searchParams.get("primary"), primary, hostname);
-      assert.equal(new URL(frame.src).pathname, "/", "all sites use the same renderer");
-      const context = { window: { location: new URL(origin) } };
-      vm.runInNewContext(profiles.slice(0, profiles.indexOf("  let primary = defaultPrimary;")) + "globalThis.result = defaultPrimary;})();", context);
-      assert.equal(context.result, primary, hostname);
-    }
-  });
-});
-test("opening and reopening localhost wallets never launch a sync popup", () => {
-  for (const primary of ["FTHG", "FTH$", "FTHX"]) {
-    const ui = embedFixture({ withHeader: true, localhost: true, primary });
-    ui.button.listeners.click();
-    assert.equal(ui.dialog().open, true);
-    ui.dialog().close();
-    ui.button.listeners.click();
-    assert.equal(ui.dialog().open, true);
-    assert.equal(ui.popups.length, 0);
-    ui.listeners.message({ origin: "https://wallet.featheral.com", source: ui.dialog().querySelector("iframe").contentWindow,
-      data: { type: "featheral:wallet-ready" } });
-    assert.equal(ui.popups.length, 0);
-  }
-});
-test("wallet panels have no manual public sync or popup and only notify their own ready renderer", () => {
-  const ui = embedFixture({ withHeader: true, localhost: true });
-  ui.button.listeners.click();
-  assert.equal(ui.popups.length, 0);
-  const root = ui.dialog().querySelector("[data-wallet-root]");
-  assert.equal(root.children.some(child => child.tag === "button"), false);
-  const frame = ui.dialog().querySelector("iframe");
-  const context = { address: "0x1111111111111111111111111111111111111111", addresses: ["0x1111111111111111111111111111111111111111"], worldAccount: null };
-  const data = { type: "featheral:wallet-context", context };
-  ui.listeners.message({ origin: "https://evil.example", source: frame.contentWindow, data });
-  ui.listeners.message({ origin: "https://wallet.featheral.com", source: frame.contentWindow, data });
-  ui.listeners.message({ origin: "https://wallet.featheral.com", source: {}, data: { type: "featheral:wallet-ready" } });
-  assert.equal(ui.messages.length, 0);
-  ui.listeners.message({ origin: "https://wallet.featheral.com", source: ui.dialog().querySelector("iframe").contentWindow,
-    data: { type: "featheral:wallet-ready" } });
-  assert.equal(ui.messages.length, 3);
-  assert.equal(ui.messages[1].origin, "https://wallet.featheral.com");
-  assert.equal(ui.messages[2].data.type, "featheral:wallet-updated");
-  assert.equal(ui.messages[2].data.context, undefined);
-  ui.listeners.message({ origin: "https://wallet.featheral.com", source: frame.contentWindow, data: { type: "featheral:wallet-sync" } });
-  assert.equal(ui.popups.length, 0);
-});
-test("theme handoffs go only to a mounted central renderer and contain host colors, never account credentials", () => {
-  const ui = embedFixture({ hostStyle: { '--gold': '#655bd4', '--panel': '#ffffff', '--txt': '#202337', '--mut': '#70758b' } });
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector('iframe');
-  ui.listeners.message({ origin: 'https://evil.example', source: frame.contentWindow, data: { type: 'featheral:wallet-ready' } });
-  ui.listeners.message({ origin: 'https://wallet.featheral.com', source: {}, data: { type: 'featheral:wallet-ready' } });
-  assert.equal(ui.messages.length, 0);
-  ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow, data: { type: 'featheral:wallet-ready' } });
-  assert.equal(ui.messages.length, 3);
-  assert.equal(ui.messages[0].data.type, 'featheral:wallet-theme');
-  assert.equal(ui.messages[0].data.theme.accent, '#655bd4');
-  assert.equal(ui.messages[0].data.theme.panel, '#ffffff');
-  assert.equal(ui.messages[0].data.theme.text, '#202337');
-  assert.equal(ui.messages[0].data.theme.scheme, 'light');
-  assert.equal(ui.messages[0].data.context, undefined);
-  assert.equal(ui.messages[0].origin, 'https://wallet.featheral.com');
-  assert.equal(ui.messages[1].data.type, 'featheral:wallet-provider-status');
-  assert.equal(ui.messages[2].data.type, 'featheral:wallet-updated');
-});
-test("wallet stays hidden until its own renderer applies the host palette, with retry and a context-preserving full wallet", async () => {
-  const ui = embedFixture({ hostStyle: { '--panel': '#ffffff', '--txt': '#202337' } });
-  ui.wallet.open({ primary: 'FTHS', view: 'receive' });
-  const root = ui.dialog().querySelector('[data-wallet-root]'), frame = root.querySelector('iframe');
-  assert.match(frame.style.cssText, /visibility:hidden/);
-  assert.equal(frame.loading, 'eager');
-  assert.equal(root['aria-busy'], 'true');
-  assert.equal(ui.timeouts.size, 1);
-  const full = new URL(root.querySelector('a').href);
-  assert.equal(full.searchParams.get('primary'), 'FTHS');
-  assert.equal(full.searchParams.get('view'), 'receive');
-  assert.equal(full.searchParams.get('parentOrigin'), 'https://notes.featheral.com');
-  assert.equal(full.searchParams.has('embedded'), false);
-  assert.equal(root.querySelector('a').rel, 'noopener');
-  const ack = { type: 'featheral:wallet-themed' };
-  await ui.listeners.message({ origin: 'https://evil.example', source: frame.contentWindow, data: ack });
-  await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: {}, data: ack });
-  assert.notEqual(frame.style.visibility, 'visible');
-  await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow, data: ack });
-  assert.equal(frame.style.visibility, 'visible');
-  assert.equal(root.querySelector('div').hidden, true);
-  assert.equal(root['aria-busy'], 'false');
-  assert.equal(ui.timeouts.size, 0);
-
-  await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow, data: { type: 'featheral:wallet-error' } });
-  const status = root.querySelector('div');
-  assert.equal(status.hidden, false);
-  assert.match(status.querySelector('span').textContent, /could not load/);
-  status.querySelector('button').listeners.click();
-  const replacement = root.querySelector('iframe');
-  assert.notEqual(replacement, frame);
-  assert.equal(ui.timeouts.size, 1);
-  await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow, data: ack });
-  assert.notEqual(replacement.style.visibility, 'visible', 'old renderer cannot unhide its replacement');
-  [...ui.timeouts][0]();
-  assert.match(root.querySelector('div').querySelector('span').textContent, /longer than expected/);
-  assert.equal(root.querySelector('div').querySelector('button').hidden, false);
-  assert.equal(ui.popups.length, 0);
-});
-test("wallet bridge uses the site's selected provider and rejects account changes during a signature", async () => {
-  const address = '0x' + '11'.repeat(20), calls = [];
-  let changed = false;
-  const selectedProvider = { async request(request) {
-    calls.push(request.method);
-    if (request.method === 'personal_sign') { changed = true; return 'signature'; }
-    return [changed ? '0x' + '22'.repeat(20) : address];
-  } };
-  const ui = embedFixture({ provider: { request() { throw new Error('Wrong extension'); } }, selectedProvider });
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector('iframe');
-  await ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow,
-    data: { type: 'featheral:wallet-provider', id: 'sign', request: { method: 'personal_sign', params: ['0x1234', address] } } });
-  assert.deepEqual(calls, ['eth_accounts', 'personal_sign', 'eth_accounts']);
-  assert.match(ui.messages.at(-1).data.error, /account changed/);
-  assert.equal(ui.messages.at(-1).data.result, undefined);
-});
-test("EIP-6963 wallets can be selected without a global injected provider or silently choosing the wrong extension", async () => {
-  const ui = embedFixture(), calls = [];
-  const providers = ['One', 'Two'].map(name => ({ name, request: async () => { calls.push(name); return []; } }));
-  for (const provider of providers) ui.listeners['eip6963:announceProvider']({ detail: { provider, info: { name: provider.name } } });
-  ui.wallet.open();
-  const frame = ui.dialog().querySelector('iframe'), picker = ui.dialog().querySelector('select');
-  assert.equal(picker.hidden, false);
-  const request = () => ui.listeners.message({ origin: 'https://wallet.featheral.com', source: frame.contentWindow,
-    data: { type: 'featheral:wallet-provider', id: 'account', request: { method: 'eth_requestAccounts' } } });
-  await request();
-  assert.match(ui.messages.at(-1).data.error, /Choose your browser wallet/);
-  assert.equal(calls.length, 0);
-  picker.value = '1'; picker.listeners.change();
-  await request();
-  assert.deepEqual(calls, ['Two']);
-});
-test("header wallet and swap controls open the same inline wallet without credentials", () => {
-  const { wallet, dialog, header, button, swap } = embedFixture({ withHeader: true });
-  assert.equal(header.dataset.walletHeader, "FTHX");
-  assert.ok(button.classes.has("central-wallet-button"));
-  assert.equal(button["aria-label"], "Open FTHX wallet");
-  button.dataset.walletAddress = "0x1111111111111111111111111111111111111111";
-  button.listeners.click();
-  assert.equal(dialog().style.top, "105px");
-  assert.equal(dialog().style.height, "min(800px,calc(100dvh - 121px))");
-  const url = new URL(dialog().querySelector("iframe").src);
-  assert.equal(url.searchParams.has("address"), false, "normal headers follow the central account, not a stale site-local address");
-  assert.equal(url.searchParams.get("primary"), "FTHX");
-  assert.equal(url.searchParams.get("followActive"), "1");
-  assert.equal(url.searchParams.has("token"), false);
-  const handler = button.listeners.click;
-  wallet.apply();
-  assert.equal(button.listeners.click, handler);
-  swap.listeners.click({ preventDefault() {} });
-  assert.equal(dialog().open, true);
 });
 test("shared header spacing keeps the connected address readable instead of forcing an icon-only width", () => {
   const css = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.css"), "utf8");
@@ -856,44 +482,6 @@ test("ecosystem navigation has compact family headers and the full footer hierar
     "footer follows all SPA content instead of overlapping a viewport-height main");
   assert.doesNotMatch(source, /eco-toggle/);
 });
-test("FTHX wallets reuse the previous X-sized panel and switch views without remounting", () => {
-  const { wallet, dialog, messages } = embedFixture();
-  wallet.open();
-  const panel = dialog(), root = panel.querySelector("[data-wallet-root]");
-  assert.equal(panel.dataset.walletPrimary, "FTHX");
-  assert.match(panel.style.cssText, /inset:64px 12px auto auto;margin:0;width:min\(380px/);
-  assert.match(panel.style.cssText, /background:var\(--panel,#16161f\)/);
-  assert.match(root.querySelector("iframe").style.cssText, /min-height:0;flex:1/);
-  assert.equal(new URL(root.querySelector("iframe").src).searchParams.get("primary"), "FTHX");
-  wallet.open({ primary: "FTHX", view: "swap", address: "0x1111111111111111111111111111111111111111" });
-  assert.equal(dialog(), panel);
-  assert.equal(messages.at(-1).data.type, "featheral:wallet-view");
-  assert.equal(messages.at(-1).data.view, "swap");
-  assert.equal(new URL(root.querySelector("a").href).searchParams.has("address"), false);
-  assert.equal(new URL(root.querySelector("iframe").src).searchParams.get("followActive"), "1");
-  assert.equal(panel.open, true);
-  panel.querySelector("button").listeners.click();
-  assert.equal(panel.open, false);
-  wallet.open();
-  panel.listeners.keydown({ key: "Escape", preventDefault() {} });
-  assert.equal(panel.open, false);
-});
-test("every primary uses the same compact top-right layout while retaining its currency", () => {
-  const { wallet, dialog } = embedFixture();
-  let style;
-  for (const primary of ["FTHX", "FTH$", "FTHG"]) {
-    wallet.open({ primary, compact: true });
-    const panel = dialog(), root = panel.querySelector("[data-wallet-root]");
-    style ||= panel.style.cssText;
-    assert.equal(panel.style.cssText, style);
-    assert.match(panel.style.cssText, /inset:64px 12px auto auto/);
-    assert.equal(panel.dataset.walletPrimary, primary);
-    assert.match(root.style.cssText, /display:flex/);
-    assert.match(root.querySelector("iframe").style.cssText, /min-height:0;flex:1/);
-    assert.equal(panel.querySelector("b").textContent, "Wallet");
-    assert.equal(root.querySelector("iframe").title, `Featheral ${primary} wallet`);
-  }
-});
 test("native Ethereum pages retain signer IDs and expose a separate central FTHG wallet", () => {
   for (const [file, signer] of [["sites/wallet.featheral.com/ethereum/index.html", "walletButton"], ["sites/gold.featheral.com/conversion/index.html", "wallet"]]) {
     const html = fs.readFileSync(path.join(__dirname, "../../..", file), "utf8");
@@ -903,6 +491,6 @@ test("native Ethereum pages retain signer IDs and expose a separate central FTHG
   const ui = embedFixture({ withHeader: true, primary: "FTHG" });
   assert.equal(ui.button["aria-label"], "Open FTHG wallet");
   ui.button.listeners.click();
-  assert.equal(new URL(ui.dialog().querySelector("iframe").src).searchParams.get("primary"), "FTHG");
-  assert.match(ui.dialog().style.cssText, /width:min\(380px/);
+  assert.equal(new URL(ui.dialog().querySelector("a").href).searchParams.get("primary"), "FTHG");
+  assert.match(ui.dialog().style.cssText, /width:min\(460px/);
 });

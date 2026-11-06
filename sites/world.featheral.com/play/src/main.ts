@@ -10,7 +10,7 @@ import { connect, readCollection, refresh, send } from './api.ts';
 import { icon } from './icons.ts';
 import { ScreenPreview } from './screen-preview.ts';
 import { World } from './world.ts';
-import { displayServerTime, environmentAt, serverClockStaleMs, serverSyncIntervalMs, worldDayMs, worldWeekMs } from './environment.ts';
+import { claimCooldownMs, defaultClockSpeed, displayServerTime, environmentAt, serverClockStaleMs, serverSyncIntervalMs, worldDayMs, worldWeekMs } from './environment.ts';
 import { compactServerCountdown, completionProgress, environmentDetails, updateClockTime, updateWeekCalendar } from './environment-view.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
@@ -385,7 +385,8 @@ function render(): void {
   if (marketPage) marketplace?.balances();
   if (explorePage) {
     const terrain = terrainAt(game.position.x, game.position.y, game.seed), resource = terrainResources[terrain];
-    document.querySelector('#location-card')!.innerHTML = `<header class="tile-heading"><div class="location-icon resource-${resource}">${icon(resource)}</div><div class="location-description"><span class="eyebrow">YOUR LOCATION</span><h3 id="current-tile-title">${terrainDetails[terrain].name}</h3></div><span class="tile-coordinates" aria-label="Tile coordinates"><span data-no-localize>${game.position.x}, ${game.position.y}</span></span></header><div class="tile-resource"><div><span class="tile-resource-name">${names[resource]}</span><span class="tile-pending" title="Ready to collect at your settlement"><span>Ready to collect</span><strong>${resourceFmt(resource, state.pending[resource])}</strong></span></div><button class="button gather-button" data-settlement-panel="residents">Crews ${icon('people')}</button></div>`;
+    const founding = game.stage < 0;
+    document.querySelector('#location-card')!.innerHTML = `<header class="tile-heading"><div class="location-icon resource-${resource}">${icon(resource)}</div><div class="location-description"><span class="eyebrow">YOUR LOCATION</span><h3 id="current-tile-title">${terrainDetails[terrain].name}</h3></div><span class="tile-coordinates" aria-label="Tile coordinates"><span data-no-localize>${game.position.x}, ${game.position.y}</span></span></header><div class="tile-resource"><div><span class="tile-resource-name">${names[resource]}</span><span class="tile-pending"><span>${founding ? 'Owned' : 'Ready to collect'}</span><strong>${resourceFmt(resource, founding ? game.stock[resource] : state.pending[resource])}</strong></span></div>${founding ? '' : `<button class="button gather-button" data-settlement-panel="residents">Crews ${icon('people')}</button>`}</div>`;
   }
   if (communityPage) renderCommunityPage();
   renderRecruitment();
@@ -408,8 +409,8 @@ function renderEnvironment(): void {
   updateWeekCalendar(calendar, environment, timestamp);
   const speed = document.querySelector<HTMLElement>('#clock-speed')!;
   speed.hidden = state.clockSpeed === 1;
-  speed.textContent = translate(`${state.clockSpeed}x DEV`, language);
-  speed.title = translate(`Development server time runs ${state.clockSpeed}x faster. All gameplay rates and durations are unchanged.`, language);
+  speed.textContent = state.clockSpeed === defaultClockSpeed ? translate('1 MIN / WEEK', language) : `${state.clockSpeed}x`;
+  speed.title = translate('The game clock runs continuously. A game week takes one real minute at the default speed.', language);
   document.querySelectorAll<HTMLElement>('[data-map-environment]').forEach(overlay => {
     const expanded = overlay.querySelector<HTMLDetailsElement>('details')?.open ?? false;
     const content = environmentDetails(environment, true);
@@ -556,7 +557,7 @@ async function processClaims(): Promise<void> {
         currentClaim = resource;
         const success = await act({ type: 'claim', resource });
         currentClaim = null;
-        nextClaimAt = performance.now() + 1050;
+        nextClaimAt = performance.now() + claimCooldownMs + 50;
         if (success) {
           const quantity = collectionReceiptQuantity(state.message, resource);
           if (quantity !== null) showClaimFeedback(resource, quantity, origin);
@@ -707,11 +708,12 @@ function renderSidebar(): void {
     ${next ? `<div class="next-stage"><span>${icon('arrow')} ${next.name}</span>${next.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} ${icon('people')}</span>` : ''}</div>${next.population ? meter(game.population, next.population, `Residents for ${next.name}`) : requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed)))}` : '<div class="complete-label">Capital complete</div>'}</div></div>
     </div><div class="explore-upkeep">${waterUpkeepPanel(true)}</div>
     <div class="sidebar-primary-actions" role="group" aria-label="Frequent actions">
-      ${game.stage < 0 ? `<button class="button primary wide" data-action="upgrade" ${upgradeReady ? '' : 'disabled'}>${icon('home')} Settle ${next ? costChips(next.cost) : ''}</button>` : `
+      ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
       <button class="button primary wide sidebar-expedition" data-action="explore" ${state.waterUpkeep?.paused || !quote || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost"><small>You spend</small>${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}</small>` : '<small>No nearby destination</small>'}</button>
       ${recruitmentButton(true)}
       </div>
+      ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
       ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
     </div>
     <div class="sidebar-status"><span>${state.availableWorkers} available residents</span><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></div>
@@ -981,7 +983,7 @@ function progressionPanel(): string {
     && (game.stage >= 0 || !isWater(terrainAt(game.position.x, game.position.y, game.seed)));
   return `
     ${next ? `<div class="upgrade-card"><div class="upgrade-target">${icon('layers')}<div><small>NEXT TIER</small><h3>${next.name}</h3></div>${icon('arrow')}</div><div class="requirement-list">${requirement('people', `${fmt(next.population)} residents`, game.population >= next.population)}${game.stage < 0 ? requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed))) : ''}</div><div class="upgrade-cost">${costChips(next.cost)}</div>    <button class="button primary wide" data-action="upgrade" ${ready ? '' : 'disabled'}>${icon('plus')}${game.stage < 0 ? 'Settle' : 'Upgrade'}</button></div>` : `<div class="notice">${icon('check')} Capital complete</div>`}
-    ${next && !ready ? `<p class="upgrade-guidance">Meet the highlighted requirements to upgrade.</p><button class="button wide" data-settlement-panel="${game.population < next.population ? 'residents' : 'production'}">${game.population < next.population ? 'Manage residents' : 'Manage production'} ${icon('arrow')}</button>` : ''}`;
+    ${game.stage < 0 ? `<a class="button wide" href="/explore/">Gather founding supplies ${icon('arrow')}</a>` : next && !ready ? `<p class="upgrade-guidance">Meet the highlighted requirements to upgrade.</p><button class="button wide" data-settlement-panel="${game.population < next.population ? 'residents' : 'production'}">${game.population < next.population ? 'Manage residents' : 'Manage production'} ${icon('arrow')}</button>` : ''}`;
 }
 function buildingsPanel(): string {
   return `<h3 class="panel-section-heading">Settlement upgrades</h3>
@@ -1010,6 +1012,14 @@ function buildingsPanel(): string {
       <div class="building">${icon('home')}<h3>Town hall</h3><div class="building-benefit">${icon('flag')}<span>Federation voting</span></div>${requirement('home', 'Town', game.stage >= 4)}<div class="upgrade-cost">${costChips(buildingCosts.townhall)}</div><button class="button wide" data-action="townhall" aria-label="${game.townhall ? 'Town hall built' : 'Build town hall'}" ${game.townhall || game.stage < 4 || !canAfford(game, buildingCosts.townhall) ? 'disabled' : ''}>${icon(game.townhall ? 'check' : 'plus')}${game.townhall ? 'Built' : 'Build'}</button></div></div>
     <details class="disclosure" data-detail="tiers"><summary>All tiers <span>${Math.max(0, game.stage + 1)} / ${stages.length}</span>${icon('chevron')}</summary>
     <div class="progression-list">${stages.map((s, i) => `<div class="tier-row ${i === game.stage ? 'current' : ''} ${i <= game.stage ? 'completed' : ''}"><span class="tier-number">${i <= game.stage ? icon('check') : icon('lock')}</span><div><strong>${s.name}</strong><small>${fmt(s.population)} residents</small></div><div class="tier-cost">${costChips(s.cost)}</div></div>`).join('')}</div></details>`;
+}
+function foundingPanel(): string {
+  const resource = terrainResources[terrainAt(game.position.x, game.position.y, game.seed)];
+  const canGather = (resource === 'wood' || resource === 'water') && game.stock[resource] < (stages[0].cost[resource] ?? 0);
+  return `<section class="founding-guide"><h3>Start from zero</h3><p>Gather Wood here, then visit the lake at 3, 0 for Water. Only the materials needed for founding can be gathered by hand. No starting FTH$ or Metal is granted.</p>
+    <div class="founding-actions"><button class="button" data-action="founding-wood">${icon('wood')} Wood</button><button class="button" data-action="founding-water">${icon('water')} Water</button>
+    <button class="button primary" data-action="gather" ${canGather ? '' : 'disabled'}>${icon(resource)} Gather</button></div><div class="upgrade-cost">${costChips(stages[0].cost)}</div>
+    <button class="button primary wide" data-action="upgrade" ${canAfford(game, stages[0].cost) && !isWater(terrainAt(game.position.x, game.position.y, game.seed)) ? '' : 'disabled'}>${icon('home')} Settle</button></section>`;
 }
 function resourceStockCard(resource: Resource): string {
   return `<div class="stock-card" data-resource-card="${resource}"><header class="resource-card-heading"><div class="stock-label resource-${resource}">${icon(resource)}<span>${names[resource]}</span></div>${resourceSettingsButton(resource)}</header><strong>${fmt(game.stock[resource])}<small> / ${fmt(resourceCapacity(state.capacity, resource, game))}</small></strong><div class="storage-meter">${meter(game.stock[resource], resourceCapacity(state.capacity, resource, game), `${names[resource]} storage`)}</div>${resourceAcquisitionActions(resource)}<span class="stock-rate">+${state.rates[resource]}/week</span>${state.workforce.crews[resource] ? completionMeter(state.workforce.crews[resource]!.readyAt - worldWeekMs, state.workforce.crews[resource]!.readyAt, 'Next delivery') : ''}</div>`;
@@ -1292,6 +1302,9 @@ app.addEventListener('click', event => {
       else toast('Travel toward the edge of known territory to start a new expedition.');
       break;
     }
+    case 'gather': void act({ type: 'gather' }); break;
+    case 'founding-wood': requestMove(0, 0); break;
+    case 'founding-water': requestMove(3, 0); break;
     case 'retry-assign': {
       const resource = resources.find(key => key === target.dataset.resource);
       if (resource) requestCrewAssignment(document.querySelector<HTMLInputElement>(`#crew-${resource}`)!);
@@ -1349,14 +1362,28 @@ window.addEventListener('pageshow', event => {
     settlementChat = null; mountWorldChat();
   }
 });
-setInterval(async () => {
+async function syncProduction(): Promise<void> {
   if (busy || confirmationOpen() || document.hidden) return;
   busy = true;
   try { synchronize(await refresh()); render(); }
   catch (error) { toast(`Could not sync server production: ${error instanceof Error ? error.message : 'Connection failed.'}`, true); }
   finally { busy = false; void saveCrewAssignments(); }
-}, serverSyncIntervalMs + Math.random() * 5000);
-setInterval(renderEnvironment, 1000);
+}
+setInterval(() => void syncProduction(), serverSyncIntervalMs + Math.random() * 5000);
+let nextDeadlineSyncAt = 0;
+setInterval(() => {
+  if (document.hidden) return;
+  renderEnvironment();
+  const deadlines = [state.workforce.cycleAt, state.recruitment?.readyAt ?? Infinity,
+    ...Object.values(state.workforce.crews).map(crew => crew.readyAt),
+    ...state.workforce.expeditions.map(expedition => expedition.readyAt)];
+  const due = Math.min(...deadlines);
+  const timestamp = displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed);
+  if (game.stage >= 0 && due <= timestamp && performance.now() >= nextDeadlineSyncAt && !busy && !confirmationOpen()) {
+    nextDeadlineSyncAt = performance.now() + 5000;
+    void syncProduction();
+  }
+}, 1000);
 settlementHalfSale = new SettlementHalfSale(() => state,
   next => { synchronize(next); render(); }, toast, language);
 if (settlementPage && !visitingSettlement) settlementSale = new SettlementSale(() => state,

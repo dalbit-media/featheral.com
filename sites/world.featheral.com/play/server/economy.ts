@@ -1,7 +1,7 @@
-import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruitmentAmount, recruitmentDollars, stages, survey, terrainAt, terrainDetails, upgrade } from '../src/engine.ts';
+import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruitmentAmount, recruitmentDollars, stages, survey, terrainAt, terrainDetails, terrainResources, upgrade } from '../src/engine.ts';
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
-import { environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
+import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
 import { balancedAllocation, emptyAllocation, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
@@ -446,7 +446,7 @@ export function parseCommand(value: unknown): Command {
   const resourceClaim = c.type === 'claim' && Object.hasOwn(c, 'resource');
   const fields: Record<string, string[]> = {
     move: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: ['action'],
-    upgrade: [], invite: [], home: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
+    upgrade: [], invite: [], home: [], gather: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
     assign: ['resource', 'workers'], automatic: ['enabled'],
     craft: ['item'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
     arrange: ['entity', 'position'],
@@ -484,6 +484,17 @@ export function execute(account: Account, command: Command, realTime = account.u
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string): string {
   const game = account.game;
   switch (command.type) {
+    case 'gather': {
+      if (game.stage >= 0) throw new ApiError(409, 'Use resident crews after founding your settlement.');
+      const terrain = terrainAt(game.position.x, game.position.y, game.seed);
+      const resource = terrainResources[terrain];
+      if (!['wood', 'water'].includes(resource) || !game.explored.includes(`${game.position.x},${game.position.y}`)) throw new ApiError(409, 'Choose known Wood or Water terrain for founding supplies.');
+      const required = stages[0].cost[resource]!;
+      const quantity = Math.min(35, Math.max(0, required - game.stock[resource]));
+      if (!quantity) throw new ApiError(409, 'You have enough of this resource to found a settlement.');
+      game.stock[resource] += quantity;
+      return note(game, 'Founding supplies gathered. No FTH$ was issued.');
+    }
     case 'move': {
       if (Math.hypot(command.x - game.position.x, command.y - game.position.y) > radius(game) + 1) throw new ApiError(409, 'That location is beyond your reach. Explore a little closer first.');
       if (game.explored.includes(`${command.x},${command.y}`)) {
@@ -617,12 +628,12 @@ export function execute(account: Account, command: Command, realTime = account.u
     }
     case 'claim': {
       if (command.resource) {
-        if (realTime - account.lastClaimAt < 1000) throw new ApiError(429, 'Wait one second between claims.');
+        if (account.lastClaimAt && realTime - account.lastClaimAt < claimCooldownMs) throw new ApiError(429, 'Wait half a second between claims.');
         const quantity = collectResource(account, command.resource);
         account.lastClaimAt = realTime;
         return note(game, `Collected ${quantity} ${command.resource}. FTH$ transport paid.`);
       }
-      if (realTime - account.lastClaimAt < 1000) throw new ApiError(429, 'Wait one second between claims.');
+      if (account.lastClaimAt && realTime - account.lastClaimAt < claimCooldownMs) throw new ApiError(429, 'Wait half a second between claims.');
       const { pending, claimThreshold, capacity: cap } = snapshot(account);
       if (claimThreshold === 0) throw new ApiError(409, 'Establish a settlement before claiming resources.');
       const selected = (command.resource ? [command.resource] : resources)

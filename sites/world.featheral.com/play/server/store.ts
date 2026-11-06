@@ -89,10 +89,10 @@ export class SqliteStore implements Store {
       if (!this.db.prepare('PRAGMA table_info(public_totals)').all().some(column => column.name === 'dollars')) {
         this.db.exec("ALTER TABLE public_totals ADD COLUMN dollars INTEGER NOT NULL DEFAULT 0 CHECK(dollars>=0); UPDATE public_totals SET dollars=(SELECT COALESCE(SUM(json_extract(data,'$.account.game.dollars')),0) FROM sessions) WHERE id=1");
       }
-      const clockTable = 'CREATE TABLE IF NOT EXISTS server_clock (id INTEGER PRIMARY KEY CHECK (id = 1), realTime INTEGER NOT NULL, serverTime INTEGER NOT NULL, speed INTEGER NOT NULL CHECK (speed IN (1, 10, 20)))';
+      const clockTable = 'CREATE TABLE IF NOT EXISTS server_clock (id INTEGER PRIMARY KEY CHECK (id = 1), realTime INTEGER NOT NULL, serverTime INTEGER NOT NULL, speed INTEGER NOT NULL CHECK (speed IN (1, 10, 20, 168)))';
       this.db.exec(clockTable);
       const clockSchema = this.db.prepare("SELECT sql FROM sqlite_master WHERE name = 'server_clock'").get()!;
-      if (!/\b20\b/.test(String(clockSchema.sql))) {
+      if (!/\b168\b/.test(String(clockSchema.sql))) {
         this.db.exec('ALTER TABLE server_clock RENAME TO legacy_server_clock');
         this.db.exec(clockTable);
         this.db.exec('INSERT INTO server_clock SELECT * FROM legacy_server_clock; DROP TABLE legacy_server_clock');

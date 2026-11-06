@@ -446,9 +446,10 @@ thresholds; warning and critical risk explanations remain open by default.
 ## Foundation intranet
 
 The gateway serves `app.featheral.com` and `silver.featheral.com` (local aliases:
-`app.localhost:8080` and `silver.localhost:8080`). Admin's **App insiders & missions**
-view (`#/intranet`) is the management backend. A World profile is required before
-requesting membership. Profile, avatar and public bio are created and edited inside
+`app.localhost:8080` and `silver.localhost:8080`). Admin's **App / organization & HR**
+view (`#/intranet`) is the management backend. Wallet sign-in starts everyone as a
+visitor, without administrator approval. A World profile is required before
+saving experience and work interests. Profile, avatar and public bio are created and edited inside
 App through the shared JSON-driven World profile component; no World-site redirect
 is needed. The same editor is mounted on World. Its model is
 `GET /api/v1/world/profile/ui` (schema `featheral.profile`, version 1), with
@@ -456,27 +457,65 @@ is needed. The same editor is mounted on World. Its model is
 wallet-signed `POST /api/v1/world/profile`. World delegates persistence to the
 existing Notes profile writer. Bios are public, signature-bound, up to 1,000
 characters; old name/avatar-only updates remain valid and preserve saved bios.
-App membership applications are still separate from public bios.
-New requests are pending, volunteer/orientation, Learning
-division/General team; only an authorized Admin operator can approve, suspend or
-assign hierarchy. Built-in divisions are Operations, Engineering, Community,
+Private enrollment preferences remain separate from public bios and the member
+directory. Visitors select an experience icon and one or more work-interest icons.
+All five ecosystem orientation quizzes must score at least 80%; answer keys and
+grading remain server-owned. Completing them automatically grants learning-level
+volunteer membership in the first selected interest's division/general team.
+Sequential practitioner, mentor and steward quizzes unlock higher-level agendas.
+Demoted visitors must pass fresh orientation quizzes to regain membership.
+Administrators can assign responsibilities and restrict access; learning never
+grants protected Admin credentials. Existing pending requests migrate to visitors;
+existing active members retain their status and can complete their preferences
+in Account. Built-in divisions are Operations, Engineering, Community,
 Research and Learning. Teams are division-bound. Levels are orientation, learning,
 practitioner, mentor and steward; roles are volunteer, intern, contributor, lead,
 manager and director. Leads manage their team, managers their division, directors
 the whole workspace; these roles never confer CMS administrator access.
+Every member sees the full organization chart: Foundation coordination, five
+division managers, general contributor leads, all ecosystem site leads and
+contributor positions. Vacancies are explicit, not fictional employees. Newly
+created teams receive chart positions. Seeded ready quality-review checklists
+cover every site; members can claim accessible tasks in their own team.
 
 Ready missions move through in-progress work, evidence-backed review and manager
-approval. Assignees must belong to the mission team. A completed mission does not
-automatically create salary. Admin Silver grants require a reason and exact
+approval. Assignees must belong to the mission team and meet its minimum learning
+level. Members cannot approve, cancel or reassign their own work. Only approved
+completion counts for compensation, never a self-reported review status.
+
+Weekly evaluations use Monday 00:00 UTC boundaries and integer task counts:
+strictly above 60% earns the configured base plus completed-task incentives.
+Exactly 60% or below earns completed-task incentives only, no base, and revokes
+membership, private channels/files/documents/agenda access, calls and push
+subscriptions. Earned FTHS stays in the wallet. Zero assignments retains membership
+and produces no salary record; cancelled assignments are excluded. Unfinished
+tasks carry into later weeks while membership is retained, including catch-up
+after downtime. Evaluated completion cannot be reopened to earn twice.
+
+Admin configures whole-unit base amounts per learning level and a per-task
+incentive with exact `CONFIGURE WEEKLY FTHS` confirmation. Policies take effect
+next Monday, never retroactively; assignment snapshots freeze the base at the
+first assignment and preserve task incentives. Unconfigured cycles explicitly
+record no issuance; membership performance rules still apply. The gateway
+evaluates at startup, every minute and before access after a week boundary.
+`POST /api/intranet/admin/evaluate` safely retries closed periods. Payroll,
+issuance, audit history and membership outcomes are atomic and idempotent.
+FTHS contribution rewards do not establish employment, a USD peg or guaranteed
+exchange liquidity.
+
+Independent Admin Silver grants require a reason and exact
 `ISSUE <whole amount> FTHS` approval, use retry-safe request IDs, and atomically
-record ledger entries, grants and audit history. A linked completed mission can
-receive one grant, to its assignee. Ordinary reaction-reward minting of FTHS is
+record ledger entries, grants and audit history. Weekly assigned tasks cannot also
+receive mission-linked grants. Ordinary reaction-reward minting of FTHS is
 disabled. Explicit Exchange pool funding remains a separate approved operation;
 it requires existing treasury FTHX and never happens at startup.
 
 `services/notes/workspace.js` stores membership, channels, messages, reads,
 files, shared notes, missions, calls, grants and audit records in the existing
-Notes SQLite database. Include that database in consistent private backups.
+Notes SQLite database. `services/notes/workspace-hr.js` additionally stores
+enrollment, quiz progress, chart positions, compensation policies, assignment
+snapshots, payroll and paid-task markers in that same database. Include all
+`work_*` tables and the Notes ledger in consistent private backups.
 On startup FTHS is registered under the system treasury and its old unissued
 placeholder becomes a real, unfunded market. A conflicting privately owned FTHS
 definition stops initialization with an explicit error rather than overwriting it.

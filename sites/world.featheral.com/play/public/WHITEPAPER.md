@@ -170,7 +170,7 @@ There is **no passive resource production**. After settling, residents are autom
 
 Settlement is tier number 1. Terrain efficiency ranges from 80% to 180%; federation metal crews receive a further 20%. New work additionally applies season, weather and temperature factors averaged over all eight daily weather windows in seven calendar days. Output is rounded down to whole accounting lots per worker, not whole displayed units, and locked when the work week starts. Production is real-world-inspired rather than a claim about actual national industrial productivity.
 
-New games receive 9,000 kg timber, 25,600 L Water and 0.8 t Metal, leaving 25,200 L Water after founding for 12 residents. FTH$ starts at zero. Sell owned resources or collect-and-sell completed production to fund transportation. Every crew pays transport at pickup; there is no free-transport allowance for new jobs. Water storage scales to at least two population-weeks with a 50% hot-weather reserve.
+New games start with zero resources, FTH$ and FTHG. Manually gather only the founding requirement: 3,000 kg timber and 400 L Water, using the known clearing and lake at 3, 0. Founding consumes these supplies and welcomes 12 residents; hand gathering ends. Basic Wood/Water crews complete real work before output can be collected or sold. Selling completed production transfers funded marketplace FTH$, never a registration grant. Existing saves and earned balances remain intact. Storage and transport rules are unchanged.
 
 Automatic allocation targets **50% total utilization**, rounded down, including residents already exploring. New gathering is limited to `max(0, min(floor(population / 2) - active explorers, population - max(2, active explorers)))` residents. Population-scaled Water storage and growth materials take priority within that budget. Explorers at or above the target pause new gathering, not paid expeditions. Gathering can start without FTH$, but completed production cannot be taken into inventory until its transport is paid. Automation of allocation is separate from item-enabled auto-collection. Workers need a whole game week; selling resources transfers existing marketplace FTH$ rather than creating money.
 
@@ -279,16 +279,16 @@ Dispatch cost and the pending batch are committed atomically. State reads or act
 
 ## 4. One game clock
 
-Development and production use identical game rates, costs, durations, thresholds, and batch sizes. The only difference is clock speed:
+Development and production use the same continuous clock and identical game rates, costs, durations, thresholds, and batch sizes:
 
 | Mode | Server game time |
 |---|---|
-| Production | 1 server second per real second |
-| Local development | 20 server seconds per real second |
+| Production | 168 server seconds per real second |
+| Local development | 168 server seconds per real second |
 
 The clock drives resource accrual, recruitment, world days, seasons, weather, and temperature together. Recruitment takes the same full week as basic collection or exploration.
 
-A work week is seven world days, or **168 server minutes**: 2h48m in production and 8m24s in development. A development day takes 1m12s. It is not seven real-world days or a season. Crews, expeditions and pending recruitment persist with game-clock deadlines across restarts and speed changes, including migration from the previous 10x development clock.
+A work week is seven world days, or **168 server minutes**: **one real minute at 168x**. Harder expeditions take two or three real minutes. Crews, expeditions and recruitment retain their game-time deadlines across restarts and clock migrations. Existing elapsed time is counted at the previous speed before switching. Real-time action limits and a 500-millisecond collection cooldown remain independent of this clock.
 
 The clock anchor and speed persist. Restarting or changing speed preserves the game timeline rather than resetting it. Legacy rate-multiplied records migrate without discarding pending resources or remaining recruitment work.
 

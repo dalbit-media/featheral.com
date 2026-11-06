@@ -1,7 +1,8 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { accrue, apply, capacity, createAccount, migrateEconomy, snapshot } from './economy.ts';
+import { accrue, apply, capacity, migrateEconomy, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import { dollarsScale } from '../src/dollars.ts';
 import { worldDayMs, worldWeekMs } from '../src/environment.ts';
 import { basicWorkers, emptyAllocation, fundAllocation, resourceAccess, resourceCapacity, resourceKeys, transportCost } from '../src/workforce.ts';

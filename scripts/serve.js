@@ -35,6 +35,7 @@ const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/n
 const { activateLiveReserve } = require("../services/gold/activation");
 const { createWorldApi } = require("../services/media/api");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
+const { defaultClockSpeed } = require("../sites/world.featheral.com/play/src/environment.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 const { worldProfileReader } = require("../sites/world.featheral.com/play/server/world-profile.ts");
 const { requestPolicy, configureServer } = require("../services/operations/http");
@@ -126,7 +127,7 @@ cms.setOperationsHandler(async (req, res) => {
   res.end(JSON.stringify({ error: "Unknown administration API route" }));
 });
 const gameApiOrigin = require("../services/operations/origin").worldOrigin(env, deploymentManifest, port);
-if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, process.argv.includes("--dev") ? 20 : 1, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
+if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, defaultClockSpeed, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;
 cms.setCreationPayments(api.creationPayments);
@@ -367,8 +368,7 @@ const server = http.createServer(async (req, res) => {
       if (Object.hasOwn(assets, url.pathname)) {
         if (assets[url.pathname].endsWith(".html")) {
           require("../services/wallet/ui").walletUi(url.searchParams);
-          res.setHeader("Content-Security-Policy", url.pathname.startsWith("/ethereum/") || url.pathname === "/exchange-auth.html" ? "frame-ancestors 'none'"
-            : "frame-ancestors 'self' https://featheral.com https://*.featheral.com http://localhost:* http://*.localhost:*");
+          res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
         }
         res.writeHead(200, { "Content-Type": types[path.extname(assets[url.pathname])], "Cache-Control": "no-store" });
         return res.end(fs.readFileSync(path.join(walletRoot, assets[url.pathname])));

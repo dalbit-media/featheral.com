@@ -2,7 +2,8 @@ import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { test } from 'node:test';
-import { accrue, apply, createAccount, migrateEconomy, snapshot } from './economy.ts';
+import { accrue, apply, migrateEconomy, snapshot } from './economy.ts';
+import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import { createApi } from './http.ts';
 import type { Command } from '../src/api-types.ts';
 import { SqliteStore } from './store.ts';
@@ -155,7 +156,7 @@ test('half-sales transfer player buy escrow and accept large payment limits', ()
     assert.equal(h.store.publicTotals().dollars, total);
   } finally { h.store.close(); }
 });
-test('a zero-grant founder funds recruitment and weekly collection by selling starter resources', () => {
+test('a zero-resource founder earns Dollar only by selling completed production', () => {
   let now = 1000000;
   const store = new SqliteStore(':memory:', () => now), identity = store.create();
   seedFixturePools(store);
@@ -165,20 +166,26 @@ test('a zero-grant founder funds recruitment and weekly collection by selling st
       apply(session.account, { id: randomUUID(), revision: session.account.revision, command: worldCommand }, time));
   };
   try {
+    act({ type: 'gather' }); act({ type: 'gather' });
+    act({ type: 'move', x: 3, y: 0 }); act({ type: 'gather' }); act({ type: 'gather' });
+    act({ type: 'move', x: 0, y: 0 });
     assert.equal(act({ type: 'upgrade' }).dollars, 0);
-    now += 1000;
-    const quote = store.transaction(identity.token, (session, _, realTime, exchange, owner) =>
-      exchange.halfQuote(owner, session.account, realTime)).halfSale;
+    assert.deepEqual(store.read(identity.token, session => session.account.game.stock), { wood: 0, water: 0, metal: 0, oil: 0 });
+    now += 2 * worldWeekMs;
+    const quote = store.transaction(identity.token, (session, time, realTime, exchange, owner) => {
+      accrue(session.account, time);
+      return exchange.collectionQuote(owner, session.account, 'wood', realTime).collectionQuote;
+    });
+    assert.ok(quote.available); assert.ok(quote.net > 0);
     const sold = store.transaction(identity.token, (session, time, realTime, exchange, owner) =>
-      exchange.action(owner, session, { id: randomUUID(), revision: session.account.revision, command: command(quote) }, time, realTime));
-    assert.ok(sold.dollars >= 900);
-    const recruited = act({ type: 'invite' });
-    assert.ok(recruited.dollars < sold.dollars);
-    now += worldWeekMs;
+      apply(session.account, { id: randomUUID(), revision: session.account.revision, command: {
+        type: 'collect-sell', resource: 'wood', quantity: quote.quantity, minimumDollars: Math.floor(quote.net * dollarsScale),
+      } }, time, realTime, command => exchange.collectSell(owner, session.account, command, time, realTime)));
+    assert.ok(sold.dollars > 0);
+    assert.equal(sold.game.stock.metal, 0);
     const collected = act({ type: 'claim', resource: 'water' });
-    assert.equal(collected.game.population, 12 + recruited.recruitment!.population);
     assert.ok(collected.game.stock.water > 0);
-    assert.ok(collected.dollars <= recruited.dollars);
+    assert.ok(collected.dollars <= sold.dollars);
     assert.deepEqual(collected.income, { weekly: 0, readyAt: 0 });
   } finally { store.close(); }
 });

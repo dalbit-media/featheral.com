@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const state = { me: null, channel: null, channels: [], members: [], missions: [], messages: new Map(), view: "inbox", document: null,
-    config: null, polling: false, sending: false, draftRequest: null, mission: null };
+    config: null, polling: false, sending: false, draftRequest: null, mission: null, experience: null, interests: [] };
   let profileEditor;
   const short = value => `..${value.slice(-5)}`;
   const node = (tag, content, className) => {
@@ -46,6 +46,7 @@
     }
     if (view === "account") void loadMe().catch(status);
     if (view === "missions") void loadMissions().catch(status);
+    if (view === "learning") renderLearning();
   }
   for (const tab of document.querySelectorAll("[data-view]")) tab.addEventListener("click", () => show(tab.dataset.view));
   async function signIn() {
@@ -56,8 +57,8 @@
   action($("signin"), signIn);
   action($("check-profile"), loadMe);
   $("application").addEventListener("submit", async event => {
-    event.preventDefault(); const submit = $("application").querySelector("button"); submit.disabled = true;
-    try { await api("/apply", { motivation: $("motivation").value }); await loadMe(); }
+    event.preventDefault(); const submit = $("application").querySelector("[type=submit]"); submit.disabled = true;
+    try { await api("/apply", { motivation: $("motivation").value, experience: state.experience, interests: state.interests }); await loadMe(); }
     catch (error) { status(error); } finally { submit.disabled = false; }
   });
   async function loadMe() {
@@ -66,18 +67,29 @@
     $("onboarding").hidden = active; $("workspace").hidden = !active;
     $("signin").hidden = true; $("signup").hidden = false;
     $("signup-title").textContent = profile?.username || "Create your World profile";
-    $("signup-status").textContent = !profile ? "Set up your public name, avatar and bio here. Your World profile is shared across Featheral."
-      : !member ? "Your World profile is ready. Introduce yourself to request insider access."
-      : member.status === "pending" ? "Application received. An administrator will assign your division, team and role."
-      : `Access ${member.status}. Contact your Foundation administrator.`;
-    $("application").hidden = !profile || !!member;
+    $("signup-status").textContent = !profile ? "You are a visitor. Set up your public name, avatar and bio here. Your World profile is shared across Featheral."
+      : member?.status === "visitor" || !member ? "Welcome, visitor. Share your experience and interests, then pass all orientation quizzes. No admin approval is required."
+      : `Access ${member.status}. Contact an administrator about this restriction.`;
+    $("application").hidden = !profile || !["visitor", "active"].includes(member?.status);
+    $(active ? "member-preferences" : "visitor-preferences").append($("application"));
+    $("application").querySelector("[type=submit]").textContent = active ? "Save experience & interests" : "Save visitor registration";
+    renderPreferences(true); renderLearning(); renderCompensation();
     const root = $("profile-editor");
     $(active ? "account-profile" : "signup-profile").append(root);
     if (!profileEditor) profileEditor = await window.FeatheralWorldProfile.mount(root, { address, onSaved: loadMe });
     else await profileEditor.load(address, true);
     if (!active) {
-      if (call) cleanupCall();
+      clearPrivate();
       return;
+    }
+    function clearPrivate() {
+      if (call) cleanupCall();
+      state.channel = null; state.channels = []; state.members = []; state.missions = []; state.messages.clear();
+      state.document = null; state.mission = null; state.config = null; state.draftRequest = null;
+      for (const id of ["messages", "channels", "mission-list", "people-list", "org-chart", "identity", "call-people"]) $(id).replaceChildren();
+      for (const id of ["document-dialog", "mission-dialog", "call-picker"]) if ($(id).open) $(id).close();
+      for (const id of ["document-body", "mission-evidence", "mission-title", "mission-body", "message", "attachment"]) $(id).value = "";
+      $("attachment-name").textContent = ""; $("silver-balance").textContent = ""; $("conversation").hidden = true;
     }
     $("identity").replaceChildren();
     if (profile?.avatar) {
@@ -89,10 +101,138 @@
     $("silver-balance").textContent = `${silver.toLocaleString()} FTHS`;
     const directory = await api("/directory"); state.members = directory.members;
     renderPeople();
+    renderOrganization();
     $("new-mission").hidden = !["lead", "manager", "director"].includes(member.role);
     await loadChannels();
     const requested = location.hash.match(/^#inbox\/([a-zA-Z0-9_-]+)$/)?.[1];
     if (!state.channel && requested && state.channels.some(channel => channel.id === requested)) await openChannel(requested);
+  }
+  function renderPreferences(reset = false) {
+    const learning = state.me.learning;
+    if (reset) {
+      state.experience = learning.enrollment?.experience || null;
+      state.interests = learning.enrollment?.interests || [];
+      $("motivation").value = state.me.member?.motivation || "";
+    }
+    const paths = {
+      seed: "M12 21V10M12 14C4 14 3 8 3 4c6 0 9 3 9 8M12 10c0-5 4-7 9-7 0 5-3 8-9 8",
+      tools: "M14 4a6 6 0 0 0-7 7L3 18l3 3 7-7a6 6 0 0 0 7-7l-4 3-3-3z",
+      settings: "M4 7h16M4 17h16M8 4v6M16 14v6",
+      people: "M9 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8M2 21v-3a7 7 0 0 1 14 0v3M17 4a4 4 0 0 1 0 8M22 21v-3a7 7 0 0 0-4-6",
+      code: "m8 5-6 7 6 7m8-14 6 7-6 7m-2-17-4 20",
+      search: "M20 20l-5-5M17 10a7 7 0 1 0-14 0 7 7 0 0 0 14 0",
+      book: "M12 5v16M12 5C8 2 4 3 2 4v15c4-2 7-1 10 2 3-3 6-4 10-2V4c-4-2-7-1-10 1",
+    };
+    function choices(root, values, multiple) {
+      root.replaceChildren();
+      root.setAttribute("role", multiple ? "group" : "radiogroup");
+      root.setAttribute("aria-label", multiple ? "Work interests" : "Your experience");
+      for (const value of values) {
+        const choice = node("button", undefined, "interest-button"); choice.type = "button";
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path"); path.setAttribute("d", paths[value.icon]);
+        icon.append(path); choice.append(icon, node("span", value.label));
+        if (!multiple) {
+          choice.setAttribute("role", "radio");
+          choice.tabIndex = (state.experience === value.id || !state.experience && value === values[0]) ? 0 : -1;
+          choice.addEventListener("keydown", event => {
+            const index = values.indexOf(value);
+            let next;
+            if (["ArrowRight", "ArrowDown"].includes(event.key)) next = (index + 1) % values.length;
+            else if (["ArrowLeft", "ArrowUp"].includes(event.key)) next = (index + values.length - 1) % values.length;
+            else if (event.key === "Home") next = 0;
+            else if (event.key === "End") next = values.length - 1;
+            else return;
+            event.preventDefault(); state.experience = values[next].id; renderPreferences(); root.children[next].focus();
+          });
+        }
+        choice.setAttribute(multiple ? "aria-pressed" : "aria-checked", String(multiple ? state.interests.includes(value.id) : state.experience === value.id));
+        choice.addEventListener("click", () => {
+          if (multiple) state.interests = state.interests.includes(value.id) ? state.interests.filter(key => key !== value.id) : [...state.interests, value.id];
+          else state.experience = value.id;
+          choices(root, values, multiple);
+          root.children[values.indexOf(value)].focus();
+        });
+        root.append(choice);
+      }
+    }
+    choices($("experience-choices"), learning.experience, false);
+    choices($("interest-choices"), learning.interests, true);
+  }
+  function renderLearning() {
+    if (!state.me) return;
+    const active = state.me.member?.status === "active", root = $(active ? "member-learning" : "visitor-learning");
+    $(active ? "visitor-learning" : "member-learning").replaceChildren();
+    root.replaceChildren();
+    if (!state.me.learning.enrollment || !["visitor", "active"].includes(state.me.member?.status)) return;
+    const learning = state.me.learning, required = learning.courses.filter(course => course.level === learning.stage);
+    root.append(node("h2", `${learning.stage} learning`),
+      node("p", `${required.filter(course => course.progress?.passed).length} / ${required.length} current-level quizzes passed. Every required quiz needs ${learning.passPercent}%.`, "fine"));
+    if (learning.stage === "steward") root.append(node("p", "You have completed the learning pathway. Management roles remain separately assigned."));
+    for (const course of learning.courses) {
+      const card = node("details", undefined, "card lesson"), summary = node("summary", `${course.title}${course.progress?.passed ? " / Passed" : ""}`);
+      card.append(summary, node("p", course.body));
+      const destinations = node("div", undefined, "account-links");
+      for (const site of course.sites) { const destination = node("a", site); destination.href = link(site); destination.target = "_blank"; destination.rel = "noopener"; destinations.append(destination); }
+      card.append(destinations);
+      const form = node("form");
+      course.questions.forEach((question, index) => {
+        const field = node("fieldset"); field.append(node("legend", question.prompt));
+        question.options.forEach((option, value) => {
+          const label = node("label", undefined, "quiz-choice"), input = node("input");
+          input.type = "radio"; input.name = `question-${index}`; input.value = String(value); input.required = true;
+          label.append(input, node("span", option)); field.append(label);
+        });
+        form.append(field);
+      });
+      const submit = node("button", "Check quiz", "primary"); submit.type = "submit";
+      const feedback = node("p", course.progress ? `Best score: ${course.progress.score}% / ${course.progress.attempts} attempts` : "", "fine");
+      feedback.setAttribute("role", "status"); form.append(submit, feedback);
+      form.addEventListener("submit", async event => {
+        event.preventDefault(); submit.disabled = true;
+        try {
+          const values = new FormData(form), answers = course.questions.map((_, index) => Number(values.get(`question-${index}`)));
+          const result = await api(`/learning/${course.id}/quiz`, { answers });
+          feedback.textContent = `${result.score}% / ${result.passed ? "Passed" : "Review the lesson and retry"}`;
+          if (result.passed) { await loadMe(); $("status").textContent = `${course.title}: ${result.score}% / Passed`; $("status").hidden = false; }
+        } catch (error) { feedback.textContent = error.message; status(error); }
+        finally { submit.disabled = false; }
+      });
+      card.append(form); root.append(card);
+    }
+  }
+  function renderCompensation() {
+    if (!state.me) return;
+    const active = state.me.member?.status === "active", root = $(active ? "member-compensation" : "visitor-compensation");
+    $(active ? "visitor-compensation" : "member-compensation").replaceChildren(); root.replaceChildren();
+    const pay = state.me.compensation;
+    const card = node("section", undefined, "card");
+    card.append(node("h2", "Weekly contribution record"), node("p", `${new Date(pay.period).toISOString().slice(0, 10)} to ${new Date(pay.ends).toISOString().slice(0, 10)} / UTC Monday to Monday`));
+    const percent = pay.assigned ? (pay.accomplished * 100 / pay.assigned).toFixed(1) : "0";
+    const progress = node("progress"); progress.max = pay.assigned || 1; progress.value = pay.accomplished;
+    progress.setAttribute("aria-label", "Approved weekly task completion");
+    card.append(progress, node("p", `${pay.accomplished} / ${pay.assigned} assigned tasks approved (${percent}%)`),
+      node("p", "Above 60%: configured base + completed-task incentives. At or below 60%: incentives only, no base, and return to visitor. No assignments: membership stays and no salary record.", "fine"));
+    card.append(node("p", pay.configured ? `Configured weekly base: ${pay.base.toLocaleString()} FTHS. Incentive per approved task: ${pay.incentivePerTask.toLocaleString()} FTHS. Evaluated after the cycle closes.` : "Reward amounts are not configured for this cycle. No FTHS will be issued; completion and membership rules still apply.", "fine"));
+    for (const record of pay.history) card.append(node("p", `${new Date(record.period).toISOString().slice(0, 10)} / ${record.accomplished}/${record.assigned} approved / Base ${record.base} + incentive ${record.incentive} = ${record.total} FTHS / ${record.qualified ? "membership retained" : "returned to visitor"}${record.configured ? "" : " / policy unconfigured"}`, "fine"));
+    root.append(card);
+  }
+  function renderOrganization() {
+    const root = $("org-chart"); root.replaceChildren();
+    const positions = state.me.org.positions;
+    function branch(parent) {
+      const list = node("ul", undefined, "org-branches");
+      for (const position of positions.filter(row => row.parent === parent)) {
+        const item = node("li"), card = node("details", undefined, "org-position");
+        card.open = parent === null || parent === "foundation";
+        card.append(node("summary", `${position.name} / ${position.role}`), node("p", position.responsibility, "fine"));
+        card.append(node("p", position.members.length ? position.members.map(member => `${personName(member.address)} / ${member.level}`).join(", ") : "Vacant / ready for responsible staffing", "fine"));
+        item.append(card, branch(position.id)); list.append(item);
+      }
+      return list;
+    }
+    root.append(branch(null));
   }
   function renderPeople() {
     const root = $("people-list"); root.replaceChildren();
@@ -217,13 +357,21 @@
     $("document-body").value = state.document.body; $("document-status").textContent = `Revision ${state.document.revision}`;
   });
   async function loadMissions() {
-    const data = await api("/missions"); state.missions = data.missions;
+    const owner = state.me?.address, data = await api("/missions");
+    if (state.me?.address !== owner || state.me?.member?.status !== "active") return;
+    state.missions = data.missions;
+    $("agenda-access").textContent = `Your level: ${state.me.member.level} / Division: ${state.me.member.division}. Higher-level agendas and private team resources remain gated.`;
     $("mission-list").replaceChildren();
     for (const mission of state.missions) {
       const card = node("article", undefined, "card");
-      card.append(node("small", `${mission.status.replace("_", " ")} / ${mission.team}`), node("h2", mission.title),
+      card.append(node("small", `${mission.status.replace("_", " ")} / ${mission.team} / ${mission.min_level}`), node("h2", mission.title),
         node("p", mission.body), node("small", mission.assignee ? `Assigned: ${personName(mission.assignee)}` : "Not assigned"),
         button("Open mission", () => editMission(mission)));
+      if (!mission.assignee && mission.status === "ready" && mission.team === state.me.member.team)
+        card.append(button("Take this task", async () => {
+          if (!confirm("Assign this task to you for this week's completion evaluation? Only approved completion counts.")) return;
+          await api(`/missions/${mission.id}/claim`, { revision: mission.revision }); await loadMe(); await loadMissions();
+        }));
       $("mission-list").append(card);
     }
     if (!data.missions.length) $("mission-list").append(node("p", "Your team has no missions yet. Ask your lead for a brief.", "fine"));
@@ -246,13 +394,21 @@
   });
   function editMission(mission = null) {
     state.mission = mission; const member = state.me.member;
-    const manager = ["lead", "manager", "director"].includes(member.role);
-    for (const field of ["title", "body", "division", "team", "assignee"]) $("mission-" + field).disabled = !manager;
+    const manager = member.role === "director" || member.division === (mission?.division || member.division)
+      && (member.role === "manager" || member.role === "lead" && member.team === (mission?.team || member.team));
+    const editable = manager && mission?.assignee !== state.me.address || mission?.assignee === state.me.address
+      && ["ready", "in_progress", "review"].includes(mission.status) || !mission && manager;
+    for (const field of ["title", "body", "division", "team", "assignee", "min_level"]) $("mission-" + field).disabled = !manager || !editable
+      || mission?.assignee === state.me.address && ["division", "team", "assignee"].includes(field);
     $("mission-title").value = mission?.title || ""; $("mission-body").value = mission?.body || "";
     $("mission-evidence").value = mission?.evidence || "";
     fillSelect($("mission-division"), state.me.org.divisions.map(division => [division.id, division.name]), mission?.division || member.division);
     missionTeamOptions(mission?.team || member.team, mission?.assignee || "");
-    fillSelect($("mission-status"), (manager ? state.me.org.states : ["ready", "in_progress", "review"]).map(value => [value, value.replace("_", " ")]), mission?.status || "draft");
+    fillSelect($("mission-min_level"), state.me.org.levels.map(level => [level, level]), mission?.min_level || "learning");
+    const states = manager && mission?.assignee !== state.me.address ? state.me.org.states : ["ready", "in_progress", "review"];
+    if (mission && !states.includes(mission.status)) states.push(mission.status);
+    fillSelect($("mission-status"), states.map(value => [value, value.replace("_", " ")]), mission?.status || "draft");
+    $("mission-status").disabled = !editable; $("mission-evidence").disabled = !editable; $("save-mission").hidden = !editable;
     $("mission-error").textContent = ""; $("mission-dialog").showModal();
   }
   action($("new-mission"), () => editMission());
@@ -260,10 +416,10 @@
   $("mission-form").addEventListener("submit", async event => {
     event.preventDefault(); const submit = $("mission-form").querySelector("button.primary"); submit.disabled = true;
     try {
-      const input = Object.fromEntries(["title", "body", "division", "team", "assignee", "status", "evidence"].map(field => [field, $("mission-" + field).value]));
+      const input = Object.fromEntries(["title", "body", "division", "team", "assignee", "status", "evidence", "min_level"].map(field => [field, $("mission-" + field).value]));
       if (state.mission) input.revision = state.mission.revision;
       await api(`/missions${state.mission ? "/" + state.mission.id : ""}`, input, state.mission ? "PUT" : "POST");
-      $("mission-dialog").close(); await loadMissions();
+      $("mission-dialog").close(); await loadMe(); await loadMissions();
     } catch (error) { $("mission-error").textContent = error.message; status(error); } finally { submit.disabled = false; }
   });
   async function config() { return state.config ||= await api("/config"); }
@@ -296,10 +452,11 @@
       for (const notification of await worker?.getNotifications() || []) notification.close();
     }
     await api("/logout", {});
-    state.me = null; state.channel = null; state.messages.clear(); state.config = null;
+    clearPrivate(); state.me = null; state.experience = null; state.interests = [];
     $("workspace").hidden = true; $("onboarding").hidden = false; $("signup").hidden = true; $("signin").hidden = false;
     $("messages").replaceChildren(); $("channels").replaceChildren(); $("message").value = ""; $("attachment").value = "";
   });
+  action($("visitor-signout"), async () => { await api("/logout", {}); location.reload(); });
   let call = null, pc = null, mic = null, screen = null, videoSender = null, callCursor = 0, signalBusy = false, lastHeartbeat = 0;
   const candidateQueue = [];
   function cleanupCall() {
@@ -434,12 +591,16 @@
     if (!state.me || state.me.member?.status !== "active" || state.polling) return;
     state.polling = true;
     try {
+      const latest = await api("/me");
+      if (latest.member?.status !== "active") { cleanupCall(); state.channel = null; state.messages.clear(); await loadMe(); return; }
+      state.me = latest; renderCompensation();
       await pollCall();
       if (!document.hidden) { await loadChannels(); await loadMessages(); }
     } catch (error) {
       status(error);
       if ([401, 403].includes(error.status)) {
-        cleanupCall(); state.me = null; $("workspace").hidden = true; $("onboarding").hidden = false; $("signin").hidden = false; $("signup").hidden = true;
+        clearPrivate(); state.me = null; state.experience = null; state.interests = [];
+        $("workspace").hidden = true; $("onboarding").hidden = false; $("signin").hidden = false; $("signup").hidden = true;
       }
     } finally { state.polling = false; }
   }

@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 const W = require("../cms/lib/wallet");
 const { SYSTEM_TREASURY_ACCOUNT } = require("../notes/game-funds");
+const { WorkspaceHR, weekStart, WEEK } = require("./workspace-hr");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const ROLES = ["volunteer", "intern", "contributor", "lead", "manager", "director"];
 const LEVELS = ["orientation", "learning", "practitioner", "mentor", "steward"];
@@ -64,11 +65,14 @@ class Workspace {
       this.db.prepare("INSERT OR IGNORE INTO note_currencies VALUES ('FTHS','Featheral Silver',?,?)").run(SYSTEM_TREASURY_ACCOUNT, now());
       this.db.prepare("INSERT INTO note_markets(symbol,placeholder) VALUES ('FTHS',0) ON CONFLICT(symbol) DO UPDATE SET placeholder=0").run();
     });
+    this.hr = new WorkspaceHR(this);
   }
   atomic(fn) {
     this.db.exec("BEGIN IMMEDIATE");
+    this.inTransaction = true;
     try { const result = fn(); this.db.exec("COMMIT"); return result; }
     catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    finally { this.inTransaction = false; }
   }
   audit(actor, action, target, data) {
     this.db.prepare("INSERT INTO work_audit(actor,action,target,data,at) VALUES (?,?,?,?,?)")
@@ -78,7 +82,7 @@ class Workspace {
     const owner = address(value), now = this.now();
     this.db.prepare("DELETE FROM work_challenges WHERE at<?").run(now - 300000);
     this.db.prepare("DELETE FROM work_sessions WHERE expires<=?").run(now);
-    const message = `Sign in to Featheral App.\n\nOrigin: ${origin}\nWallet: ${W.checksum(owner)}\nNonce: ${crypto.randomBytes(24).toString("hex")}\nIssued: ${new Date(now).toISOString()}\n\nPrivate Foundation workspace. No transfer or salary approval. Insider access requires administrator approval.`;
+    const message = `Sign in to Featheral App.\n\nOrigin: ${origin}\nWallet: ${W.checksum(owner)}\nNonce: ${crypto.randomBytes(24).toString("hex")}\nIssued: ${new Date(now).toISOString()}\n\nJoin as a visitor. Membership follows ecosystem learning and quizzes. No transfer or salary approval.`;
     this.db.prepare("INSERT OR REPLACE INTO work_challenges VALUES (?,?,?)").run(owner, message, now);
     return { address: owner, message };
   }
@@ -92,6 +96,7 @@ class Workspace {
     this.atomic(() => {
       this.db.prepare("DELETE FROM work_challenges WHERE address=?").run(owner);
       this.db.prepare("INSERT INTO work_sessions VALUES (?,?,?)").run(digest(token), owner, this.now() + 86400000);
+      this.db.prepare("INSERT OR IGNORE INTO work_members VALUES (?,'visitor','volunteer','orientation','learning','learning-general','',?)").run(owner, this.now());
     });
     return token;
   }
@@ -104,34 +109,44 @@ class Workspace {
   logout(token) { if (typeof token === "string") this.db.prepare("DELETE FROM work_sessions WHERE token=?").run(digest(token)); }
   member(owner) { return this.db.prepare("SELECT * FROM work_members WHERE address=?").get(owner) || null; }
   active(owner) {
+    this.hr.settleDue();
     const member = this.member(owner);
-    if (member?.status !== "active") throw fail(403, "Administrator-approved insider access is required.");
+    if (member?.status !== "active") throw fail(403, "Active membership is required. Register as a visitor and pass the ecosystem quizzes.");
     return member;
   }
   org() {
     return { divisions: this.db.prepare("SELECT * FROM work_divisions ORDER BY name").all(),
-      teams: this.db.prepare("SELECT * FROM work_teams ORDER BY division,name").all(), roles: ROLES, levels: LEVELS, states: STATES };
+      teams: this.db.prepare("SELECT * FROM work_teams ORDER BY division,name").all(), roles: ROLES, levels: LEVELS, states: STATES,
+      positions: this.hr ? this.hr.chart() : [] };
   }
   async me(owner) {
+    this.hr.settleDue();
     const profile = await this.profileReader(owner);
+    const member = this.member(owner), org = this.org();
+    if (member?.status !== "active") org.positions = [];
     return { address: owner, profile: profile ? { username: profile.username, avatar: profile.avatar, bio: profile.bio || "", address: owner } : null,
-      member: this.member(owner), org: this.org(), silver: this.notes.balance(owner, "FTHS") };
+      member, org, silver: this.notes.balance(owner, "FTHS"), learning: this.hr.learning(owner), compensation: this.hr.compensation(owner) };
   }
   async apply(owner, input) {
     const profile = await this.profileReader(owner);
-    if (!profile?.username) throw fail(409, "Create your World profile before requesting insider access.");
+    if (!profile?.username) throw fail(409, "Create your World profile before registering your work interests.");
     const motivation = text(input?.motivation, "Introduction", 1000), existing = this.member(owner);
-    if (existing) throw fail(409, "Your application is already recorded. Contact an administrator for changes.");
-    this.db.prepare("INSERT INTO work_members VALUES (?,'pending','volunteer','orientation','learning','learning-general',?,?)")
-      .run(owner, motivation, this.now());
-    this.audit(owner, "membership.request", owner, { motivation });
-    return this.member(owner);
+    if (existing && !["visitor", "pending", "active"].includes(existing.status)) throw fail(409, "This membership is restricted. Contact an administrator.");
+    return this.atomic(() => {
+      this.hr.enroll(owner, input);
+      this.db.prepare(`INSERT INTO work_members VALUES (?,'visitor','volunteer','orientation','learning','learning-general',?,?)
+        ON CONFLICT(address) DO UPDATE SET status=CASE WHEN work_members.status='active' THEN 'active' ELSE 'visitor' END,
+        motivation=excluded.motivation`).run(owner, motivation, this.now());
+      this.audit(owner, "membership.register", owner, { motivation, experience: input.experience, interests: input.interests });
+      return this.member(owner);
+    });
   }
   setMember(actor, value, input) {
+    this.hr.settleDue();
     const owner = address(value), previous = this.member(owner);
     if (!previous) throw fail(404, "Membership application not found.");
     const { status, role, level, division, team } = input || {};
-    if (!["pending", "active", "suspended", "rejected"].includes(status) || !ROLES.includes(role) || !LEVELS.includes(level))
+    if (!["visitor", "pending", "active", "suspended", "rejected"].includes(status) || !ROLES.includes(role) || !LEVELS.includes(level))
       throw fail(400, "Choose a valid membership status, role and level.");
     if (!this.db.prepare("SELECT 1 FROM work_teams WHERE id=? AND division=?").get(id(team), id(division)))
       throw fail(400, "The selected team must belong to this division.");
@@ -152,6 +167,10 @@ class Workspace {
     return this.atomic(() => {
       this.db.prepare("INSERT INTO work_teams VALUES (?,?,?)").run(key, division, name);
       this.db.prepare("INSERT INTO work_channels VALUES (?,?,?,?)").run(`team-${key}`, name, "team", key);
+      this.db.prepare("INSERT INTO work_positions VALUES (?,?,?,?,?,'lead',?)")
+        .run(`lead-${key}`, `division-${division}`, name, division, key, "Assign clear tasks, support the team and review evidence.");
+      this.db.prepare("INSERT INTO work_positions VALUES (?,?,?,?,?,'contributor',?)")
+        .run(`contributors-${key}`, `lead-${key}`, `${name} contributors`, division, key, "Deliver assigned work with evidence and report blockers.");
       this.audit(actor, "team.create", key, { division, name });
       return this.org();
     });
@@ -269,12 +288,17 @@ class Workspace {
   }
   missions(owner) {
     const member = this.active(owner);
-    return this.db.prepare("SELECT * FROM work_missions ORDER BY at DESC LIMIT 1000").all()
-      .filter(mission => member.role === "director" || mission.division === member.division);
+    return this.db.prepare(`SELECT * FROM work_missions WHERE ?='director' OR division=? AND
+      CASE min_level WHEN 'orientation' THEN 0 WHEN 'learning' THEN 1 WHEN 'practitioner' THEN 2
+        WHEN 'mentor' THEN 3 WHEN 'steward' THEN 4 ELSE 5 END <= ? ORDER BY at DESC LIMIT 1000`)
+      .all(member.role, member.division, LEVELS.indexOf(member.level));
   }
   saveMission(owner, input, key, admin = false) {
+    this.hr.settleDue();
     const member = admin ? null : this.active(owner), previous = key && this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(id(key));
     if (key && !previous) throw fail(404, "Mission not found.");
+    if (!admin && previous && member.role !== "director" && (previous.division !== member.division
+      || LEVELS.indexOf(previous.min_level) > LEVELS.indexOf(member.level))) throw fail(404, "Mission unavailable at your current level.");
     const manager = admin || this.manages(member, previous || input);
     if (!manager && (!previous || previous.assignee !== owner)) throw fail(403, "Only the assignee or scoped manager can update this mission.");
     const status = input?.status;
@@ -289,20 +313,35 @@ class Workspace {
         const assigned = this.active(assignee);
         if (assigned.division !== division || assigned.team !== team) throw fail(400, "Assignee must belong to the mission team.");
       }
-      mission = { title: text(input.title, "Title", 160), body: text(input.body, "Mission brief", 6000), division, team, assignee };
+      if (previous?.status === "done" && assignee !== previous.assignee) throw fail(409, "Completed work cannot be reassigned.");
+      if (previous && this.db.prepare("SELECT 1 FROM work_paid_missions WHERE mission=?").get(previous.id)
+        && status !== "done") throw fail(409, "Paid completed work cannot be reopened. Create a new task.");
+      if (previous?.status === "done" && status !== "done" && this.db.prepare(`SELECT 1 FROM work_assignments a
+        JOIN work_payroll p ON a.address=p.address AND a.period=p.period WHERE a.mission=? AND a.completed IS NOT NULL`).get(previous.id))
+        throw fail(409, "Evaluated completed work cannot be reopened. Create a new task.");
+      const min_level = input.min_level || previous?.min_level || "learning";
+      if (!LEVELS.includes(min_level)) throw fail(400, "Choose a valid agenda learning level.");
+      if (assignee && LEVELS.indexOf(this.member(assignee).level) < LEVELS.indexOf(min_level))
+        throw fail(400, "Assignee has not reached the mission learning level.");
+      mission = { title: text(input.title, "Title", 160), body: text(input.body, "Mission brief", 6000), division, team, assignee, min_level };
     } else {
       const transitions = { ready: ["in_progress"], in_progress: ["review"], review: ["in_progress"] };
       if (!transitions[previous.status]?.includes(status)) throw fail(403, "Submit work for review; a manager must approve completion.");
       mission = previous;
     }
     const evidence = input.evidence === undefined ? previous?.evidence || "" : typeof input.evidence === "string" && input.evidence.length <= 6000 ? input.evidence : null;
-    if (evidence === null || status === "review" && !evidence.trim()) throw fail(400, "Provide completion evidence before review.");
+    if (evidence === null || ["review", "done"].includes(status) && !evidence.trim()) throw fail(400, "Provide completion evidence before review or approval.");
+    if (!admin && status === "done" && mission.assignee === owner) throw fail(403, "A different manager must approve your completed work.");
+    if (!admin && previous?.assignee === owner && (status === "cancelled" || mission.assignee !== owner))
+      throw fail(403, "A different manager must cancel or reassign your own task.");
     const missionId = key || crypto.randomUUID(), revision = (previous?.revision || 0) + 1;
     return this.atomic(() => {
-      this.db.prepare(`INSERT INTO work_missions VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+      this.db.prepare(`INSERT INTO work_missions(id,title,body,division,team,assignee,status,evidence,revision,at,min_level)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
         title=excluded.title,body=excluded.body,division=excluded.division,team=excluded.team,assignee=excluded.assignee,
-        status=excluded.status,evidence=excluded.evidence,revision=excluded.revision,at=excluded.at`)
-        .run(missionId, mission.title, mission.body, mission.division, mission.team, mission.assignee, status, evidence, revision, this.now());
+        status=excluded.status,evidence=excluded.evidence,revision=excluded.revision,at=excluded.at,min_level=excluded.min_level`)
+        .run(missionId, mission.title, mission.body, mission.division, mission.team, mission.assignee, status, evidence, revision, this.now(), mission.min_level);
+      this.hr.updateAssignment(previous, this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(missionId));
       this.audit(owner, "mission.save", missionId, { status, revision });
       return this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(missionId);
     });
@@ -323,6 +362,8 @@ class Workspace {
         const work = this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(mission);
         if (!work || work.status !== "done" || work.assignee !== owner) throw fail(409, "A mission grant requires approved completed work by this member.");
         if (this.db.prepare("SELECT 1 FROM work_grants WHERE mission=?").get(mission)) throw fail(409, "This mission has already received a grant.");
+        if (this.db.prepare("SELECT 1 FROM work_assignments WHERE mission=? AND cancelled=0").get(mission))
+          throw fail(409, "This assigned mission is evaluated through weekly payroll, not a separate mission grant.");
       }
       const supply = this.db.prepare("SELECT COALESCE(SUM(amount),0) AS n FROM notes_entries WHERE symbol='FTHS'").get().n;
       if (!Number.isSafeInteger(supply + amount) || !Number.isSafeInteger(this.notes.balance(owner, "FTHS") + amount)) throw fail(409, "Silver supply exceeds safe unit limits.");
@@ -336,7 +377,8 @@ class Workspace {
   silver() {
     const supply = this.db.prepare("SELECT COALESCE(SUM(amount),0) AS n FROM notes_entries WHERE symbol='FTHS'").get().n;
     return { symbol: "FTHS", name: "Featheral Silver", alias: "Featheral Salary", decimals: 0, supply,
-      market: this.markets.catalog().find(row => row.symbol === "FTHS"), automaticSalary: false, usdPeg: false };
+      market: this.markets.catalog().find(row => row.symbol === "FTHS"), automaticSalary: true, usdPeg: false,
+      salaryCycle: "weekly", completionThreshold: 60 };
   }
   startCall(owner, input) {
     this.channel(owner, input?.channel);
@@ -393,10 +435,14 @@ class Workspace {
       .all(key, after, owner).map(row => ({ ...row, body: JSON.parse(row.body) })) };
   }
   admin() {
+    this.hr.settleDue();
     return { org: this.org(), members: this.db.prepare("SELECT * FROM work_members ORDER BY at DESC LIMIT 1000").all(),
       missions: this.db.prepare("SELECT * FROM work_missions ORDER BY at DESC LIMIT 1000").all(),
       grants: this.db.prepare("SELECT * FROM work_grants ORDER BY at DESC LIMIT 100").all(),
-      audit: this.db.prepare("SELECT * FROM work_audit ORDER BY id DESC LIMIT 100").all(), silver: this.silver() };
+      audit: this.db.prepare("SELECT * FROM work_audit ORDER BY id DESC LIMIT 100").all(), silver: this.silver(),
+      payroll: this.db.prepare("SELECT * FROM work_payroll WHERE status!='no_assignments' ORDER BY period DESC LIMIT 1000").all(),
+      policy: this.hr.policy(), nextPolicy: this.hr.policy(weekStart(this.now()) + WEEK),
+      enrollments: this.db.prepare("SELECT address,experience,interests FROM work_enrollment").all() };
   }
 }
 module.exports = { Workspace, ROLES, LEVELS, STATES };

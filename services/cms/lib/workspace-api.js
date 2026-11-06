@@ -61,6 +61,11 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
   }));
   router.get("/me", run(async (req, res) => res.json(await workspace.me(owner(req)))));
   router.post("/apply", run(async (req, res) => res.json(await workspace.apply(owner(req), req.body))));
+  router.get("/learning", run((req, res) => res.json(workspace.hr.learning(owner(req)))));
+  router.post("/learning/:id/quiz", run((req, res) => {
+    limit(req, 30); res.json(workspace.hr.quiz(owner(req), req.params.id, req.body));
+  }));
+  router.get("/compensation", run((req, res) => res.json(workspace.hr.compensation(owner(req)))));
   router.use("/admin", (req, res, next) => {
     if (!adminHost(req)) return res.status(404).json({ error: "Use the administration site." });
     cmsAuth(req, res, next);
@@ -71,6 +76,8 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
   router.post("/admin/missions", run((req, res) => res.json(workspace.saveMission("admin", req.body, null, true))));
   router.put("/admin/missions/:id", run((req, res) => res.json(workspace.saveMission("admin", req.body, req.params.id, true))));
   router.post("/admin/grants", run((req, res) => res.json(workspace.grant("admin", req.body))));
+  router.put("/admin/payroll-policy", run((req, res) => res.json(workspace.hr.configure("admin", req.body))));
+  router.post("/admin/evaluate", run((req, res) => { workspace.hr.settleDue(); res.json(workspace.admin()); }));
   router.use((req, res, next) => {
     try { workspace.active(owner(req)); next(); } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
   });
@@ -78,6 +85,7 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
     const members = notes.db.prepare("SELECT address,role,level,division,team FROM work_members WHERE status='active' ORDER BY division,team,address LIMIT 1000").all();
     res.json({ members: await Promise.all(members.map(async member => ({ ...member, username: (await profileReader(member.address))?.username || null }))) });
   }));
+  router.get("/organization", run((req, res) => res.json(workspace.org())));
   router.get("/channels", run((req, res) => res.json({ channels: workspace.channels(owner(req)) })));
   router.post("/direct", run((req, res) => { limit(req, 60); res.json(workspace.direct(owner(req), req.body?.address)); }));
   router.get("/channels/:id/messages", run((req, res) => res.json({ messages: workspace.messages(owner(req), req.params.id, Number(req.query.after || 0)) })));
@@ -99,6 +107,7 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
   router.put("/channels/:id/document", run((req, res) => res.json(workspace.document(owner(req), req.params.id, req.body))));
   router.get("/missions", run((req, res) => res.json({ missions: workspace.missions(owner(req)) })));
   router.post("/missions", run((req, res) => res.json(workspace.saveMission(owner(req), req.body))));
+  router.post("/missions/:id/claim", run((req, res) => res.json(workspace.hr.claim(owner(req), req.params.id, req.body))));
   router.put("/missions/:id", run((req, res) => res.json(workspace.saveMission(owner(req), req.body, req.params.id))));
   router.get("/calls", run((req, res) => res.json({ calls: workspace.calls(owner(req)) })));
   router.post("/calls", run((req, res) => {

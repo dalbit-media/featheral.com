@@ -294,7 +294,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       if (status === 500) console.error('API request failed', error);
       if (response.headersSent) { response.destroy(error instanceof Error ? error : undefined); return; }
       if (status === 429) response.setHeader('Retry-After', error instanceof ApiError && error.message === 'Wait three seconds between messages.' ? '3'
-        : error instanceof ApiError && error.message === 'Global chat is busy. Wait a moment before sending.' ? '1' : '60');
+        : error instanceof ApiError && ['Global chat is busy. Wait a moment before sending.', 'Wait half a second between claims.', 'Actions are limited to four per second.'].includes(error.message) ? '1' : '60');
       if (status === 401 && request.url === '/api/state') response.setHeader('Set-Cookie', `${cookie}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`);
       reply(response, status, { error: status === 500 ? 'Internal server error.' : (error as Error).message });
     }

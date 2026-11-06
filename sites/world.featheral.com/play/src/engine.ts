@@ -91,7 +91,7 @@ export interface Game {
 }
 export function newGame(): Game {
   return {
-    version: 1, seed: Math.floor(Math.random() * 1000000), stock: { wood: 180, water: 2560, metal: 80, oil: 0 }, dollars: 0,
+    version: 1, seed: Math.floor(Math.random() * 1000000), stock: { wood: 0, water: 0, metal: 0, oil: 0 }, dollars: 0,
     stage: -1, population: 0, position: { x: 0, y: 0 }, home: null, explored: [],
     harvested: {}, light: 0, bank: false, townhall: false, relationship: 25, federation: null,
     votes: [], rewardAt: 0, contribution: 0, rewards: 0, log: ['Your expedition has arrived in the Verdant Reach.'],

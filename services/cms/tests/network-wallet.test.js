@@ -6,6 +6,7 @@ const html = fs.readFileSync(path.join(__dirname, '../../../sites/wallet.feather
 class Element {
   constructor(id = '') { this.id = id; this.value = ''; this.children = []; this.listeners = {}; this.style = { setProperty(name, value) { this[name] = value; } }; this.dataset = {}; this.textContent = ''; }
   get textContent() { return this.text + this.children.map(child => typeof child === 'string' ? child : child.textContent).join(''); }
+  get firstChild() { return this.children[0]; }
   set textContent(value) { this.text = String(value); this.children = []; }
   append(...nodes) { this.children.push(...nodes); }
   after() {}
@@ -19,8 +20,8 @@ class Element {
 }
 async function fixture(host, { embedded = false, storageBlocked = false, walletData = {}, publicAddress = null, markets = [], noProvider = false, vaultApi,
   activeAddress = null, followActive = false, worldAccount = null, noSession = embedded, view = 'assets', marketError = false,
-  selectionNonce = null, popupBlocked = false, marketDelay = false, manualReview = false, parentProvider, storageAccess,
-  readySelection = null, sessionExpired = false, payment = null } = {}) {
+  selectionNonce = null, authNonce = null, popupBlocked = false, marketDelay = false, manualReview = false,
+  sessionExpired = false, payment = null } = {}) {
   const nodes = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   nodes['wallet-review'].showModal = () => {
     nodes['wallet-review'].open = true;
@@ -49,7 +50,8 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     const body = options.body ? JSON.parse(options.body) : undefined;
     calls.push({ url, body, headers: options.headers });
     if (url.startsWith('/api/wallet/ui')) return reply(require('../../wallet/ui').walletUi(new URLSearchParams({ primary: require('../../wallet/ui').primaryFor(`${host}.localhost`),
-      view, ...(embedded ? { embedded: '1', parentOrigin: 'http://notes.localhost:8080' } : {}),
+      view, ...(embedded ? { parentOrigin: 'http://notes.localhost:8080' } : {}),
+      ...(authNonce ? { authNonce, parentOrigin: 'http://notes.localhost:8080' } : {}),
       ...(selectionNonce ? { selectionNonce, parentOrigin: 'http://gold.localhost:8080' } : {}),
       ...(publicAddress ? { address: publicAddress } : {}), followActive: followActive ? '1' : '0', ...(payment || {}) })));
     if (url.startsWith('/api/v1/notes/fth/accounts/')) return reply({ fthDollar: { available: '1000000000000000000' }, wallet: null });
@@ -98,41 +100,21 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
       : selector === '[role="tab"]' ? tabs : selector === 'form' ? ['send-form', 'swap-form', 'vault-form'].map(id => nodes[id]) : Object.values(nodes) };
   const clipboard = [];
   const context = { document, navigator: { clipboard: { writeText: async text => clipboard.push(text) } }, location: new URL(`http://${host}.localhost:8080/wallet/#${view === 'assets' ? 'swap' : view}`), localStorage: storage, sessionStorage: storage,
-    URL, URLSearchParams, TextEncoder, crypto, fetch, Date: class extends Date { static now() { return Date.now() + elapsed; } },
+    URL, URLSearchParams, TextEncoder, crypto, fetch, Event: class {}, Date: class extends Date { static now() { return Date.now() + elapsed; } },
     setInterval(callback, delay) { intervals.push({ callback, delay }); }, setTimeout, clearTimeout, btoa: value => Buffer.from(value).toString('base64'),
     console: { error: error => errors.push(error.message) }, history: { replaceState() {} },
-    window: { parent: { postMessage(data, origin) {
-      messages.push({ data, origin });
-      if (embedded && !noProvider && data.type === 'featheral:wallet-ready') queueMicrotask(() => {
-        for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
-          data: { type: 'featheral:wallet-provider-status', available: true } });
-      });
-      if (readySelection && data.type === 'featheral:wallet-ready') queueMicrotask(() => {
-        for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
-          data: { type: 'featheral:wallet-selection', address: readySelection } });
-      });
-      if ((parentProvider || !noProvider) && data.type === 'featheral:wallet-provider') {
-        Promise.resolve().then(() => parentProvider ? parentProvider(data.request) : context.window.ethereum.request(data.request)).then(result => {
-          for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
-            data: { type: 'featheral:wallet-provider-result', id: data.id, result } });
-        }, error => {
-          for (const listener of windowListeners.message || []) listener({ origin: 'http://notes.localhost:8080', source: context.window.parent,
-            data: { type: 'featheral:wallet-provider-result', id: data.id, error: error.message } });
-        });
-      }
-    } },
-      opener: { postMessage: (data, origin) => messages.push({ data, origin }) },
+    window: { opener: { postMessage: (data, origin) => messages.push({ data, origin }) },
       open(href) { if (popupBlocked) return null; const popup = { href }; popups.push(popup); return popup; },
+      dispatchEvent() {},
       addEventListener(name, callback) { (windowListeners[name] ||= []).push(callback); }, ethereum: { on() {}, async request({ method }) {
       if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [address];
       if (method === 'personal_sign') { if (rejectSignature) { rejectSignature = false; throw new Error('signature rejected'); } return 'mock-signature'; }
       throw new Error(`Unexpected provider method: ${method}`);
     } } } };
-  if (!embedded) context.window.parent = context.window;
+  context.window.parent = context.window;
   if (noProvider) delete context.window.ethereum;
   let reloads = 0;
   context.location.reload = () => { reloads++; };
-  if (storageAccess) document.requestStorageAccess = storageAccess;
   context.window.FeatheralPortfolio = require('../../../sites/wallet.featheral.com/portfolio-view');
   context.window.FeatheralSignIn = require('../../../sites/wallet.featheral.com/site-sign-in');
   if (vaultApi) {
@@ -142,7 +124,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   await new Promise(resolve => setImmediate(resolve));
   return { nodes, calls, document, errors, tips, store, intervals, popups, messages, clipboard, setFunded: value => { funded = value; },
     reloads: () => reloads,
-    message: async (data, { origin = 'http://notes.localhost:8080', source = context.window.parent } = {}) => {
+    message: async (data, { origin = 'http://notes.localhost:8080', source = context.window.opener } = {}) => {
       for (const listener of windowListeners.message || []) listener({ origin, source, data });
       await new Promise(resolve => setImmediate(resolve));
     },
@@ -217,19 +199,19 @@ test('without an injected provider the built-in wallet unlocks and authenticates
   await ui.nodes['vault-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(ui.errors, []);
-  assert.equal(ui.nodes.connect.textContent, 'Disconnect');
+  assert.equal(ui.nodes.connect.textContent, 'Disconnect wallet');
   assert.equal(ui.store.has('featheral-creation-token'), false);
   assert.equal(ui.nodes['vault-password'].value, '');
   assert.equal(ui.calls.find(call => call.url.endsWith('/login')).body.signature, 'local-owner-signature');
   ui.advanceTime(600001); ui.interact();
-  assert.equal(ui.nodes.connect.textContent, 'Connect wallet');
+  assert.equal(ui.nodes.connect.textContent, 'Unlock built-in wallet');
   assert.match(ui.nodes['vault-status'].textContent, /inactivity/);
   assert.match(ui.nodes['vault-state'].textContent, /Locked/);
   ui.nodes['vault-password'].value = 'test vault password';
   await ui.nodes['vault-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   await ui.nodes['vault-lock'].fire('click');
-  assert.equal(ui.nodes.connect.textContent, 'Connect wallet');
+  assert.equal(ui.nodes.connect.textContent, 'Unlock built-in wallet');
   assert.ok(ui.calls.some(call => call.url.endsWith('/logout')));
 });
 test('site wallet authorizes an existing extension inline and never sends without explicit in-panel approval', async () => {
@@ -263,7 +245,7 @@ test('site wallet authorizes an existing extension inline and never sends withou
 test('a restoring parent selection never resets an existing session and expiration retains the public connection', async () => {
   const address = '0x' + '11'.repeat(20);
   const ui = await fixture('dollar', { embedded: true, noSession: false, followActive: true,
-    activeAddress: address, readySelection: address });
+    activeAddress: address });
   assert.equal(ui.nodes['wallet-connect'].title, 'Disconnect wallet');
   assert.equal(ui.calls.some(call => call.url.endsWith('/logout') || call.url.endsWith('/login')), false);
   assert.deepEqual(ui.errors, []);
@@ -274,28 +256,10 @@ test('a restoring parent selection never resets an existing session and expirati
   assert.equal(expired.store.has('featheral-creation-token'), false);
   assert.match(expired.nodes.status.textContent, /authorization expired/);
 });
-test('inline provider bridge restores authorized accounts and signs only after deliberate actions', async () => {
-  const providerCalls = [], address = '0x' + '11'.repeat(20);
-  const ui = await fixture('gold', { embedded: true, noProvider: true, followActive: true,
-    parentProvider: async request => { providerCalls.push(request); return request.method === 'personal_sign' ? 'mock-signature' : [address]; } });
-  await ui.message({ type: 'featheral:wallet-provider-status', available: true }, { origin: 'https://evil.example' });
-  assert.equal(providerCalls.length, 0);
-  await ui.message({ type: 'featheral:wallet-provider-status', available: true });
-  assert.deepEqual(providerCalls.map(call => call.method), ['eth_accounts']);
-  assert.ok(ui.calls.some(call => call.url === '/api/wallet/accounts/' + address));
-  await ui.nodes.connect.fire('click');
-  assert.ok(providerCalls.some(call => call.method === 'personal_sign'));
-  assert.equal(ui.nodes['wallet-connect'].title, 'Disconnect wallet');
-  assert.ok(ui.messages.filter(message => message.data.type === 'featheral:wallet-provider')
-    .every(message => Object.keys(message.data).sort().join(',') === 'id,request,type'));
-  assert.ok(!ui.messages.some(message => message.data.token || message.data.password));
-  assert.deepEqual(ui.errors, []);
-  assert.equal(ui.popups.length, 0);
-});
-test('site sign-in approval is inline, rejects financial messages and returns only a signature', async () => {
+test('top-level site approval trusts only its opener, rejects financial messages and returns only a signature', async () => {
   const address = '0x' + '11'.repeat(20), nonce = 'ab'.repeat(16);
   const challenge = require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), Date.now());
-  const ui = await fixture('notes', { embedded: true, followActive: true });
+  const ui = await fixture('notes', { authNonce: nonce, followActive: true });
   await ui.message({ type: 'featheral:wallet-auth-start', nonce }, { source: {} });
   assert.notEqual(ui.nodes['site-approval'].hidden, false);
   await ui.message({ type: 'featheral:wallet-auth-start', nonce });
@@ -309,7 +273,7 @@ test('site sign-in approval is inline, rejects financial messages and returns on
   const result = ui.messages.find(message => message.data.type === 'featheral:wallet-signature');
   assert.equal(result.data.signature, 'mock-signature');
   assert.deepEqual(Object.keys(result.data).sort(), ['address', 'nonce', 'signature', 'type']);
-  const rejected = await fixture('notes', { embedded: true, followActive: true });
+  const rejected = await fixture('notes', { authNonce: nonce, followActive: true });
   await rejected.message({ type: 'featheral:wallet-auth-start', nonce });
   await rejected.message({ type: 'featheral:wallet-auth', nonce, address, message: 'Send all funds' });
   assert.match(rejected.messages.at(-1).data.error, /standard Featheral sign-in/);
@@ -317,16 +281,13 @@ test('site sign-in approval is inline, rejects financial messages and returns on
   assert.ok(!rejected.messages.some(message => message.data.signature));
   assert.equal(ui.popups.length, 0);
 });
-test('existing built-in storage can be requested inside Account and denial never redirects', async () => {
-  const ui = await fixture('notes', { embedded: true, noProvider: true, storageAccess: async () => {} });
-  assert.equal(ui.nodes['wallet-storage'].hidden, false);
-  await ui.nodes['wallet-storage'].fire('click');
-  assert.equal(ui.reloads(), 1);
-  const denied = await fixture('notes', { embedded: true, noProvider: true,
-    storageAccess: async () => { throw new Error('Permission denied'); } });
-  await denied.nodes['wallet-storage'].fire('click');
-  assert.match(denied.nodes['wallet-storage-status'].textContent, /restore your encrypted backup/);
-  assert.equal(denied.reloads(), 0); assert.equal(denied.popups.length, 0);
+test('site approval waits for a connected signer rather than committing a stale public selection', async () => {
+  const nonce = 'ab'.repeat(16);
+  const ui = await fixture('notes', { authNonce: nonce, noSession: true, activeAddress: '0x' + '11'.repeat(20) });
+  await ui.message({ type: 'featheral:wallet-auth-start', nonce });
+  assert.equal(ui.messages.some(message => message.data.type === 'featheral:wallet-auth-ready'), false);
+  await ui.nodes['connect'].fire('click');
+  assert.equal(ui.messages.filter(message => message.data.type === 'featheral:wallet-auth-ready').length, 1);
 });
 test('wallet tabs expose one panel and one keyboard stop, with wrapping arrows and Home/End navigation', async () => {
   const ui = await fixture('notes');
@@ -356,7 +317,7 @@ test('without an extension the central hero offers creation and account links op
     verifiedLinks() { return []; }
   }
   const ui = await fixture('wallet', { noProvider: true, noSession: true, vaultApi: { Vault: EmptyVault } });
-  assert.equal(ui.nodes['wallet-connect'].title, 'Connect / create wallet');
+  assert.equal(ui.nodes['wallet-connect'].title, 'Create built-in wallet');
   await ui.nodes['wallet-connect'].fire('click');
   assert.equal(ui.nodes.account.hidden, false);
   assert.equal(ui.nodes['local-wallet'].open, true);
@@ -372,9 +333,9 @@ test('without an extension the central hero offers creation and account links op
   assert.equal(existing.nodes['vault-action'].value, 'unlock');
   assert.deepEqual(existing.errors, []);
 });
-test('embedded connection stays inline above tabs and exposes Account creation without a new window', async () => {
+test('full wallet connection stays above tabs and exposes Account creation', async () => {
   const ui = await fixture('gold', { embedded: true, noSession: true });
-  assert.equal(ui.nodes['wallet-connect-action'].hidden, false);
+  assert.notEqual(ui.nodes['wallet-connect-action'].hidden, true);
   assert.ok(html.indexOf('id="wallet-connect-action"') < html.indexOf('role="tablist"'));
   assert.equal(ui.nodes['full-wallet'], undefined);
   assert.equal(ui.popups.length, 0);
@@ -382,14 +343,14 @@ test('embedded connection stays inline above tabs and exposes Account creation w
 test('compact wallet connection icon exposes its state and keeps pricing explanations out of visible estimates', async () => {
   for (const [options, state, label] of [
     [{}, 'authorized', 'Disconnect wallet'],
-    [{ noSession: true, noProvider: true }, 'disconnected', 'Connect / create wallet'],
-    [{ noSession: true, activeAddress: '0x' + '11'.repeat(20) }, 'selected', 'Authorize wallet'],
+    [{ noSession: true, noProvider: true }, 'disconnected', 'Create built-in wallet'],
+    [{ noSession: true, activeAddress: '0x' + '11'.repeat(20) }, 'selected', 'Connect extension'],
   ]) {
     const ui = await fixture('notes', options), button = ui.nodes['wallet-connect'];
     assert.equal(button.dataset.state, state);
     assert.equal(button['aria-label'], label);
     assert.equal(button.dataset.tooltip, label);
-    assert.equal(button.textContent, '');
+    assert.equal(ui.nodes['wallet-connect-label'].textContent, label);
     assert.deepEqual(ui.errors, []);
   }
   const ui = await fixture('gold', { walletData: { portfolio: { totals: { FTHG: { value: '1', partial: true, unpriced: ['FTHZ'] } },
@@ -415,34 +376,14 @@ test('read-only address field copies the full active address and never copies a 
   assert.deepEqual(empty.clipboard, []);
   assert.match(empty.nodes.status.textContent, /Connect your wallet first/);
 });
-test('embedded themes accept only bounded colors from the configured parent and never alter public balances', async () => {
-  const ui = await fixture('notes', { embedded: true, activeAddress: '0x1111111111111111111111111111111111111111' });
-  const initial = ui.document.body.style['--brand'], reads = ui.calls.length;
-  const theme = { accent: '#655bd4', panel: '#ffffff', text: '#202337', background: '#f6f7fb',
-    muted: '#70758b', line: '#e4e6ef', button: '#f0f0fa', onAccent: '#ffffff', scheme: 'light' };
-  ui.themeMessage(theme, { origin: 'https://evil.example' });
-  ui.themeMessage(theme, { source: {} });
-  assert.equal(ui.document.body.style['--brand'], initial);
-  ui.themeMessage(theme);
-  assert.equal(ui.document.body.style['--brand'], theme.accent);
-  assert.equal(ui.document.body.style['--panel'], '#ffffff');
-  assert.equal(ui.document.body.style.colorScheme, 'light');
-  ui.themeMessage({ accent: 'url(https://evil.example/track)', panel: '#fff;background:red', text: 'x'.repeat(81), scheme: 'invalid' });
-  assert.equal(ui.document.body.style['--brand'], theme.accent);
-  assert.equal(ui.document.body.style['--panel'], '#ffffff');
-  assert.equal(ui.document.body.style['--txt'], '#202337');
-  assert.equal(ui.document.body.style.colorScheme, 'light');
-  assert.equal(ui.calls.length, reads);
-  assert.deepEqual(ui.errors, []);
-});
-test('standalone wallet defaults to gold with visible connection state while embeds keep their host accent', async () => {
+test('standalone wallet defaults to gold with visible connection state while site windows keep their host accent', async () => {
   const disconnected = await fixture('wallet', { noSession: true, noProvider: true });
   assert.equal(disconnected.document.body.style['--brand'], '#e2b13c');
-  assert.equal(disconnected.nodes['wallet-connect-label'].textContent, 'Connect wallet');
+  assert.equal(disconnected.nodes['wallet-connect-label'].textContent, 'Create built-in wallet');
   const connected = await fixture('wallet');
-  assert.equal(connected.nodes['wallet-connect-label'].textContent, 'Disconnect');
+  assert.equal(connected.nodes['wallet-connect-label'].textContent, 'Disconnect wallet');
   const readOnly = await fixture('wallet', { publicAddress: '0x' + '22'.repeat(20) });
-  assert.equal(readOnly.nodes['wallet-connect-label'].textContent, 'Read-only');
+  assert.equal(readOnly.nodes['wallet-connect-label'].textContent, 'Read-only wallet');
   assert.equal(readOnly.nodes['wallet-connect'].disabled, true);
   const embedded = await fixture('notes', { embedded: true });
   assert.equal(embedded.document.body.style['--brand'], require('../../../shared/site-colors.json')['notes.featheral.com'].color);
@@ -617,7 +558,7 @@ test('Gold estimates remain visible at four decimal precision independently of t
     assert.equal(ui.nodes['portfolio-primary'].textContent, `≈ ${gold}`);
   }
 });
-test('public central-wallet selection returns amounts despite isolated iframe storage, without a session', async () => {
+test('central public selection follows wallet-origin storage changes without restoring a signing session', async () => {
   const address = '0x' + '22'.repeat(20);
   for (const host of ['gold', 'dollar']) {
     const ui = await fixture(host, { embedded: true, followActive: true, noSession: true, noProvider: true });
@@ -626,10 +567,9 @@ test('public central-wallet selection returns amounts despite isolated iframe st
     await ui.selectAccount(address, { fromParent: true, origin: 'https://evil.example' });
     await ui.selectAccount(address, { origin: 'http://notes.localhost:8080', source: {} });
     assert.ok(!ui.calls.some(call => call.url.startsWith('/api/wallet/accounts/')));
-    await ui.selectAccount(address, { fromParent: true, origin: 'http://notes.localhost:8080' });
+    await ui.storageChange('featheral-wallet-active-account', address);
     assert.ok(ui.calls.some(call => call.url === '/api/wallet/accounts/' + address));
-    assert.equal(ui.messages.at(-1).data.type, 'featheral:wallet-selected');
-    assert.deepEqual(Object.keys(ui.messages.at(-1).data).sort(), ['address', 'type']);
+    assert.equal(ui.messages.length, 0);
     assert.ok(!ui.calls.some(call => call.body || call.headers?.['x-creation-token']));
     assert.equal(ui.store.has('featheral-creation-token'), false);
     assert.deepEqual(ui.errors, []);
@@ -638,12 +578,12 @@ test('public central-wallet selection returns amounts despite isolated iframe st
     activeAddress: '0x' + '11'.repeat(20) });
   await stale.selectAccount(address, { fromParent: true, origin: 'https://evil.example' });
   assert.ok(!stale.calls.some(call => call.url === '/api/wallet/accounts/' + address));
-  await stale.selectAccount(address, { fromParent: true, origin: 'http://notes.localhost:8080' });
+  await stale.storageChange('featheral-wallet-active-account', address);
   assert.ok(stale.calls.some(call => call.url === '/api/wallet/accounts/' + address));
   const next = '0x' + '33'.repeat(20);
   await stale.storageChange('featheral-wallet-active-account', next);
   assert.equal(stale.calls.filter(call => call.url.startsWith('/api/wallet/accounts/')).at(-1).url, '/api/wallet/accounts/' + next);
-  assert.equal(stale.messages.at(-1).data.address, next);
+  assert.equal(stale.messages.length, 0);
   assert.equal(stale.popups.length, 0);
 });
 test('slow market discovery never delays amounts or scheduled balance updates and recovery clears only its warning', async () => {
@@ -906,7 +846,7 @@ test('Exchange custody appears separately and never increases wallet spendable h
   assert.equal(ui.nodes['trading-holdings'].hidden, false);
   assert.match(ui.nodes['trading-holdings'].textContent, /not available to send or swap.*77 FTHX.*5 FTHA/);
 });
-test('visible embedded wallets refresh public totals every 30 seconds and accept only their configured parent update hint', async () => {
+test('visible full wallets refresh public totals every 30 seconds and ignore all parent update hints', async () => {
   const address = '0x1111111111111111111111111111111111111111';
   const ui = await fixture('notes', { embedded: true, publicAddress: address });
   const poll = ui.intervals.find(timer => timer.delay === 30000);
@@ -922,6 +862,8 @@ test('visible embedded wallets refresh public totals every 30 seconds and accept
   await ui.notifyUpdate({ origin: 'https://evil.example' }); await ui.notifyUpdate({ source: {} });
   assert.equal(reads(), initial + 1);
   await ui.notifyUpdate();
+  assert.equal(reads(), initial + 1);
+  await poll.callback();
   assert.equal(reads(), initial + 2);
   await ui.nodes.refresh.fire('click');
   assert.equal(reads(), initial + 3);
