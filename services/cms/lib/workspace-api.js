@@ -31,6 +31,10 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
       return res.status(403).json({ error: "Same-origin App requests are required." });
     if (req.hostname.startsWith("silver.") && req.path !== "/silver")
       return res.status(404).json({ error: "Only the public Silver summary is available on this host." });
+    if (req.path !== "/silver") {
+      try { workspace.hr.assertReady(); }
+      catch (error) { return res.status(error.status || 500).json({ error: error.message }); }
+    }
     next();
   });
   async function notify(addresses, title, body, url = "/") {

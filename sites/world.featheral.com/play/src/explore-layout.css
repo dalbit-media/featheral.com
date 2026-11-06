@@ -18,7 +18,7 @@
 #app.explore-page .water-upkeep-row progress{height:4px;opacity:0}
 #app.explore-page .water-upkeep-row .completion-meter::before,#app.explore-page .water-upkeep-row .completion-meter::after{content:"";position:absolute;bottom:0;left:0;height:4px;border-radius:4px;pointer-events:none}
 #app.explore-page .water-upkeep-row .completion-meter::before{width:100%;background:#a8d9ec18}
-#app.explore-page .water-upkeep-row .completion-meter::after{width:var(--completion-progress,0%);background:#a8d9ec;transition:width 1s linear}
+#app.explore-page .water-upkeep-row .completion-meter::after{width:100%;background:#a8d9ec;transform:scaleX(var(--completion-scale,0));transform-origin:left;transition:transform 1s linear}
 #app.explore-page .water-upkeep-row .completion-meter.awaiting-confirmation::after{background:#d7bc7c}
 #app.explore-page .water-upkeep-row>a{display:flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;color:#a8d9ec;border-radius:6px}
 #app.explore-page .water-upkeep-row>a:hover{background:#ffffff0b}

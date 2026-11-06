@@ -221,7 +221,13 @@
 .completion-caption>span{margin-right:auto}
 .completion-caption strong{font-size:10px;color:#d9e7ce;font-weight:500;overflow-wrap:anywhere}
 .completion-caption small{font-size:9px;color:#a6c58e;font-variant-numeric:tabular-nums}
-.completion-meter progress{height:7px;margin:0;width:100%}
+.completion-meter{position:relative}
+.completion-meter progress{height:7px;margin:0;width:100%;opacity:0}
+.completion-meter::before,.completion-meter::after{content:"";position:absolute;bottom:0;left:0;width:100%;height:7px;border-radius:4px;pointer-events:none}
+.completion-meter::before{background:#c5e7b418}
+.completion-meter::after{background:var(--mint);transform:scaleX(var(--completion-scale,0));transform-origin:left;transition:transform 1s linear}
+.completion-meter.awaiting-confirmation::after{background:#d7bc7c}
+@media(prefers-reduced-motion:reduce){.completion-meter::after{transition:none}}
 .completion-meter.compact{margin-top:auto;gap:6px}
 .completion-meter.compact .completion-caption{justify-content:space-between;gap:4px}
 .completion-meter.compact .completion-caption>span{display:none}

@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { stripTypeScriptTypes } from 'node:module';
 import { formatPublicTotal, publicSite, resolvePublicSite } from './site.ts';
 import { landingSeo, whitepaperPage, worldProfileAssets } from '../vite.config.ts';
 import { newGame, stages, terrainDetails } from './engine.ts';
@@ -22,6 +23,22 @@ import { waterFacilityKeys, waterFacilities } from './water-facilities.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
+
+test('calendar animation bounds updates to ten per second and pauses when hidden or reduced-motion', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const code = stripTypeScriptTypes(main.slice(main.indexOf('let clockFrame:'), main.indexOf('function scheduleClockAnimation()')));
+  let timestamp = 0, updates = 0;
+  const context = {
+    document: { hidden: false }, clockMotion: { matches: false }, state: { serverTime: 0, clockSpeed: 33.6 },
+    performance: { now: () => timestamp }, synchronizedAt: 0, clockCalendar: {},
+    displayServerTime: () => timestamp, updateClockTime: () => { updates++; }, requestAnimationFrame: () => 1,
+  };
+  const tick = runInNewContext(`${code}; animateClock;`, context);
+  for (timestamp = 0; timestamp < 1000; timestamp += 10) tick(timestamp);
+  assert.equal(updates, 10);
+  context.document.hidden = true; timestamp = 1000; tick(timestamp); assert.equal(updates, 10);
+  context.document.hidden = false; context.clockMotion.matches = true; tick(timestamp); assert.equal(updates, 10);
+});
 
 test('deadline refresh includes off-cycle crews and retries without polling hidden or busy views', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -917,7 +934,7 @@ test('Explore Water upkeep uses a compact daily row with server-timed animated p
   assert.match(main, /translate\('Water facilities', language\)/);
   assert.match(main, /class="water-shortage-text" role="status"/);
   assert.match(css, /\.water-upkeep-row\{[^}]*min-height:44px/);
-  assert.match(css, /\.completion-meter::after\{[^}]*transition:width 1s linear/);
+  assert.match(css, /\.completion-meter::after\{[^}]*transform:scaleX\(var\(--completion-scale,0\)\)[^}]*transition:transform 1s linear/);
   assert.match(main, /el\.style\.setProperty\('--completion-progress', `\$\{progress\.percent\}%`\)/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
 });

@@ -27,6 +27,14 @@ const siteTeams = [
 class WorkspaceHR {
   constructor(workspace) {
     this.work = workspace; this.db = workspace.db;
+    if (this.db.readOnlyReplica) {
+      const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+      this.schemaReady = ["work_enrollment", "work_learning", "work_positions", "work_pay_policy",
+        "work_assignments", "work_payroll", "work_paid_missions"].every(name => tables.has(name))
+        && this.db.prepare("PRAGMA table_info(work_missions)").all().some(row => row.name === "min_level");
+      if (!this.schemaReady) console.warn("Featheral App HR is unavailable on this read-only replica. Initialize the workspace on the writable source and sync a fresh database snapshot.");
+      return;
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS work_enrollment(address TEXT PRIMARY KEY,experience TEXT NOT NULL,interests TEXT NOT NULL,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_learning(address TEXT NOT NULL,course TEXT NOT NULL,score INTEGER NOT NULL,
@@ -73,6 +81,10 @@ class WorkspaceHR {
         }
       });
     }
+    this.schemaReady = true;
+  }
+  assertReady() {
+    if (!this.schemaReady) throw fail(503, "App learning and HR schema is missing from this read-only replica. Initialize the workspace on the writable source and sync a fresh database snapshot.");
   }
   start() {
     if (this.timer || this.db.readOnlyReplica) return;

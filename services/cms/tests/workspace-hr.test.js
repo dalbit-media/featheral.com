@@ -6,6 +6,34 @@ const { Creation } = require("../../notes/creation");
 const { Workspace } = require("../../notes/workspace");
 const { courses } = require("../../notes/work-learning");
 const { weekStart, WEEK } = require("../../notes/workspace-hr");
+test("an older read-only snapshot starts without creating or migrating HR tables", t => {
+  const notes = new Notes(":memory:"), creation = new Creation(notes, {});
+  t.after(() => notes.close());
+  const writer = new Workspace(notes, creation.markets);
+  for (const name of ["work_enrollment", "work_learning", "work_positions", "work_pay_policy",
+    "work_assignments", "work_payroll", "work_paid_missions"]) notes.db.exec(`DROP TABLE ${name}`);
+  notes.db.exec("ALTER TABLE work_missions DROP COLUMN min_level");
+  const before = notes.db.prepare("SELECT sql FROM sqlite_master ORDER BY name").all();
+  notes.db.readOnlyReplica = true; notes.db.exec("PRAGMA query_only=ON");
+  const warnings = t.mock.method(console, "warn", () => {});
+  const replica = new Workspace(notes, creation.markets);
+  assert.throws(() => replica.hr.assertReady(), error => error.status === 503 && /writable source/.test(error.message));
+  replica.hr.start(); assert.equal(replica.hr.timer, undefined);
+  assert.deepEqual(notes.db.prepare("SELECT sql FROM sqlite_master ORDER BY name").all(), before);
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.equal(writer.hr.schemaReady, true);
+});
+test("a current read-only snapshot preserves HR records and disables evaluations", t => {
+  const notes = new Notes(":memory:"), creation = new Creation(notes, {});
+  t.after(() => notes.close());
+  const writer = new Workspace(notes, creation.markets);
+  const before = writer.org();
+  notes.db.readOnlyReplica = true; notes.db.exec("PRAGMA query_only=ON");
+  const replica = new Workspace(notes, creation.markets);
+  replica.hr.assertReady(); replica.hr.start(); replica.hr.settleDue();
+  assert.equal(replica.hr.timer, undefined);
+  assert.deepEqual(replica.org(), before);
+});
 function fixture(t) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), profiles = new Map();
   let now = Date.UTC(2026, 10, 2, 12);

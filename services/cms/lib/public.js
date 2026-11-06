@@ -1303,15 +1303,15 @@ class PublicSite {
 class Curation {
   constructor(file, notesFile, siteKey) {
     this.db = open(file);
-    this.db.exec(`
+    if (!this.db.readOnlyReplica) this.db.exec(`
       CREATE TABLE IF NOT EXISTS rounds (type TEXT PRIMARY KEY, round INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS votes (post_id INTEGER NOT NULL, type TEXT NOT NULL, round INTEGER NOT NULL, vote TEXT NOT NULL, at INTEGER NOT NULL,
         PRIMARY KEY (post_id, type, round));
       CREATE TABLE IF NOT EXISTS trash (post_id INTEGER PRIMARY KEY, type TEXT, round INTEGER, at INTEGER NOT NULL, title TEXT,
         files TEXT NOT NULL, missed TEXT NOT NULL, attachments TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, shared INTEGER NOT NULL DEFAULT 0);
     `);
-    if (!this.db.prepare('PRAGMA table_info(trash)').all().some((c) => c.name === 'dup_of')) this.db.exec('ALTER TABLE trash ADD COLUMN dup_of INTEGER');
-    this.db.exec(`
+    if (!this.db.readOnlyReplica && !this.db.prepare('PRAGMA table_info(trash)').all().some((c) => c.name === 'dup_of')) this.db.exec('ALTER TABLE trash ADD COLUMN dup_of INTEGER');
+    if (!this.db.readOnlyReplica) this.db.exec(`
       CREATE TABLE IF NOT EXISTS wallet_nonces (address TEXT PRIMARY KEY, nonce TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS wallet_sessions (token TEXT PRIMARY KEY, address TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL, address TEXT NOT NULL, content TEXT NOT NULL, at INTEGER NOT NULL);
@@ -1334,7 +1334,7 @@ class Curation {
         PRIMARY KEY(collection_id,post_id));
     `);
     // Added after member posts first shipped: the YouTube video a member post plays.
-    if (!this.db.prepare('PRAGMA table_info(member_posts)').all().some((c) => c.name === 'video')) this.db.exec('ALTER TABLE member_posts ADD COLUMN video TEXT');
+    if (!this.db.readOnlyReplica && !this.db.prepare('PRAGMA table_info(member_posts)').all().some((c) => c.name === 'video')) this.db.exec('ALTER TABLE member_posts ADD COLUMN video TEXT');
     this.siteKey = siteKey;
     this.notes = !!notesFile;
     this.ledgerTable = 'qprn_ledger';

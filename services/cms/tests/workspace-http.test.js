@@ -8,11 +8,13 @@ const { Wallet } = require("ethers");
 const { Notes } = require("../../notes/ledger");
 const { Creation } = require("../../notes/creation");
 const { workspaceApi } = require("../lib/workspace-api");
+const { Workspace } = require("../../notes/workspace");
 const { courses } = require("../../notes/work-learning");
 const { WEEK, weekStart } = require("../../notes/workspace-hr");
 
-async function fixture(t, env = {}) {
+async function fixture(t, env = {}, prepareNotes = () => {}) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), profiles = new Map(), deliveries = [];
+  prepareNotes(notes, creation.markets);
   const { router, workspace } = workspaceApi({ notes, markets: creation.markets, profileReader: address => profiles.get(address),
     env, cmsAuth: (req, res, next) => req.get("authorization") === "Basic fixture-admin" ? next() : res.status(401).json({ error: "Admin authorization required" }),
     pushTransport: { setVapidDetails() {}, async sendNotification(subscription, payload) { deliveries.push({ subscription, payload: JSON.parse(payload) }); } } });
@@ -51,6 +53,24 @@ async function fixture(t, env = {}) {
   }
   return { notes, creation, workspace, call, login, profiles, deliveries };
 }
+test("App HTTP reports an unmigrated replica explicitly while public Silver remains readable", async t => {
+  t.mock.method(console, "warn", () => {});
+  const f = await fixture(t, {}, (notes, markets) => {
+    new Workspace(notes, markets);
+    notes.db.exec("DROP TABLE work_learning");
+    notes.db.readOnlyReplica = true; notes.db.exec("PRAGMA query_only=ON");
+  });
+  for (const [path, body, options] of [
+    ["/learning"], ["/me"], ["/organization"], ["/challenge", { address: Wallet.createRandom().address }],
+    ["/admin", undefined, { host: "admin.localhost", admin: true }],
+  ]) {
+    const result = await f.call(path, body, options);
+    assert.equal(result.status, 503);
+    assert.match(result.body.error, /writable source.*fresh database snapshot/);
+  }
+  assert.equal((await f.call("/silver", undefined, { host: "silver.localhost" })).status, 200);
+  assert.equal(f.notes.db.prepare("SELECT name FROM sqlite_master WHERE name='work_learning'").get(), undefined);
+});
 test("public enrollment and quizzes qualify membership without any admin approval; payroll revokes level-scoped access", async t => {
   const f = await fixture(t);
   let now = Date.UTC(2026, 10, 2, 12); f.workspace.now = () => now;

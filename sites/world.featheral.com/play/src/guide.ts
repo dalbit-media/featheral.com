@@ -55,7 +55,7 @@ export const guideTopics = [
     tip: 'Open Federation for membership, population, gifts and assembly actions.', path: '/communicate/', action: 'Inbox' },
   { id: 'clock', title: 'Your world keeps moving.', icon: 'sun', tag: 'Time & offline play',
     intro: 'Daily needs. Weekly deliveries. A year of changing seasons.',
-    paragraphs: ['A game week takes one real minute at the default 168x clock speed. Work completes continuously; harder expeditions take two or three minutes. Existing saves and earned balances are preserved.',
+    paragraphs: ['A game week takes five real minutes at the default 33.6x clock speed. Work completes continuously; harder expeditions take ten or fifteen minutes. Existing saves and earned balances are preserved.',
       'Gathering and Water consumption continue offline. Active collection items automate paid pickups until expiry; shortages never delete residents.',
       'The calendar has 52 weeks per year and 13 weeks per season. A compact clock shows game time and four square season indicators fill from bottom to top as the year passes. Seven weekday segments track progress through the week. The current season is highlighted. Server updates arrive every 30–35 real seconds; a stale clock pauses its display and shows a sync warning rather than inventing progress.'],
     tip: 'Before leaving: check daily Water demand, weekly deliveries and transport funding.', path: '/settlement/#production', action: 'Storage' },

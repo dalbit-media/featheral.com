@@ -269,6 +269,13 @@ polling and Gold execution, removes financial private keys from the runtime, ope
 persistent SQLite read-only and rejects journal transactions and HTTP mutations.
 Replica startup skips seeding/upgrades and public page views do not increment
 stored counters. Target server Settings and encryption keys remain its own.
+App workspace and HR initialization also skip all schema writes on replicas.
+Public curation initialization skips table creation and column upgrades as well.
+An older snapshot without the learning/payroll tables or mission learning-level
+column does not prevent gateway startup: App endpoints return an explicit 503,
+while the public Silver summary remains readable. Initialize the workspace on
+the writable source, then sync a fresh database snapshot and restart the replica.
+Do not remove replica markers or enable writes to repair a reader's schema.
 Dollar startup also skips legacy wallet-profile imports when profile storage is
 read-only; it serves the profiles already present in the snapshot.
 Code deployment skips published CMS imports on a read-only replica, preserving

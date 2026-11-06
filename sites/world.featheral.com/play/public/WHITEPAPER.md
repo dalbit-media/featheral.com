@@ -283,12 +283,12 @@ Development and production use the same continuous clock and identical game rate
 
 | Mode | Server game time |
 |---|---|
-| Production | 168 server seconds per real second |
-| Local development | 168 server seconds per real second |
+| Production | 33.6 server seconds per real second |
+| Local development | 33.6 server seconds per real second |
 
 The clock drives resource accrual, recruitment, world days, seasons, weather, and temperature together. Recruitment takes the same full week as basic collection or exploration.
 
-A work week is seven world days, or **168 server minutes**: **one real minute at 168x**. Harder expeditions take two or three real minutes. Crews, expeditions and recruitment retain their game-time deadlines across restarts and clock migrations. Existing elapsed time is counted at the previous speed before switching. Real-time action limits and a 500-millisecond collection cooldown remain independent of this clock.
+A work week is seven world days, or **168 server minutes**: **five real minutes at 33.6x**. Harder expeditions take ten or fifteen real minutes. Crews, expeditions and recruitment retain their game-time deadlines across restarts and clock migrations. Existing elapsed time is counted at the previous speed before switching. Real-time action limits and a 500-millisecond collection cooldown remain independent of this clock.
 
 The clock anchor and speed persist. Restarting or changing speed preserves the game timeline rather than resetting it. Legacy rate-multiplied records migrate without discarding pending resources or remaining recruitment work.
 

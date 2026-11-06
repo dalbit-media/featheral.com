@@ -6,6 +6,23 @@ const { SitePages } = require('../lib/site-pages');
 const root = path.resolve(__dirname, '../../..');
 const source = fs.readFileSync(path.join(root, 'sites', 'x.featheral.com', 'site.js'), 'utf8');
 
+test('public curation startup never creates tables or migrates an older read-only snapshot', t => {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const implementation = fs.readFileSync(path.join(root, 'services', 'cms', 'lib', 'public.js'), 'utf8');
+  const code = implementation.slice(implementation.indexOf('class Curation {'), implementation.indexOf('module.exports ='));
+  const Curation = vm.runInNewContext(`${code}; Curation`, { open: () => db });
+  new Curation(':memory:', null, 'test');
+  db.exec('DROP TABLE saved_media; DROP TABLE media_collections; ALTER TABLE trash DROP COLUMN dup_of; ALTER TABLE member_posts DROP COLUMN video');
+  const before = db.prepare('SELECT sql FROM sqlite_master ORDER BY name').all();
+  db.readOnlyReplica = true; db.exec('PRAGMA query_only=ON');
+  const replica = new Curation(':memory:', null, 'test');
+  assert.equal(replica.ledgerTable, 'qprn_ledger');
+  assert.equal(replica.addView(1), 0);
+  assert.deepEqual(db.prepare('SELECT sql FROM sqlite_master ORDER BY name').all(), before);
+});
+
 test('reading lists, details and liked summaries expose only available local thumbnail types', () => {
   const rows = [1, 2, 3].map(ID => ({ ID, post_title: `Reading ${ID}`, post_content: 'A short story.', post_date: '2026-01-01' }));
   const metrics = new Map([

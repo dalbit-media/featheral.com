@@ -1,8 +1,38 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { runInNewContext } from 'node:vm';
 import { displayServerTime, environmentAt, seasonMs, weatherMs, worldDayMs, worldEpoch, worldWeekMs, worldWeeksPerYear, worldYearMs } from './environment.ts';
 import { compactServerCountdown, completionProgress, weekCalendar } from './environment-view.ts';
 import { icon } from './icons.ts';
+
+test('ordinary calendar ticks reuse DOM and update only transform scales and accessible values', () => {
+  const properties = new Map<string, string>(), attributes = new Map<string, string>();
+  const style = { setProperty: (name: string, value: string) => properties.set(name, value) };
+  const time = { textContent: '' };
+  const dayFill = { style };
+  const week = { dataset: { dayOfWeek: '1' }, querySelector: () => ({ querySelector: () => dayFill }),
+    setAttribute: (name: string, value: string) => attributes.set(`week-${name}`, value) };
+  const seasons = { querySelector: () => ({ style }),
+    setAttribute: (name: string, value: string) => attributes.set(`seasons-${name}`, value) };
+  const e = environmentAt(worldEpoch);
+  const root = {
+    firstElementChild: {}, dataset: { calendarKey: `${e.year}:${e.weekOfYear}:${e.dayOfWeek}:${e.phase}:${e.season}` },
+    ownerDocument: { createElement: () => { throw new Error('Unchanged calendar must not parse a template.'); } },
+    querySelector: (selector: string) => selector === '.clock-week' ? week : selector === '.clock-seasons' ? seasons : time,
+  };
+  const source = stripTypeScriptTypes(readFileSync(new URL('./environment-view.ts', import.meta.url), 'utf8'))
+    .replace(/^import .*;\r?\n/gm, '').replace(/^export /gm, '');
+  runInNewContext(`${source}\nupdateWeekCalendar(root, e, worldEpoch + 1000);`, {
+    root, e, worldEpoch, worldDayMs, worldYearMs, seasonMs, worldWeeksPerYear, environmentAt,
+  });
+  assert.equal(time.textContent, '00:01');
+  assert.equal(Number(properties.get('--day-scale')), 1000 / worldDayMs);
+  assert.equal(Number(properties.get('--season-scale')), 1000 / seasonMs);
+  assert.equal(properties.has('--day-progress'), false, 'tick does not mutate layout widths');
+  assert.ok(Number(attributes.get('week-aria-valuenow')) > 0);
+});
 
 test('one world day is exactly 24 server minutes and wraps at the millisecond boundary', () => {
   const first = environmentAt(worldEpoch);

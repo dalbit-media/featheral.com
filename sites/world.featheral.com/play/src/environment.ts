@@ -1,7 +1,7 @@
 export const worldEpoch = Date.UTC(2026, 0, 1);
 export const worldDayMs = 24 * 60000;
 export const worldWeekMs = 7 * worldDayMs;
-export const defaultClockSpeed = 168;
+export const defaultClockSpeed = 33.6;
 export const claimCooldownMs = 500;
 export const worldWeeksPerYear = 52;
 export const seasonMs = 13 * worldWeekMs;
@@ -10,7 +10,7 @@ export const climateCycleDays = worldWeeksPerYear * 7 * 16;
 export const weatherMs = 3 * 60000;
 export const serverSyncIntervalMs = 30000;
 export const serverClockStaleMs = 90000;
-export type ClockSpeed = 1 | 10 | 20 | typeof defaultClockSpeed;
+export type ClockSpeed = 1 | 10 | 20 | 168 | typeof defaultClockSpeed;
 export type Season = 'Spring' | 'Summer' | 'Autumn' | 'Winter';
 export type DayPhase = 'Dawn' | 'Day' | 'Dusk' | 'Night';
 export type Weather = 'Clear skies' | 'Overcast' | 'Rain' | 'Snow' | 'Storm';

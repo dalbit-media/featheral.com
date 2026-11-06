@@ -23,7 +23,7 @@ const digest = value => crypto.createHash("sha256").update(value).digest("hex");
 class Workspace {
   constructor(notes, markets, profileReader = () => null, now = Date.now) {
     this.notes = notes; this.db = notes.db; this.markets = markets; this.profileReader = profileReader; this.now = now;
-    this.db.exec(`
+    if (!this.db.readOnlyReplica) this.db.exec(`
       CREATE TABLE IF NOT EXISTS work_members(address TEXT PRIMARY KEY,status TEXT NOT NULL,role TEXT NOT NULL,
         level TEXT NOT NULL,division TEXT NOT NULL,team TEXT NOT NULL,motivation TEXT NOT NULL,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_divisions(id TEXT PRIMARY KEY,name TEXT NOT NULL);

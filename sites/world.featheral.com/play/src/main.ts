@@ -409,8 +409,8 @@ function renderEnvironment(): void {
   updateWeekCalendar(calendar, environment, timestamp);
   const speed = document.querySelector<HTMLElement>('#clock-speed')!;
   speed.hidden = state.clockSpeed === 1;
-  speed.textContent = state.clockSpeed === defaultClockSpeed ? translate('1 MIN / WEEK', language) : `${state.clockSpeed}x`;
-  speed.title = translate('The game clock runs continuously. A game week takes one real minute at the default speed.', language);
+  speed.textContent = state.clockSpeed === defaultClockSpeed ? translate('5 MIN / WEEK', language) : `${state.clockSpeed}x`;
+  speed.title = translate('The game clock runs continuously. A game week takes five real minutes at the default speed.', language);
   document.querySelectorAll<HTMLElement>('[data-map-environment]').forEach(overlay => {
     const expanded = overlay.querySelector<HTMLDetailsElement>('details')?.open ?? false;
     const content = environmentDetails(environment, true);
@@ -481,6 +481,7 @@ function renderWorkTimers(): void {
     const meter = el.querySelector<HTMLProgressElement>('progress')!;
     meter.value = progress.percent;
     el.style.setProperty('--completion-progress', `${progress.percent}%`);
+    el.style.setProperty('--completion-scale', String(progress.percent / 100));
     meter.setAttribute('aria-valuetext', `${Math.floor(progress.percent)}% · ${countdown}`);
     el.querySelector<HTMLElement>('[data-completion-time]')!.textContent = countdown;
     el.querySelector<HTMLElement>('[data-completion-percent]')!.textContent = `${Math.floor(progress.percent)}%`;
@@ -1394,13 +1395,15 @@ const clockCalendar = document.querySelector<HTMLElement>('#world-time')!;
 const clockMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let clockFrame: number | undefined;
 let clockDrawnAt = -1;
-function animateClock(): void {
+let clockUpdatedAt = -Infinity;
+function animateClock(frameTime: number): void {
   clockFrame = undefined;
   if (document.hidden || clockMotion.matches) return;
   const timestamp = displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed);
-  if (timestamp !== clockDrawnAt) {
+  if (frameTime - clockUpdatedAt >= 100 && timestamp !== clockDrawnAt) {
     updateClockTime(clockCalendar, timestamp);
     clockDrawnAt = timestamp;
+    clockUpdatedAt = frameTime;
   }
   clockFrame = requestAnimationFrame(animateClock);
 }
@@ -1408,6 +1411,7 @@ function scheduleClockAnimation(): void {
   if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
   clockFrame = undefined;
   clockDrawnAt = -1;
+  clockUpdatedAt = -Infinity;
   if (!document.hidden && !clockMotion.matches) clockFrame = requestAnimationFrame(animateClock);
 }
 clockMotion.addEventListener('change', scheduleClockAnimation);

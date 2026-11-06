@@ -23,7 +23,7 @@
 #app #world-time{--season-size:clamp(40px,calc(var(--game-header-height) - 32px),64px);display:grid;grid-column:auto;grid-row:auto;grid-template-columns:var(--season-size) minmax(0,1fr);grid-template-rows:auto auto 4px;gap:3px 8px;min-width:0;font-size:11px}
 #app .clock-seasons{grid-column:1;grid-row:1/-1;align-self:end;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:3px;width:var(--season-size);height:var(--season-size)}
 #app .clock-season{width:100%;height:auto;aspect-ratio:1;border-radius:3px}
-#app .clock-season::before{inset:auto 0 0;width:100%;height:var(--season-progress)}
+#app .clock-season::before{inset:0;width:100%;height:100%;transform:scaleY(var(--season-scale,0));transform-origin:bottom;transition:none}
 #app .clock-calendar{grid-column:2;grid-row:1;display:flex;align-items:baseline;gap:5px;min-width:0;line-height:14px}
 #app .clock-calendar>span:first-child{font-size:10px}
 #app .clock-week-label small{font-size:8px}
@@ -35,8 +35,8 @@
 #app .clock-day{position:relative;display:block;min-width:0;height:100%;overflow:hidden;border-radius:2px;background:#ffffff14;box-shadow:none;color:transparent}
 #app .clock-day::before{display:none}
 #app .clock-day.current{background:#ffffff14;box-shadow:none}
-#app .clock-day-fill{position:absolute;inset:0 auto 0 0;width:var(--day-progress);background:#c6e8a4}
-#app .clock-day.current .clock-day-fill{background:var(--mint);transition:width .6s linear}
+#app .clock-day-fill{position:absolute;inset:0;width:100%;background:#c6e8a4;transform:scaleX(var(--day-scale,0));transform-origin:left}
+#app .clock-day.current .clock-day-fill{background:var(--mint);transition:transform .1s linear}
 #app .clock-season>.icon{width:clamp(9px,calc(var(--season-size) * .3),20px);height:clamp(9px,calc(var(--season-size) * .3),20px);opacity:.85;filter:none}
 #app .clock-season.current::after{display:none}
 #app .clock-season.current>.icon{animation:none}

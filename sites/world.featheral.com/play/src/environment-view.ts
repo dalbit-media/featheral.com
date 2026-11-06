@@ -1,5 +1,5 @@
 import type { DayPhase, Environment, Season } from './environment.ts';
-import { worldDayMs, worldEpoch, worldWeeksPerYear } from './environment.ts';
+import { environmentAt, worldDayMs, worldEpoch, worldWeeksPerYear, worldYearMs, seasonMs } from './environment.ts';
 import { icon } from './icons.ts';
 import { productionClimate, recruitmentClimate, waterDemandClimate } from './climate.ts';
 
@@ -35,14 +35,24 @@ function clockMinuteOfDay(serverTime: number): number {
 }
 export function updateClockTime(root: HTMLElement, serverTime: number): void {
   const minuteOfDay = clockMinuteOfDay(serverTime);
+  const dayOfWeek = ((Math.floor((serverTime - worldEpoch) / worldDayMs) % 7 + 7) % 7) + 1;
+  if (Number(root.querySelector<HTMLElement>('.clock-week')!.dataset.dayOfWeek) !== dayOfWeek) {
+    updateWeekCalendar(root, environmentAt(serverTime), serverTime);
+    return;
+  }
   const time = root.querySelector('.clock-game-time>span')!;
   const text = `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(Math.floor(minuteOfDay % 60)).padStart(2, '0')}`;
   if (time.textContent !== text) time.textContent = text;
   const week = root.querySelector<HTMLElement>('.clock-week')!;
   const progress = minuteOfDay / 1440;
   const currentDay = week.querySelector<HTMLElement>('.clock-day.current')!;
-  currentDay.querySelector<HTMLElement>('.clock-day-fill')!.style.setProperty('--day-progress', `${Number((progress * 100).toFixed(6))}%`);
+  currentDay.querySelector<HTMLElement>('.clock-day-fill')!.style.setProperty('--day-scale', String(progress));
   week.setAttribute('aria-valuenow', String(Number((Number(week.dataset.dayOfWeek) - 1 + progress).toFixed(4))));
+  const seasons = root.querySelector<HTMLElement>('.clock-seasons')!;
+  const elapsed = serverTime - worldEpoch;
+  const yearProgress = ((elapsed % worldYearMs + worldYearMs) % worldYearMs) / seasonMs;
+  seasons.querySelector<HTMLElement>('.clock-season.current')!.style.setProperty('--season-scale', String(yearProgress % 1));
+  seasons.setAttribute('aria-valuenow', String(Number(yearProgress.toFixed(6))));
 }
 export function weekCalendar(environment: Environment): string {
   const { year, weekOfYear, dayOfWeek, minuteOfDay, phase, season } = environment;
@@ -57,16 +67,22 @@ export function weekCalendar(environment: Environment): string {
   const seasonDescription = `${season} · Week ${(weekOfYear - 1) % weeksPerSeason + 1} of ${weeksPerSeason}`;
   const days = weekDays.map(([name], index) => {
     const dayProgress = index < dayOfWeek - 1 ? 100 : index === dayOfWeek - 1 ? minuteOfDay / 1440 * 100 : 0;
-    return `<span class="clock-day${index === dayOfWeek - 1 ? ' current' : ''}" title="${name}" aria-hidden="true"><span class="clock-day-fill" style="--day-progress:${Number(dayProgress.toFixed(6))}%"></span></span>`;
+    return `<span class="clock-day${index === dayOfWeek - 1 ? ' current' : ''}" title="${name}" aria-hidden="true"><span class="clock-day-fill" style="--day-progress:${Number(dayProgress.toFixed(6))}%;--day-scale:${dayProgress / 100}"></span></span>`;
   }).join('');
   return `<span class="clock-calendar"><span>Year ${year.toLocaleString('en-US')}</span><span class="clock-week-label">Week ${weekOfYear}<small> / ${worldWeeksPerYear}</small></span><span class="clock-current-day" title="${dayName}">${dayLabel}</span></span>
     <span class="clock-game-time" title="${phase}">${dayPhaseIcon(phase)}<span>${hour}:${minute}</span><small class="clock-current-season">${season}</small></span>
     <span class="clock-week" data-day-of-week="${dayOfWeek}" role="progressbar" aria-label="Week progress" aria-valuemin="0" aria-valuemax="7" aria-valuenow="${Number(progress.toFixed(4))}" aria-valuetext="${description}" title="${description}">${days}</span>
     <span class="clock-seasons" role="progressbar" aria-label="Season progress" aria-valuemin="0" aria-valuemax="4" aria-valuenow="${Number(seasonProgress.toFixed(6))}" aria-valuetext="${seasonDescription}" title="${seasonDescription}">${Object.entries(seasonIcons).map(([name, symbol], index) =>
-      `<span class="clock-season clock-season-${name.toLowerCase()}${index < seasonIndex ? ' complete' : index === seasonIndex ? ' current' : ''}" aria-hidden="true" title="${name}" style="--season-progress:${index < seasonIndex ? 100 : index === seasonIndex ? Number(((seasonProgress - seasonIndex) * 100).toFixed(4)) : 0}%">${icon(symbol, 'season-icon')}<span>${name}</span></span>`).join('')}</span>`;
+      `<span class="clock-season clock-season-${name.toLowerCase()}${index < seasonIndex ? ' complete' : index === seasonIndex ? ' current' : ''}" aria-hidden="true" title="${name}" style="--season-progress:${index < seasonIndex ? 100 : index === seasonIndex ? Number(((seasonProgress - seasonIndex) * 100).toFixed(4)) : 0}%;--season-scale:${index < seasonIndex ? 1 : index === seasonIndex ? seasonProgress - seasonIndex : 0}">${icon(symbol, 'season-icon')}<span>${name}</span></span>`).join('')}</span>`;
 }
 export function updateWeekCalendar(root: HTMLElement, environment: Environment,
   serverTime = worldEpoch + (environment.day - 1) * worldDayMs + environment.minuteOfDay * 1000): void {
+  const calendarKey = `${environment.year}:${environment.weekOfYear}:${environment.dayOfWeek}:${environment.phase}:${environment.season}`;
+  if (root.firstElementChild && root.dataset.calendarKey === calendarKey) {
+    updateClockTime(root, serverTime);
+    return;
+  }
+  root.dataset.calendarKey = calendarKey;
   if (!root.firstElementChild) {
     root.innerHTML = weekCalendar(environment);
     updateClockTime(root, serverTime);
@@ -96,6 +112,10 @@ export function updateWeekCalendar(root: HTMLElement, environment: Environment,
         segment.querySelector<HTMLElement>('.clock-day-fill')!.style.setProperty(property,
           incoming.querySelector<HTMLElement>('.clock-day-fill')!.style.getPropertyValue(property));
       } else segment.style.setProperty(property, incoming.style.getPropertyValue(property));
+      const fill = selector === '.clock-week' ? segment.querySelector<HTMLElement>('.clock-day-fill')! : segment;
+      const nextFill = selector === '.clock-week' ? incoming.querySelector<HTMLElement>('.clock-day-fill')! : incoming;
+      const scale = selector === '.clock-week' ? '--day-scale' : '--season-scale';
+      fill.style.setProperty(scale, nextFill.style.getPropertyValue(scale));
     });
   }
   updateClockTime(root, serverTime);
