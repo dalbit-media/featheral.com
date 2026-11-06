@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const { paymentRequest, requestParams } = require("../request");
 const { createPayApi } = require("../server");
+const { allowReplicaRequest } = require("../../operations/replica");
 const { walletUi } = require("../../wallet/ui");
 const QRCode = require("qrcode");
 const address = "0x" + "12".repeat(20);
@@ -88,4 +89,32 @@ test("HTTP API returns portable links and real QR SVG without creating payments"
     assert.equal(invalid.status, status);
     assert.equal(typeof (await invalid.json()).error, "string");
   }
+});
+
+test("read-only Pay replicas construct validated requests and QR codes without permitting financial writes", async t => {
+  const api = createPayApi({ siteUrl: (_, site, pathname) => `https://${site}.featheral.com${pathname}` });
+  const server = http.createServer(async (req, res) => {
+    if (!allowReplicaRequest(req, res, { replica: { readOnly: true } })) return;
+    if (!await api.handle(req, res)) { res.writeHead(404); res.end(); }
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const request = (pathname, body, host = "pay.featheral.com") => new Promise((resolve, reject) => {
+    const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: pathname,
+      method: body === undefined ? "GET" : "POST", headers: { Host: host, "Content-Type": "application/json" } }, res => {
+      let text = ""; res.on("data", chunk => text += chunk);
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
+    });
+    req.on("error", reject); req.end(body === undefined ? undefined : JSON.stringify(body));
+  });
+  const response = await request("/api/v1/pay/requests", { to: address, amount: "1" });
+  assert.equal(response.status, 200); assert.equal(response.headers["x-featheral-replica"], "read-only");
+  const result = JSON.parse(response.body);
+  assert.equal(result.to, account); assert.equal(result.currency, "FTH$");
+  const qrUrl = new URL(result.qrUrl), qr = await request(qrUrl.pathname + qrUrl.search);
+  assert.equal(qr.status, 200); assert.equal(qr.headers["x-featheral-replica"], "read-only"); assert.match(qr.body, /<svg/);
+  assert.equal((await request("/api/v1/pay/requests", { to: "invalid" })).status, 400);
+  for (const pathname of ["/api/v1/notes/fth/transfers", "/api/v1/pay/qr", "/api/settings/save"])
+    assert.equal((await request(pathname, { to: address })).status, 403);
+  assert.equal((await request("/api/v1/pay/requests", { to: address }, "wallet.featheral.com")).status, 403);
 });

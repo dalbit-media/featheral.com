@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
+const https = require("node:https");
 const { spawnSync } = require("node:child_process");
 const { DatabaseSync } = require("node:sqlite");
 const { hash, safeName, excludedName } = require("../services/operations/site-sync-snapshot");
@@ -256,7 +257,65 @@ function logApplicationOutput(root) {
     } finally { fs.closeSync(fd); }
   }
 }
-async function run(root, snapshotDirectory, backupDirectory, sourceId) {
+function probeTargetSite(hostname, pathname, { method = "GET", body } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = https.request({ hostname, path: pathname, method, agent: false,
+      headers: body === undefined ? {} : { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
+      lookup: (_hostname, options, callback) => options.all
+        ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4) }, response => {
+      let body = "";
+      response.once("error", reject);
+      response.on("data", chunk => {
+        if (pathname === "/") return;
+        if (Buffer.byteLength(body) + chunk.length > 16384) {
+          request.destroy(new Error("Site API health response exceeds 16 KiB.")); return;
+        }
+        body += chunk.toString("utf8");
+      });
+      response.once("end", () => resolve({ status: response.statusCode,
+        replica: response.headers["x-featheral-replica"], body }));
+    });
+    const timer = setTimeout(() => request.destroy(new Error("Site HTTPS check timed out after 5000 ms.")), 5000);
+    request.once("close", () => clearTimeout(timer));
+    request.once("error", reject);
+    request.end(body);
+  });
+}
+async function checkTargetSites(root, hosts, { probe = probeTargetSite, requireReplica = false, log = console.log } = {}) {
+  assert(Array.isArray(hosts) && hosts.length && hosts.every(host => typeof host === "string"
+    && /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host)), "Invalid sync target hostnames.");
+  const release = fs.realpathSync(path.join(root, "current"));
+  const manifestFile = path.join(release, ".deployment-hosts.json");
+  assert(fs.existsSync(manifestFile), "Deploy the current release from Admin Settings before syncing; the target has no deployment host assignment.");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  assert(Array.isArray(manifest.hosts), "Invalid target deployment host assignment. Review and deploy the current release before syncing.");
+  const missing = hosts.filter(host => !manifest.hosts.includes(host));
+  assert(!missing.length, `Deploy the current release before syncing. Target deployment is missing assigned sites: ${missing.join(", ")}. Save server assignments, point DNS to the target, then run Review release in Admin Settings.`);
+  for (const host of hosts) {
+    try {
+      const result = await probe(host, "/");
+      assert(result.status === 200 || host === "admin.featheral.com" && result.status === 401,
+        `HTTP ${result.status}; expected 200${host === "admin.featheral.com" ? " or 401" : ""}.`);
+      if (requireReplica) assert(result.replica === "read-only", "Site did not report read-only replica mode.");
+      if (host === "pay.featheral.com") {
+        const to = "0x0000000000000000000000000000000000000001";
+        for (const method of ["GET", "POST"]) {
+          const payment = await probe(host, `/api/v1/pay/requests${method === "GET" ? `?to=${to}` : ""}`,
+            { method, ...(method === "POST" ? { body: JSON.stringify({ to }) } : {}) });
+          assert(payment.status === 200, `Payment request API ${method} returned HTTP ${payment.status}.`);
+          if (requireReplica) assert(payment.replica === "read-only", "Payment API did not report read-only replica mode.");
+          const data = JSON.parse(payment.body);
+          assert(data?.schema === "featheral.pay" && data.version === 1 && data.currency === "FTH$"
+            && new URL(data.paymentUrl).origin === `https://${host}`, "Target does not serve the expected Featheral Pay API.");
+        }
+      }
+      log(`Site sync readiness: ${host} HTTPS and application routes verified${requireReplica ? " (read-only)" : ""}.`);
+    } catch (error) {
+      throw new Error(`Site setup is not ready for ${host}: ${error.message} Review and deploy the current release in Admin Settings; check DNS, Nginx and TLS before retrying sync.`, { cause: error });
+    }
+  }
+}
+async function run(root, snapshotDirectory, backupDirectory, sourceId, hosts) {
   assert(process.platform === "linux", "The sync receiver requires the Linux deployment layout.");
   const release = fs.realpathSync(path.join(root, "current"));
   const roots = targetRoots(release);
@@ -270,6 +329,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
   };
   for (const file of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
     assert(fs.readFileSync(path.join(release, file), "utf8").includes("replica"), "Deploy the sync-capable release to the target first.");
+  await checkTargetSites(root, hosts);
   verifySnapshot(snapshotDirectory, { retainedRoot: release });
   console.log("Snapshot checksums and database integrity verified.");
   const apps = JSON.parse(command("jlist")).filter(app => app.name === "featheral");
@@ -293,6 +353,7 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId) {
     command("restart", "featheral"); started = true;
     console.log("FEATHERAL_SYNC:health");
     await waitForReplica(healthURL);
+    await checkTargetSites(root, hosts, { requireReplica: true });
     prepared.state.phase = "complete";
     fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
     console.log("Snapshot installed; read-only health confirmed. Verified backup:", backupDirectory);
@@ -345,8 +406,12 @@ async function recover(root, backupDirectory) {
   console.log("Verified backup restored. Check application health before enabling writes.");
 }
 if (require.main === module) {
-  const operation = process.argv[2] === "--recover" ? recover(...process.argv.slice(3)) : run(...process.argv.slice(2));
+  const operation = (async () => {
+    if (process.argv[2] === "--recover") return recover(...process.argv.slice(3));
+    if (process.argv[2] === "--check-sites") return checkTargetSites(process.argv[3], JSON.parse(process.argv[4]));
+    return run(...process.argv.slice(2, 6), JSON.parse(process.argv[6]));
+  })();
   operation.catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 module.exports = { verifySnapshot, prepareBackup, installSnapshot, restoreBackup, returnStaged, targetRoots,
-  replicaHealthURL, probeReplica, waitForReplica, run };
+  replicaHealthURL, probeReplica, waitForReplica, probeTargetSite, checkTargetSites, run };

@@ -35,7 +35,7 @@ async function sshTarget(t, base) {
   shim(shims, "id", "echo 0");
   shim(shims, "systemd-run", 'while [ "$1" != /bin/bash ]; do shift; done; shift; exec /bin/bash "$@"');
   // The receiver itself is Linux-only and unit-tested separately; here it records the verified invocation.
-  shim(shims, "node", 'printf "%s\\n" "$@" > "$APPLIED"; echo FEATHERAL_SYNC:install; echo FEATHERAL_SYNC:health');
+  shim(shims, "node", 'if [ "${2:-}" = --check-sites ]; then echo "Site sync readiness verified"; exit 0; fi; printf "%s\\n" "$@" > "$APPLIED"; echo FEATHERAL_SYNC:install; echo FEATHERAL_SYNC:health');
   const opened = [];
   const server = new Server({ hostKeys: [host.private] }, connection => {
     connection.on("authentication", context => context.method === "password" && context.password === "ssh-secret" ? context.accept() : context.reject(["password"]));
@@ -134,5 +134,6 @@ test("real SFTP sync uploads databases first, pauses mid-file, resumes from the 
   assert.match(args[0], /\/receiver-[a-f0-9]{16}\/scripts\/restore-site-sync\.js$/);
   assert.equal(sha(fromRemote(args[0])), sha(path.join(__dirname, "..", "..", "..", "scripts", "restore-site-sync.js")));
   assert.equal(args[2], toRemote(staging));
+  assert.deepEqual(JSON.parse(args[5]), ["gold.featheral.com"]);
   assert.equal(fs.existsSync(path.join(service.directory, id)), false, "local snapshot removed after completion");
 });

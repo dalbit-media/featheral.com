@@ -8,7 +8,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { snapshot, hash, runtimePaths } = require("../../operations/site-sync-snapshot");
 const { MARKER, CMS_ORIGIN, readReplica, readCMSOrigin, replicaEnvironment, allowReplicaRequest } = require("../../operations/replica");
 const { prepareBackup, installSnapshot, restoreBackup, returnStaged, verifySnapshot,
-  replicaHealthURL, probeReplica, waitForReplica } = require("../../../scripts/restore-site-sync");
+  replicaHealthURL, probeReplica, waitForReplica, checkTargetSites, probeTargetSite } = require("../../../scripts/restore-site-sync");
 const { SiteSync } = require("../lib/site-sync");
 test("replica health uses the configured local listener including IPv6", () => {
   for (const host of ["127.0.0.1", "0.0.0.0"])
@@ -20,6 +20,113 @@ test("replica health uses the configured local listener including IPv6", () => {
   assert.throws(() => replicaHealthURL({ HOST: "remote.example" }), /local or wildcard/);
   for (const port of ["invalid", "0", "65536", "1.5"])
     assert.throws(() => replicaHealthURL({ PORT: port }), /Invalid target HTTP port/);
+});
+test("sync site readiness requires deployed assignments, valid HTTPS routes and the actual Pay API", async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-site-readiness-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const release = path.join(directory, "current"), file = path.join(release, ".deployment-hosts.json");
+  fs.mkdirSync(release);
+  const hosts = ["admin.featheral.com", "pay.featheral.com"], calls = [], logs = [];
+  let response = {}, payBody = { schema: "featheral.pay", version: 1, currency: "FTH$", paymentUrl: "https://pay.featheral.com/?to=public" };
+  const probe = async (host, pathname, options) => {
+    calls.push({ host, pathname, options });
+    if (response.error) throw response.error;
+    return { status: host === "admin.featheral.com" ? 401 : 200, replica: "read-only",
+      body: JSON.stringify(payBody), ...response };
+  };
+  const check = (options = {}) => checkTargetSites(directory, hosts, { probe, log: line => logs.push(line), ...options });
+  await assert.rejects(check(), /no deployment host assignment/);
+  fs.writeFileSync(file, JSON.stringify({ hosts: ["admin.featheral.com"] }));
+  await assert.rejects(check(), /missing assigned sites: pay.featheral.com/);
+  assert.equal(calls.length, 0, "missing code/host setup is rejected before probing");
+  fs.writeFileSync(file, JSON.stringify({ hosts }));
+  await check(); assert.equal(calls.length, 4);
+  assert.equal(calls.at(-1).host, "pay.featheral.com");
+  assert.match(calls.at(-2).pathname, /^\/api\/v1\/pay\/requests\?to=0x/);
+  assert.equal(calls.at(-1).options.method, "POST");
+  assert.match(JSON.parse(calls.at(-1).options.body).to, /^0x0+1$/);
+  await check({ requireReplica: true });
+  assert.ok(logs.some(line => line.includes("pay.featheral.com") && line.includes("read-only")));
+  await assert.rejects(check({ probe: (host, pathname, options) => options?.method === "POST"
+    ? Promise.resolve({ status: 403 }) : probe(host, pathname, options) }), /POST returned HTTP 403/);
+  for (const invalid of [{ status: 404 }, { status: 302 }, { error: new Error("certificate does not match hostname") }]) {
+    response = invalid;
+    await assert.rejects(check(), /Site setup is not ready.*Review and deploy/);
+  }
+  response = { replica: undefined };
+  await assert.rejects(check({ requireReplica: true }), /read-only replica mode/);
+  response = {};
+  for (const invalid of [{}, { ...payBody, schema: "unrelated" }, { ...payBody, currency: "USD" },
+    { ...payBody, paymentUrl: "http://pay.featheral.com/" }, { ...payBody, paymentUrl: "https://other.featheral.com/" }]) {
+    const saved = payBody; payBody = invalid;
+    await assert.rejects(check(), /expected Featheral Pay API/); payBody = saved;
+  }
+  await assert.rejects(checkTargetSites(directory, [], { probe }), /Invalid sync target/);
+  await assert.rejects(checkTargetSites(directory, ["host;command"], { probe }), /Invalid sync target/);
+});
+test("target HTTPS probe retains certificate verification and routes only to loopback with correct SNI", async t => {
+  const { EventEmitter } = require("node:events"), https = require("node:https");
+  const { PassThrough } = require("node:stream");
+  let options;
+  t.mock.method(https, "request", (input, callback) => {
+    options = input;
+    const request = new EventEmitter();
+    request.destroy = error => { request.emit("error", error); request.emit("close"); };
+    request.end = body => queueMicrotask(() => {
+      assert.equal(body, '{"to":"public"}');
+      const response = new PassThrough(); response.statusCode = 200;
+      response.headers = { "x-featheral-replica": "read-only" }; callback(response);
+      response.end('{"schema":"featheral.pay"}');
+      response.once("end", () => request.emit("close"));
+    });
+    return request;
+  });
+  const result = await probeTargetSite("pay.featheral.com", "/api/v1/pay/requests", { method: "POST", body: '{"to":"public"}' });
+  assert.equal(options.hostname, "pay.featheral.com");
+  assert.equal(options.method, "POST");
+  assert.equal(options.headers["Content-Length"], 15);
+  assert.equal(options.rejectUnauthorized, undefined, "TLS verification is never disabled");
+  options.lookup("pay.featheral.com", {}, (error, address, family) => {
+    assert.equal(error, null); assert.equal(address, "127.0.0.1"); assert.equal(family, 4);
+  });
+  options.lookup("pay.featheral.com", { all: true }, (error, addresses) => {
+    assert.equal(error, null); assert.deepEqual(addresses, [{ address: "127.0.0.1", family: 4 }]);
+  });
+  assert.equal(result.replica, "read-only");
+  assert.equal(JSON.parse(result.body).schema, "featheral.pay");
+});
+test("target HTTPS probes reject oversized API responses and stalled connections", async t => {
+  const { EventEmitter } = require("node:events"), https = require("node:https");
+  const { PassThrough } = require("node:stream");
+  let stall = false;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(https, "request", (_options, callback) => {
+    const request = new EventEmitter();
+    request.destroy = error => { request.emit("error", error); request.emit("close"); };
+    request.end = () => {
+      if (stall) return;
+      const response = new PassThrough(); response.statusCode = 200; response.headers = {};
+      callback(response); response.end("x".repeat(16385));
+    };
+    return request;
+  });
+  await assert.rejects(probeTargetSite("pay.featheral.com", "/api/v1/pay/requests"), /exceeds 16 KiB/);
+  stall = true;
+  const rejected = assert.rejects(probeTargetSite("pay.featheral.com", "/"), /timed out after 5000 ms/);
+  t.mock.timers.tick(5000); await rejected;
+});
+test("Pay replicas allow only stateless request construction, not wallet, ledger or unrelated writes", () => {
+  const settings = { replica: { readOnly: true } };
+  const res = { setHeader() {}, writeHead(code) { this.status = code; }, end(text) { this.body = text; } };
+  for (const host of ["pay.featheral.com", "pay.localhost:8080"]) {
+    assert.equal(allowReplicaRequest({ method: "POST", url: "/api/v1/pay/requests", headers: { host } }, res, settings), true);
+    for (const url of ["/api/v1/notes/fth/transfers", "/api/creation/login", "/api/v1/pay/qr", "/api/v1/pay/requests/"])
+      assert.equal(allowReplicaRequest({ method: "POST", url, headers: { host } }, res, settings), false);
+  }
+  for (const host of ["wallet.featheral.com", "admin.featheral.com", "evil.example", "pay.featheral.com.evil.example", "bad host", ""])
+    assert.equal(allowReplicaRequest({ method: "POST", url: "/api/v1/pay/requests", headers: { host } }, res, settings), false);
+  assert.equal(allowReplicaRequest({ method: "PUT", url: "/api/v1/pay/requests", headers: { host: "pay.featheral.com" } }, res, settings), false);
+  assert.equal(res.status, 403); assert.match(res.body, /read-only/);
 });
 test("replica HTTP probe requires a healthy read-only response and exposes connection errors", async t => {
   const http = require("node:http");
@@ -107,6 +214,82 @@ test("snapshot includes live SQLite WAL contents and excludes operational secret
   try { assert.equal(copy.prepare("SELECT name FROM wallets").get().name, "source wallet"); } finally { copy.close(); }
   assert.equal(verifySnapshot(output).entries.length, manifest.entries.length);
   assert.equal(f.database.prepare("SELECT COUNT(*) AS n FROM wallets").get().n, 1);
+});
+test("new-site CMS data participates in sync while Pay code and target setup are never overwritten", t => {
+  const f = fixture(t), output = path.join(f.directory, "snapshot");
+  f.write(f.root, "sites/pay.featheral.com/index.html", "source application code");
+  const targetCode = f.write(f.target, "sites/pay.featheral.com/index.html", "installed target application");
+  const cmsFile = f.write(f.root, "services/cms/data/site-pages/pay.featheral.com.sqlite", "");
+  const database = new DatabaseSync(cmsFile);
+  database.exec("CREATE TABLE content(value TEXT); INSERT INTO content VALUES ('Pay content');"); database.close();
+  const manifest = snapshot(f.root, output, {});
+  assert.ok(manifest.entries.some(entry => entry.name === "cms/site-pages/pay.featheral.com.sqlite"));
+  assert.ok(!manifest.entries.some(entry => entry.name.startsWith("sites/")));
+  const backup = path.join(f.directory, "backup"), prepared = prepareBackup(f.target, output, backup);
+  installSnapshot(f.target, output, backup, prepared);
+  assert.equal(fs.readFileSync(targetCode, "utf8"), "installed target application");
+  const installed = new DatabaseSync(path.join(f.target, "services", "cms", "data", "site-pages", "pay.featheral.com.sqlite"), { readOnly: true });
+  try { assert.equal(installed.prepare("SELECT value FROM content").get().value, "Pay content"); }
+  finally { installed.close(); }
+});
+for (const fails of [false, true]) test(`receiver ${fails ? "rolls back a broken Pay route after restart" : "completes only after every Pay route reports read-only"}`, async t => {
+  const f = fixture(t), vm = require("node:vm"), { EventEmitter } = require("node:events");
+  const { PassThrough } = require("node:stream"), { createRequire } = require("node:module");
+  const script = path.resolve(__dirname, "../../../scripts/restore-site-sync.js"), actualRequire = createRequire(script);
+  const root = path.join(f.directory, "deployment"), output = path.join(f.directory, "snapshot"), backup = path.join(f.directory, "backup");
+  fs.mkdirSync(path.join(root, "shared"), { recursive: true });
+  f.write(f.target, ".deployment-hosts.json", JSON.stringify({ hosts: ["pay.featheral.com"] }));
+  for (const name of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
+    f.write(f.target, name, "// replica support");
+  snapshot(f.root, output, {});
+  const commands = [], probes = [], logs = [];
+  let restarted = false;
+  const response = (callback, status, body = "") => {
+    const stream = new PassThrough(); stream.statusCode = status;
+    stream.headers = restarted ? { "x-featheral-replica": "read-only" } : {};
+    callback(stream); stream.end(body);
+  };
+  const request = send => {
+    const req = new EventEmitter(); req.destroy = error => { req.emit("error", error); req.emit("close"); };
+    req.end = () => queueMicrotask(() => { send(); req.emit("close"); });
+    return req;
+  };
+  const moduleObject = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(script, "utf8"), {
+    module: moduleObject, Buffer, URL, setTimeout, clearTimeout, process: { platform: "linux", env: {} },
+    console: { log: line => logs.push(line), error: line => logs.push(line) },
+    require(name) {
+      if (name === "node:fs") return { ...fs, realpathSync: file => file === path.join(root, "current") ? f.target : fs.realpathSync(file) };
+      if (name === "node:child_process") return { spawnSync: (_program, args) => {
+        commands.push(args[0]); if (args[0] === "restart") restarted = true;
+        return { status: 0, stdout: args[0] === "jlist"
+          ? JSON.stringify([{ name: "featheral", pm2_env: { status: "online", pm_cwd: f.target } }]) : "" };
+      } };
+      if (name === "node:http") return { get: (_url, _options, callback) => {
+        const req = request(() => response(callback, 200)); req.end(); return req;
+      } };
+      if (name === "node:https") return { request: (options, callback) => request(() => {
+        probes.push({ ...options, restarted });
+        response(callback, fails && restarted && options.method === "POST" ? 403 : 200,
+          JSON.stringify({ schema: "featheral.pay", version: 1, currency: "FTH$", paymentUrl: "https://pay.featheral.com/?to=public" }));
+      }) };
+      if (name === path.join(f.target, "services", "operations", "settings"))
+        return { OperationsSettings: class { environment() { return {}; } } };
+      return actualRequire(name);
+    },
+  }, { filename: script });
+  const operation = moduleObject.exports.run(root, output, backup, "another-source", ["pay.featheral.com"]);
+  if (fails) await assert.rejects(operation, /POST returned HTTP 403/);
+  else await operation;
+  const state = JSON.parse(fs.readFileSync(path.join(backup, "state.json"), "utf8"));
+  assert.equal(state.phase, fails ? "rolled-back" : "complete");
+  assert.equal(commands.filter(command => command === "stop").length, fails ? 2 : 1);
+  assert.equal(fs.existsSync(path.join(root, "shared", "site-sync.lock")), false);
+  assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt"), "utf8"),
+    fails ? "target overlapping upload" : "source upload");
+  assert.equal(Boolean(readReplica(f.target)), !fails);
+  assert.ok(probes.some(probe => probe.restarted && probe.method === "POST"));
+  assert.ok(logs.some(line => line.includes(fails ? "Previous target state restored" : "Snapshot installed")));
 });
 test("promoted CMS storage retains its source identity without retaining the replica role", t => {
   const f = fixture(t), marker = path.join(f.root, "data", MARKER), origin = path.join(f.root, "data", CMS_ORIGIN);
@@ -280,6 +463,7 @@ test("review binds a frozen snapshot to site target, session, revision and walle
   const context = { session: "admin", origin: "https://admin.example", wallet: "wallet" };
   const review = await service.plan({ site: "gold" }, context);
   assert.equal(review.target, "gold"); assert.equal(review.readOnly, true);
+  assert.deepEqual(review.hosts, target.hosts);
   assert(!JSON.stringify(review).includes("ssh-secret")); assert.equal(calls.length, 0);
   assert.throws(() => service.challenge({ plan: review.id }, { ...context, session: "other" }), /another session/);
   service.challenge({ plan: review.id }, context);
@@ -287,6 +471,9 @@ test("review binds a frozen snapshot to site target, session, revision and walle
   settings.value.revision++;
   assert.throws(() => service.start({ plan: review.id, signature: "signed" }, context), /Settings changed/);
   settings.value.revision--;
+  target.hosts.push("pay.featheral.com");
+  assert.throws(() => service.start({ plan: review.id, signature: "signed" }, context), /Settings changed/);
+  target.hosts.pop();
   now += 11 * 60000;
   assert.throws(() => service.challenge({ plan: review.id }, context), /expired/);
   assert(!fs.existsSync(path.join(f.root, "data", "site-sync", review.id)));
@@ -345,6 +532,10 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
   const apply = commands.find(item => item.command.includes("systemd-run"));
   assert.equal(apply.input, "ssh-secret\n");
   assert.match(apply.command, /sha256sum --check/); assert.match(apply.command, /restore-site-sync/);
+  const preflight = commands.findIndex(item => item.command.includes("--check-sites"));
+  assert.ok(preflight >= 0);
+  assert.match(commands[preflight].command, /gold\.featheral\.com/);
+  assert.ok(preflight < commands.findIndex(item => item.command.includes("systemd-run")));
 });
 test("shared sync captures and launches in one request without separate wallet approval", async t => {
   const f = fixture(t);
@@ -379,7 +570,7 @@ test("shared sync captures and launches in one request without separate wallet a
 test("shared sync preserves operation locks and rejects Settings changes during capture", async t => {
   const f = fixture(t);
   const settings = { value: { revision: 1 }, environment: () => { settings.value.revision++; return {}; },
-    deploymentTargets: () => [{ id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral", fingerprint: "SHA256:shared" }] };
+    deploymentTargets: () => [{ id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral", hosts: ["gold.featheral.com"], fingerprint: "SHA256:shared" }] };
   const deployment = { running: true, sites: () => [{ key: "gold", status: "ready" }] };
   const service = new SiteSync({ root: f.root, settings, deployment });
   service.execute = async () => assert.fail("Changed or busy target must not receive data");
@@ -394,7 +585,7 @@ test("sync failures retain redacted details and never report completed progress"
   const f = fixture(t);
   const settings = { value: { revision: 1 }, environment: () => ({}),
     deploymentTargets: () => [{ id: "shared", host: "shared.example.com", port: 22,
-      directory: "/srv/featheral", fingerprint: "SHA256:shared", password: "fixture-secret" }] };
+      directory: "/srv/featheral", hosts: ["gold.featheral.com"], fingerprint: "SHA256:shared", password: "fixture-secret" }] };
   const deployment = { running: false, sites: () => [{ key: "gold", status: "ready" }] };
   const service = new SiteSync({ root: f.root, settings, deployment });
   service.execute = async () => { service.result.phase = "applying"; throw new Error("SSH rejected fixture-secret"); };
@@ -471,10 +662,10 @@ async function uiFixture({ shared = false, initialStatus = { phase: "idle", runn
   };
   const form = element("#site-server-form");
   form.elements = Object.fromEntries(["url", "host", "port", "useShared", "credential", "applyRuntime"].map(name => [name, element(name)]));
-  let signs = 0, failure, pendingStart, status = initialStatus;
+  let signs = 0, failure, pendingStart, status = initialStatus, html = "";
   const context = vm.createContext({
     VIEWS: {}, state: { seq: 1 }, location: { hash: "#/site-server/gold" }, viewCleanup: null, leaveView: null,
-    AbortController, setTimeout, clearTimeout, esc: value => String(value), $: element, renderSidebar() {}, setCrumbs() {}, setView() {}, toast() {},
+    AbortController, setTimeout, clearTimeout, esc: value => String(value), $: element, renderSidebar() {}, setCrumbs() {}, setView(value) { html = value; }, toast() {},
     window: { addEventListener() {}, removeEventListener() {} }, confirm: () => true,
     FormData: class { constructor(value) { this.entries = Object.entries(value.elements).map(([key, item]) => [key, item.value]); } [Symbol.iterator]() { return this.entries[Symbol.iterator](); } },
     approveAdminAction: async () => { signs++; return { signature: "signed" }; },
@@ -499,7 +690,7 @@ async function uiFixture({ shared = false, initialStatus = { phase: "idle", runn
   });
   vm.runInContext(fs.readFileSync(path.resolve(__dirname, "../../../sites/admin.featheral.com/js/settings.js"), "utf8"), context);
   await context.VIEWS["site-server"]("gold", {}, 1);
-  return { calls, element, context, form, get signs() { return signs; }, fail(error) { failure = error; },
+  return { calls, element, context, form, get html() { return html; }, get signs() { return signs; }, fail(error) { failure = error; },
     holdStart() {
       status = { running: true, phase: "preparing", progress: { percent: 15, stage: "Compressing archive." },
         logs: [{ at: 1, message: "Verified source snapshot." }] };
@@ -511,6 +702,9 @@ async function uiFixture({ shared = false, initialStatus = { phase: "idle", runn
 }
 test("site Settings waits for review, explicit confirmation and wallet approval before syncing", async () => {
   const f = await uiFixture();
+  assert.match(f.html, /Adding a site such as Pay/);
+  assert.match(f.html, /href="#\/settings"/);
+  assert.match(f.html, /does not copy application code or configure DNS\/TLS/);
   assert(!f.calls.some(call => call.url.endsWith("/plan")));
   await f.click("#site-sync-start");
   assert.equal(f.signs, 0);
@@ -632,9 +826,9 @@ function resumableFixture(t) {
   fs.writeFileSync(path.join(directory, "snapshot", "payload.bin"), data);
   fs.writeFileSync(archive, JSON.stringify({ entries: [{ name: "payload.bin", bytes: data.length, hash: crypto.createHash("sha256").update(data).digest("hex") }] }));
   const target = { id: "shared", host: "shared.example.com", port: 22, directory: "/srv/featheral",
-    fingerprint: "SHA256:fixture", password: "ssh-secret", sshTimeoutSeconds: 1, deploymentTimeoutSeconds: 1 };
+    fingerprint: "SHA256:fixture", password: "ssh-secret", hosts: ["gold.featheral.com"], sshTimeoutSeconds: 1, deploymentTimeoutSeconds: 1 };
   const binding = { id, site: "gold", target: target.id, host: target.host, port: target.port,
-    directory: target.directory, fingerprint: target.fingerprint, digest: hash(archive), revision: 1, transport: "files-v1" };
+    directory: target.directory, fingerprint: target.fingerprint, hosts: [...target.hosts], digest: hash(archive), revision: 1, transport: "files-v1" };
   const state = { remote: null, manifest: null, writes: [], commands: [], delay: 0, failAt: null, stall: false, ended: 0, applied: 0 };
   const settings = { value: { revision: 1 }, deploymentTargets: () => [{ ...target }] };
   const sftp = {
@@ -709,6 +903,35 @@ test("interrupted transfer resumes exact acknowledged and partial bytes after re
   assert.equal(f.state.applied, 1); assert.equal(restarted.status().phase, "complete");
   assert.equal(restarted.status().progress.percent, 100);
   assert(!fs.existsSync(f.directory));
+});
+test("site setup failure pauses before snapshot uploads or target apply and can resume after deployment", async t => {
+  const f = resumableFixture(t), execute = f.deployment.execute;
+  f.deployment.execute = async (...args) => {
+    if (args[1].includes("--check-sites")) {
+      args[5]("Target deployment is missing assigned sites: pay.featheral.com. Deploy the current release.");
+      throw new Error("Target site setup check failed");
+    }
+    return execute(...args);
+  };
+  f.service.launch(f.plan); await f.service.transferTask;
+  assert.equal(f.state.remote, null); assert.equal(f.state.manifest, null);
+  assert.equal(f.state.applied, 0); assert.equal(f.state.writes.length, 0);
+  assert.equal(f.service.status().phase, "paused");
+  assert.match(f.service.status().message, /deploy the current release from Admin Settings/);
+  assert.ok(f.service.status().logs.some(entry => entry.message.includes("missing assigned sites")));
+  assert.ok(fs.existsSync(f.archive), "the reviewed snapshot is retained for retry");
+  f.deployment.execute = execute;
+  f.service.resume({ site: "gold" }); await f.service.transferTask;
+  assert.equal(f.service.status().phase, "complete"); assert.equal(f.state.applied, 1);
+});
+test("paused snapshots cannot resume against a changed assigned hostname set", async t => {
+  const f = resumableFixture(t);
+  f.state.failAt = 0;
+  f.service.launch(f.plan); await f.service.transferTask;
+  assert.equal(f.service.status().phase, "paused");
+  f.target.hosts.push("pay.featheral.com");
+  assert.throws(() => f.service.resume({ site: "gold" }), /Site assignments changed/);
+  assert.equal(f.state.applied, 0);
 });
 test("insufficient target space stops before opening any upload and preserves the frozen snapshot for recovery", async t => {
   const f = resumableFixture(t), execute = f.deployment.execute;

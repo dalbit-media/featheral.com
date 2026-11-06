@@ -115,6 +115,31 @@ test("automatic installation is wallet-bound and separate DB deploys before the 
   assert.deepEqual(modes, [{ id: site, arguments: 3 }, { id: "shared", arguments: 3 }]);
   assert.equal(deployment.result.success, true);
 });
+test("Pay is automatically cataloged and deployed with the shared server or its saved separate assignment", async t => {
+  const f = fixture(t), root = path.resolve(__dirname, "../../..");
+  const { SitePages } = require("../lib/site-pages");
+  const pages = new SitePages({ root, dataDir: path.join(f.directory, "cms") });
+  t.after(() => pages.close());
+  const sites = pages.catalog(), pay = sites.find(site => site.hostname === "pay.featheral.com");
+  assert.ok(pay?.builtin); assert.equal(pay.key, "pay.featheral.com");
+  await f.save({ ...f.input, settings: { ...f.input.settings, enabled: true } });
+  assert.ok(f.settings.deploymentTargets(sites).find(target => target.id === "shared").hosts.includes(pay.hostname));
+  const input = { revision: f.settings.value.revision, settings: { useShared: false, url: "https://pay.featheral.com/",
+    host: "pay.example", port: 22, fingerprint: "SHA256:" + "b".repeat(43), credential: "root:pay-fixture-password" } };
+  const proof = f.settings.siteChallenge(pay.key, input, context, pay.hostname);
+  await f.settings.saveSite(pay.key, { ...input, challengeId: proof.challengeId, signature: await f.wallet.signMessage(proof.message) }, context, pay.hostname);
+  const deployment = new Deployment({ root, settings: f.settings, sites: () => sites,
+    hostnames: () => sites.map(site => site.hostname), stateDirectory: path.join(f.directory, "deploy") });
+  const plan = deployment.plan(), separate = plan.targets.find(target => target.id === pay.key);
+  assert.deepEqual(separate.hosts, [pay.hostname]);
+  assert.equal(separate.host, "pay.example");
+  assert.ok(!plan.targets.find(target => target.id === "shared").hosts.includes(pay.hostname));
+  const files = deployment.plans.get(plan.id).files;
+  for (const file of ["sites/pay.featheral.com/index.html", "sites/pay.featheral.com/pay.js",
+    "sites/pay.featheral.com/pay.css", "services/pay/request.js", "services/pay/server.js", "shared/logo-pay.svg", "package-lock.json"])
+    assert.ok(files.includes(file), `${file} must be shipped by deployment`);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).dependencies.qrcode);
+});
 test("automatic managed-site review binds published content and rejects retired manual installation controls", async t => {
   const f = fixture(t);
   await f.save({ ...f.input, settings: { ...f.input.settings, enabled: true } });
@@ -769,6 +794,7 @@ test("remote setup provisions Node/PM2/Nginx, applies limits and enables SSL cer
   assert.match(script, /proxy_read_timeout DEPLOY_TIMEOUTs/);
   assert.match(script, /proxy_send_timeout DEPLOY_TIMEOUTs/);
   assert.match(script, /certbot --nginx/);
+  assert.match(script, /certbot --nginx --non-interactive --agree-tos --keep-until-expiring --expand --email "\$email" --redirect "\$\{certificate_args\[@\]\}"/);
   assert.match(script, /systemctl enable --now certbot\.timer/);
   assert.match(script, /systemctl is-active --quiet certbot\.timer/);
   assert.match(script, /renewal-hooks\/deploy\/featheral-nginx/);

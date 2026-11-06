@@ -50,6 +50,12 @@ function allowReplicaRequest(req, res, settings) {
   res.setHeader("X-Featheral-Replica", "read-only");
   const pathname = new URL(req.url, "http://localhost").pathname;
   if (["GET", "HEAD", "OPTIONS"].includes(req.method) && !/^\/(?:api\/(?:session|chat|connect|sync)|wallet-sync)(?:\/|$)/.test(pathname)) return true;
+  if (req.method === "POST" && pathname === "/api/v1/pay/requests") {
+    let hostname;
+    try { hostname = new URL(`http://${req.headers?.host || ""}`).hostname; }
+    catch { hostname = ""; }
+    if (["pay.featheral.com", "pay.localhost"].includes(hostname)) return true;
+  }
   res.writeHead(403, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   res.end(JSON.stringify({ error: "This server is a read-only snapshot replica. Send writes to the source server." }));
   return false;

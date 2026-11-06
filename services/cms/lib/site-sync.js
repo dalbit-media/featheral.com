@@ -166,7 +166,7 @@ class SiteSync {
       const archive = path.join(directory, "snapshot", "manifest.json");
       this.progress(25, "Computing the manifest SHA256. Database entries transfer before uploaded files.");
       const binding = { id, site: input.site, target: target.id, host: target.host, port: target.port,
-        directory: target.directory, fingerprint: target.fingerprint, revision, digest: hash(archive), transport: "files-v1" };
+        directory: target.directory, fingerprint: target.fingerprint, hosts: [...target.hosts], revision, digest: hash(archive), transport: "files-v1" };
       const plan = { directory, archive, binding, context, expires: this.now() + 10 * 60000,
         review: { ...binding, expiresAt: new Date(this.now() + 10 * 60000).toISOString(),
           files: manifest.entries.length, bytes: manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0),
@@ -192,7 +192,8 @@ class SiteSync {
     if (input.site && input.site !== plan.binding.site) throw fail(400, "The reviewed snapshot belongs to another site.");
     const target = this.target(plan.binding.site);
     if (plan.binding.revision !== this.settings.value.revision || target.host !== plan.binding.host
-      || target.directory !== plan.binding.directory || target.fingerprint !== plan.binding.fingerprint)
+      || target.directory !== plan.binding.directory || target.fingerprint !== plan.binding.fingerprint
+      || JSON.stringify(target.hosts) !== JSON.stringify(plan.binding.hosts))
       throw fail(409, "Target Settings changed. Review a new snapshot.");
     return plan;
   }
@@ -234,7 +235,9 @@ class SiteSync {
       else this.log(`ERROR: ${error.message}`, [target.password]);
       if (paused) return;
       if (this.result.phase === "transferring") {
-        this.finish("paused", "Upload paused. Frozen files and verified target prefixes are retained. Continue transfer to skip completed files and resume the interrupted file.");
+        this.finish("paused", error.siteSetup
+          ? "Target site setup is not ready. No snapshot data was transferred in this attempt. Review the detail log, deploy the current release from Admin Settings and fix HTTPS, then continue this retained snapshot or reset for a fresh capture."
+          : "Upload paused. Frozen files and verified target prefixes are retained. Continue transfer to skip completed files and resume the interrupted file.");
       } else {
         this.result.resumable = false;
         this.finish("uncertain", "Sync was not confirmed. Inspect the target's featheral-site-sync systemd job and shared/sync-backups before retrying. No success is assumed.");
@@ -256,7 +259,7 @@ class SiteSync {
       this.persist();
     }
   }
-  // The receiver travels with the snapshot (checksum-verified), so the target needs no new release before syncing.
+  // Receiver updates travel with the snapshot; application code and site setup still require deployment.
   receiverBundle() {
     const names = ["scripts/restore-site-sync.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js"];
     const files = names.map(name => {
@@ -321,6 +324,8 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
     for (const key of ["host", "port", "directory", "fingerprint"])
       if (target[key] !== binding[key]) throw fail(409, "Restore the original target connection before continuing this snapshot.");
     if (target.id !== binding.target) throw fail(409, "Restore the original server assignment before continuing this snapshot.");
+    if (binding.hosts && JSON.stringify(target.hosts) !== JSON.stringify(binding.hosts))
+      throw fail(409, "Site assignments changed. Restore the original assigned hostnames before continuing this snapshot.");
     const directory = path.join(this.directory, binding.id), archive = path.join(directory, "snapshot", "manifest.json");
     if (!fs.existsSync(archive)) throw fail(409, "The frozen source manifest is missing. Legacy ZIP transfers cannot be continued by this uploader.");
     this.running = true;
@@ -391,6 +396,14 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
         for (const file of receiver.files)
           await uploadFile({ deployment: this.deployment, client, sftp, file: file.path, remote: `${receiverDirectory}/${file.name}`,
             bytes: file.bytes, digest: file.hash, target, signal: this.pauseController.signal });
+        this.log("Checking assigned sites, HTTPS certificates and application routes before transferring databases or uploads.");
+        try {
+          await this.deployment.execute(client, [
+            `cd ${quote(remote)}`,
+            `printf '%s\\n' ${quote(receiver.files.map(file => `${file.hash}  ${path.posix.basename(receiverDirectory)}/${file.name}`).join("\n"))} | sha256sum --check --quiet`,
+            `node ${quote(receiverDirectory + "/scripts/restore-site-sync.js")} --check-sites ${quote(target.directory)} ${quote(JSON.stringify(target.hosts))}`,
+          ].join(" && "), "", target.deploymentTimeoutSeconds, undefined, onLog);
+        } catch (error) { error.siteSetup = true; throw error; }
         let completed = 0, completedBytes = 0, skipped = 0;
         for (const entry of entries) {
           if (this.pauseController.signal.aborted) throw this.pauseController.signal.reason;
@@ -416,7 +429,7 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
         `cd ${quote(remote)}`, "echo FEATHERAL_SYNC:verify",
         `printf '%s\\n' ${quote([`${plan.binding.digest}  snapshot/manifest.json`,
           ...receiver.files.map(file => `${file.hash}  ${path.posix.basename(receiverDirectory)}/${file.name}`)].join("\n"))} | sha256sum --check --quiet`,
-        `node ${quote(receiverDirectory + "/scripts/restore-site-sync.js")} ${quote(target.directory)} ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups/" + plan.binding.id)} ${quote(this.sourceId)}`,
+        `node ${quote(receiverDirectory + "/scripts/restore-site-sync.js")} ${quote(target.directory)} ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups/" + plan.binding.id)} ${quote(this.sourceId)} ${quote(JSON.stringify(target.hosts))}`,
       ].join("\n");
       const launcher = `systemd-run --wait --pipe --collect --unit=featheral-site-sync --uid="$(id -u)" --setenv=HOME="$HOME" --setenv=PATH="$PATH" /bin/bash -c ${quote(script)}`;
       const command = `IFS= read -r password; if [ "$(id -u)" = 0 ]; then ${launcher}; else printf '%s\\n' "$password" | sudo -S -p '' -v && sudo -n ${launcher}; fi`;

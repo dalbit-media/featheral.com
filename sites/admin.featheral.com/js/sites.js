@@ -112,6 +112,7 @@ function deploymentControlsHtml() {
     <div class="deployment-review-heading"><h4>Upload reviewed code</h4>
     <button class="btn" type="button" id="deployment-plan">Review release</button></div>
     <p class="muted small">Code is compressed into a verified ZIP before upload. One release for all assigned servers; installation is detected automatically and existing data and keys are preserved. Database/uploads sync remains a separate file transfer.</p>
+    <p class="note">New hostname such as pay.featheral.com? Save its shared/separate server assignment, point DNS at that server, then use Review release and Sign &amp; deploy. This installs the site and expands HTTPS coverage. Git self-sync below keeps this Admin server's existing hostname assignment and certificates; it does not provision new sites or update other servers.</p>
     <p id="deployment-summary" class="deployment-summary" role="status">Save the connection, then review the release.</p>
     <details class="deployment-technical"><summary>Servers &amp; technical details</summary>
     <pre class="deployment-plan" id="deployment-details">No plan generated yet.</pre></details>

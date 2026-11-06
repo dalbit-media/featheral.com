@@ -94,6 +94,13 @@ Self-sync preserves the active release's upload and timeout limits and reuses
 installed HTTPS certificates, still verifying every assigned HTTPS hostname.
 It needs no outbound TLS registration email; the existing Certbot timer handles
 renewal.
+It preserves the installed hostname assignment too: to enable a newly added site
+such as `pay.featheral.com`, first save its shared/separate server assignment,
+configure DNS and run **Review release > Sign & deploy**. Upload deployment
+expands an existing certificate to cover new assigned hostnames non-interactively
+and reuses unexpired certificates when the hostname set is unchanged. Later Git
+self-syncs can update the already-provisioned site on the Admin server; separate
+servers still require upload deployment.
 Private storage stays linked in place; published CMS pages are not re-imported.
 Custom content, storage-origin mappings and the current writer authority remain
 intact. Recognized shipped page defaults receive their normal versioned design
@@ -126,6 +133,31 @@ prepare the snapshot and start transfer immediately using the saved connection;
 there is no separate review, replacement checkbox or wallet approval. For a
 separate server, prepare a review, confirm database replacement and sign with
 the Admin wallet. Reviewing never connects to or changes the target.
+
+For a newly added application such as **Pay**, save its server assignment and
+point DNS at the target, then use **Settings > Review release** and deploy first.
+Code deployment installs the new site's files and locked dependencies, updates
+the deployment hostname manifest and Nginx, and provisions HTTPS. Sync never
+copies application code or configures DNS/TLS. Its checksum-verified receiver
+travels separately; it does not upgrade the installed application.
+
+Before any snapshot data files transfer, sync checks that the target deployment
+manifest covers every currently assigned hostname and probes each site's local
+HTTPS virtual host with normal certificate/hostname verification. Pay also needs
+its versioned FTH$ request API to accept both GET and stateless POST, not just a
+generic homepage. Missing
+sites or TLS/application failures stop the transfer with deploy-first guidance
+in the detail log. Fix deployment/setup and continue the retained snapshot (or
+reset it for a fresh capture). Readiness is checked again before stopping the
+target and after restart; every assigned site must report read-only replica mode
+before sync is marked complete. These loopback checks do not replace public DNS
+and external reachability checks during deployment.
+
+Pay requests and printable cards are stateless and require no Pay-specific
+database sync. On an assigned Pay replica, `POST /api/v1/pay/requests` is allowed
+because it only constructs a public payment request. Native ledger transfers,
+wallet sign-in and all other writes remain blocked; the payer apps must point at
+their normal writer-enabled hosts. A replica cannot itself act as a paying wallet.
 
 The sync panel polls while snapshot preparation or transfer is pending and shows
 a stage-based progress bar, byte-counted SFTP upload progress and a timestamped

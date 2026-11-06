@@ -357,7 +357,7 @@ step=https
 if [[ "$deployment_mode" == self ]]; then
   echo "Preserving installed HTTPS certificates; renewal remains managed by certbot.timer."
 else
-  as_root certbot --nginx --non-interactive --agree-tos --email "$email" --redirect "${certificate_args[@]}"
+  as_root certbot --nginx --non-interactive --agree-tos --keep-until-expiring --expand --email "$email" --redirect "${certificate_args[@]}"
 fi
 as_root install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
 printf '%s\n' '#!/bin/sh' 'set -eu' '/usr/sbin/nginx -t' '/bin/systemctl reload nginx' > "$release/renew-nginx"
