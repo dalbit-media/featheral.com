@@ -5,7 +5,7 @@ const CmsStore = require('./cms');
 const { Documents } = require('./documents');
 
 const hosts = ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'app.featheral.com', 'dollar.featheral.com', 'world.featheral.com', 'media.featheral.com', 'admin.featheral.com', 'x.featheral.com', 'ex.featheral.com',
-  'notes.featheral.com', 'sites.featheral.com', 'stats.featheral.com', 'wallet.featheral.com', 'db.featheral.com'];
+  'notes.featheral.com', 'sites.featheral.com', 'stats.featheral.com', 'wallet.featheral.com', 'db.featheral.com', 'pay.featheral.com'];
 const escape = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const themes = {

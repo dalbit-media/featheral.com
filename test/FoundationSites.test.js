@@ -21,13 +21,14 @@ describe("Foundation managed-site gateway", () => {
     const handle = (name) => ({ handle: async () => { calls.push([name]); return name === "dollar" && claimDollar || name === "gold" && claimGold; } });
     vm.runInNewContext(handlerSource, {
       URL, console, path, require: name => name === "./site-routing" ? require("../scripts/site-routing") : require(name),
-      requestPolicy: () => true, gameApi: null, dollarGameApi: null,
+      requestPolicy: () => true, gameApi: null, dollarGameApi: null, deploymentManifest: null,
       injectTelemetry() {},
       http: { createServer: (fn) => { handler = fn; } },
       siteFor,
       siteUrl: (req, site, pathname) => `http://${site}.localhost:8080${pathname}`,
       redirect: (res, url, status) => calls.push(["redirect", url, status]),
       cms, gold: handle("gold"), world: handle("world"), api: handle("dollar"),
+      pay: require("../services/pay/server").createPayApi({ siteUrl: (req, site, pathname) => `http://${site}.localhost:8080${pathname}` }),
       sitesRoot: path.join(__dirname, "..", "sites"),
       root: path.join(__dirname, ".."),
       fs: { existsSync: fs.existsSync, statSync: fs.statSync, readFileSync: file => { calls.push(["static", file]); return "wallet"; },
@@ -59,6 +60,15 @@ describe("Foundation managed-site gateway", () => {
     expect(await fixture().request("ledger.localhost:8080")).to.deep.equal([
       ["static", path.join(__dirname, "..", "sites", "ledger.featheral.com", "index.html")],
     ]);
+  });
+  it("serves Pay independently of CMS and rejects unrelated financial API writes", async () => {
+    expect(siteFor("pay.localhost")).to.equal("pay");
+    expect(await fixture().request("pay.localhost:8080")).to.deep.equal([
+      ["static", path.join(__dirname, "..", "sites", "pay.featheral.com", "index.html")],
+    ]);
+    expect(await fixture().request("pay.localhost:8080", "/api/v1/notes/fth/transfers", {}, "POST")).to.deep.equal([["status", 404]]);
+    expect(await fixture().request("pay.localhost:8080", "/api/v1/pay/requests?to=invalid")).to.deep.equal([["status", 400]]);
+    expect(await fixture().request("pay.localhost:8080", "/api/v1/pay/requests?to=0x" + "11".repeat(20))).to.deep.equal([]);
   });
   it("serves the FTH$ explorer on Ledger and redirects legacy Dollar explorer URLs", async () => {
     const explorer = await fixture().request("ledger.localhost:8080", "/explorer/");

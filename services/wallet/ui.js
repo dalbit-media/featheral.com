@@ -12,11 +12,20 @@ function allowedOrigin(value) {
 }
 function primaryFor(hostname) {
   const site = hostname.split(".")[0];
-  return ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar"].includes(site) ? "FTH$" : "FTHX";
+  return ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar", "pay"].includes(site) ? "FTH$" : "FTHX";
 }
 function walletUi(params) {
-  const origin = params.get("parentOrigin"), primary = params.get("primary") || (origin && allowedOrigin(origin) ? primaryFor(new URL(origin).hostname) : "FTHX");
-  const requestedView = params.get("view") || "assets", view = requestedView === "tip" ? "swap" : requestedView, embedded = params.get("embedded") === "1";
+  const paymentFields = ["to", "amount", "name", "currency"];
+  let payment = null;
+  if (paymentFields.some(key => params.has(key))) {
+    if (paymentFields.some(key => params.getAll(key).length > 1))
+      throw Object.assign(new Error("Duplicate payment request fields are not supported."), { status: 400 });
+    payment = require("../pay/request").paymentRequest(Object.fromEntries(paymentFields.filter(key => params.has(key)).map(key => [key, params.get(key)])));
+    if (params.has("primary") && params.get("primary") !== "FTH$")
+      throw Object.assign(new Error("Payment requests use FTH$ only."), { status: 400 });
+  }
+  const origin = params.get("parentOrigin"), primary = params.get("primary") || (payment ? "FTH$" : origin && allowedOrigin(origin) ? primaryFor(new URL(origin).hostname) : "FTHX");
+  const requestedView = params.get("view") || "assets", view = payment ? "send" : requestedView === "tip" ? "swap" : requestedView, embedded = params.get("embedded") === "1";
   const defaultSite = primary === "FTHG" ? "gold" : primary === "FTH$" ? "dollar" : primary === "FTHS" ? "silver" : "notes";
   const theme = params.get("theme") || (origin && allowedOrigin(origin) ? new URL(origin).hostname.split(".")[0] : defaultSite);
   const themeHost = theme === "foundation" || theme === "localhost" || theme === "featheral" ? "featheral.com" : `${theme}.featheral.com`;
@@ -31,7 +40,7 @@ function walletUi(params) {
     || params.has("address") && !/^0x[0-9a-fA-F]{40}$/.test(params.get("address")))
     throw Object.assign(new Error("Unsupported wallet configuration or embedding origin."), { status: 400 });
   const interactive = !params.has("address") || params.get("followActive") === "1";
-  return { schema: "featheral.wallet", version: 1, primary, view, embedded, interactive, theme: { site: palette ? theme : defaultSite,
+  return { schema: "featheral.wallet", version: 1, primary, view, payment, embedded, interactive, theme: { site: palette ? theme : defaultSite,
     accent: (palette || siteColors[`${defaultSite}.featheral.com`]).color }, compact: params.get("compact") === "1", address: params.get("address") || null,
     followActive: params.get("followActive") === "1", parentOrigin: origin || null,
     selectionNonce: params.get("selectionNonce") || null, signing: interactive ? "wallet-provider" : "read-only",

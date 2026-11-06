@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Featheral Pay | Less friction. More possibility.</title>
+  <meta name="description" content="Accept FTH$ with a payment link, QR code or NFC tap. Pay with Dollar or Featheral Wallet. Preview your reusable Featheral Card.">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="/shared/logo-pay.svg">
+  <link rel="stylesheet" href="/pay.css">
+  <script src="/shared/site-links.js" defer></script><script src="/pay.js" defer></script>
+</head>
+<body>
+  <header data-no-central-wallet>
+    <a class="brand" href="/"><img src="/shared/logo-pay.svg" alt="" width="34" height="34">Featheral <strong>Pay</strong></a>
+    <nav aria-label="Pay navigation"><a href="#accept">Accept payments</a><a href="#card">Featheral Card</a><a href="#developers">API</a></nav>
+    <a class="wallet-link" data-site="wallet">Open Wallet <span aria-hidden="true">&nearr;</span></a>
+  </header>
+  <main>
+    <section class="hero" aria-labelledby="headline">
+      <div><p class="eyebrow"><span class="dot"></span> A lighter way to get paid</p>
+        <h1 id="headline">Good things.<br>Simple <em>payments.</em></h1>
+        <p class="lead">For your work, your shop, your next big idea. Accept <strong>FTH$</strong> with one link, a QR scan or an NFC tap.</p>
+        <div class="actions"><a class="button" href="#accept">Create a payment link <span aria-hidden="true">&rarr;</span></a><a class="text-link" href="#how">See how it works &darr;</a></div>
+        <div class="hero-details"><span>FTH$ native payments</span><span>Your wallet. Your funds.</span><span>No ETH needed for native transfers</span></div>
+      </div>
+      <aside class="hero-card"><div class="orbit" aria-hidden="true"><img src="/shared/logo-pay.svg" alt="" width="80" height="80"></div>
+        <p class="eyebrow">One request. Two ways to pay.</p><h2>Scan it.<br>Tap it.<br><span>Make it happen.</span></h2>
+        <div class="payer-badges"><span>Dollar app</span><span>Featheral Wallet</span></div>
+        <p>Every payment is reviewed and authorized in the payer's wallet.</p>
+      </aside>
+    </section>
+    <section id="accept" class="accept-section" aria-labelledby="accept-title">
+      <div class="section-heading"><div><p class="eyebrow">Built around your wallet</p><h2 id="accept-title">Ready when you are.</h2></div><p>No new account. No custody.<br>Just a public receiving wallet ID.</p></div>
+      <div class="payment-grid">
+        <form id="request-form" class="panel">
+          <div class="panel-heading"><span class="step">01</span><h3>Your payment request</h3></div>
+          <label for="name">Name or business <span>optional, public</span></label>
+          <input id="name" name="name" maxlength="60" placeholder="How should payers know you?" autocomplete="organization">
+          <label for="to">Receiving wallet ID</label>
+          <input id="to" name="to" required spellcheck="false" autocomplete="off" placeholder="0x... wallet address or FTH$ account ID" aria-describedby="wallet-help">
+          <small id="wallet-help">Use your public 0x wallet address or 32-byte FTH$ account ID. Never enter a private key or recovery phrase.</small>
+          <label for="amount">Amount <span>optional</span></label>
+          <div class="amount-input"><input id="amount" name="amount" inputmode="decimal" placeholder="Payer chooses" autocomplete="off" maxlength="79"><span>FTH$</span></div>
+          <small>Leave blank for a reusable request. FTH$ is the base currency, not a USD card charge.</small>
+          <button class="button" type="submit" id="generate">Create payment request &rarr;</button>
+        </form>
+        <section class="panel checkout" aria-labelledby="checkout-title">
+          <div class="panel-heading"><span class="step">02</span><h3 id="checkout-title">Scan. Review. Pay.</h3></div>
+          <div id="empty-request" class="empty-request"><span aria-hidden="true">FTH$</span><p>Your payment QR will appear here.<br>Start with your receiving wallet ID.</p></div>
+          <div id="request-result" hidden>
+            <p class="request-name" id="request-name"></p><h3 class="request-amount" id="request-amount"></h3>
+            <img id="payment-qr" class="qr" alt="QR code opening this FTH$ payment request" width="240" height="240">
+            <p class="recipient-label">Receiving wallet ID</p><code id="recipient"></code>
+            <p class="warning">Display names are unverified. Confirm the full recipient ID with the person you intend to pay.</p>
+            <div class="payer-actions"><a id="pay-wallet" class="button">Pay with Wallet &nearr;</a><a id="pay-dollar" class="button secondary">Pay with Dollar &nearr;</a></div>
+            <label for="payment-link">Share this payment link</label><input id="payment-link" readonly>
+            <div class="actions"><button id="copy-link" type="button" class="subtle">Copy link</button><a id="download-qr" download="featheral-payment.svg">Download QR</a><button id="write-nfc" type="button" class="subtle">Write NFC tag</button></div>
+          </div>
+          <p class="settlement-note">A scan or tap only opens a request. No funds move until the payer approves. An internet connection is required to settle.</p>
+        </section>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+    <section id="how" class="how-section" aria-labelledby="how-title">
+      <p class="eyebrow">From hello to paid</p><h2 id="how-title">Three steps. That's the whole idea.</h2>
+      <div class="steps"><article><span>01 / Create</span><h3>A link that's yours.</h3><p>Add your receiving wallet ID and, if you like, an amount. Share it anywhere.</p></article><article><span>02 / Connect</span><h3>A scan or a tap.</h3><p>Show your QR or write the same link to a compatible NFC tag. No special reader needed to scan.</p></article><article><span>03 / Approve</span><h3>Paid wallet to wallet.</h3><p>The payer opens Dollar or Wallet, checks the recipient and amount, then authorizes an FTH$ transfer.</p></article></div>
+    </section>
+    <section id="card" class="card-section" aria-labelledby="card-title">
+      <div class="card-copy"><p class="eyebrow">Meet Featheral Card <span class="badge">Coming soon</span></p><h2 id="card-title">A small card.<br>A lasting connection.</h2>
+        <p>A reusable name card for in-person payments. Your name, public wallet ID, payment QR and clear instructions, all in one place. A compatible NFC tag can carry the same link.</p>
+        <p>Designed for reuse, not a pile of single-use payment slips. Print your preview on recycled stock. Physical card materials and sustainability certifications are not yet finalized.</p>
+        <p class="warning">The card shares a request while offline; it does not store funds or settle offline. NFC works only if a tag is attached and programmed. Physical card production and final design are coming soon.</p>
+        <button id="print-card" class="button" type="button" disabled>Print card / Save as PDF &nearr;</button><p class="small">Create a request above to personalize your printable preview. Its QR always lets the payer choose an amount.</p>
+      </div>
+      <div id="print-area" class="card-preview">
+        <article class="name-card card-front">
+          <div class="card-brand"><img src="/shared/logo-dollar.svg" alt="" width="24" height="24"><strong>Featheral Card</strong><span>FTH$</span></div>
+          <p class="card-kicker">Let's make a connection.</p><h3 id="card-name">Your name. Your wallet.</h3>
+          <div class="card-bottom"><span>Reusable payment name card<br>Printable preview / physical card coming soon</span><span class="tap-symbol" aria-label="NFC if programmed">)))</span></div>
+        </article>
+        <article class="name-card card-back">
+          <div class="card-back-layout"><div><strong>Scan to pay in FTH$</strong><ol><li>Scan QR or tap a programmed NFC tag.</li><li>Open Dollar or Featheral Wallet.</li><li>Check the ID, enter an amount and approve.</li></ol><small>Internet required to settle.<br>No private keys or funds stored on this card.</small></div>
+            <div class="card-qr-wrap"><img id="card-qr" alt="Reusable Featheral Card payment QR" width="120" height="120" hidden><span id="card-qr-placeholder">Create your QR above</span></div></div>
+          <p class="card-wallet-label">PUBLIC RECEIVING WALLET ID</p><code id="card-wallet">Your public wallet ID appears here</code>
+          <span class="card-site">pay.featheral.com &middot; Confirm the full ID before paying.</span>
+        </article>
+      </div>
+    </section>
+    <section id="developers" class="developer-section" aria-labelledby="developer-title">
+      <div><p class="eyebrow">Made to connect</p><h2 id="developer-title">Your checkout.<br>Our payment request API.</h2><p>Create a portable FTH$ request with JSON. Get a payment link, QR URL, NFC URL record and payer handoffs. No private keys, no new ledger.</p></div>
+      <div><pre><code>POST /api/v1/pay/requests
+Content-Type: application/json
+
+{
+  "to": "YOUR_PUBLIC_WALLET_ID",
+  "amount": "12.50",
+  "currency": "FTH$",
+  "name": "Your business"
+}</code></pre><p>Omit <code>amount</code> for a reusable request. Requests are stateless and public, not invoices or proof of payment. Confirm receipt in your wallet or native ledger before providing goods.</p><p><code>GET /api/v1/pay/requests?to=...</code><br><code>GET /api/v1/pay/qr?to=...</code> returns SVG.</p></div>
+    </section>
+    <noscript><p class="warning">Enable JavaScript to create payment requests and printable cards. The JSON payment API is also available for integrations.</p></noscript>
+  </main>
+</body>
+</html>

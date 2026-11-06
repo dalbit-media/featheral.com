@@ -20,7 +20,7 @@ class Element {
 async function fixture(host, { embedded = false, storageBlocked = false, walletData = {}, publicAddress = null, markets = [], noProvider = false, vaultApi,
   activeAddress = null, followActive = false, worldAccount = null, noSession = embedded, view = 'assets', marketError = false,
   selectionNonce = null, popupBlocked = false, marketDelay = false, manualReview = false, parentProvider, storageAccess,
-  readySelection = null, sessionExpired = false } = {}) {
+  readySelection = null, sessionExpired = false, payment = null } = {}) {
   const nodes = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   nodes['wallet-review'].showModal = () => {
     nodes['wallet-review'].open = true;
@@ -51,7 +51,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     if (url.startsWith('/api/wallet/ui')) return reply(require('../../wallet/ui').walletUi(new URLSearchParams({ primary: require('../../wallet/ui').primaryFor(`${host}.localhost`),
       view, ...(embedded ? { embedded: '1', parentOrigin: 'http://notes.localhost:8080' } : {}),
       ...(selectionNonce ? { selectionNonce, parentOrigin: 'http://gold.localhost:8080' } : {}),
-      ...(publicAddress ? { address: publicAddress } : {}), followActive: followActive ? '1' : '0' })));
+      ...(publicAddress ? { address: publicAddress } : {}), followActive: followActive ? '1' : '0', ...(payment || {}) })));
     if (url.startsWith('/api/v1/notes/fth/accounts/')) return reply({ fthDollar: { available: '1000000000000000000' }, wallet: null });
     if (url.includes('/wallet/portfolio/')) return reply({ totals: {
       FTHX: { value: '100000000000000000000', unpriced: [] }, 'FTH$': { value: '1000000000000000000', unpriced: [] } },
@@ -178,6 +178,26 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     rejectNextSignature: () => { rejectSignature = true; }, loseTipReceipt: () => { tipReceiptLost = true; },
     loseSwapReceipt: () => { swapReceiptLost = true; }, completes: () => completes };
 }
+test('payment links prefill FTH$ without transferring until explicit exact-amount review', async () => {
+  const payment = { to: '0x' + '22'.repeat(20), amount: '0.000000000000000001', name: 'Test shop' };
+  const ui = await fixture('dollar', { payment, manualReview: true, view: 'assets' });
+  assert.equal(ui.nodes['send-symbol'].value, 'FTH$');
+  assert.equal(ui.nodes['send-amount'].value, payment.amount);
+  assert.equal(ui.nodes.recipient.value, '0x' + '00'.repeat(12) + '22'.repeat(20));
+  assert.match(ui.nodes['payment-request'].textContent, /unverified/);
+  assert.equal(ui.nodes.send.hidden, false);
+  assert.equal(ui.calls.some(call => call.url.includes('/send/prepare') || call.url.includes('/transfers')), false);
+  const cancelled = ui.nodes['send-form'].fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(ui.nodes['wallet-review-message'].textContent, /0\.000000000000000001 FTH\$/);
+  await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
+  assert.equal(ui.calls.some(call => call.url.includes('/transfers')), false);
+  const approved = ui.nodes['send-form'].fire('submit');
+  await new Promise(resolve => setImmediate(resolve));
+  await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
+  assert.equal(ui.calls.find(call => call.url.endsWith('/send/prepare')).body.amount, '1');
+  assert.equal(ui.calls.filter(call => call.url.includes('/transfers')).length, 1);
+});
 test('without an injected provider the built-in wallet unlocks and authenticates without persisting its signing session', async () => {
   const address = '0x1111111111111111111111111111111111111111';
   class LocalVault {

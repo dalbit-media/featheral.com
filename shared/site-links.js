@@ -3,10 +3,10 @@
 // Cross-site links for the Featheral hosts. Works on production (gold.featheral.com) and local
 // development (gold.localhost:8080) by swapping only the first host label and keeping protocol/port.
 (() => {
-  const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "x", "ex", "notes", "sites", "stats", "wallet"];
+  const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "x", "ex", "notes", "sites", "stats", "wallet", "pay"];
   const publicSites = [["foundation", "Foundation"], ["gold", "Gold · FTHG"], ["dollar", "Dollar · FTH$"],
-    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["db", "Database"], ["admin", "Admin"]];
-  const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$",
+    ["silver", "Silver · FTHS"], ["app", "App"], ["world", "World"], ["media", "Media"], ["ledger", "Ledger"], ["ex", "Exchange"], ["notes", "Notes"], ["sites", "Sites"], ["stats", "Stats"], ["wallet", "Wallet"], ["pay", "Pay"], ["db", "Database"], ["admin", "Admin"]];
+  const currencies = { foundation: "FTHG", gold: "FTHG", silver: "FTHS", dollar: "FTH$", world: "FTH$", pay: "FTH$",
     app: "FTHX", media: "FTHX", x: "FTHX", ex: "FTHX", notes: "FTHX", sites: "FTHX", wallet: "FTHX" };
   const familySites = ["foundation", "gold", "dollar", "silver", "stats", "world", "media"];
   // Stats keeps the family layout but is linked from the footer Tools group, not the top bar.
@@ -119,7 +119,7 @@
       for (const [label, sites] of [
         ["Currencies", ["gold", "silver", "dollar"]],
         ["World & community", ["world", "media"]],
-        ["Apps", ["app", "ex", "notes", "sites"]],
+        ["Apps", ["app", "ex", "notes", "sites", "pay"]],
         ["Ledgers", ["ledger"]],
         ["Tools", ["wallet", "stats", "db", "admin"]],
       ]) {

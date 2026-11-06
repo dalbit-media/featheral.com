@@ -9,6 +9,7 @@ One Node server (`scripts/serve.js`) hosts the Foundation ecosystem, selected by
 | Featheral Silver (FTHS) | silver.featheral.com | http://silver.localhost:8080/ | `sites/silver.featheral.com/` |
 | Featheral App (intranet) | app.featheral.com | http://app.localhost:8080/ | `sites/app.featheral.com/` |
 | Featheral Dollar (FTH$) | dollar.featheral.com | http://dollar.localhost:8080/ (`/wallet/`, `/explorer/`) | `sites/dollar.featheral.com/` |
+| Featheral Pay | pay.featheral.com | http://pay.localhost:8080/ | `sites/pay.featheral.com/` |
 | Featheral Ledger | ledger.featheral.com | http://ledger.localhost:8080/ | `sites/ledger.featheral.com/` |
 | Featheral World (settlement & federation game) | world.featheral.com | http://world.localhost:8080/ | `sites/world.featheral.com/play/` |
 | Featheral Media (social community) | media.featheral.com | http://media.localhost:8080/ | `sites/media.featheral.com/` |
@@ -18,7 +19,7 @@ One Node server (`scripts/serve.js`) hosts the Foundation ecosystem, selected by
 
 All frontend source lives under `sites/`, named by its public hostname. Common assets remain in `shared/`; backend services and private data stay in `services/` and their existing data directories. World game source remains nested in `sites/world.featheral.com/play/`. X supplies the shared CMS-managed public-page shell, also used by Exchange and newly registered sites; Exchange's demo assets live in its own directory. The CMS server preserves `/site/` asset URLs and authenticated preview behavior without copying the shared renderer.
 
-Services are named by ownership: `database`, `gold`, `notes` (including Dollar and game funds), `identity`, `wallet`, `media`, `cms`, and `operations`. Admin screen modules live in `sites/admin.featheral.com/pages/`. The redundant Dollar API wrapper and empty social placeholder pages have been removed; tests, migration tooling and private data are retained.
+Services are named by ownership: `database`, `gold`, `notes` (including Dollar and game funds), `identity`, `wallet`, `pay`, `media`, `cms`, and `operations`. Admin screen modules live in `sites/admin.featheral.com/pages/`. The redundant Dollar API wrapper and empty social placeholder pages have been removed; tests, migration tooling and private data are retained.
 
 Header title links return to the current site's landing page. Foundation, Gold, Dollar, Silver, Stats, World and Media share an identical compact family bar with exactly those seven links in that order and the same 11px text, spacing and layout. Readable foreground and panel colors follow each site's theme, with the current page marked in bold. Other sites retain their current-site and same-currency links alongside the family links. Every non-embedded site has the full core-site hierarchy in its footer, including cross-currency destinations and Admin.
 
@@ -38,6 +39,54 @@ deleting target-only files, and target server credentials/keys stay private.
 The target restarts as a persistent read-only replica; the source remains the
 writer. Code deployment never performs this data copy automatically. See
 [sync prerequisites and recovery](services/cms/README.md#one-time-server-data-sync).
+
+### Featheral Pay and Featheral Card
+
+Pay creates public, stateless **FTH$ payment requests**, not invoices or payment
+receipts. Enter a public wallet address or a 32-byte FTH$ account ID, optionally
+an amount and display name. Share the generated link or download its QR SVG.
+Dollar opens the central wallet embedded on its own host; Wallet opens it
+directly. Both prefill the same recipient and exact amount and require explicit
+payer review and signing through the existing native FTH$ transfer service.
+Names are unverified; compare the full wallet ID through a trusted channel.
+Confirm actual receipt in the receiving wallet/native ledger before fulfillment.
+There is no new balance store, automatic charging, USD card processing or
+payment-confirmation callback.
+
+The printable two-sided **Featheral Card** contains a name, public wallet ID,
+reusable amount-free QR and payer instructions. Use **Print card / Save as PDF**
+after generating a request; print at 100% scale for 85.6 x 54 mm sides. Physical
+card production and final design remain **coming soon**. Reuse the card and
+optionally print on recycled stock; materials and certifications are not finalized.
+The card can share its request offline, but settlement requires internet.
+NFC requires a compatible writable tag, not just a printed symbol. **Write NFC
+tag** writes the currently displayed payment link as an NDEF URL record (leave
+amount blank for reuse). Browser writing requires HTTPS, supported Web NFC
+hardware/browser and user permission. Otherwise copy the link into an NFC writer
+app or scan the QR. Test the tag with another device before sharing.
+
+API, on the Pay host:
+
+- `POST /api/v1/pay/requests` with `Content-Type: application/json` and
+  `{"to":"PUBLIC_WALLET_ID","amount":"12.50","currency":"FTH$","name":"Shop"}`.
+- `GET /api/v1/pay/requests?to=PUBLIC_WALLET_ID&amount=12.50` returns the same
+  versioned `featheral.pay` JSON. `amount`, `currency` and `name` are optional;
+  only FTH$ is supported. Omit amount or send `""` to let the payer choose.
+- `GET /api/v1/pay/qr?to=PUBLIC_WALLET_ID` returns a real QR SVG with a four-module
+  quiet zone, encoding the corresponding Pay URL.
+
+JSON includes canonical `to`, decimal `amount`, exact 18-decimal `baseUnits`
+(null for payer-chosen amounts), `paymentUrl`, `qrUrl`, `payers.wallet`,
+`payers.dollar` and `nfc: {recordType:"url",data:paymentUrl}`. No funds move when
+creating or fetching a request. Requests are not persisted; public data is
+contained in shareable URLs. Never put secrets in these fields. JSON bodies are
+limited to 2048 bytes; duplicate/unknown fields, zero recipients and invalid
+amounts are rejected. The API deliberately exposes no unrelated financial writes.
+
+Run `npm run test:pay` for request/API tests. Provision DNS/TLS for
+`pay.featheral.com` through the same gateway as other sites, and include it in
+assigned hosts if using a deployment manifest. A separate Pay deployment must
+follow the existing read-only replica rules; never start another ledger writer.
 
 ### Foundation App and Silver
 

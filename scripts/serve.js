@@ -97,7 +97,7 @@ if (reserveMode === "isolated") {
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8", ".webmanifest": "application/manifest+json" };
 const sitesRoot = path.join(root, "sites");
 // Static sites and the private-data-backed CMS share one hostname gateway.
-const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats"];
+const SITES = ["foundation", "gold", "silver", "app", "db", "dollar", "world", "media", "ledger", "admin", "cms", "x", "ex", "notes", "wallet", "sites", "stats", "pay"];
 const cms = require("../services/cms/server");
 const { injectTelemetry } = require("../services/cms/lib/telemetry");
 const gameDirectory = path.resolve(env.DOLLAR_GAME_DIR || path.join(root, "data", "dollar-game"));
@@ -232,6 +232,7 @@ async function forwardGame(req, res) {
   } finally { clearTimeout(timer); }
 }
 
+const pay = require("../services/pay/server").createPayApi({ siteUrl });
 const server = http.createServer(async (req, res) => {
   if (!requestPolicy(req, res, cms.operationsSettings)) return;
   cms.serverProfile?.recordRequest(req, res);
@@ -259,12 +260,17 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(404, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "Unknown database service endpoint." }));
     }
+    if (site === "pay" && url.pathname.startsWith("/api/")) {
+      if (await pay.handle(req, res)) return;
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Unknown payment service endpoint." }));
+    }
     if (url.pathname.startsWith("/api/intranet/") || url.pathname.startsWith("/api/silver/")) return cms(req, res);
     if (site === "ledger" && url.pathname.startsWith("/api/notes/ledger/")) return cms(req, res);
     if (site === "ledger" && url.pathname === "/explorer")
       return redirect(res, siteUrl(req, "ledger", "/explorer/" + url.search), 301);
     if (site !== "admin" && /^\/api\/v1\/(?:world|media)\/profile/.test(url.pathname) && await world.handle(req, res)) return;
-    if (["app", "silver", "db", "ledger"].includes(site) && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/shared/")) {
+    if (["app", "silver", "db", "ledger", "pay"].includes(site) && !url.pathname.startsWith("/api/") && !url.pathname.startsWith("/shared/")) {
       const directory = site === "ledger" && (url.pathname === "/fth.js" || url.pathname.startsWith("/explorer/"))
         ? path.join(sitesRoot, "dollar.featheral.com")
         : path.join(sitesRoot, `${site}.featheral.com`);

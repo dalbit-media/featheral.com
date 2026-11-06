@@ -3,7 +3,7 @@
   const script = document.currentScript;
   const walletOrigin = new URL(script.src).origin;
   const site = location.hostname.split(".")[0];
-  const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar"].includes(site) ? "FTH$" : "FTHX";
+  const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar", "pay"].includes(site) ? "FTH$" : "FTHX";
   const frames = new Set();
   const frameStates = new WeakMap();
   const rootFrames = new WeakMap();
@@ -316,6 +316,12 @@
     const followActive = options.followActive || !options.address;
     url.search = new URLSearchParams({ embedded: "1", parentOrigin: location.origin, primary, view,
       compact: options.compact ? "1" : "0", followActive: followActive ? "1" : "0" });
+    if (options.payment) {
+      for (const [key, value] of new URLSearchParams(options.payment)) {
+        if (!["to", "amount", "name", "currency"].includes(key)) throw new Error("Unsupported payment request field.");
+        url.searchParams.append(key, value);
+      }
+    }
     const address = followActive && selectedPublicAddress || options.address;
     if (address) {
       if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("Invalid public wallet address.");
@@ -323,6 +329,7 @@
     }
     const frame = document.createElement("iframe");
     rootFrames.set(root, frame);
+    frame.dataset.walletPayment = options.payment || "";
     frame.dataset.walletFollowActive = String(!!followActive);
     frames.add(frame);
     frame.src = url.href; frame.title = `Featheral ${primary} wallet`;
@@ -398,7 +405,7 @@
     } else {
       const root = dialog.querySelector("[data-wallet-root]");
       const frame = root.querySelector("iframe"), target = new URL(frame.src);
-      if (target.searchParams.get("primary") !== primary || options.address && !options.followActive
+      if ((frame.dataset.walletPayment || "") !== (options.payment || "") || target.searchParams.get("primary") !== primary || options.address && !options.followActive
         && target.searchParams.get("address") !== options.address) {
         delete root.dataset.walletMounted; mount(root, options);
       } else frame.contentWindow?.postMessage({ type: "featheral:wallet-view", view: options.view || "assets" }, walletOrigin);
@@ -438,7 +445,7 @@
   function apply() {
     for (const root of document.querySelectorAll("[data-wallet-embed]")) mount(root, {
       primary: root.dataset.walletPrimary, view: root.dataset.walletView, compact: root.dataset.walletCompact === "true",
-      address: root.dataset.walletAddress,
+      address: root.dataset.walletAddress, payment: root.dataset.walletPayment,
     });
     const header = document.querySelector("body > header, #app > header, header.topbar");
     if (header && !["x.featheral.com", "x.localhost"].includes(location.hostname) && !location.hostname.startsWith("admin.") && !header.hasAttribute("data-no-central-wallet")) {

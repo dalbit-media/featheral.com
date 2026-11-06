@@ -17,6 +17,7 @@
     "start:cms": "npm start --prefix services/cms",
     "test:cms": "npm test --prefix services/cms",
     "test:db": "node --test services/database/tests/*.test.js",
+    "test:pay": "node --test services/pay/tests/*.test.js",
     "test": "hardhat test"
   },
   "engines": {
@@ -43,6 +44,7 @@
     "hardhat": "^2.29.1"
   },
   "dependencies": {
-    "ethers": "^6.17.0"
+    "ethers": "^6.17.0",
+    "qrcode": "^1.5.4"
   }
 }

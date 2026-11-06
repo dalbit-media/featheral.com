@@ -69,7 +69,7 @@ test("Notes market cards link to Exchange instead of rendering executable trade 
   assert.match(css, /\[data-primary\]\[data-embedded=true\] main/);
 });
 test("versioned wallet JSON validates options and network origin defaults", () => {
-  for (const [site, primary] of [["gold", "FTHG"], ["silver", "FTHS"], ["dollar", "FTH$"], ["world", "FTH$"], ["notes", "FTHX"], ["ex", "FTHX"], ["foundation", "FTHG"]]) {
+  for (const [site, primary] of [["gold", "FTHG"], ["silver", "FTHS"], ["dollar", "FTH$"], ["world", "FTH$"], ["pay", "FTH$"], ["notes", "FTHX"], ["ex", "FTHX"], ["foundation", "FTHG"]]) {
     assert.equal(primaryFor(`${site}.featheral.com`), primary);
     const config = walletUi(new URLSearchParams({ embedded: "1", parentOrigin: `https://${site}.featheral.com`, compact: "1", view: "swap" }));
     assert.equal(config.version, 1); assert.equal(config.primary, primary); assert.equal(config.signing, "wallet-provider"); assert.equal(config.view, "swap");
@@ -218,6 +218,22 @@ function embedFixture({ withHeader = false, localhost = false, primary, hostStyl
   return { wallet: window.FeatheralWallet, dialog: () => document.getElementById("featheral-central-wallet"), header, button, swap,
     listeners, messages, popups, timers, timeouts, store, profileCalls, errors };
 }
+test("Dollar embeds and full-wallet fallback retain the same payment recipient and amount", () => {
+  const ui = embedFixture({ localhost: true, hostname: 'dollar.localhost' });
+  const payment = new URLSearchParams({ to: '0x' + '22'.repeat(20), amount: '1.000000000000000001', name: 'Shop & cafe', currency: 'FTH$' });
+  ui.wallet.open({ primary: 'FTH$', view: 'send', payment: payment.toString() });
+  const frame = ui.dialog().querySelector('iframe');
+  for (const [key, value] of payment) assert.equal(new URL(frame.src).searchParams.get(key), value);
+  const links = ui.dialog().children.flatMap(child => child.children || []).filter(child => child.tag === 'a');
+  const fallback = links.find(link => link.textContent === 'Open full wallet ↗');
+  assert.ok(fallback);
+  for (const [key, value] of payment) assert.equal(new URL(fallback.href).searchParams.get(key), value);
+  payment.set('amount', '2');
+  ui.wallet.open({ primary: 'FTH$', view: 'send', payment: payment.toString() });
+  assert.equal(new URL(ui.dialog().querySelector('iframe').src).searchParams.get('amount'), '2');
+  ui.wallet.open({ primary: 'FTH$', view: 'send' });
+  assert.equal(new URL(ui.dialog().querySelector('iframe').src).searchParams.has('to'), false);
+});
 test("site wallet buttons keep their wallet icon beside the public avatar and five-character address suffix", async () => {
   const address = '0x' + '1'.repeat(35) + 'abcde', avatar = 'data:image/png;base64,YXZhdGFy';
   for (const primary of ['FTHG', 'FTH$', 'FTHX']) {
@@ -782,6 +798,8 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   }
   assert.ok(fixture("dollar").bar.querySelector('a[data-site="world"]'), "all core sites share the six family links");
   assert.ok(fixture("app").bar.querySelector('a[data-site="media"]'), "FTHX siblings remain available");
+  for (const site of ["pay", "dollar", "world"])
+    assert.ok(fixture("pay").bar.querySelector(`a[data-site="${site}"]`), `Pay includes its FTH$ sibling ${site}`);
   const fthxSites = ["app", "media", "ex", "notes", "sites", "wallet"];
   for (const host of fthxSites) {
     if (familySites.includes(host)) continue;
@@ -792,8 +810,9 @@ test("ecosystem navigation has compact family headers and the full footer hierar
   const stable = fixture("wallet");
   assert.equal(stable.bar.querySelectorAll("a[data-site]")[0], stable.firstLink,
     "reapplying unchanged navigation preserves link nodes and keyboard focus");
-  assert.equal(links.length, 15);
-  assert.equal(new Set(links.map(link => link.dataset.site)).size, 15);
+  assert.equal(links.length, 16);
+  assert.equal(new Set(links.map(link => link.dataset.site)).size, 16);
+  assert.equal(links.find(link => link.dataset.site === "pay").href, "http://pay.localhost:8080/");
   assert.ok(!links.some(link => link.dataset.site === "x"));
   for (const host of [...familySites, ...fthxSites, "admin", "db", "ledger"])
     assert.ok(!fixture(host).bar.querySelector('a[data-site="x"]'), `${host} never advertises standalone X`);

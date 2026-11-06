@@ -9,6 +9,7 @@ const badges = {
   app: '<rect x="46" y="43" width="12" height="18" rx="3"/><path d="M50 46h4m-3 12h2"/>',
   db: '<ellipse cx="52" cy="46" rx="7" ry="3"/><path d="M45 46v11c0 4 14 4 14 0V46m-14 5c0 4 14 4 14 0"/>',
   dollar: '<path d="M55 47h-5a3 3 0 000 6h3a3 3 0 010 6h-5m4-15v18"/>',
+  pay: '<rect x="44" y="46" width="16" height="12" rx="2"/><path d="M48 51v2m4-4v6m4-8v10"/>',
   ledger: '<rect x="45" y="44" width="14" height="17" rx="2"/><path d="M49 44v17m3-12h4m-4 4h4m-4 4h4"/>',
   world: '<circle cx="52" cy="52" r="7"/><ellipse cx="52" cy="52" rx="3" ry="7"/><path d="M45 52h14"/>',
   media: '<path d="M44 45h16v11H51l-5 4v-4h-2z"/><path d="M48 49h8m-8 3h5"/>',

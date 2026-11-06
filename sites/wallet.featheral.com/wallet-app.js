@@ -140,7 +140,7 @@
       event.preventDefault(); tab(tabs[next].dataset.tab); tabs[next].focus();
     });
   }
-  tab(location.hash.slice(1) || config.view);
+  tab(config.payment ? "send" : location.hash.slice(1) || config.view);
   window.addEventListener("hashchange", () => tab(location.hash.slice(1)));
   document.title = `Featheral Wallet · ${primarySymbol}`;
   $("wallet-title").textContent = "Featheral Wallet";
@@ -155,6 +155,13 @@
       const option = el("option", "FTHS"); option.value = "FTHS"; $(id).append(option); $(id).value = "FTHS";
     }
     $("swap-from").value = "FTH$";
+  }
+  if (config.payment) {
+    $("send-symbol").value = "FTH$";
+    $("recipient").value = config.payment.to;
+    $("send-amount").value = config.payment.amount;
+    $("payment-request").hidden = false;
+    $("payment-request").textContent = `Payment request${config.payment.name ? " from " + config.payment.name : ""}. Display name is unverified. Check the recipient wallet ID and exact amount before approving.`;
   }
   const local = location.hostname.endsWith(".localhost");
   $("exchange-link").href = `${location.protocol}//${local ? "ex.localhost" : "ex.featheral.com"}${location.port ? ":" + location.port : ""}/`;
@@ -652,7 +659,8 @@
     try {
       if (!await ensureSession()) return;
       const symbol = $("send-symbol").value, raw = units($("send-amount").value, symbol);
-      if (!await review(`Send ${format(raw, symbol)} to ${$("recipient").value}?`)) return;
+      const reviewAmount = symbol === "FTH$" ? `${$("send-amount").value.trim()} FTH$` : format(raw, symbol);
+      if (!await review(`Send ${reviewAmount} to ${$("recipient").value}?`)) return;
       if (symbol === "FTH$") {
         sendRequest ||= await api("/wallet/send/prepare", { to: $("recipient").value, amount: raw });
         const request = sendRequest, signature = await sign(request.message);
