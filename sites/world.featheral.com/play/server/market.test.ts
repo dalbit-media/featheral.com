@@ -90,6 +90,24 @@ test('resource pricing depth survives exchange reinitialization and never grows 
     assert.deepEqual(db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get(), depth);
   } finally { db.close(); }
 });
+test('Wood sale funding covers accounting precision as well as payout for 85,400 kg', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    const exchange = new Exchange(db), account = createFundedFixtureAccount(1000000);
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, expires INTEGER, data TEXT)');
+    account.game.stage = 0; account.game.stock.wood = 1708;
+    db.prepare("UPDATE market_pools SET units=1000000,dollars=10000 WHERE asset='wood'").run();
+    const before = exchange.read('seller', account, 1000000, 1000000, 'wood', 1708).market.quotes.sell;
+    assert.equal(before.available, false); assert.equal(before.dollars, 0);
+    const target = exchange.resourceFundingRequired('wood', 1708)!;
+    assert.ok(target > 10000n);
+    db.prepare("UPDATE market_pools SET dollars=? WHERE asset='wood'").run(Number(target));
+    const quote = exchange.read('seller', account, 1000000, 1000000, 'wood', 1708).market.quotes.sell;
+    assert.equal(quote.available, true);
+    assert.ok(quote.dollars >= 1708 / dollarsScale);
+    assert.ok(quote.dollars * dollarsScale <= Number(target));
+  } finally { db.close(); }
+});
 test('large item quotes narrow to safe accounting capacity rather than overflowing intermediate payments', () => {
   const db = sqlite.open(':memory:');
   try {

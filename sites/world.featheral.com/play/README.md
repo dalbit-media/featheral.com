@@ -218,7 +218,9 @@ low-price orders, filled history and genesis reserve seeds are preserved.
 
 An authenticated settled player's resource sale quotes and trades check funding
 for the actual owned/pending quantity, including large half-sales. Funding solves
-the shared sell curve against real reserves; sufficient funds require no top-up.
+the shared sell curve against real reserves and the matcher’s final marginal
+accounting increment. This prevents historical sub-increment prices from returning
+an unavailable quote despite ample origin backing. Sufficient funds require no top-up.
 Gold converts verified origin FTHG first using its active rate, issuing quoted
 whole-game-unit FTH$, updating allocated Gold and the dynamic rate. The original
 finite cap and confirmed origin holdings less pending obligations bound issuance.

@@ -147,7 +147,15 @@ export class Exchange {
     // Solve payment(q) <= real dollars; virtual pricing depth is never spendable.
     const numerator = (100n - spread) * q * pool.depthDollars;
     const denominator = 100n * (BigInt(pool.units) + pool.depthUnits) + spread * q;
-    return (numerator + denominator - 1n) / denominator;
+    const funded = (numerator + denominator - 1n) / denominator;
+    // Matching also requires the final marginal price to reach one accounting unit.
+    const units = BigInt(pool.units) + pool.depthUnits;
+    const floor = BigInt(dollarsUnits(marketPriceFloor(asset)));
+    const marginalNumerator = floor * 100n * (units + q) ** 2n;
+    const marginalDenominator = (100n - spread) * units;
+    const dollarsAtMinimum = (marginalNumerator + marginalDenominator - 1n) / marginalDenominator;
+    const precision = dollarsAtMinimum > pool.depthDollars ? dollarsAtMinimum - pool.depthDollars : 0n;
+    return funded > precision ? funded : precision;
   }
   private plan(owner: string, asset: MarketAsset, side: MarketSide, quantity: number, realTime: number, limit?: number): Step[] {
     const makers = this.orders(asset, side === 'buy' ? 'sell' : 'buy', owner, realTime)

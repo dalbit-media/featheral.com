@@ -255,6 +255,38 @@ describe("Isolated finite Gold reserve", () => {
     assert.deepEqual(ledger.balance(REDEMPTION_ESCROW), escrow);
     conserved();
   });
+  it("funds and executes 85,400 kg of Wood when its historical price is below accounting precision", async () => {
+      await engine.initialize(); await engine.activatePricing();
+      store = new SqliteStore(":memory:", Date.now, 1, adapter);
+      const identity = store.create();
+      store.transaction(identity.token, session => {
+        session.account.game.stage = 0; session.account.game.stock.wood = 1708;
+      });
+      await store.ensureLiquidity(identity.token, "wood");
+      const seed = structuredClone(ledger.goldReserve.pools.wood);
+      store.db.prepare("UPDATE market_pools SET units=10000000000 WHERE asset='wood'").run();
+      store.db.prepare("INSERT OR REPLACE INTO market_resource_depth VALUES('wood','90000000000','90000')").run();
+      const read = () => store.transaction(identity.token, (session, time, real, exchange, owner) =>
+        exchange.read(owner, session.account, time, real, "wood", 1708));
+      assert.equal(read().market.quotes.sell.available, false);
+      const supply = BigInt(ledger.summary().supply);
+      await store.ensureLiquidity(identity.token, "wood", 1708);
+      assert.ok(BigInt(ledger.summary().supply) > supply);
+      assert.deepEqual(ledger.goldReserve.pools.wood, seed);
+      const quote = read();
+      assert.equal(quote.market.quotes.sell.available, true);
+      assert.ok(quote.market.quotes.sell.dollars > 0);
+      const tip = ledger.tipHash;
+      await store.ensureLiquidity(identity.token, "wood", 1708);
+      assert.equal(ledger.tipHash, tip);
+      const request = { id: crypto.randomUUID(), revision: quote.revision,
+        command: { type: "spot", side: "sell", asset: "wood", quantity: 1708, limitDollars: quote.market.quotes.sell.dollars } };
+      const result = store.transaction(identity.token, (session, time, real, exchange, owner) =>
+        exchange.action(owner, session, request, time, real));
+      assert.equal(result.game.stock.wood, 0);
+      assert.equal(result.dollars, quote.market.quotes.sell.dollars);
+      conserved();
+  });
   it("HTTP sale quotes fund origin conversions and retries or rejected large orders do not allocate again", async () => {
     await engine.initialize(); await engine.activatePricing();
     store = new SqliteStore(":memory:", Date.now, 1, adapter);
