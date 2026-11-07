@@ -230,6 +230,12 @@ a release lacking the approved catalog after authorization, reset ledger data,
 rotate keys or bypass preflight.
 
 During managed deployment, preflight marks approved additions as pending.
+The historical `liquidityTargets()` export remains the original 32 liquid
+markets so an already-running self-sync worker can perform its old exact-match
+bootstrap check. The fetched installer and new gateway explicitly use
+`authorizedLiquidityTargets()` (60 liquid markets). The installer's expanded
+comparison still rejects changed original targets and unapproved additions
+before any cutover; passing the legacy check does not authorize funding.
 Startup validates both signatures without committing the expansion. The installer
 signals that specific gateway process only **after all gateway/HTTPS health checks
 and PM2 persistence succeed**. Before that point, ordinary rollback remains safe.

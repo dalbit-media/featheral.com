@@ -14,7 +14,8 @@ function readPolicy(root, runtimeRoot = root) {
     const env = settings.environment();
     const { monetaryPolicy } = require(path.join(root, "sites/world.featheral.com/play/src/monetary-policy.ts"));
     const { collectionPolicy } = require(path.join(root, "sites/world.featheral.com/play/src/collection.ts"));
-    const markets = env.GOLD_RESERVE_MODE === "live" ? require(path.join(root, "services/notes/game-funds")).liquidityTargets() : null;
+    const funds = env.GOLD_RESERVE_MODE === "live" ? require(path.join(root, "services/notes/game-funds")) : null;
+    const markets = funds ? (funds.authorizedLiquidityTargets || funds.liquidityTargets)() : null;
     process.stdout.write(JSON.stringify({ monetaryPolicy, collectionPolicy, markets }));
   `;
   return JSON.parse(execFileSync(process.execPath, ["-e", script, runtimeRoot], {

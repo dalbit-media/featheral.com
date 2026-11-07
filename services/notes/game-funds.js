@@ -8,6 +8,12 @@ const SYSTEM_TREASURY_ACCOUNT = `0x${crypto.createHash("sha256").update("feather
 const { REDEMPTION_ESCROW } = require("../gold/reserve");
 
 function liquidityTargets() {
+  // Older self-sync workers compare this original catalog before loading the new installer.
+  const { approvedMarkets } = require("../gold/market-expansion");
+  return Object.fromEntries(Object.entries(authorizedLiquidityTargets()).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset)));
+}
+
+function authorizedLiquidityTargets() {
   const { marketAssets, isLiquidAsset, marketBasePrice, marketQuantityLimit } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
@@ -76,4 +82,4 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
   };
 }
 
-module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets };
+module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets };

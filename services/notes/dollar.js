@@ -89,7 +89,7 @@ function createDollarApi({ env = require("../operations/runtime").environment(),
     writerPublicKey: setting("WRITER_PUBLIC_KEY") || null,
     blockIntervalMs: setting("BLOCK_INTERVAL_MS") === "" ? 1000 : Number(setting("BLOCK_INTERVAL_MS")),
     genesis: { fthg: TOKEN_ADDRESS, sourceWallet: SOURCE_ADDRESS, reserveWallet: RESERVE_ADDRESS, openingRate: "1 FTHG = 1000 FTH$", ...(env.FTH_GAME_PUBLIC_KEY ? { gamePublicKey: env.FTH_GAME_PUBLIC_KEY } : {}),
-      ...(env.FTH_GOLD_PUBLIC_KEY ? { goldPublicKey: env.FTH_GOLD_PUBLIC_KEY, goldMarkets: require("../notes/game-funds").liquidityTargets() } : {}) },
+      ...(env.FTH_GOLD_PUBLIC_KEY ? { goldPublicKey: env.FTH_GOLD_PUBLIC_KEY, goldMarkets: require("../notes/game-funds").authorizedLiquidityTargets() } : {}) },
   }).open();
   const ownsProfiles = !suppliedProfiles;
   const profiles = suppliedProfiles || require("../database/wallet-profiles").createWalletProfiles(

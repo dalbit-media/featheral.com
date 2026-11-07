@@ -10,7 +10,7 @@ const { ethers } = require("ethers");
 const { FthLedger, walletAccountId } = require("../services/fth-ledger/ledger");
 const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
-const { gameSigningKey, ledgerFunds, liquidityTargets } = require("../services/notes/game-funds");
+const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets } = require("../services/notes/game-funds");
 const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold/reserve");
 const pricing = require("../shared/gold-pricing");
 const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
@@ -22,7 +22,7 @@ const { createApi } = require("../sites/world.featheral.com/play/server/http.ts"
 
 describe("Isolated finite Gold reserve", () => {
   let directory, ledger, engine, adapter, provider, goldKeys, gameKeys, source, reserve, store;
-  const targets = liquidityTargets();
+  const targets = authorizedLiquidityTargets();
   const total = asset => BigInt(targets[asset].pricePerLot) * BigInt(targets[asset].quantity);
   const blockHash = height => ethers.zeroPadValue(ethers.toBeHex(height + 1), 32);
   beforeEach(() => {
