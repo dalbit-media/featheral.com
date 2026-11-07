@@ -6,14 +6,20 @@ const { once } = require("node:events");
 const express = require("express");
 const { Wallet } = require("ethers");
 const { createAdminAuth, adminWallets } = require("../lib/admin-auth");
-async function fixture(t) {
+async function fixture(t, replica = false) {
   const wallets = [Wallet.createRandom(), Wallet.createRandom()], clock = { now: Date.now() };
   const auth = createAdminAuth({ wallets: wallets.map(wallet => wallet.address), now: () => clock.now });
   const app = express();
+  if (replica) app.use((req, res, next) => {
+    if (require("../../operations/replica").allowReplicaRequest(req, res, { replica: { readOnly: true } })) next();
+  });
   app.use("/api/admin-auth", auth.router);
   app.use(auth.gate);
   app.get("/private", auth.authenticate, (req, res) => res.json({ wallet: req.adminWallet, session: req.adminSession }));
   app.post("/private", auth.authenticate, (_req, res) => res.json({ saved: true }));
+  app.post("/api/deployment/plan", auth.authenticate, (_req, res) => res.json({ reviewed: true }));
+  app.post("/api/database/deployment/challenge", auth.authenticate, (_req, res) => res.json({ challenge: true }));
+  app.post("/api/database/deployment/start", auth.authenticate, (_req, res) => res.status(403).json({ error: "Signed deployment proof required." }));
   const server = http.createServer(app);
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
@@ -44,6 +50,44 @@ async function fixture(t) {
 }
 test("Admin accepts exactly the project origin and Dollar reserve wallet by default", () => {
   assert.deepEqual(adminWallets, ["0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c", "0x706CCb6109046a6a4A08dbAD4444A46408703ccb"]);
+});
+test("loopback replica Admin can sign in and read without permitting persistent writes", async t => {
+  const f = await fixture(t, true);
+  assert.equal((await f.call("/private")).status, 401);
+  assert.equal((await f.call("/api/admin-auth/challenge", { address: Wallet.createRandom().address })).status, 403);
+  const signedIn = await f.login();
+  const access = await f.call("/private", undefined, signedIn);
+  assert.equal(access.status, 200);
+  assert.equal(access.headers["x-featheral-replica"], "read-only");
+  assert.equal((await f.call("/api/deployment/plan", {}, signedIn)).body.reviewed, true);
+  assert.equal((await f.call("/api/deployment/plan", {})).status, 401);
+  assert.equal((await f.call("/api/deployment/plan", {}, { ...signedIn, origin: "http://evil.localhost" })).status, 403);
+  assert.equal((await f.call("/api/deployment/start", {}, signedIn)).status, 403);
+  assert.equal((await f.call("/api/database/deployment/challenge", {}, signedIn)).body.challenge, true);
+  assert.equal((await f.call("/api/database/deployment/challenge", {})).status, 401);
+  assert.equal((await f.call("/api/database/deployment/start", {}, signedIn)).body.error, "Signed deployment proof required.");
+  const write = await f.call("/private", {}, signedIn);
+  assert.equal(write.status, 403);
+  assert.match(write.body.error, /read-only snapshot replica/);
+  assert.equal((await f.call("/api/admin-auth/logout", {}, signedIn)).status, 200);
+  assert.equal((await f.call("/private", undefined, signedIn)).status, 401);
+});
+test("replica sign-in exception is exact-route and loopback Admin only", () => {
+  const { allowReplicaRequest } = require("../../operations/replica");
+  const settings = { replica: { readOnly: true } };
+  for (const [host, remoteAddress, url, method] of [
+    ["admin.localhost", "192.0.2.1", "/api/admin-auth/challenge", "POST"],
+    ["admin.featheral.com", "127.0.0.1", "/api/admin-auth/challenge", "POST"],
+    ["app.localhost", "127.0.0.1", "/api/admin-auth/verify", "POST"],
+    ["admin.localhost", "127.0.0.1", "/api/admin-auth/settings", "POST"],
+    ["admin.localhost", "127.0.0.1", "/api/admin-auth/challenge", "PUT"],
+    ["admin.featheral.com", "127.0.0.1", "/api/deployment/plan", "POST"],
+    ["admin.localhost", "192.0.2.1", "/api/deployment/plan", "POST"],
+    ["admin.localhost", "127.0.0.1", "/api/deployment/plan/extra", "POST"],
+  ]) {
+    const res = { setHeader() {}, writeHead() {}, end() {} };
+    assert.equal(allowReplicaRequest({ method, url, headers: { host }, socket: { remoteAddress } }, res, settings), false);
+  }
 });
 test("privileged approvals follow the signed-in origin or Dollar wallet and stay bound to that wallet and session", async () => {
   const { OriginApprovals } = require("../../database/approvals");

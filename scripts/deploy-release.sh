@@ -57,12 +57,22 @@ source /etc/os-release
 [[ "$ID" == ubuntu || "$ID" == debian ]] || { echo "Ubuntu or Debian required"; exit 1; }
 as_root true
 phase provision
-step=apt-update
-phase "$step"
-as_root apt-get update
-step=apt-install
-phase "$step"
-as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates gnupg nginx curl certbot python3-certbot-nginx unzip git
+missing_packages=()
+for package in ca-certificates gnupg nginx curl certbot python3-certbot-nginx unzip git; do
+  if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]]; then
+    missing_packages+=("$package")
+  fi
+done
+if (( ${#missing_packages[@]} )); then
+  step=apt-update
+  phase "$step"
+  as_root apt-get update
+  step=apt-install
+  phase "$step"
+  as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+else
+  echo "System dependencies already installed; skipping APT provisioning."
+fi
 if ! command -v node >/dev/null || ! node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'; then
   step=node-repository
   phase "$step"
@@ -171,7 +181,23 @@ ln -s "$shared/cms-data" "$release/services/cms/data"
 cd "$release"
 phase dependencies
 step=dependencies
-npm ci
+previous_release="$(readlink -f "$root/current" 2>/dev/null || true)"
+reuse_build=false
+if [[ "$previous_release" == "$root/releases/"* && "$previous_release" != "$release"
+  && -f "$previous_release/.deployment-build.json" && -f "$release/.deployment-files.json"
+  && -d "$previous_release/node_modules" && -d "$previous_release/sites/world.featheral.com/play/node_modules"
+  && -f "$previous_release/sites/world.featheral.com/play/dist/index.html"
+  && -f "$previous_release/shared/abi/FeatheralGold.json" && -f "$previous_release/shared/abi/FthgGameBridge.json" ]]; then
+  if node -e 'const fs=require("node:fs"),crypto=require("node:crypto"),saved=JSON.parse(fs.readFileSync(process.argv[1]));const digest=crypto.createHash("sha256").update(fs.readFileSync(process.argv[2])).digest("hex");process.exit(saved.digest===digest&&saved.node===process.versions.node?0:1)' "$previous_release/.deployment-build.json" "$release/.deployment-files.json"; then
+    reuse_build=true
+  fi
+fi
+if [[ "$reuse_build" == true ]]; then
+  cp -a "$previous_release/node_modules" "$release/node_modules"
+  echo "Reviewed code and Node runtime unchanged; reusing installed dependencies."
+else
+  npm ci
+fi
 if [[ "$installation" == new ]]; then
   step=initialize
   phase "$step"
@@ -188,11 +214,24 @@ if [[ "$hostnames" != db.featheral.com && "$primary" != true ]]; then
 fi
 step=world-dependencies
 phase "$step"
-npm ci --prefix sites/world.featheral.com/play
+if [[ "$reuse_build" == true ]]; then
+  cp -a "$previous_release/sites/world.featheral.com/play/node_modules" "$release/sites/world.featheral.com/play/node_modules"
+else
+  npm ci --prefix sites/world.featheral.com/play
+fi
 phase build
 step=build
-npm run abi
-npm run build:world
+if [[ "$reuse_build" == true ]]; then
+  cp -a "$previous_release/sites/world.featheral.com/play/dist" "$release/sites/world.featheral.com/play/dist"
+  cp "$previous_release/shared/abi/FeatheralGold.json" "$previous_release/shared/abi/FthgGameBridge.json" "$release/shared/abi/"
+  echo "Reviewed code unchanged; reusing built World and ABI outputs."
+else
+  npm run abi
+  npm run build:world
+fi
+if [[ -f "$release/.deployment-files.json" ]]; then
+  node -e 'const fs=require("node:fs"),crypto=require("node:crypto");fs.writeFileSync(process.argv[2],JSON.stringify({digest:crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"),node:process.versions.node}),{mode:0o600})' "$release/.deployment-files.json" "$release/.deployment-build.json"
+fi
 step=pm2-install
 phase "$step"
 mkdir -p "$shared/tools"
@@ -357,7 +396,19 @@ step=https
 if [[ "$deployment_mode" == self ]]; then
   echo "Preserving installed HTTPS certificates; renewal remains managed by certbot.timer."
 else
-  as_root certbot --nginx --non-interactive --agree-tos --keep-until-expiring --expand --email "$email" --redirect "${certificate_args[@]}"
+  https_ready=true
+  for host in $hostnames; do
+    if ! status="$(curl -sS -o /dev/null -w '%{http_code}' --resolve "$host:443:127.0.0.1" --max-time 15 "https://$host/")" \
+      || [[ "$status" != 200 && ! ( "$host" == admin.featheral.com && "$status" == 401 ) ]]; then
+      https_ready=false
+      break
+    fi
+  done
+  if [[ "$https_ready" == true ]]; then
+    echo "All assigned HTTPS routes already verified; skipping certificate issuance."
+  else
+    as_root certbot --nginx --non-interactive --agree-tos --keep-until-expiring --expand --email "$email" --redirect "${certificate_args[@]}"
+  fi
 fi
 as_root install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
 printf '%s\n' '#!/bin/sh' 'set -eu' '/usr/sbin/nginx -t' '/bin/systemctl reload nginx' > "$release/renew-nginx"
@@ -385,3 +436,6 @@ if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]];
   fi
 fi
 phase verified
+if ! node -e 'const root=process.cwd();const report=require("./services/operations/storage-cleanup").cleanupStorage({root,apply:true,minAgeMs:0,discardCompletedBackups:true,discardOldReleases:true,operationCleanup:true});console.log("Verified installation storage cleanup:",JSON.stringify(report))'; then
+  echo "Installation verified, but temporary storage cleanup failed; operator review is required." >&2
+fi

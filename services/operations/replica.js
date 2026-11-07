@@ -50,6 +50,15 @@ function allowReplicaRequest(req, res, settings) {
   res.setHeader("X-Featheral-Replica", "read-only");
   const pathname = new URL(req.url, "http://localhost").pathname;
   if (["GET", "HEAD", "OPTIONS"].includes(req.method) && !/^\/(?:api\/(?:session|chat|connect|sync)|wallet-sync)(?:\/|$)/.test(pathname)) return true;
+  // Loopback Admin can orchestrate signed remote deployment, never ledger writes.
+  if (req.method === "POST" && (/^\/api\/admin-auth\/(?:challenge|verify|logout)$/.test(pathname)
+    || ["/api/deployment/plan", "/api/database/deployment/challenge", "/api/database/deployment/start"].includes(pathname))
+    && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket?.remoteAddress)) {
+    let hostname;
+    try { hostname = new URL(`http://${req.headers?.host || ""}`).hostname; }
+    catch { hostname = ""; }
+    if (hostname === "admin.localhost") return true;
+  }
   if (req.method === "POST" && pathname === "/api/v1/pay/requests") {
     let hostname;
     try { hostname = new URL(`http://${req.headers?.host || ""}`).hostname; }

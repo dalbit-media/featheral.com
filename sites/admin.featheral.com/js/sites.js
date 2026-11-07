@@ -112,7 +112,6 @@ function deploymentControlsHtml() {
     <div class="deployment-review-heading"><h4>Upload reviewed code</h4>
     <button class="btn" type="button" id="deployment-plan">Review release</button></div>
     <p class="muted small">Code is compressed into a verified ZIP before upload. One release for all assigned servers; installation is detected automatically and existing data and keys are preserved. Database/uploads sync remains a separate file transfer.</p>
-    <p class="note">New hostname such as pay.featheral.com? Save its shared/separate server assignment, point DNS at that server, then use Review release and Sign &amp; deploy. This installs the site and expands HTTPS coverage. Git self-sync below keeps this Admin server's existing hostname assignment and certificates; it does not provision new sites or update other servers.</p>
     <p id="deployment-summary" class="deployment-summary" role="status">Save the connection, then review the release.</p>
     <details class="deployment-technical"><summary>Servers &amp; technical details</summary>
     <pre class="deployment-plan" id="deployment-details">No plan generated yet.</pre></details>
@@ -246,7 +245,7 @@ async function mountDeploymentControls(token, ready = () => true) {
   let plan;
   let deploymentTimer;
   const output = deploymentConsoleOutput();
-  let submitting = false, reviewing = false, running = false;
+  let submitting = false, reviewing = false, running = false, reviewError = '', submissionError = '';
   const viewHash = location.hash, active = () => token === state.seq && location.hash === viewHash;
   const approval = $('#deployment-approval'), start = $('#deployment-start'), review = $('#deployment-plan');
   const exactApproval = () => plan ? `DEPLOY ${plan.digest} ${plan.contentDigest}` : '';
@@ -266,8 +265,8 @@ async function mountDeploymentControls(token, ready = () => true) {
       running = current.running;
       review.disabled = submitting || reviewing || running;
       updateStart();
-      $('#deployment-status').textContent = current.running ? 'Running'
-        : current.result ? current.result.success ? 'Verified successfully' : 'Deployment failed' : 'No deployment started';
+      $('#deployment-status').textContent = submissionError || reviewError || (current.running ? 'Running'
+        : current.result ? current.result.success ? 'Verified successfully' : 'Deployment failed' : 'No deployment started');
       const lines = (current.logs || []).map(entry => `[${new Date(entry.at).toLocaleTimeString()}] ${entry.message}`);
       for (const target of current.result?.targets || []) {
         lines.push(`${target.host}: ${target.success ? 'verified' : 'failed'} (${target.hosts.join(', ')})`);
@@ -277,12 +276,12 @@ async function mountDeploymentControls(token, ready = () => true) {
       output('Upload deployment', lines);
       if (current.running && !deploymentTimer) deploymentTimer = setInterval(status, 2000);
       if (!current.running) { clearInterval(deploymentTimer); deploymentTimer = null; }
-    } catch (error) { clearInterval(deploymentTimer); deploymentTimer = null; if (active()) $('#deployment-status').textContent = error.message; }
+    } catch (error) { clearInterval(deploymentTimer); deploymentTimer = null; if (active()) $('#deployment-status').textContent = submissionError || reviewError || error.message; }
   };
   $('#deployment-plan').addEventListener('click', async event => {
     const button = event.currentTarget;
     if (submitting || reviewing || running) return;
-    reviewing = true; plan = undefined;
+    reviewing = true; plan = undefined; reviewError = ''; submissionError = '';
     approval.value = ''; approval.disabled = true;
     $('#deployment-phrase').value = '';
     $('#deployment-summary').textContent = 'Preparing release review...';
@@ -299,11 +298,12 @@ async function mountDeploymentControls(token, ready = () => true) {
       $('#deployment-phrase').value = exactApproval();
       approval.disabled = !plan.enabled;
       $('#deployment-status').textContent = plan.enabled ? 'Review every step, then enter the approval phrase.' : 'Deployment disabled. Sign and save the connection above, then review a new plan.';
-    } catch (error) { plan = undefined; if (active()) { $('#deployment-status').textContent = error.message; $('#deployment-summary').textContent = 'Review unavailable. Resolve the error and retry.'; approval.disabled = true; } }
+    } catch (error) { plan = undefined; reviewError = error.message; if (active()) { $('#deployment-status').textContent = reviewError; $('#deployment-summary').textContent = `Review unavailable: ${reviewError}`; approval.disabled = true; } }
     finally { reviewing = false; if (active()) { button.disabled = running; updateStart(); } }
   });
   $('#deployment-start').addEventListener('click', async () => {
     if (!active() || !plan || submitting || reviewing || running) return;
+    submissionError = '';
     try {
       if (!ready()) throw new Error('Connection settings changed. Save them and review a new plan.');
       if (Date.now() >= plan.expiresAt) throw new Error('Deployment plan expired. Review a new plan.');
@@ -326,7 +326,13 @@ async function mountDeploymentControls(token, ready = () => true) {
       $('#deployment-status').textContent = 'Deployment accepted, not yet verified.';
       clearInterval(deploymentTimer); deploymentTimer = setInterval(status, 2000);
       await status();
-    } catch (error) { if (active()) $('#deployment-status').textContent = error.message; else toast(error.message); }
+    } catch (error) {
+      submissionError = error.message;
+      if (active()) {
+        $('#deployment-status').textContent = submissionError;
+        $('#deployment-summary').textContent = `Deployment submission not confirmed: ${submissionError}`;
+      } else toast(submissionError);
+    }
     finally {
       submitting = false;
       if (active()) { review.disabled = running; approval.disabled = !plan?.enabled || running; updateStart(); }

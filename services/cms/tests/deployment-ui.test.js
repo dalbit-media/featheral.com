@@ -14,7 +14,7 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
   };
   const plan = { id: 'reviewed', enabled: true, walletApprovalRequired: true, digest: 'source', contentDigest: 'content',
     expiresAt: Date.now() + 600000, target: 'root@server.example', files: 100, steps: ['Upload release'] };
-  let failure, signingFailure, startFailure, statusFailure, statusPending, ready = true, confirmed = 0, signed = 0, poll;
+  let failure, signingFailure, startFailure, statusFailure, reviewFailure, statusPending, ready = true, confirmed = 0, signed = 0, poll;
   const context = vm.createContext({
     document: {
       createDocumentFragment: () => ({ children: [], append(child) { this.children.push(child); } }),
@@ -31,7 +31,10 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
     async api(url, options) {
       calls.push({ url, input: options?.json, cache: options?.cache });
       if (url === '/api/deployment/status') return currentStatus;
-      if (url === '/api/deployment/plan') return { ...plan };
+      if (url === '/api/deployment/plan') {
+        if (reviewFailure) throw reviewFailure;
+        return { ...plan };
+      }
       if (url === '/api/settings/self-sync') {
         if (statusFailure) throw statusFailure;
         if (statusPending) return statusPending;
@@ -56,6 +59,7 @@ async function fixture(currentStatus = { running: false, logs: [] }, selfStatus 
     setSigningFailure(error) { signingFailure = error; },
     setStartFailure(error) { startFailure = error; },
     setStatusFailure(error) { statusFailure = error; },
+    setReviewFailure(error) { reviewFailure = error; },
     setStatusPending(promise) { statusPending = promise; },
     setSelfStatus(value) { selfStatus = value; },
     async refresh() { await poll(); },
@@ -278,6 +282,7 @@ test('installation controls are absent and reviewing delegates detection to the 
   await f.click('#deployment-plan');
   const html = vm.runInContext('deploymentControlsHtml()', f.context);
   assert.doesNotMatch(html, /type="checkbox"|First installation options|deployment-initialize|deployment-fresh-sites/);
+  assert.doesNotMatch(html, /New hostname such as|Git self-sync below keeps/);
   assert.match(html, /detected automatically/);
   assert.match(html, /Live installer output/);
   assert.equal(JSON.stringify(f.calls.find(call => call.url === '/api/deployment/plan').input), '{}');
@@ -288,6 +293,35 @@ test('installation controls are absent and reviewing delegates detection to the 
   assert.equal(f.element('#deployment-plan').textContent, 'Refresh review');
   await f.enter('DEPLOY source content');
   assert.equal(f.element('#deployment-start').disabled, false);
+});
+test('review errors remain specific through status polling and retry clears the failure', async () => {
+  const status = { running: true, logs: [] };
+  const f = await fixture(status);
+  status.running = false;
+  await f.refresh();
+  f.setReviewFailure(new Error('Set a certificate registration email in Admin Settings.'));
+  await f.click('#deployment-plan');
+  assert.equal(f.element('#deployment-summary').textContent, 'Review unavailable: Set a certificate registration email in Admin Settings.');
+  assert.equal(f.element('#deployment-start').disabled, true);
+  await f.refresh();
+  assert.equal(f.element('#deployment-status').textContent, 'Set a certificate registration email in Admin Settings.');
+  f.setReviewFailure(undefined);
+  await f.click('#deployment-plan');
+  assert.match(f.element('#deployment-summary').textContent, /1 server.*100 files/);
+  assert.equal(f.element('#deployment-status').textContent, 'Review every step, then enter the approval phrase.');
+});
+test('deployment approval errors stay visible and never launch the reviewed release', async () => {
+  const status = { running: true, logs: [] }, f = await fixture(status);
+  status.running = false;
+  await f.refresh();
+  await f.click('#deployment-plan');
+  await f.enter('DEPLOY source content');
+  f.setSigningFailure(new Error('Connect the Admin signing wallet.'));
+  await f.click('#deployment-start');
+  await f.refresh();
+  assert.equal(f.element('#deployment-status').textContent, 'Connect the Admin signing wallet.');
+  assert.match(f.element('#deployment-summary').textContent, /submission not confirmed.*Connect/);
+  assert.equal(f.calls.some(call => call.url === '/api/database/deployment/start'), false);
 });
 test('review summary shows every target count while full connection details remain available', async () => {
   const f = await fixture();

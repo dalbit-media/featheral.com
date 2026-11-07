@@ -257,6 +257,25 @@ function poolProvider(state) {
         : iface.encodeFunctionResult('getLiquidity', [state.liquidity]);
     } };
 }
+test('reserve RPC failures retain spot price, expose a useful status and retry only after the cache expires', async () => {
+  let time = 1793570000000, reads = 0;
+  const errors = [], provider = poolProvider({ sqrt: 7071n * 2n ** 96n, liquidity: 10n });
+  provider.getLogs = async () => {
+    reads++;
+    throw Object.assign(new Error('could not coalesce error'), { info: { error: { message: 'RPC history rate limit exceeded' } } });
+  };
+  const read = createMarketPriceReader({ provider, ethUsd: async () => ({ usdPerEth: String(2000n * unit) }),
+    clock: () => time, logger: { error: (...args) => errors.push(args) } });
+  const result = await read();
+  assert.equal(result.reserves, null);
+  assert.equal(result.reservesError, 'RPC history rate limit exceeded');
+  assert.equal(result.fallback, false);
+  assert.equal((await read()), result);
+  assert.equal(reads, 1); assert.equal(errors.length, 1);
+  time += 60001;
+  await read();
+  assert.equal(reads, 2);
+});
 test('Gold values FTHG from the read-only Uniswap v4 ETH/FTHG pool and otherwise publishes the labeled $0.01 reference', async () => {
   const { ethers } = require('ethers');
   const now = 1793570000000, token = '0xba658127d93b17e577e1b8e8995cab3ae7d7c665';

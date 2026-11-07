@@ -423,6 +423,9 @@ class Deployment {
     try {
       this.log(`${config.host}: connecting to SSH with the saved credential and pinned server key.`);
       client = await this.connect(config.vault ? { ...config, password: credential.password } : config);
+      const cleanup = require("../../operations/storage-cleanup").remoteCleanupCode(config.directory);
+      await this.execute(client, `if command -v node >/dev/null; then node -e ${quote(cleanup)}; fi`, "", config.deploymentTimeoutSeconds || 120, undefined,
+        line => this.log(`${config.host}: ${redactServerLog(line, [config.password, credential?.password])}`));
       const remote = `${config.directory}/shared/deployment/${archive.hash}`;
       await this.execute(client, `mkdir -p ${quote(remote)} && rm -f ${quote(remote + '/cleanup-complete.json')}`, "", config.sshTimeoutSeconds || 20);
       await checkSpace(this, client, remote, archive.bytes + archive.expandedBytes + 512 * 1024 * 1024, config.sshTimeoutSeconds || 20);

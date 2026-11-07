@@ -108,6 +108,57 @@ test('specific import failure survives the shell generic failure marker without 
   assert.equal(deployment.status().logs.length, 1);
   assert.match(deployment.status().logs[0].message, /remote managed-site registry is missing/);
 });
+test('installer skips installed packages and valid HTTPS but provisions missing dependencies and certificate coverage', () => {
+  const { spawnSync } = require('node:child_process');
+  const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const run = body => {
+    const result = spawnSync(bash, ['-c', `set -Eeuo pipefail\nphase() { :; }\n${body}`], { encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  };
+  const packages = script.slice(script.indexOf('missing_packages=()'), script.indexOf('if ! command -v node'));
+  const installed = run(`dpkg-query() { printf 'install ok installed'; }\nas_root() { echo "APT:$*"; }\n${packages}`);
+  assert.doesNotMatch(installed, /APT:/);
+  const missing = run(`dpkg-query() { [[ "$*" != *certbot* ]] && printf 'install ok installed'; }\nas_root() { echo "APT:$*"; }\n${packages}`);
+  assert.match(missing, /apt-get update/);
+  assert.match(missing, /install -y certbot python3-certbot-nginx/);
+  const https = script.slice(script.indexOf('  https_ready=true'), script.indexOf('\nfi\nas_root install -d -m 755 /etc/letsencrypt'));
+  const setup = 'hostnames="featheral.com pay.featheral.com"\nemail=test@example.com\ncertificate_args=(-d featheral.com -d pay.featheral.com)\nas_root() { echo "ROOT:$*"; }';
+  assert.doesNotMatch(run(`${setup}\ncurl() { printf 200; }\n${https}`), /ROOT:certbot/);
+  assert.match(run(`${setup}\ncurl() { return 60; }\n${https}`), /ROOT:certbot --nginx.*--expand/);
+  const syntax = spawnSync(bash, ['-n'], { input: script, encoding: 'utf8', timeout: 10000 });
+  assert.equal(syntax.status, 0, syntax.stderr);
+});
+test('installer reuses dependencies only for matching reviewed inventories and Node versions', t => {
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-reuse-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const previous = path.join(directory, 'releases', 'previous'), release = path.join(directory, 'releases', 'next');
+  for (const entry of ['node_modules', 'sites/world.featheral.com/play/node_modules', 'sites/world.featheral.com/play/dist', 'shared/abi'])
+    fs.mkdirSync(path.join(previous, entry), { recursive: true });
+  fs.mkdirSync(release);
+  fs.writeFileSync(path.join(previous, 'node_modules', 'fixture.txt'), 'reuse');
+  for (const file of ['sites/world.featheral.com/play/dist/index.html', 'shared/abi/FeatheralGold.json', 'shared/abi/FthgGameBridge.json'])
+    fs.writeFileSync(path.join(previous, file), 'existing');
+  const inventory = '[]', digest = crypto.createHash('sha256').update(inventory).digest('hex');
+  const marker = path.join(previous, '.deployment-build.json');
+  fs.writeFileSync(marker, JSON.stringify({ digest, node: process.versions.node }));
+  fs.writeFileSync(path.join(release, '.deployment-files.json'), inventory);
+  const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const reuse = script.slice(script.indexOf('previous_release='), script.indexOf('if [[ "$installation" == new ]]', script.indexOf('previous_release=')));
+  const run = () => spawnSync(process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
+    ['-c', `set -Eeuo pipefail\nroot="$FIXTURE_DIR"\nrelease="$root/releases/next"\nreadlink() { echo "$root/releases/previous"; }\nnpm() { echo "CLEAN_INSTALL"; }\n${reuse}`],
+    { encoding: 'utf8', timeout: 10000, env: { ...process.env, FIXTURE_DIR: directory.replace(/\\/g, '/') } });
+  const reused = run();
+  assert.equal(reused.status, 0, reused.stderr);
+  assert.match(reused.stdout, /reusing installed dependencies/);
+  assert.equal(fs.readFileSync(path.join(release, 'node_modules', 'fixture.txt'), 'utf8'), 'reuse');
+  fs.writeFileSync(marker, JSON.stringify({ digest, node: 'different' }));
+  const changed = run();
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.match(changed.stdout, /CLEAN_INSTALL/);
+});
 test('Linux installer emits a failed step before exiting on package or private-data errors', t => {
   const { spawnSync } = require('node:child_process');
   const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';

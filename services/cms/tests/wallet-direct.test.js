@@ -7,6 +7,16 @@ const embed = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/embed.
 const app = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/wallet-app.js'), 'utf8');
 const address = '0x' + '11'.repeat(20), other = '0x' + '22'.repeat(20), signature = '0x' + 'ab'.repeat(65);
 const tick = () => new Promise(setImmediate);
+test('reader-mode World balance lookup reports unavailability without throwing an expected capability error', () => {
+  const source = fs.readFileSync(path.join(root, 'scripts/serve.js'), 'utf8');
+  const body = source.slice(source.indexOf('const readWorld = async () => {'), source.indexOf('const [native]'));
+  const errors = [];
+  const context = vm.createContext({ store: null, worldError: null, console: { error: (...args) => errors.push(args) } });
+  vm.runInContext(`${body}; readWorld();`, context);
+  assert.match(context.worldError, /read-only server/);
+  assert.match(context.worldError, /World writer/);
+  assert.equal(errors.length, 0);
+});
 test('wallet accepts the real open-membership App challenge and rejects changed origins or authorization terms', () => {
   const { Notes } = require('../../notes/ledger');
   const { Creation } = require('../../notes/creation');

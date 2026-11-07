@@ -54,11 +54,15 @@ function createMarketPriceReader({ provider, ethUsd, clock = Date.now, logger = 
     "function getLiquidity(bytes32) view returns (uint128)",
   ], provider);
   const ranges = new Map();
-  let scanned = POOL_START_BLOCK - 1, cached, at = 0, pending;
+  let scanned = POOL_START_BLOCK - 1, cached, at = 0, pending, reservesError = null;
   // Uniswap v4 keeps every pool's tokens in the PoolManager, so reserves are rebuilt from this pool's liquidity ranges.
   const reserves = async (block, sqrtPrice, usdPerEth, usdPerFthg) => {
+    reservesError = null;
     try {
-      if (typeof provider.getLogs !== "function") return null;
+      if (typeof provider.getLogs !== "function") {
+        reservesError = "Pool reserve history is unavailable from this RPC provider.";
+        return null;
+      }
       for (let chunks = 0; scanned < block && chunks < MAX_CHUNKS_PER_READ; chunks += 1) {
         const toBlock = Math.min(block, scanned + LOG_CHUNK);
         const logs = await provider.getLogs({ address: VALUATION_POOL.poolManager, fromBlock: scanned + 1, toBlock,
@@ -72,7 +76,10 @@ function createMarketPriceReader({ provider, ethUsd, clock = Date.now, logger = 
         }
         scanned = toBlock;
       }
-      if (scanned < block) return null;
+      if (scanned < block) {
+        reservesError = "Pool reserve history is still loading.";
+        return null;
+      }
       let eth = 0n, fthg = 0n;
       for (const range of ranges.values()) {
         const [amount0, amount1] = positionAmounts(range.liquidity, range.tickLower, range.tickUpper, sqrtPrice);
@@ -81,7 +88,8 @@ function createMarketPriceReader({ provider, ethUsd, clock = Date.now, logger = 
       const tvlUsd = (eth * BigInt(usdPerEth) + fthg * usdPerFthg) / 10n ** 18n;
       return { eth: eth.toString(), fthg: fthg.toString(), tvlUsd: tvlUsd.toString(), positions: ranges.size, decimals: 18 };
     } catch (error) {
-      logger.error("FTHG valuation pool reserves unavailable:", error.shortMessage || error.message);
+      reservesError = error.info?.error?.message || error.error?.message || error.shortMessage || error.message;
+      logger.error("FTHG valuation pool reserves unavailable (retry in 60s):", reservesError);
       return null;
     }
   };
@@ -104,7 +112,7 @@ function createMarketPriceReader({ provider, ethUsd, clock = Date.now, logger = 
         const usdPerFthg = BigInt(eth.usdPerEth) * Q192 / squared;
         if (usdPerFthg <= 0n) throw new Error("FTHG pool price is below supported precision.");
         const poolReserves = await reserves(block, sqrtPriceX96, eth.usdPerEth, usdPerFthg);
-        return { reserves: poolReserves, usdPerFthg: usdPerFthg.toString(), decimals: 18,
+        return { reserves: poolReserves, reservesError, usdPerFthg: usdPerFthg.toString(), decimals: 18,
           source: "Uniswap v4 ETH/FTHG pool spot × ETH/USD estimate", indicative: true, fallback: false,
           pool: VALUATION_POOL.poolId, poolUrl: VALUATION_POOL.url, block, tick: Number(slot0[1]),
           liquidity: BigInt(liquidity).toString(), fthgPerEth: (squared * 10n ** 18n / Q192).toString(),

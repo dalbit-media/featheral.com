@@ -46,11 +46,11 @@ function operationActive(root, command = spawnSync) {
 }
 
 function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
-  deployment, siteSync, busy = () => false, command } = {}) {
+  deployment, siteSync, busy = () => false, command, discardCompletedBackups = false, discardOldReleases = false, operationCleanup = false } = {}) {
   if (!Number.isFinite(minAgeMs) || minAgeMs < 0) throw new Error("Invalid temporary-work retention");
   root = path.resolve(root);
   const report = { applied: apply, blocked: false, removedBytes: 0, candidates: [], skipped: [] };
-  if (busy() || deployment?.running || siteSync?.running || operationActive(root, command)) {
+  if (busy() || deployment?.running || siteSync?.running || !operationCleanup && operationActive(root, command)) {
     report.blocked = true;
     report.skipped.push({ reason: "A server operation is active" });
     return report;
@@ -97,9 +97,77 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
     scan(path.join(shared, "deployment"), entry => entry.isDirectory() && /^provision-release-\d+-[a-f0-9]{12}$/.test(entry.name));
     scan(path.join(shared, "site-sync"), entry => entry.isDirectory() && uuid.test(entry.name)
       && read(path.join(shared, "sync-backups", entry.name, "state.json"))?.phase === "complete");
+    if (discardCompletedBackups) {
+      const backups = path.join(shared, "sync-backups");
+      if (fs.existsSync(backups)) {
+        if (fs.lstatSync(backups).isSymbolicLink()) throw new Error("Refusing linked backup directory");
+        for (const id of fs.readdirSync(backups)) {
+          if (!uuid.test(id)) continue;
+          const directory = path.join(backups, id);
+          if (fs.lstatSync(directory).isSymbolicLink()) throw new Error("Refusing linked backup entry");
+          const state = read(path.join(directory, "state.json"));
+          if (!["complete", "rolled-back"].includes(state?.phase)) continue;
+          // Backup files can be hard links to live data: unlink only the backup names.
+          const inspect = file => {
+            const info = fs.lstatSync(file);
+            if (info.isSymbolicLink()) throw new Error("Refusing linked backup payload");
+            if (info.isDirectory()) return fs.readdirSync(file).reduce((sum, name) => sum + inspect(path.join(file, name)), 0);
+            if (!info.isFile()) throw new Error("Unsupported backup payload");
+            return info.nlink === 1 ? info.size : 0;
+          };
+          for (const name of fs.readdirSync(directory)) {
+            if (name === "state.json") continue;
+            const file = path.join(directory, name), bytes = inspect(file);
+            report.candidates.push({ path: file, bytes });
+            if (apply) {
+              fs.rmSync(file, { recursive: fs.lstatSync(file).isDirectory(), force: false });
+              report.removedBytes += bytes;
+            }
+          }
+        }
+      }
+    }
     const self = path.join(shared, "self-deployment"), state = read(path.join(self, "status.json"));
     if (state?.running || state?.phase === "running") report.skipped.push({ path: self, reason: "Self deployment is active" });
     else scan(self, entry => entry.isDirectory() && uuid.test(entry.name));
+    if (discardOldReleases && !state?.running && state?.phase !== "running") {
+      const releases = path.dirname(root);
+      if (fs.lstatSync(releases).isSymbolicLink()) throw new Error("Refusing linked release directory");
+      const referenced = [], pm2 = path.join(shared, "tools", "node_modules", ".bin", "pm2");
+      if (fs.existsSync(pm2)) {
+        const processes = (command || spawnSync)(pm2, ["jlist"], { encoding: "utf8", timeout: 10000 });
+        if (processes.error || processes.status !== 0) throw new Error("Cannot verify running release references; cleanup refused");
+        const apps = JSON.parse(processes.stdout);
+        if (!Array.isArray(apps)) throw new Error("Invalid running release references");
+        for (const app of apps) for (const key of ["pm_cwd", "pm_exec_path"])
+          if (typeof app.pm2_env?.[key] === "string") referenced.push(path.resolve(app.pm2_env[key]));
+      }
+      for (const name of fs.readdirSync(releases)) {
+        if (!/^release-\d+-[a-f0-9]{12}$/.test(name)) continue;
+        const file = path.join(releases, name);
+        if (fs.realpathSync(root) === file || fs.lstatSync(file).isSymbolicLink()) continue;
+        if (referenced.some(entry => entry === file || entry.startsWith(file + path.sep))) continue;
+        if (!fs.existsSync(path.join(file, ".deployment-hosts.json"))) continue;
+        const assignment = read(path.join(file, ".deployment-hosts.json"));
+        if (!Array.isArray(assignment?.hosts) || typeof assignment.primary !== "boolean")
+          throw new Error("Invalid release assignment; cleanup refused");
+        // Remove only an obsolete release tree. Its data links are unlinked,
+        // never followed; shared databases/uploads remain outside this tree.
+        const size = entry => {
+          const info = fs.lstatSync(entry);
+          if (info.isSymbolicLink()) return 0;
+          if (info.isDirectory()) return fs.readdirSync(entry).reduce((total, child) => total + size(path.join(entry, child)), 0);
+          if (!info.isFile()) throw new Error("Unsupported old release entry");
+          return info.nlink === 1 ? info.size : 0;
+        };
+        const bytes = size(file);
+        report.candidates.push({ path: file, bytes });
+        if (apply) {
+          fs.rmSync(file, { recursive: true, force: false });
+          report.removedBytes += bytes;
+        }
+      }
+    }
   }
   return report;
 }
@@ -107,7 +175,7 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
 function startStorageMaintenance(root) {
   const run = () => {
     try {
-      const report = cleanupStorage({ root, apply: true });
+      const report = cleanupStorage({ root, apply: true, discardCompletedBackups: true, discardOldReleases: true });
       if (report.candidates.length) console.info(`Storage maintenance removed ${report.candidates.length} temporary entries (${report.removedBytes} bytes).`);
     } catch (error) { console.error("Storage maintenance failed:", error); }
   };
@@ -115,5 +183,15 @@ function startStorageMaintenance(root) {
   initial.unref(); timer.unref();
   return { close() { clearTimeout(initial); clearInterval(timer); } };
 }
+function remoteCleanupCode(directory, discardOldReleases = false) {
+  return fs.readFileSync(__filename, "utf8") + `
+const current=path.join(${JSON.stringify(directory)},'current');
+if(fs.existsSync(current)){
+  const root=fs.realpathSync(current),before=fs.statfsSync(root);
+  const report=cleanupStorage({root,apply:true,minAgeMs:0,discardCompletedBackups:true,discardOldReleases:${discardOldReleases}});
+  const after=fs.statfsSync(root);
+  console.log(JSON.stringify({cleanup:report,freeBefore:before.bavail*before.bsize,freeAfter:after.bavail*after.bsize}));
+}`;
+}
 
-module.exports = { cleanupStorage, managedShared, operationActive, startStorageMaintenance, DAY };
+module.exports = { cleanupStorage, managedShared, operationActive, startStorageMaintenance, remoteCleanupCode, DAY };

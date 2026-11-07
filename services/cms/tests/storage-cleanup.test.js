@@ -46,6 +46,34 @@ test('cleanup previews without writes, removes only old named staging, and prese
   for (const file of [...retained, fresh]) assert(fs.existsSync(file), file);
   assert.equal(cleanupStorage({ root: f.root, apply: true }).candidates.length, 0);
 });
+test('no-backup cleanup removes only confirmed payloads and inactive releases without following live data links', t => {
+  const f = fixture(t), current = path.join(f.root, 'releases', 'release-123456-aaaaaaaaaaaa');
+  fs.mkdirSync(current, { recursive: true });
+  fs.symlinkSync(current, path.join(f.root, 'current'), 'junction');
+  const old = 'releases/release-123455-bbbbbbbbbbbb';
+  f.write(`${old}/.deployment-hosts.json`, { hosts: ['featheral.com'], primary: true });
+  f.write(`${old}/node_modules/temporary.js`, 'unused');
+  const live = f.write('shared/data/live.sqlite', 'live');
+  fs.symlinkSync(path.dirname(live), path.join(f.root, old, 'data'), 'junction');
+  const backed = f.write(`shared/sync-backups/${ids[0]}/data/old.sqlite`, 'old');
+  fs.linkSync(live, path.join(path.dirname(backed), 'live-link.sqlite'));
+  f.write(`shared/sync-backups/${ids[0]}/state.json`, { phase: 'complete' });
+  const unfinished = f.write(`shared/sync-backups/${ids[1]}/data/old.sqlite`, 'recovery');
+  f.write(`shared/sync-backups/${ids[1]}/state.json`, { phase: 'installing' });
+  const options = { root: current, minAgeMs: 0, discardOldReleases: true, discardCompletedBackups: true,
+    command: () => ({ status: 0, stdout: 'inactive\n' }) };
+  const preview = cleanupStorage(options);
+  assert.equal(preview.candidates.length, 2);
+  assert(fs.existsSync(backed));
+  assert(fs.existsSync(path.join(f.root, old)));
+  cleanupStorage({ ...options, apply: true });
+  assert(!fs.existsSync(backed));
+  assert(!fs.existsSync(path.join(f.root, old)));
+  assert.equal(fs.readFileSync(live, 'utf8'), 'live');
+  assert(fs.existsSync(unfinished));
+  assert(fs.existsSync(path.join(path.dirname(path.dirname(backed)), 'state.json')));
+  assert(fs.existsSync(current));
+});
 
 test('cleanup protects active operations, reviewed plans and paused or uncertain resumable snapshots', t => {
   const f = fixture(t);

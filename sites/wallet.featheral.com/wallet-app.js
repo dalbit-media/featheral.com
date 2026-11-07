@@ -578,6 +578,7 @@ async function mountFeatheralWallet(context) {
         : "Included in the total portfolio. Gameplay funds stay separate; transfers require approval in World.";
       if (!data.world.duplicate) appendEstimates($("world-status"), worldValue, data.portfolio?.worldUsdValue, data.portfolio);
     } else if (data.worldError) { $("world-balance").textContent = "Unavailable"; $("world-status").textContent = data.worldError; }
+    else { $("world-balance").textContent = "Not linked"; $("world-status").textContent = "No World gameplay account is linked to this wallet."; }
     $("address").value = owner; $("address").placeholder = "Not connected";
     let addressStatus = !token ? interactive ? "Connected" : "Read-only" : "Authorized";
     if (vaultReader?.read()?.address.toLowerCase() === owner.toLowerCase())

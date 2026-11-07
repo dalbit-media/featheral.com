@@ -371,6 +371,7 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
       };
       const remote = `${target.directory}/shared/site-sync/${plan.binding.id}`;
       this.progress(32, "SSH connected. Checking target release and staging directories.");
+      await this.deployment.execute(client, `node -e ${quote(require("../../operations/storage-cleanup").remoteCleanupCode(target.directory))}`, "", target.deploymentTimeoutSeconds, undefined, onLog);
       await this.deployment.execute(client, `umask 077; test -f ${quote(target.directory + "/current/services/operations/settings.js")} && mkdir -p ${quote(remote + "/snapshot")} ${quote(target.directory + "/shared/sync-backups")}`, "", target.sshTimeoutSeconds, undefined, onLog);
       if (await fileHash(plan.archive) !== plan.binding.digest) throw fail(409, "Retained source manifest checksum changed. Refusing to resume.");
       const manifest = JSON.parse(fs.readFileSync(plan.archive, "utf8"));
@@ -446,7 +447,17 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
       this.result.phase = "applying"; this.result.resumable = false; this.result.message = "Target verifies checksums, stops the app, backs up affected data, installs and checks read-only health."; this.persist();
       this.progress(72, "Upload complete. Starting independent target verification and restore job.");
       await this.deployment.execute(client, command, target.password + "\n", target.deploymentTimeoutSeconds, undefined, onLog);
-      this.finish("complete", "Snapshot synchronized. Target read-only health was confirmed; verified backup retained on the target.");
+      this.finish("complete", "Snapshot synchronized. Target read-only health was confirmed.");
+      try {
+        const cleanup = require("../../operations/storage-cleanup").remoteCleanupCode(target.directory, true);
+        await this.deployment.execute(client, `node -e ${quote(cleanup)}`, "", target.deploymentTimeoutSeconds, undefined, onLog);
+        this.result.message += " Completed temporary files and backup payloads cleaned.";
+        this.persist();
+      } catch (error) {
+        this.log(`Verified sync cleanup failed: ${error.message}`, [target.password]);
+        this.result.message += " Cleanup failed; retained files need operator review.";
+        this.persist();
+      }
     } finally { client?.end(); }
   }
   recoveryBinding(site) {
