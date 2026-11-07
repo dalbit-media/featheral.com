@@ -34,7 +34,8 @@ export function marketAssetName(asset: MarketAsset): string {
   return isMarketResource(asset) ? ({ wood: 'Wood', water: 'Water', metal: 'Metal', oil: 'Oil' })[asset] : itemName(asset);
 }
 export function marketBasePrice(asset: MarketAsset): number {
-  if (isMarketResource(asset)) return Math.max(prices[asset] * 2, marketPriceFloor(asset));
+  // Reserve genesis pins this seed price; trading floors must not change it.
+  if (isMarketResource(asset)) return prices[asset] * 2;
   if (isCollectionItem(asset)) return monetaryPolicy.collectibleBase + collectionItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
   if (isActivityItem(asset)) return monetaryPolicy.collectibleBase + activityItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
   if (!isCraftableItem(asset)) return monetaryPolicy.collectibleBase + terrainDetails[asset.slice(6) as Terrain].weeks * monetaryPolicy.collectiblePerWeek;

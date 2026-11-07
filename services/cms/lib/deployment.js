@@ -92,6 +92,7 @@ const installerSteps = {
   'runtime-settings': 'Loading encrypted runtime Settings and checking financial reader modes.',
   'world-dependencies': 'Installing locked World dependencies.',
   build: 'Building World and exporting ABIs.',
+  preflight: 'Checking candidate syntax, runtime Settings and immutable financial policies before stopping the working gateway.',
   'pm2-install': 'Installing the PM2 process manager.',
   'nginx-existing': 'Checking existing Nginx configuration. Unmanaged configuration requires review before replacement.',
   nginx: 'Validating Nginx and hostname routing.',
@@ -105,6 +106,7 @@ const installerSteps = {
   'pm2-start': 'Starting the release with PM2.',
   health: 'Checking release identity and assigned site responses.',
   'pm2-startup': 'Saving PM2 state and configuring service startup.',
+  rollback: 'Restoring the previous code and Nginx configuration and verifying gateway and assigned-site health.',
   https: 'Configuring HTTPS certificates and automatic renewal.',
   verified: 'HTTPS checks completed.',
 };
@@ -162,6 +164,10 @@ const digestFiles = (root, files) => {
   return hash.digest('hex');
 };
 async function prepareRelease(root, files, content, prepared) {
+  if (files.includes('scripts/deploy-release.sh')
+    && fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').includes('scripts/deployment-preflight.js')
+    && !files.includes('scripts/deployment-preflight.js'))
+    throw error(503, 'Deployment preflight is missing from the Git-tracked release inventory. Track the new script and review the release again; no installation started.');
   const transfers = [];
   for (const name of files) {
     const source = path.join(root, ...name.split('/')), file = path.join(prepared, ...name.split('/'));

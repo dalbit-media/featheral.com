@@ -151,7 +151,7 @@ test("self-sync API requires the Admin host, authentication, same origin and wal
   const result = await request("/start", { challengeId: proof.body.challengeId, signature: await f.wallet.signMessage(proof.body.message) });
   assert.equal(result.status, 200); assert.equal(result.body.running, true);
 });
-for (const fails of [false, true]) test(`self-sync worker persists ${fails ? "failure" : "verified completion"} across the restart`, async t => {
+for (const fails of [false, true, "preflight"]) test(`self-sync worker persists ${fails === "preflight" ? "preflight refusal without cutover" : fails ? "failure" : "verified completion"} across the restart`, async t => {
   const f = fixture(t), vm = require("node:vm"), { EventEmitter } = require("node:events");
   const { PassThrough } = require("node:stream"), { createRequire } = require("node:module");
   const scriptFile = path.resolve(__dirname, "../../../scripts/self-deploy.js"), actualRequire = createRequire(scriptFile);
@@ -201,11 +201,16 @@ for (const fails of [false, true]) test(`self-sync worker persists ${fails ? "fa
       if (name === "../services/operations/settings") return { OperationsSettings: class {
         constructor() { this.value = { tlsEmail: "", uploadLimitMiB: 16, requestTimeoutSeconds: 90 }; }
       } };
+      if (name === "./deployment-preflight") return { readPolicy() {}, verifyCompatibility(candidate, previous) {
+        assert.equal(candidate, path.join(directory, "checkout"));
+        assert.equal(previous, f.root);
+        if (fails === "preflight") throw new Error("Live reserve policy mismatch; activation refused before stopping gateway.");
+      } };
       return actualRequire(name);
     },
     process: { platform: "linux", env: {} }, console: { log: line => stdout.push(line) }, setTimeout, clearTimeout, Buffer,
   });
-  if (fails) await assert.rejects(moduleObject.exports.run(f.directory, id), /bash failed/);
+  if (fails) await assert.rejects(moduleObject.exports.run(f.directory, id), fails === "preflight" ? /policy mismatch/ : /bash failed/);
   else await moduleObject.exports.run(f.directory, id);
   const receipt = JSON.parse(fs.readFileSync(path.join(directory, "status.json")));
   assert.equal(receipt.phase, fails ? "failed" : "complete");
@@ -214,4 +219,5 @@ for (const fails of [false, true]) test(`self-sync worker persists ${fails ? "fa
   assert.equal(fs.existsSync(path.join(directory, id)), false, "only job-specific package staging is cleaned");
   assert.equal(fs.existsSync(path.join(directory, "checkout")), true, "persistent Git checkout survives");
   assert(calls.some(call => call.program === "git" && call.args.join(" ") === "pull --ff-only origin trunk"));
+  if (fails === "preflight") assert(!calls.some(call => call.program === "/bin/bash"), "incompatible source never reaches the installer");
 });

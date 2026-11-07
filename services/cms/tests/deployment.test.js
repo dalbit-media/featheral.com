@@ -9,6 +9,20 @@ const { Deployment, configuration, releaseFiles } = require('../lib/deployment')
 const root = path.resolve(__dirname, '..', '..', '..');
 const env = { DEPLOY_TARGET: 'featheral@server.example:/opt/featheral', DEPLOY_KEY_FILE: path.resolve('unused-test-key'),
   DEPLOY_HOST_KEY_SHA256: 'SHA256:' + 'a'.repeat(43), DEPLOY_TLS_EMAIL: 'ops@example.com' };
+function reviewedFixture(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-reviewed-source-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const files = ['scripts/deploy-release.sh', 'scripts/deployment-preflight.js', 'scripts/serve.js', 'scripts/init-settings.js',
+    'package.json', 'ecosystem.config.cjs', 'services/cms/lib/admin-auth.js',
+    'sites/admin.featheral.com/login.html', 'sites/admin.featheral.com/js/login.js'];
+  for (const file of files) {
+    const destination = path.join(directory, ...file.split('/'));
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.copyFileSync(path.join(root, ...file.split('/')), destination);
+  }
+  fs.writeFileSync(path.join(directory, '.deployment-source.json'), JSON.stringify({ files }));
+  return directory;
+}
 test('published content importer skips replicas before reading snapshots or opening CMS stores', t => {
   const vm = require('node:vm'), { createRequire } = require('node:module');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'replica-code-import-'));
@@ -66,7 +80,7 @@ test('deployment console persists bounded progress and accepts only fixed instal
 test('installer failures stream safe step diagnostics and persist the failed target reason', async t => {
   const stateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-failure-'));
   t.after(() => fs.rmSync(stateDirectory, { recursive: true, force: true }));
-  const deployment = new Deployment({ root, env: { ...env, DEPLOY_ENABLED: 'true' }, stateDirectory });
+  const deployment = new Deployment({ root: reviewedFixture(t), env: { ...env, DEPLOY_ENABLED: 'true' }, stateDirectory });
   const client = { end() {}, exec(_command, callback) {
     const stream = new EventEmitter(); stream.stderr = new EventEmitter();
     stream.end = () => {
@@ -230,16 +244,18 @@ test('health retries avoid empty JSON errors and expose bounded application diag
   fs.mkdirSync(path.join(directory, 'logs'));
   fs.writeFileSync(path.join(directory, 'logs', 'error.log'), 'Startup error: fixture failed\n');
   fs.writeFileSync(path.join(directory, 'logs', 'app.log'), 'Starting application\n');
+  fs.writeFileSync(path.join(directory, 'logs', 'error-0.log'), 'Actual PM2 startup crash\n');
   const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
   const health = script.slice(script.indexOf('healthy=false'), script.indexOf('for host in $hostnames; do\n  # CMS'));
   const run = body => spawnSync(process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
-    ['-c', `set -Eeuo pipefail\nshared="$FIXTURE_DIR"\ngateway=127.0.0.1:8080\nrelease_id=fixture\nsleep() { :; }\n${body}\n${health}`],
+    ['-c', `set -Eeuo pipefail\nshared="$FIXTURE_DIR"\ngateway=127.0.0.1:8080\nrelease_id=fixture\npm2=fixture_pm2\nfixture_pm2(){ printf '%s' '[{"name":"featheral","pm2_env":{"status":"online","restart_time":0}}]'; }\nsleep() { :; }\n${body}\n${health}`],
     { encoding: 'utf8', timeout: 15000, env: { ...process.env, FIXTURE_DIR: directory.replace(/\\/g, '/') } });
   const unreachable = run('curl() { echo "connection refused" >&2; return 7; }');
   assert.equal(unreachable.status, 1);
   assert.match(unreachable.stdout, /after 60 attempts/);
   assert.match(unreachable.stdout, /Startup error: fixture failed/);
   assert.match(unreachable.stdout, /Starting application/);
+  assert.match(unreachable.stdout, /Actual PM2 startup crash/);
   assert.equal(unreachable.stderr, '');
   const invalid = run('curl() { printf "not JSON"; }');
   assert.equal(invalid.status, 1);
@@ -248,6 +264,9 @@ test('health retries avoid empty JSON errors and expose bounded application diag
   assert.equal(ready.status, 0);
   assert.equal(ready.stdout, '');
   assert.equal(ready.stderr, '');
+  const crashing = run(`curl() { return 7; }\nfixture_pm2(){ printf '%s' '[{"name":"featheral","pm2_env":{"status":"errored","restart_time":1}}]'; }`);
+  assert.equal(crashing.status, 1);
+  assert.match(crashing.stdout, /restart loop; rolling back immediately/);
 });
 test('site health probes simulate HTTPS on loopback and identify failing hosts without accepting errors', () => {
   const { spawnSync } = require('node:child_process');
@@ -256,7 +275,7 @@ test('site health probes simulate HTTPS on loopback and identify failing hosts w
   const external = script.slice(script.lastIndexOf('for host in $hostnames; do'), script.indexOf('echo "Deployment complete:'));
   const run = (check, mock, hosts = 'featheral.com admin.featheral.com') => spawnSync(
     process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash',
-    ['-c', `set -Eeuo pipefail\ngateway=127.0.0.1:8080\nhostnames="${hosts}"\n${mock}\n${check}`],
+    ['-c', `set -Eeuo pipefail\ngateway=127.0.0.1:8080\nhostnames="${hosts}"\npm2=fixture_pm2\nfixture_pm2(){ :; }\n${mock}\n${check}`],
     { encoding: 'utf8', timeout: 10000 });
   const forwarded = run(internal, `curl() { if [[ "$*" != *"X-Forwarded-Proto: https"* ]]; then printf 403; else printf 200; fi; }`);
   assert.equal(forwarded.status, 0);
@@ -367,6 +386,15 @@ test('Git-tracked release inventory excludes untracked, removed and private file
   assert.deepEqual(releaseFiles(directory), ['package.json', 'scripts/tracked.js']);
   assert.equal(fs.readFileSync(path.join(directory, 'scripts', 'tracked.js'), 'utf8'), 'updated tracked source');
 });
+test('release packaging rejects a required preflight missing from the reviewed inventory', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-incomplete-release-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'scripts'));
+  fs.writeFileSync(path.join(directory, 'scripts', 'deploy-release.sh'), 'node "$release/scripts/deployment-preflight.js"');
+  await assert.rejects(require('../lib/deployment').prepareRelease(directory, ['scripts/deploy-release.sh'], '{}', directory),
+    { status: 503 });
+  assert.equal(fs.existsSync(path.join(directory, 'release.zip')), false);
+});
 test('a deployed release retains its reviewed Git-tracked inventory without shipping Git metadata', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-release-inventory-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -381,7 +409,7 @@ test('a deployed release retains its reviewed Git-tracked inventory without ship
 test('installer hands a deployment-owned PM2 daemon to its persistent service before health checks', () => {
   const { spawnSync } = require('node:child_process');
   const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
-  const startup = script.slice(script.indexOf('step=pm2-startup'), script.indexOf('step=health'));
+  const startup = script.slice(script.indexOf('step=pm2-startup'), script.indexOf('step=activate\nln -sfn'));
   const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
   const run = (active, failStart = false) => spawnSync(bash, ['-c', `set -Eeuo pipefail
 active=${active}
@@ -403,10 +431,10 @@ echo "health ready"`], { encoding: 'utf8', timeout: 10000 });
   const cold = run(false);
   assert.equal(cold.error, undefined);
   assert.equal(cold.status, 0);
-  assert.match(cold.stdout, /pm2 save\nstartup\npm2 kill\nstart pm2-fixture\nhealth ready/);
+  assert.match(cold.stdout, /pm2 save --force\nstartup\npm2 kill\nstart pm2-fixture\nhealth ready/);
   const warm = run(true);
   assert.equal(warm.status, 0);
-  assert.match(warm.stdout, /pm2 save\nstartup\nhealth ready/);
+  assert.equal(warm.stdout.trim(), 'health ready');
   assert.doesNotMatch(warm.stdout, /pm2 kill|start pm2-fixture/);
   const failed = run(false, true);
   assert.equal(failed.status, 1);
@@ -567,7 +595,7 @@ test('reviewed source is uploaded by SFTP and SSH failures never report success'
     }
     end() {}
   }
-  const deployment = new Deployment({ root, env: { ...env, DEPLOY_ENABLED: 'true', DEPLOY_KEY_FILE: keyFile, DEPLOY_HOST_KEY_SHA256: fingerprint, APP_VAPID_PRIVATE_KEY: 'fixture-runtime-secret' },
+  const deployment = new Deployment({ root: reviewedFixture(t), env: { ...env, DEPLOY_ENABLED: 'true', DEPLOY_KEY_FILE: keyFile, DEPLOY_HOST_KEY_SHA256: fingerprint, APP_VAPID_PRIVATE_KEY: 'fixture-runtime-secret' },
     clientFactory: () => new FakeClient(), stateDirectory: temp });
   const plan = deployment.plan();
   await assert.rejects(deployment.start({ planId: plan.id, approval: `DEPLOY ${plan.digest} ${plan.contentDigest}` }), { status: 502 });

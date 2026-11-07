@@ -3,7 +3,7 @@ import { dollarsUnits } from '../src/dollars.ts';
 import type { Account } from './economy.ts';
 import { createAccount } from './economy.ts';
 import { worldWeekMs } from '../src/environment.ts';
-import { isLiquidAsset, isMarketResource, marketAssets, marketBasePrice } from '../src/market.ts';
+import { isLiquidAsset, isMarketResource, marketAssets, marketBasePrice, marketPriceFloor } from '../src/market.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import { inventory } from './inventory.ts';
 import type { SqliteStore } from './store.ts';
@@ -22,7 +22,7 @@ export function seedFixturePools(store: SqliteStore): void {
   store.transaction(treasury.token, (session, _time, _realTime, exchange) => {
     for (const asset of marketAssets.filter(isLiquidAsset)) {
       const quantity = isMarketResource(asset) ? monetaryPolicy.rawInitialUnits : monetaryPolicy.itemInitialUnits;
-      const dollars = dollarsUnits(quantity * marketBasePrice(asset));
+      const dollars = dollarsUnits(quantity * Math.max(marketBasePrice(asset), marketPriceFloor(asset)));
       session.account.game.dollars = dollars;
       if (isMarketResource(asset)) session.account.game.stock[asset] = quantity;
       else inventory(session.account).items.push(...Array.from({ length: quantity }, () => asset));
@@ -42,7 +42,7 @@ export function fundFixtureFromReserves(path: string, dollars: number): void {
     if (Number(db.prepare('SELECT SUM(dollars) AS dollars FROM market_pools').get()!.dollars) === 0) {
       for (const asset of marketAssets.filter(isLiquidAsset)) {
         const quantity = isMarketResource(asset) ? monetaryPolicy.rawInitialUnits : monetaryPolicy.itemInitialUnits;
-        db.prepare('UPDATE market_pools SET units=?,dollars=? WHERE asset=?').run(quantity, dollarsUnits(quantity * marketBasePrice(asset)), asset);
+        db.prepare('UPDATE market_pools SET units=?,dollars=? WHERE asset=?').run(quantity, dollarsUnits(quantity * Math.max(marketBasePrice(asset), marketPriceFloor(asset))));
       }
     }
     const units = dollarsUnits(dollars);

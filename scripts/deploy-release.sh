@@ -232,6 +232,9 @@ fi
 if [[ -f "$release/.deployment-files.json" ]]; then
   node -e 'const fs=require("node:fs"),crypto=require("node:crypto");fs.writeFileSync(process.argv[2],JSON.stringify({digest:crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"),node:process.versions.node}),{mode:0o600})' "$release/.deployment-files.json" "$release/.deployment-build.json"
 fi
+step=preflight
+phase "$step"
+node "$release/scripts/deployment-preflight.js" "$release" "$previous_release"
 step=pm2-install
 phase "$step"
 mkdir -p "$shared/tools"
@@ -281,9 +284,14 @@ if as_root test -f "$nginx_file"; then
   had_nginx=true
 fi
 activated=false
+gateway_healthy() {
+  local expected="$1" response
+  response="$(curl -fsS --max-time 3 "http://$gateway/healthz" 2>/dev/null)" || return 1
+  printf '%s' "$response" | node -e 'let data="";process.stdin.on("data",chunk=>data+=chunk);process.stdin.on("end",()=>{let health;try{health=JSON.parse(data)}catch{process.exit(1)}if(health.status!=="ok"||health.release!==process.argv[1])process.exit(1)});' "$expected"
+}
 rollback() {
-  code=$?
-  trap - ERR
+  code="${1:-$?}"
+  trap - ERR TERM INT HUP
   printf 'FEATHERAL_FAILURE:%s:%s\n' "$step" "$code" >&3
   echo "Deployment failed ($code); restoring the prior code/configuration, never monetary data."
   if [[ "$had_nginx" == true ]]; then
@@ -296,7 +304,6 @@ rollback() {
       ln -sfn "$previous" "$root/current.next"
       mv -Tf "$root/current.next" "$root/current"
       start_release "$previous"
-      "$pm2" save
     else
       "$pm2" delete featheral
       rm -f "$root/current"
@@ -304,9 +311,38 @@ rollback() {
   fi
   as_root nginx -t
   as_root systemctl reload nginx
+  if [[ "$activated" == true && -n "$previous" ]]; then
+    local restored=false
+    phase rollback
+    for attempt in $(seq 1 30); do
+      if gateway_healthy "${previous##*/}"; then restored=true; break; fi
+      sleep 2
+    done
+    if [[ "$restored" != true ]]; then
+      echo "ROLLBACK UNCONFIRMED: previous gateway did not become healthy. Recovery files retained; inspect application logs."
+      exit "$code"
+    fi
+    local previous_hosts
+    if ! previous_hosts="$(node -e 'const a=require(process.argv[1]);if(!Array.isArray(a.hosts)||!a.hosts.length)process.exit(1);console.log(a.hosts.join(" "))' "$previous/.deployment-hosts.json")"; then
+      echo "ROLLBACK UNCONFIRMED: previous site assignment could not be loaded. Recovery files retained."
+      exit "$code"
+    fi
+    for host in $previous_hosts; do
+        if ! status="$(curl -sS -o /dev/null -w '%{http_code}' --resolve "$host:443:127.0.0.1" --max-time 15 "https://$host/")" \
+          || [[ "$status" != 200 && ! ( "$host" == admin.featheral.com && "$status" == 401 ) ]]; then
+          echo "ROLLBACK UNCONFIRMED: $host HTTPS is not healthy. Recovery files retained."
+          exit "$code"
+        fi
+    done
+    "$pm2" save
+    echo "Rollback confirmed: previous gateway and assigned HTTPS sites are healthy."
+  fi
   exit "$code"
 }
 trap rollback ERR
+trap 'rollback 143' TERM
+trap 'rollback 130' INT
+trap 'rollback 129' HUP
 phase nginx
 step=nginx
 # Do not overwrite other virtual hosts. Subsequent releases retain Certbot's TLS configuration.
@@ -336,35 +372,39 @@ if [[ "$hostnames" != db.featheral.com && "$deployment_mode" != self ]]; then
 fi
 step=activate
 phase "$step"
+# Ensure the process manager belongs to its persistent service before cutover.
+step=pm2-startup
+phase "$step"
+pm2_service="pm2-$(id -un)"
+if ! as_root systemctl is-active --quiet "$pm2_service"; then
+  "$pm2" save --force
+  as_root env PATH="$PATH" "$pm2" startup systemd -u "$(id -un)" --hp "$HOME"
+  "$pm2" kill
+  as_root systemctl start "$pm2_service"
+fi
+as_root systemctl is-active --quiet "$pm2_service"
+step=activate
 ln -sfn "$release" "$root/current.next"
 mv -Tf "$root/current.next" "$root/current"
 activated=true
 step=pm2-start
 phase "$step"
 start_release "$release"
-step=pm2-startup
-phase "$step"
-"$pm2" save
-as_root env PATH="$PATH" "$pm2" startup systemd -u "$(id -un)" --hp "$HOME"
-pm2_service="pm2-$(id -un)"
-if ! as_root systemctl is-active --quiet "$pm2_service"; then
-  # A daemon created by this temporary deployment job dies when the job exits.
-  # Stop it before resurrecting the saved processes under the persistent service.
-  "$pm2" kill
-  as_root systemctl start "$pm2_service"
-fi
-as_root systemctl is-active --quiet "$pm2_service"
 step=health
 phase "$step"
 healthy=false
 for attempt in $(seq 1 60); do
   if response="$(curl -fsS --max-time 3 "http://$gateway/healthz" 2>/dev/null)" &&
     printf '%s' "$response" | node -e 'let data="";process.stdin.on("data",chunk=>data+=chunk);process.stdin.on("end",()=>{let health;try{health=JSON.parse(data)}catch{process.exit(1)}if(health.status!=="ok"||health.release!==process.argv[1])process.exit(1)});' "$release_id"; then healthy=true; break; fi
+  if ! "$pm2" jlist | node -e 'let data="";process.stdin.on("data",chunk=>data+=chunk);process.stdin.on("end",()=>{const app=JSON.parse(data).find(app=>app.name==="featheral");process.exit(app&&app.pm2_env.status==="online"&&app.pm2_env.restart_time===0?0:1)});'; then
+    echo "Candidate process exited or entered a restart loop; rolling back immediately."
+    break
+  fi
   sleep 2
 done
 if [[ "$healthy" != true ]]; then
   echo "Gateway did not report release $release_id at http://$gateway/healthz after 60 attempts. Recent application output:"
-  for log in "$shared/logs/error.log" "$shared/logs/app.log"; do
+  for log in "$shared/logs"/error*.log "$shared/logs"/app*.log; do
     if [[ -f "$log" ]]; then
       echo "--- ${log##*/} (last 64 KiB, up to 80 lines) ---"
       tail -c 65536 -- "$log" | tail -n 80
@@ -428,6 +468,7 @@ for host in $hostnames; do
     false
   fi
 done
+"$pm2" save
 echo "Deployment complete: $release_id"
 if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]]; then
   if ! (printf '%s\n' '{"version":1,"complete":true}' > "${archive%/*}/cleanup-complete.json.tmp" &&

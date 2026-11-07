@@ -4,6 +4,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { prepareRelease, releaseFiles, redactServerLog } = require("../services/cms/lib/deployment");
 const { repository } = require("../services/operations/self-deployment");
+const { readPolicy, verifyCompatibility } = require("./deployment-preflight");
 async function updateCheckout(checkout, command, source = repository) {
   const directory = path.dirname(checkout);
   if (!fs.existsSync(checkout)) await command("git", ["clone", "--no-checkout", "--origin", "origin", source, checkout], directory);
@@ -42,7 +43,7 @@ async function run(root, id) {
   };
   const command = (program, args, cwd, capture = false) => new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "pipe"] });
-    let output = "";
+    let output = "", failurePhase = "";
     const timer = setTimeout(() => child.kill("SIGTERM"), 30 * 60 * 1000);
     const read = stream => {
       stream.setEncoding("utf8");
@@ -54,7 +55,11 @@ async function run(root, id) {
         }
         pending += chunk;
         const lines = pending.split(/\r?\n/); pending = lines.pop();
-        for (const line of lines) if (line && (!capture || stream === child.stderr)) log(line);
+        for (const line of lines) {
+          const failure = /^FEATHERAL_FAILURE:([a-z-]+):[0-9]+$/.exec(line);
+          if (failure && !failurePhase) failurePhase = failure[1];
+          if (line && (!capture || stream === child.stderr)) log(line);
+        }
         if (pending.length > 65536) { if (!capture || stream === child.stderr) log(pending.slice(0, 4096)); pending = ""; }
       });
       stream.on("end", () => { if (pending && (!capture || stream === child.stderr)) log(pending); });
@@ -64,24 +69,26 @@ async function run(root, id) {
     child.once("close", code => {
       clearTimeout(timer);
       if (code === 0) resolve(output.trim());
-      else reject(new Error(`${program} failed (exit ${code}). Inspect the self-sync log and server Git/sudo access.`));
+      else reject(new Error(`${program} failed${failurePhase ? ` at ${failurePhase}` : ""} (exit ${code}). Review the self-sync failure and rollback health log before retrying; no success is assumed.`));
     });
   });
   const prepared = path.join(directory, id);
   try {
     if (fs.existsSync(path.join(root, "shared", "site-sync.lock"))) throw new Error("Site sync is locked; finish recovery first.");
     const current = fs.realpathSync(path.join(root, "current"));
+    process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
     const assignment = JSON.parse(fs.readFileSync(path.join(current, ".deployment-hosts.json"), "utf8"));
     if (!assignment.primary || !assignment.hosts.includes("admin.featheral.com")) throw new Error("This is not the Admin server.");
     const checkout = path.join(directory, "checkout");
     log("Fetching the repository default branch. Server Git credentials must already be configured.");
     const { branch, commit } = await updateCheckout(checkout, command);
     receipt.commit = commit; receipt.branch = branch; persist();
+    log("Checking fetched source against the running financial policies before packaging or gateway cutover.");
+    verifyCompatibility(checkout, current, { policy: source => readPolicy(source, current) });
     fs.mkdirSync(prepared, { mode: 0o700 });
     log(`Building fresh release from ${branch} at ${commit}. Existing private data and published pages are preserved.`);
     const archive = await prepareRelease(checkout, releaseFiles(checkout), JSON.stringify({ integrated: [], managed: [] }), prepared);
     const releaseId = `release-${Date.now()}-${commit.slice(0, 12)}`;
-    process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
     const { OperationsSettings } = require("../services/operations/settings");
     const settings = new OperationsSettings({ root: current });
     await command("/bin/bash", [archive.installer.file, root, releaseId, settings.value.tlsEmail,

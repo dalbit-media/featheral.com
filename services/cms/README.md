@@ -13,6 +13,29 @@ On a read-only snapshot replica, loopback `admin.localhost` permits Admin authen
 
 Remote installation skips APT when all required packages are installed. Identical reviewed file inventories and Node versions reuse dependency/build copies from the previous managed release; otherwise the normal clean install/build runs. New hostname assignments still update Nginx and restart the gateway. Certbot issuance is skipped only when every assigned HTTPS route passes certificate-verified loopback health; missing coverage invokes Certbot and all routes are verified again. Existing data, keys and financial reader/writer roles are preserved.
 
+Both uploaded deployment and server **Sync** run candidate syntax/runtime and
+immutable monetary, collection and live-reserve market-policy compatibility checks
+**before** editing Nginx or stopping the working gateway. Resource trading floors
+are independent of the genesis-pinned reserve seed prices; never reset financial
+data, regenerate keys or reprice the reserve manifest to accommodate a UI change.
+An incompatible release fails at `preflight` while the old sites remain available.
+Server Sync also checks fetched source against the running policies before
+packaging, using the current installed dependencies and Settings without starting
+writers. New preflight scripts must be included in the reviewed Git-tracked
+inventory; packaging rejects an incomplete release instead of uploading it.
+
+PM2 is attached to its persistent systemd service before cutover. The candidate is
+not saved as the boot process until gateway identity and every assigned HTTPS
+site pass health checks. A candidate crash/restart loop aborts immediately rather
+than waiting through repeated 502s; diagnostics include PM2's numbered log files.
+Activation failures and termination signals restore the previous code/Nginx
+configuration and verify its release identity and existing HTTPS sites before
+reporting confirmed rollback. Data Sync and offline recovery likewise retain
+their recovery lock/payload until restored gateway and HTTPS health are confirmed.
+PM2 reporting `online` or accepting `restart` alone is not proof of recovery.
+There is still a brief cutover on this single-writer server; deployment must never
+start a second financial writer against live storage to simulate zero downtime.
+
 Installation and Site Sync inspect and reclaim confirmed disposable remote staging using the saved pinned SSH credential before transfer. After verified success, cleanup removes inactive managed releases and completed sync backup payloads (no retained server backup policy), preserving the current release, PM2-referenced releases, live shared data, credentials, unconfirmed jobs and compact sync receipts. Transaction rollback files remain until successful health verification or confirmed rollback; they are never removed mid-install. Unknown maintenance folders and live CMS uploads are not treated as temporary files. Cleanup failures remain explicit and do not undo a verified installation/sync. Hourly managed-server maintenance applies the same no-retained-backup policy when operations are idle.
 
 Wallet summaries on Dollar readers explicitly mark World gameplay funds unavailable without logging an expected missing-writer stack trace. No zero balance is substituted. Missing links clear any previous World display. Pool reserve RPC failures expose `reservesError` while retaining independently verified spot prices; the existing 60-second cache bounds retries and repeated logs.

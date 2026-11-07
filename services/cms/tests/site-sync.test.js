@@ -136,6 +136,30 @@ test("replica HTTP probe requires a healthy read-only response and exposes conne
     if (replica) res.setHeader("X-Featheral-Replica", replica);
     res.writeHead(status); res.end("{}");
   });
+  test("rollback health requires the restored release identity and its original replica role", async t => {
+    const http = require("node:http");
+    let body = JSON.stringify({ status: "ok", release: "previous" }), replica = "";
+    const server = http.createServer((_req, res) => {
+      if (replica) res.setHeader("X-Featheral-Replica", replica);
+      res.end(body);
+    });
+    t.after(() => server.close());
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${server.address().port}/healthz`;
+    const options = { requireReplica: false, expectedRelease: "previous" };
+    await probeReplica(url, options);
+    await assert.rejects(probeReplica(url, { ...options, requireReplica: true }), /missing/);
+    replica = "read-only";
+    await probeReplica(url, { ...options, requireReplica: true });
+    await assert.rejects(probeReplica(url, options), /unexpectedly reports read-only/);
+    replica = "";
+    body = JSON.stringify({ status: "ok", release: "failed-candidate" });
+    await assert.rejects(probeReplica(url, options), /identity/);
+    body = JSON.stringify({ status: "error", release: "previous" });
+    await assert.rejects(probeReplica(url, options), /identity/);
+    body = "not JSON";
+    await assert.rejects(probeReplica(url, options), /invalid JSON/);
+  });
   t.after(() => server.close());
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}/healthz`;
@@ -232,7 +256,7 @@ test("new-site CMS data participates in sync while Pay code and target setup are
   try { assert.equal(installed.prepare("SELECT value FROM content").get().value, "Pay content"); }
   finally { installed.close(); }
 });
-for (const fails of [false, true]) test(`receiver ${fails ? "rolls back a broken Pay route after restart" : "completes only after every Pay route reports read-only"}`, async t => {
+for (const fails of [false, true, "rollback-health"]) test(`receiver ${fails === "rollback-health" ? "retains recovery lock when restored gateway health fails" : fails ? "rolls back a broken Pay route after restart" : "completes only after every Pay route reports read-only"}`, async t => {
   const f = fixture(t), vm = require("node:vm"), { EventEmitter } = require("node:events");
   const { PassThrough } = require("node:stream"), { createRequire } = require("node:module");
   const script = path.resolve(__dirname, "../../../scripts/restore-site-sync.js"), actualRequire = createRequire(script);
@@ -243,10 +267,10 @@ for (const fails of [false, true]) test(`receiver ${fails ? "rolls back a broken
     f.write(f.target, name, "// replica support");
   snapshot(f.root, output, {});
   const commands = [], probes = [], logs = [];
-  let restarted = false;
+  let restarted = false, restarts = 0;
   const response = (callback, status, body = "") => {
     const stream = new PassThrough(); stream.statusCode = status;
-    stream.headers = restarted ? { "x-featheral-replica": "read-only" } : {};
+    stream.headers = restarted && readReplica(f.target) ? { "x-featheral-replica": "read-only" } : {};
     callback(stream); stream.end(body);
   };
   const request = send => {
@@ -256,21 +280,23 @@ for (const fails of [false, true]) test(`receiver ${fails ? "rolls back a broken
   };
   const moduleObject = { exports: {} };
   vm.runInNewContext(fs.readFileSync(script, "utf8"), {
-    module: moduleObject, Buffer, URL, setTimeout, clearTimeout, process: { platform: "linux", env: {} },
+    module: moduleObject, Buffer, URL, setTimeout: (callback, ms) => setTimeout(callback, fails === "rollback-health" && ms === 2000 ? 0 : ms),
+    clearTimeout, process: { platform: "linux", env: {} },
     console: { log: line => logs.push(line), error: line => logs.push(line) },
     require(name) {
       if (name === "node:fs") return { ...fs, realpathSync: file => file === path.join(root, "current") ? f.target : fs.realpathSync(file) };
       if (name === "node:child_process") return { spawnSync: (_program, args) => {
-        commands.push(args[0]); if (args[0] === "restart") restarted = true;
+        commands.push(args[0]); if (args[0] === "restart") { restarted = true; restarts++; }
         return { status: 0, stdout: args[0] === "jlist"
           ? JSON.stringify([{ name: "featheral", pm2_env: { status: "online", pm_cwd: f.target } }]) : "" };
       } };
       if (name === "node:http") return { get: (_url, _options, callback) => {
-        const req = request(() => response(callback, 200)); req.end(); return req;
+        const req = request(() => response(callback, 200, JSON.stringify({ status: "ok",
+          release: fails === "rollback-health" && restarts > 1 ? "failed-candidate" : path.basename(f.target) }))); req.end(); return req;
       } };
       if (name === "node:https") return { request: (options, callback) => request(() => {
         probes.push({ ...options, restarted });
-        response(callback, fails && restarted && options.method === "POST" ? 403 : 200,
+        response(callback, fails && restarted && readReplica(f.target) && options.method === "POST" ? 403 : 200,
           JSON.stringify({ schema: "featheral.pay", version: 1, currency: "FTH$", paymentUrl: "https://pay.featheral.com/?to=public" }));
       }) };
       if (name === path.join(f.target, "services", "operations", "settings"))
@@ -279,17 +305,18 @@ for (const fails of [false, true]) test(`receiver ${fails ? "rolls back a broken
     },
   }, { filename: script });
   const operation = moduleObject.exports.run(root, output, backup, "another-source", ["pay.featheral.com"]);
-  if (fails) await assert.rejects(operation, /POST returned HTTP 403/);
+  if (fails) await assert.rejects(operation, fails === "rollback-health" ? /restored release/ : /POST returned HTTP 403/);
   else await operation;
   const state = JSON.parse(fs.readFileSync(path.join(backup, "state.json"), "utf8"));
-  assert.equal(state.phase, fails ? "rolled-back" : "complete");
+  assert.equal(state.phase, fails === "rollback-health" ? "installing" : fails ? "rolled-back" : "complete");
   assert.equal(commands.filter(command => command === "stop").length, fails ? 2 : 1);
-  assert.equal(fs.existsSync(path.join(root, "shared", "site-sync.lock")), false);
+  assert.equal(fs.existsSync(path.join(root, "shared", "site-sync.lock")), fails === "rollback-health");
   assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt"), "utf8"),
     fails ? "target overlapping upload" : "source upload");
   assert.equal(Boolean(readReplica(f.target)), !fails);
   assert.ok(probes.some(probe => probe.restarted && probe.method === "POST"));
-  assert.ok(logs.some(line => line.includes(fails ? "Previous target state restored" : "Snapshot installed")));
+  if (fails === "rollback-health") assert(!logs.some(line => line.includes("Previous target state restored") || line === "FEATHERAL_SYNC:rollback-complete"));
+  else assert.ok(logs.some(line => line.includes(fails ? "Previous target state restored" : "Snapshot installed")));
 });
 test("promoted CMS storage retains its source identity without retaining the replica role", t => {
   const f = fixture(t), marker = path.join(f.root, "data", MARKER), origin = path.join(f.root, "data", CMS_ORIGIN);

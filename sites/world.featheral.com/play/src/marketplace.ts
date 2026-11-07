@@ -215,7 +215,7 @@ export class Marketplace {
       ? marketPriceAvailable(price) ? this.price(price) : translate('No offers yet.', this.language) : '';
     this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2><p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p></div><span class="exchange-venue">Players + game shop</span>`;
     if (!this.priceEdited && ticker) {
-      const value = marketPriceAvailable(price) ? price : marketBasePrice(this.asset);
+      const value = marketPriceAvailable(price) ? price : Math.max(marketBasePrice(this.asset), marketPriceFloor(this.asset));
       if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = displayPrice(this.asset, value).toFixed(4);
     }
   }

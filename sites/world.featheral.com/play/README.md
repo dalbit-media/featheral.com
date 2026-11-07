@@ -215,6 +215,10 @@ historical fills remain unchanged. An under-floor pool cannot pay a fictitious
 floor price; its unavailable side is explicitly shown as having no quote.
 Donations must meet the floor individually and for the resulting reserve ratio.
 No reserves, escrow or balances are repriced, and no currency is issued.
+Reserve seed prices remain immutable and separate from trading floors. In
+particular, the existing Oil reserve seed is FTH$24/lot even though the trading
+floor is FTH$30/bbl; insufficiently priced reserves cannot produce a sell quote.
+Deployment preflight refuses changes to the live reserve manifest before cutover.
 
 Buy orders escrow FTH$ and sell orders escrow owned assets. Partial fills retain unfilled escrow; cancellation returns it. Item bids and asks reserve inventory slots. The limit is 50 open orders per session; orders expire with the seven-day session. Raw quantities are 1–10,000 accounting lots with the physical increments below. Items use whole pieces; collectibles use one. Limit prices are FTH$0.0001–1,000,000 per accounting lot with four decimals, converted to physical-unit display prices. Charts show the latest 120 real executions, never fabricated history. Quotes refresh every five seconds. SQLite persists both accounts, escrow, reserves, trades and idempotent receipts atomically.
 

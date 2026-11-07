@@ -213,15 +213,29 @@ function replicaHealthURL(environment) {
   assert(Number.isInteger(port) && port > 0 && port <= 65535, "Invalid target HTTP port.");
   return `http://${host.includes(":") ? "[::1]" : host === "localhost" ? "localhost" : "127.0.0.1"}:${port}/healthz`;
 }
-function probeReplica(url) {
+function probeReplica(url, { requireReplica = true, expectedRelease } = {}) {
   return new Promise((resolve, reject) => {
     // Use server-side HTTP, without fetch's browser-only restricted-port rules.
     const request = http.get(url, { agent: false }, response => {
       response.once("error", reject);
-      response.resume();
+      let data = "";
+      response.on("data", chunk => {
+        if (Buffer.byteLength(data) + chunk.length > 16384) return request.destroy(new Error("Gateway health response exceeds 16 KiB."));
+        data += chunk.toString("utf8");
+      });
       const replica = response.headers["x-featheral-replica"];
-      if (response.statusCode === 200 && replica === "read-only") resolve();
-      else reject(new Error(`HTTP ${response.statusCode}; X-Featheral-Replica: ${replica || "missing"}`));
+      response.once("end", () => {
+        if (response.statusCode !== 200 || requireReplica && replica !== "read-only")
+          return reject(new Error(`HTTP ${response.statusCode}; X-Featheral-Replica: ${replica || "missing"}`));
+        if (expectedRelease) {
+          let health;
+          try { health = JSON.parse(data); }
+          catch (error) { return reject(new Error("Gateway health returned invalid JSON.", { cause: error })); }
+          if (!health || health.status !== "ok" || health.release !== expectedRelease) return reject(new Error("Gateway health release identity does not match the restored release."));
+          if (!requireReplica && replica === "read-only") return reject(new Error("Restored writer gateway unexpectedly reports read-only replica mode."));
+        }
+        resolve();
+      });
     });
     const timer = setTimeout(() => request.destroy(new Error("Health request timed out after 3000 ms.")), 3000);
     request.once("close", () => clearTimeout(timer));
@@ -338,6 +352,11 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId, hosts) {
   process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
   const { OperationsSettings } = require(path.join(release, "services", "operations", "settings"));
   const healthURL = replicaHealthURL(new OperationsSettings({ root: release }).environment());
+  const wasReplica = Boolean(readReplica(release));
+  const verifyRestored = async () => {
+    await waitForReplica(healthURL, { probe: url => probeReplica(url, { requireReplica: wasReplica, expectedRelease: path.basename(release) }) });
+    await checkTargetSites(root, hosts, { requireReplica: wasReplica });
+  };
   const lock = path.join(root, "shared", "site-sync.lock");
   fs.writeFileSync(lock, backupDirectory, { flag: "wx", mode: 0o600 });
   let prepared, stopped = false, started = false, rollbackConfirmed = false;
@@ -368,8 +387,9 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId, hosts) {
       if (started) command("stop", "featheral");
       if (prepared) { returnStaged(prepared, snapshotDirectory); restoreBackup(prepared.roots, backupDirectory, prepared.state); }
       command("restart", "featheral");
+      await verifyRestored();
       rollbackConfirmed = true;
-      console.log("Previous target state restored and application restarted.");
+      console.log("Previous target state restored; gateway identity and assigned HTTPS health confirmed.");
       if (prepared) {
         prepared.state.phase = "rolled-back";
         fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(prepared.state), { mode: 0o600, flush: true });
@@ -400,10 +420,16 @@ async function recover(root, backupDirectory) {
   command("stop", "featheral");
   restoreBackup(roots, backupDirectory, state);
   command("restart", "featheral");
+  process.env.FEATHERAL_BOOTSTRAP_FILE = path.join(root, "shared", "bootstrap", "bootstrap.json");
+  const { OperationsSettings } = require(path.join(release, "services", "operations", "settings"));
+  const url = replicaHealthURL(new OperationsSettings({ root: release }).environment());
+  await waitForReplica(url, { probe: url => probeReplica(url, { requireReplica: Boolean(readReplica(release)), expectedRelease: path.basename(release) }) });
+  const assignment = JSON.parse(fs.readFileSync(path.join(release, ".deployment-hosts.json"), "utf8"));
+  await checkTargetSites(root, assignment.hosts, { requireReplica: Boolean(readReplica(release)) });
   state.phase = "rolled-back";
   fs.writeFileSync(path.join(backupDirectory, "state.json"), JSON.stringify(state), { mode: 0o600, flush: true });
   if (fs.existsSync(lock)) fs.unlinkSync(lock);
-  console.log("Verified backup restored. Check application health before enabling writes.");
+  console.log("Verified backup restored; gateway identity and assigned HTTPS health confirmed.");
 }
 if (require.main === module) {
   const operation = (async () => {
