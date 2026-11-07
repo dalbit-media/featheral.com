@@ -375,9 +375,10 @@ test('actual returned exploration grants one biome keepsake; overlap and zero-re
   accrue(account, due);
   const id = `relic-${terrainAt(7, 0, account.game.seed)}`;
   assert.equal(inventory(account).items[0], id);
-  assert.equal(inventory(account).items.length, 3);
+  assert.equal(inventory(account).items.length, 4);
   assert.ok(inventory(account).items[1].startsWith('collection-'));
   assert.ok(inventory(account).items[2].startsWith('activity-'));
+  assert.match(inventory(account).items[3], /^(?:permit-|title-)/);
   assert.ok(account.game.log.some(entry => entry.includes('Charted 0 new tiles')));
   const after = structuredClone(inventory(account));
   accrue(account, due + worldWeekMs);

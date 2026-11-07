@@ -108,7 +108,7 @@ test('calendar animation bounds updates to ten per second and pauses when hidden
 
 test('deadline refresh includes off-cycle crews and retries without polling hidden or busy views', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  const timer = main.slice(main.indexOf('let nextDeadlineSyncAt = 0;'), main.indexOf('settlementHalfSale = new SettlementHalfSale'));
+  const timer = main.slice(main.indexOf('let nextDeadlineSyncAt = 0;'), main.indexOf('settlementResourceSale = new SettlementSale'));
   const crews: Record<string, { readyAt: number }> = { wood: { readyAt: 1000 } };
   let tick = () => { throw new Error('Deadline timer was not registered.'); };
   let timestamp = 999, realTime = 0, requests = 0, confirming = false;
@@ -214,7 +214,8 @@ test('owned Water facilities appear on the shared settlement grid with stable co
   assert.match(panel, /우물/);
   for (const key of waterFacilityKeys) assert.match(panel, new RegExp(`data-entity="${key}"`));
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  assert.match(main, /data-action="water-facility"/);
+  assert.match(main, /waterUpgradeCards\(state, language\)/);
+  assert.match(readFileSync(new URL('./upgrade-view.ts', import.meta.url), 'utf8'), /action: 'water-facility'/);
   assert.match(main, /case 'water-facility':/);
   assert.match(main, /isWaterFacility\(target.dataset.facility\)/);
 });
@@ -367,7 +368,7 @@ test('marketplace has its own entry, complete tradable catalog and FTH$ quote cu
   assert.match(main, /href=.*\/market\//);
   assert.match(main, /new Marketplace/);
   assert.doesNotMatch(main, /function marketPanel|Simulated market · Fixed prices|type: 'trade'/);
-  assert.equal(marketAssets.length, 53);
+  assert.equal(marketAssets.length, 81);
   assert.equal(new Set(marketAssets).size, marketAssets.length);
   for (const asset of marketAssets) { assert.ok(isMarketAsset(asset)); assert.ok(marketBasePrice(asset) > 0); }
   assert.equal(isMarketAsset('metal'), true);
@@ -671,8 +672,10 @@ test('resource acquisition shares one header manager while preserving direct cla
   assert.match(main, /if \(success\)[\s\S]*collectionReceiptQuantity\(state.message, resource\)/);
   assert.match(main, /crewManagementCard\(resource, false\)/);
   const sale = readFileSync(new URL('./settlement-sale.ts', import.meta.url), 'utf8');
-  assert.match(sale, /resource \? `settlement-sale-\$\{resource\}`/);
-  assert.match(sale, /confirmConsumption\(marketConsumption\(command\)!/);
+  assert.match(sale, /resource \? \[resource\] : marketResources/);
+  assert.match(sale, /new ResourceSaleQuantity\(language/);
+  assert.match(sale, /confirmConsumption\(consumption, this.language\)/);
+  assert.match(sale, /marketConsumption\(spot\)/);
 });
 test('desktop Play header presents a readable world clock and keeps resource inventory alongside it', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');

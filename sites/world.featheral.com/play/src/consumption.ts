@@ -1,7 +1,8 @@
 import { buildingCosts, diplomacyCosts, recruitmentAmount, stages } from './engine.ts';
 import type { Cost, Resource } from './engine.ts';
 import type { Command, Snapshot } from './api-types.ts';
-import { craftingCost, itemName, itemStorage } from './items.ts';
+import { craftingCost, craftingIngredients, itemName, itemStorage } from './items.ts';
+import { isTitleItem } from './customization.ts';
 import { explorationQuote } from './workforce.ts';
 import { activityItemDetails, activityName } from './automation.ts';
 import { isWaterFacility, waterFacilities } from './water-facilities.ts';
@@ -16,6 +17,7 @@ export interface ConsumptionAmount { asset: MarketAsset | 'fthg' | 'dollars'; am
 export interface ConsumptionQuote {
   title: string;
   subject: string;
+  literalSubject?: boolean;
   costs: ConsumptionAmount[];
   weeks: number | null;
   residents?: number;
@@ -36,16 +38,22 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
   const quote = (title: string, subject: string, cost: Cost, notes: string[] = []): ConsumptionQuote =>
     ({ title, subject, costs: amounts(cost), weeks: 0, notes });
   switch (command.type) {
+    case 'use-customization':
+      return { ...quote(isTitleItem(command.item) ? 'Set player title' : 'Edit settlement identity', command.value, {},
+        ['Consumes one permit. Names and titles are cosmetic and do not change ownership or permissions.']),
+        literalSubject: !isTitleItem(command.item), costs: [{ asset: command.item, amount: 1 }] };
     case 'claim':
       return command.resource ? { ...quote('Collect resources', itemNameForResource(command.resource), { dollars: state.collection?.fees[command.resource] ?? 0 }),
         receives: [{ asset: command.resource, amount: state.pending[command.resource] }], notes: ['Transport is paid in FTH$ when completed resources are collected.'] } : null;
     case 'collect-sell':
       return { ...quote('Collect and sell', itemNameForResource(command.resource), {}, ['Completed output is sold at marketplace prices. Transport is deducted from the proceeds.',
+        'Collect all completed output, sell the selected amount, and store the rest. Full transport is deducted from proceeds.',
         ...(command.resource === 'water' ? ['Selling Water can cause daily shortages. Keep enough Water for your residents.'] : [])]),
         costs: [{ asset: command.resource, amount: command.quantity }],
         receives: [{ asset: 'dollars', amount: command.minimumDollars / dollarsScale }], receiveLabel: 'Minimum received' };
     case 'activate-collection':
-      return { ...quote('Activate auto-collection', itemName(command.item), {}, ['Consumes one item. Remaining automation time stacks. FTH$ transport is still required.']),
+      return { ...quote('Activate auto-collection', itemName(command.item), {}, ['Consumes one item. Remaining automation time stacks. FTH$ transport is still required.',
+        ...(collectionItemDetails(command.item).resource === 'all' ? ['Applies the duration to Wood, Water, Metal and Oil independently. Oil still requires its normal unlock.'] : [])]),
         costs: [{ asset: command.item, amount: 1 }], weeks: collectionItemDetails(command.item).weeks };
     case 'activate-activity':
       return { ...quote('Activate activity automation', itemName(command.item), {},
@@ -90,7 +98,11 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const next = itemStorage[state.inventory.storage + 1];
       return next ? quote('Expand storage', next.name, { metal: next.metal, dollars: next.dollars }) : null;
     }
-    case 'craft': return quote('Craft', `${command.quantity ?? 1} × ${itemName(command.item)}`, craftingCost(command.item, command.quantity));
+    case 'craft':
+      return { ...quote('Craft', `${command.quantity ?? 1} × ${itemName(command.item)}`, craftingCost(command.item, command.quantity)),
+        costs: [...amounts(craftingCost(command.item, command.quantity)),
+          ...Object.entries(craftingIngredients(command.item, command.quantity)).map(([asset, amount]) => ({ asset: asset as MarketAsset, amount }))],
+        notes: Object.keys(craftingIngredients(command.item)).length ? ['Collector recipes consume owned permits, not active automation time or market escrow. Total collection time is preserved.'] : [] };
     case 'diplomacy':
       if (command.action === 'gift') return quote('Send goodwill shipment', 'Evergreen Union', diplomacyCosts.gift);
       if (command.action === 'form') return quote('Found federation', 'Verdant Federation', diplomacyCosts.form);

@@ -118,6 +118,14 @@
 .inventory-item-detail h3{font-size:12px;margin:0 0 5px;overflow-wrap:anywhere}
 .inventory-item-detail p,.inventory-page-empty{font-size:10px;color:#a6b69b;line-height:1.6;margin:0}
 .inventory-item-detail .button{flex-shrink:0;font-size:10px;padding:8px}
+.customization-detail{flex-wrap:wrap}
+.customization-detail>div:not(.item-art){flex-basis:calc(100% - 74px)}
+.customization-detail label{display:grid;gap:6px;margin-top:8px;font-size:12px}
+.customization-detail input{box-sizing:border-box;width:100%;min-width:0;min-height:44px;border:1px solid #d5dfad44;border-radius:6px;padding:9px;background:#15251c;color:#e3e7dd;font-size:16px}
+.customization-detail .button{flex:1 1 auto;min-height:44px}
+.collector-ingredients{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px;font-size:11px;line-height:1.5}
+.collector-ingredients li{overflow-wrap:anywhere}
+.collector-ingredients strong{white-space:nowrap;color:#e3e7dd}
 .settlement-task-body .inventory-item-detail .item-art{width:34px;height:34px;margin:0;flex-shrink:0}
 .settlement-task-body .inventory-item-detail .item-art svg{width:30px;height:30px}
 .inventory-panel .disclosure{margin-top:10px}
@@ -145,6 +153,36 @@
 .settlement-task-body .warehouse-card{flex-wrap:wrap;gap:12px}
 .settlement-task-body .warehouse-info{min-width:0}
 .settlement-task-body .warehouse-upgrade{margin-left:auto}
+.upgrade-options{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin:12px 0}
+.upgrade-option{min-width:0;padding:16px;border:1px solid #d5dfad25;border-radius:10px;background:#ffffff04;display:flex;flex-direction:column;gap:12px}
+.upgrade-option-heading{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+.upgrade-option-heading>div{flex:1;min-width:120px}
+.upgrade-option-heading h3{font-size:14px;line-height:1.4;margin:0 0 4px;overflow-wrap:anywhere}
+.upgrade-option-heading small,.upgrade-option-next,.upgrade-option-preview{font-size:12px;color:#b6cba3;line-height:1.6}
+.upgrade-option-icon{display:grid;place-items:center;flex-shrink:0;width:34px;height:34px;background:#d5dfad10;border-radius:8px}
+.upgrade-option-icon .icon{width:20px;height:20px}
+.upgrade-option-status{font-size:11px;line-height:1.5;color:#d7c58c;max-width:100%;overflow-wrap:anywhere}
+.upgrade-option-benefit{font-size:12px;line-height:1.6;color:#c0d4ac;margin:0}
+.upgrade-option-next,.upgrade-option-lock{margin:0}
+.upgrade-option-lock{display:flex;align-items:center;gap:7px;font-size:12px;color:#d7c58c}
+.upgrade-option-lock .icon{width:14px;height:14px;flex-shrink:0}
+.upgrade-option-costs{border-top:1px solid #d5dfad18;padding-top:10px}
+.upgrade-cost-head{display:flex;justify-content:space-between;font-size:11px;color:#9eb58e;margin-bottom:8px}
+.upgrade-cost-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid #ffffff08;font-size:12px}
+.upgrade-cost-row>span:first-child{display:flex;align-items:center;gap:6px}
+.upgrade-cost-row .icon{width:15px;height:15px;flex-shrink:0}
+.upgrade-cost-row strong{font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}
+.upgrade-cost-row small{grid-column:2;text-align:right;color:#9eb58e;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.upgrade-cost-shortfall{grid-column:1/-1;color:#f0b994;font-size:11px}
+.upgrade-option .button{min-height:44px;font-size:13px;margin-top:auto;white-space:normal}
+.upgrade-option .button>span{flex:1}
+.upgrade-capacity{list-style:none;padding:0;margin:6px 0 0;display:grid;gap:8px}
+.upgrade-capacity li{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px}
+.upgrade-capacity li>span{display:flex;align-items:center;gap:5px}
+.upgrade-capacity .icon{width:14px;height:14px}
+.upgrade-capacity strong{font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}
+.upgrade-option.is-complete{border-color:#c6e8a440}
+.upgrade-option.is-complete .upgrade-option-status{color:#c6e8a4}
 .settlement-task-body .item-storage-card{flex-wrap:wrap;padding:13px;gap:10px}
 .settlement-task-body .item-storage-next{width:100%;max-width:none;justify-content:space-between;border-top:1px solid #ffffff10;padding-top:12px;margin-top:3px}
 .settlement-task-body .item-storage-next .button{margin-left:auto}

@@ -1,14 +1,16 @@
-import { readMarket, sendMarket } from './api.ts';
-import type { ApiState } from './api-types.ts';
+import './resource-sale.css';
+import { readCollection, readMarket, send, sendMarket } from './api.ts';
+import type { ApiState, CollectionQuote } from './api-types.ts';
 import { marketAssetName, marketResources } from './market.ts';
 import type { MarketQuote, MarketResource } from './market.ts';
-import { marketConsumption } from './consumption.ts';
+import { gameConsumption, marketConsumption } from './consumption.ts';
 import { confirmConsumption, confirmationOpen } from './confirmation.ts';
-import { dollarsSlippage, formatDollars } from './dollars.ts';
+import { dollarsSlippage, dollarsUnits, formatDollars } from './dollars.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { localize } from './i18n-dom.ts';
-import { accountingQuantity, displayQuantity, tradingUnit } from './resource-units.ts';
+import { formatResourceAmount } from './resource-units.ts';
+import { ResourceSaleQuantity } from './resource-sale-quantity.ts';
 
 export function settlementSalesAvailable(state: ApiState): boolean {
   return state.game.stage >= 0 && !!(state.game.bank || state.game.incomeFacilities?.['market-stall'] || state.game.incomeFacilities?.['trade-hub']);
@@ -16,85 +18,130 @@ export function settlementSalesAvailable(state: ApiState): boolean {
 export class SettlementSale {
   private root = document.createElement('section');
   private quote: MarketQuote | null = null;
+  private collection: CollectionQuote | null = null;
   private sequence = 0;
   private pending = false;
-  constructor(privateState: () => ApiState, privateUpdate: (state: ApiState) => void,
-    privateNotify: (message: string, error?: boolean) => void, privateLanguage: Language, resource?: MarketResource) {
-    this.state = privateState; this.update = privateUpdate; this.notify = privateNotify; this.language = privateLanguage;
-    const prefix = resource ? `settlement-sale-${resource}` : 'settlement-sale';
-    this.root.className = 'settlement-section settlement-sale';
-    this.root.innerHTML = `<h3>Sell resources for FTH$</h3><p>Sell at current market prices. Origin Gold conversions fund insufficient liquidity first; Dollar treasury is used only after verified origin exhaustion. Claim pending resources first.</p>
-      <form><label for="${prefix}-resource" ${resource ? 'hidden' : ''}>Resource</label><select id="${prefix}-resource" ${resource ? 'hidden' : ''}>${(resource ? [resource] : marketResources).map(asset => `<option value="${asset}">${marketAssetName(asset)}</option>`).join('')}</select>
-      <label for="${prefix}-quantity">Amount</label><div class="settlement-sale-amount"><input id="${prefix}-quantity" type="number" min="1" max="10000" step="1" value="1" required><button type="button" data-sale-max>Max</button></div>
-      <p><span>You get · FTH$</span> <strong data-sale-total>—</strong></p><p role="status" data-sale-status></p>
-      <button class="button primary" type="submit" data-sale-submit disabled>Review sell</button><button class="button" type="button" data-sale-refresh>Refresh quote</button></form>`;
-    localize(this.root);
-    this.configure();
-    this.root.querySelector('select')!.addEventListener('change', () => { this.configure(); this.quote = null; void this.refresh(); });
-    this.root.querySelector('input')!.addEventListener('input', () => { this.quote = null; void this.refresh(); });
-    this.root.querySelector('[data-sale-refresh]')!.addEventListener('click', () => { void this.refresh(); });
-    this.root.querySelector('[data-sale-max]')!.addEventListener('click', () => {
-      this.input.value = String(displayQuantity(this.asset, Math.min(10000, this.state().game.stock[this.asset])));
-      this.quote = null; void this.refresh();
-    });
-    this.root.querySelector('form')!.addEventListener('submit', event => { event.preventDefault(); void this.execute(); });
-    setInterval(() => { if (this.root.isConnected && !document.hidden && !confirmationOpen()) void this.refresh(); }, 5000);
-  }
+  private loading = false;
+  private error = '';
+  private debounce: ReturnType<typeof setTimeout> | undefined;
+  private controls: ResourceSaleQuantity;
+  private source: 'owned' | 'completed' = 'owned';
   private state: () => ApiState;
   private update: (state: ApiState) => void;
   private notify: (message: string, error?: boolean) => void;
   private language: Language;
-  private get input(): HTMLInputElement { return this.root.querySelector('input')!; }
+  private access: 'settlement' | 'market';
+  constructor(state: () => ApiState, update: (state: ApiState) => void,
+    notify: (message: string, error?: boolean) => void, language: Language,
+    resource?: MarketResource, access: 'settlement' | 'market' = 'settlement') {
+    this.state = state; this.update = update; this.notify = notify; this.language = language; this.access = access;
+    this.root.className = 'settlement-section resource-sale';
+    this.root.innerHTML = `<h3>Sell resources</h3>
+      <form><label ${resource ? 'hidden' : ''}>Resource<select data-sale-resource>${(resource ? [resource] : marketResources).map(asset =>
+        `<option value="${asset}">${marketAssetName(asset)}</option>`).join('')}</select></label>
+      <div class="resource-sale-sources" role="group" aria-label="Resource source"><button type="button" data-sale-source="owned" aria-pressed="true">Owned</button><button type="button" data-sale-source="completed" aria-pressed="false">Ready to collect</button></div>
+      <p data-sale-stock></p><div data-sale-controls></div><small data-sale-note></small>
+      <p class="resource-sale-total"><span>You get · FTH$</span><strong data-sale-total>—</strong></p>
+      <p role="status" data-sale-status></p><div class="resource-sale-actions">
+      <button class="button primary" type="submit" data-sale-submit disabled>Review sell</button>
+      <button class="button" type="button" data-sale-refresh>Refresh quote</button></div></form>`;
+    this.controls = new ResourceSaleQuantity(language, () => this.changed());
+    this.root.querySelector('[data-sale-controls]')!.append(this.controls.root);
+    localize(this.root); this.configure(true);
+    this.root.querySelector('select')!.addEventListener('change', () => { this.configure(true); this.changed(); });
+    this.root.querySelectorAll<HTMLButtonElement>('[data-sale-source]').forEach(button => button.addEventListener('click', () => {
+      this.setSource(button.dataset.saleSource === 'completed' ? 'completed' : 'owned');
+    }));
+    this.root.querySelector('[data-sale-refresh]')!.addEventListener('click', () => { void this.refresh(); });
+    this.root.querySelector('form')!.addEventListener('submit', event => { event.preventDefault(); void this.execute(); });
+    setInterval(() => {
+      if (this.root.isConnected && !document.hidden && !confirmationOpen() && document.activeElement?.closest('.resource-sale') !== this.root) void this.refresh();
+    }, 5000);
+  }
   private get asset(): MarketResource { return marketResources.find(resource => resource === this.root.querySelector('select')!.value)!; }
-  private quantity(): number { return accountingQuantity(this.asset, Number(this.input.value)); }
-  private configure(): void {
-    this.input.min = this.input.step = String(displayQuantity(this.asset, 1));
-    this.input.max = String(displayQuantity(this.asset, 10000));
-    this.input.value = this.input.min;
-    this.root.querySelector(`label[for="${this.input.id}"]`)!.textContent = `${translate('Amount', this.language)} (${tradingUnit(this.asset)})`;
+  private available(): number {
+    return this.source === 'owned' ? this.state().game.stock[this.asset] : Math.floor(this.state().pending[this.asset]);
+  }
+  select(resource: MarketResource): void {
+    if (this.pending || this.asset === resource) return;
+    this.root.querySelector('select')!.value = resource; this.configure(true); this.changed();
+  }
+  setSource(source: 'owned' | 'completed'): void {
+    if (this.pending) return;
+    this.source = source; this.configure(true); this.changed();
+  }
+  private configure(reset = false): void {
+    if (this.controls.configure(this.asset, this.available(), reset)) this.quote = null;
+  }
+  private changed(): void {
+    this.sequence++; this.quote = null; this.collection = null; this.error = ''; this.paint();
+    clearTimeout(this.debounce); this.debounce = setTimeout(() => { void this.refresh(); }, 250);
   }
   mount(parent: Element): void {
-    if (!settlementSalesAvailable(this.state())) {
-      parent.innerHTML = `<p>${translate('Build a market stall, trade hub or city bank to sell here.', this.language)} <a href="/market/">${translate('Open marketplace', this.language)}</a></p>`;
+    if (this.state().game.stage < 0 || this.access === 'settlement' && !settlementSalesAvailable(this.state()) && this.source === 'owned') {
+      parent.innerHTML = `<p>${translate('Build a market stall, trade hub or city bank to sell here.', this.language)} <a href="/market/?side=sell">${translate('Open marketplace', this.language)}</a></p>`;
       return;
     }
-    parent.replaceChildren(this.root); this.paint();
-    if (!this.quote && !this.pending) void this.refresh();
+    parent.replaceChildren(this.root); this.configure(); this.paint();
+    if (!this.quote && !this.pending && !this.loading && !this.error) void this.refresh();
   }
   private paint(message = ''): void {
-    const quantity = this.quantity();
-    const reason = message || (!this.input.validity.valid || !Number.isSafeInteger(quantity)
-      ? translate(`Enter an amount from ${this.input.min} to ${this.input.max} ${tradingUnit(this.asset)} in steps of ${this.input.step}.`, this.language)
-      : quantity > this.state().game.stock[this.asset] ? translate('Not enough owned resources for this order.', this.language)
-      : this.quote && !this.quote.available ? translate('Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.', this.language) : '');
+    const t = (text: string) => translate(text, this.language);
+    const amount = formatResourceAmount(this.asset, this.available(), locale(this.language));
+    this.root.querySelector('[data-sale-stock]')!.textContent = `${t(this.source === 'owned' ? 'Owned' : 'Ready to collect')}: ${amount}`;
+    this.root.querySelectorAll<HTMLButtonElement>('[data-sale-source]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.saleSource === this.source)); button.disabled = this.pending;
+    });
+    this.root.querySelector('[data-sale-note]')!.textContent = this.source === 'completed'
+      ? `${t('Collect all completed output, sell the selected amount, and store the rest. Full transport is deducted from proceeds.')} ${t('Transport')}: FTH$ ${this.collection ? formatDollars(this.collection.transport, locale(this.language)) : '—'}`
+      : t('Only owned resources are sold. Pending resources and escrow are excluded.');
+    const reason = message || this.error || (!this.controls.valid
+      ? t(this.available() < 1 ? 'No resources available to sell.' : 'Enter a whole trading lot within the available amount.')
+      : this.quote && !this.quote.available ? t('Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.') : '');
     this.root.querySelector('[data-sale-total]')!.textContent = this.quote?.available ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-sale-status]')!.textContent = reason;
-    this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!.disabled = this.pending || !!reason || !this.quote?.available || !this.quote.dollars;
-    this.root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,[data-sale-max],[data-sale-refresh]').forEach(control => control.disabled = this.pending);
+    const submit = this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!;
+    submit.textContent = t(this.pending ? 'Saving...' : this.source === 'completed' ? 'Review collect and sell' : 'Review sell');
+    submit.disabled = this.pending || !!reason || !this.quote?.available || !this.quote.dollars;
+    this.controls.disable(this.pending);
+    this.root.querySelector<HTMLSelectElement>('select')!.disabled = this.pending;
+    this.root.querySelector<HTMLButtonElement>('[data-sale-refresh]')!.disabled = this.pending;
   }
   private async refresh(): Promise<void> {
-    if (this.pending) return;
-    const sequence = ++this.sequence, asset = this.asset, quantity = this.quantity();
-    this.paint();
-    if (!this.input.validity.valid || !Number.isSafeInteger(quantity)) return;
+    if (this.pending || !this.root.isConnected) return;
+    clearTimeout(this.debounce); this.configure();
+    const sequence = ++this.sequence, asset = this.asset, quantity = this.controls.quantity, source = this.source;
+    this.loading = true; this.error = ''; this.quote = null; this.paint();
+    if (!this.controls.valid) { this.loading = false; return; }
     try {
-      const response = await readMarket(asset, quantity);
-      if (sequence !== this.sequence || this.asset !== asset || this.quantity() !== quantity) return;
-      this.quote = response.market.quotes.sell; this.update(response); this.paint();
+      const response = source === 'completed' ? await readCollection(asset, quantity) : await readMarket(asset, quantity);
+      if (sequence !== this.sequence || this.asset !== asset || this.controls.quantity !== quantity || this.source !== source) return;
+      if ('collectionQuote' in response) {
+        this.collection = response.collectionQuote;
+        this.quote = { quantity, dollars: this.collection.net, available: this.collection.available
+          && dollarsUnits(dollarsSlippage(this.collection.proceeds, 'sell')) - dollarsUnits(this.collection.transport) >= 1 };
+      } else this.quote = response.market.quotes.sell;
+      this.update(response); this.configure(); this.paint();
     } catch (error) {
       if (sequence !== this.sequence) return;
-      this.quote = null; this.paint(translate(error instanceof Error ? error.message : 'Connection failed.', this.language));
-    }
+      this.quote = null; this.error = translate(error instanceof Error ? error.message : 'Connection failed.', this.language); this.paint();
+    } finally { if (sequence === this.sequence) { this.loading = false; this.paint(); } }
   }
   private async execute(): Promise<void> {
     if (this.pending || confirmationOpen() || this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!.disabled || !this.quote) return;
-    const command = { type: 'spot', side: 'sell', asset: this.asset, quantity: this.quantity(), limitDollars: dollarsSlippage(this.quote.dollars, 'sell') } as const;
+    const state = this.state(), source = this.source;
+    const spot = { type: 'spot', side: 'sell', asset: this.asset, quantity: this.controls.quantity, limitDollars: dollarsSlippage(this.quote.dollars, 'sell') } as const;
+    const collect = { type: 'collect-sell', resource: this.asset, quantity: this.controls.quantity,
+      minimumDollars: this.collection ? dollarsUnits(dollarsSlippage(this.collection.proceeds, 'sell')) - dollarsUnits(this.collection.transport) : 0 } as const;
+    const consumption = source === 'completed' ? gameConsumption(state, collect) : marketConsumption(spot);
+    if (!consumption) { this.notify('The action could not be completed.', true); return; }
     this.pending = true; this.sequence++; this.paint();
     try {
-      if (!await confirmConsumption(marketConsumption(command)!, this.language)) return;
-      if (!settlementSalesAvailable(this.state())) throw new Error('Build a market stall, trade hub or city bank to sell here.');
-      const response = await sendMarket(this.state(), command);
+      if (!await confirmConsumption(consumption, this.language)) return;
+      if (source === 'owned' && this.access === 'settlement' && !settlementSalesAvailable(this.state())) throw new Error('Build a market stall, trade hub or city bank to sell here.');
+      const response = source === 'completed' ? await send(this.state(), collect) : await sendMarket(this.state(), spot);
       this.update(response); this.notify(response.message ?? 'Resources sold for FTH$.');
+      this.configure(true);
     } catch (error) { this.notify(error instanceof Error ? error.message : 'The action could not be completed.', true); }
     finally { this.pending = false; this.quote = null; await this.refresh(); }
   }

@@ -1,7 +1,7 @@
 import { canAfford, GameError, note, pay, radius } from '../src/engine.ts';
 import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
-import { craftingCost, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
+import { craftingCost, craftingFits, craftingIngredients, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
 import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
 import { arrangementError, cellKey, legacySpaceCells, positionEntries, settlementEntityName, settlementPositions } from '../src/settlement-layout.ts';
@@ -9,6 +9,8 @@ import type { GridPosition, SettlementEntity } from '../src/settlement-layout.ts
 import { collectionDurations } from '../src/collection.ts';
 import { activityKinds, isAutomationItem } from '../src/automation.ts';
 import type { ExplorationFind } from '../src/items.ts';
+import { customizationKeys, customizationName, isCustomizationItem, isTitleItem, namingItems, titleItems } from '../src/customization.ts';
+import type { CustomizationItem } from '../src/customization.ts';
 
 export function inventory(account: Account): ItemInventory {
   if (!account.inventory) {
@@ -26,12 +28,18 @@ export function craft(account: Account, item: CraftableItem, quantity = 1): stri
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) throw new GameError('Invalid crafting quantity.');
   const bag = inventory(account), game = account.game;
   if (game.stage < 0) throw new GameError('Establish a settlement before crafting.');
-  if (inventoryUsed(bag) + quantity > itemStorage[bag.storage].capacity) throw new GameError('Item inventory is full. Upgrade item storage first.');
+  const ingredients = craftingIngredients(item, quantity);
+  if (Object.entries(ingredients).some(([id, count]) => bag.items.filter(owned => owned === id).length < count))
+    throw new GameError('Not enough collector items to craft this bundle.');
+  if (!craftingFits(bag, item, quantity)) throw new GameError('Item inventory is full. Upgrade item storage first.');
   if (!recipeDiscovered(game, item)) throw new GameError('Explore the ingredient resources before crafting this item.');
   const recipe = craftableItems[item];
   const cost = craftingCost(item, quantity);
   if (!canAfford(game, cost)) throw new GameError('Not enough resources to craft this item.');
   pay(game, cost);
+  for (const [id, count] of Object.entries(ingredients)) {
+    for (let index = 0; index < count; index++) bag.items.splice(bag.items.findIndex(owned => owned === id), 1);
+  }
   for (let index = 0; index < quantity; index++) bag.items.push(item);
   if (isVisibilityItem(item) && visibilityItems[item].radius > radius(game)) bag.equipped = item;
   inventory(account);
@@ -105,11 +113,35 @@ export function findActivityItem(account: Account, terrain: Terrain): void {
   if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
   else bag.pending.push(item);
 }
+export function findCustomizationItem(account: Account, terrain: Terrain): void {
+  const bag = inventory(account), item = customizationKeys[Object.keys(terrainDetails).indexOf(terrain) % customizationKeys.length];
+  if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
+  else bag.pending.push(item);
+}
+export function useCustomization(account: Account, item: CustomizationItem, value: string): string {
+  const bag = inventory(account), index = bag.items.indexOf(item);
+  if (account.game.stage < 0) throw new GameError('Settlement required.');
+  if (index < 0 || !isCustomizationItem(item)) throw new GameError('This customization item is not available in your inventory.');
+  const custom = account.customization ?? {};
+  if (isTitleItem(item)) {
+    if (value !== titleItems[item].title) throw new GameError('Invalid player title.');
+    if (custom.title === item) throw new GameError('This player title is already active.');
+    account.customization = { ...custom, title: item };
+  } else {
+    const name = customizationName(value);
+    if (!name) throw new GameError('Names must contain 2-40 letters, numbers, spaces, apostrophes, periods or hyphens.');
+    const target = namingItems[item].target;
+    if (custom[target] === name) throw new GameError('This name is already active.');
+    account.customization = { ...custom, [target]: name };
+  }
+  bag.items.splice(index, 1);
+  return note(account.game, 'Customization applied. One permit consumed.');
+}
 export function collectFinds(account: Account): string {
   const bag = inventory(account), room = itemStorage[bag.storage].capacity - inventoryUsed(bag);
   if (!bag.pending.length) throw new GameError('No pending finds to collect.');
   if (room <= 0) throw new GameError('Item inventory is full. Upgrade item storage first.');
-  const collected = bag.pending.filter(id => isAutomationItem(id) || !bag.marketReserved?.includes(id)).slice(0, room);
+  const collected = bag.pending.filter(id => isAutomationItem(id) || isCustomizationItem(id) || !bag.marketReserved?.includes(id)).slice(0, room);
   if (!collected.length) throw new GameError('Pending finds are reserved by open market orders. Cancel the order first.');
   for (const id of collected) bag.pending.splice(bag.pending.indexOf(id), 1);
   bag.items.push(...collected);

@@ -3,7 +3,7 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from './items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketPriceAvailable, marketPriceFloor, marketQuantityLimit } from './market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketAssets, marketPriceAvailable, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit } from './market.ts';
 import type { MarketAsset, MarketCommand, MarketFill, MarketResponse, MarketSide } from './market.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -14,6 +14,8 @@ import { confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
+import { SettlementSale } from './settlement-sale.ts';
+import { ResourceSaleQuantity } from './resource-sale-quantity.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
@@ -51,6 +53,8 @@ export class Marketplace {
   private fresh = false;
   private sequence = 0;
   private debounce: ReturnType<typeof setTimeout> | undefined;
+  private resourceSale: SettlementSale;
+  private resourceQuantity: ResourceSaleQuantity;
   constructor(root: HTMLElement, state: () => ApiState, update: Marketplace['update'], notify: Marketplace['notify'], language: Language) {
     this.root = root; this.state = state; this.update = update; this.notify = notify; this.language = language;
     const params = new URLSearchParams(location.search), asset = params.get('asset');
@@ -68,6 +72,25 @@ export class Marketplace {
     funding.className = 'exchange-card';
     funding.innerHTML = `<h2>Fund market liquidity</h2><p>Markets start empty. Donate owned assets and existing FTH$ to the selected market. Donations are permanent and do not issue currency.</p><strong data-pool-funding-asset></strong><form data-pool-funding><label>Owned asset amount<input type="number" min="0.01" step="0.01" required data-pool-quantity></label><label>FTH$ donation<input type="number" min="0.0001" step="0.0001" required data-pool-dollars></label><button class="button" type="submit" data-pool-submit>Review donation</button></form>`;
     root.append(funding);
+    const navigation = document.createElement('nav');
+    navigation.className = 'resource-market-navigation';
+    navigation.setAttribute('aria-label', 'Marketplace section');
+    navigation.innerHTML = '<button type="button" class="button" data-market-section="resources">Resources</button><button type="button" class="button" data-market-section="items">Item marketplace</button>';
+    root.querySelector('.exchange-heading')!.after(navigation);
+    const seller = document.createElement('div');
+    seller.dataset.marketResourceSale = '';
+    root.querySelector('.exchange-main')!.prepend(seller);
+    this.resourceSale = new SettlementSale(state, next => { this.update(next); this.balances(); }, notify, language, undefined, 'market');
+    if (isMarketResource(this.asset)) this.resourceSale.select(this.asset);
+    this.resourceQuantity = new ResourceSaleQuantity(language, () => {
+      this.fresh = false; clearTimeout(this.debounce); this.preview();
+      this.debounce = setTimeout(() => { void this.refresh(); }, 250);
+    });
+    const resourceControls = document.createElement('div');
+    resourceControls.className = 'resource-sale'; resourceControls.dataset.marketResourceQuantity = '';
+    resourceControls.append(this.resourceQuantity.root);
+    root.querySelector('[data-market-form] .ticket-quantity')!.after(resourceControls);
+    root.querySelector<HTMLSelectElement>('[data-market-category]')!.querySelector('option[value=resources]')!.remove();
     funding.querySelector('form')!.addEventListener('submit', event => {
       event.preventDefault();
       const quantity = accountingQuantity(this.asset, Number(funding.querySelector<HTMLInputElement>('[data-pool-quantity]')!.value));
@@ -80,12 +103,14 @@ export class Marketplace {
     });
     localize(root);
     root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Automation', this.language), 'automation'));
+    root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Names & titles', this.language), 'customization'));
     root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = !matchMedia(compactMarketQuery).matches;
     this.configureQuantity();
     root.querySelectorAll<HTMLButtonElement>('[data-market-side]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSide === this.side)));
     root.addEventListener('input', event => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
+      if (target.closest('[data-market-resource-sale]')) return;
       if (target.hasAttribute('data-market-search')) { this.query = target.value.toLocaleLowerCase(); this.catalog(); return; }
       if (target.hasAttribute('data-market-price')) this.priceEdited = true;
       if (target.hasAttribute('data-market-quantity')) {
@@ -96,6 +121,13 @@ export class Marketplace {
     });
     root.addEventListener('change', event => {
       const target = event.target;
+      if (target instanceof Element && target.closest('[data-market-resource-sale]')) {
+        if (target instanceof HTMLSelectElement && isMarketAsset(target.value) && isMarketResource(target.value)) {
+          this.asset = target.value; this.fresh = false; this.priceEdited = false;
+          this.configureQuantity(true); this.catalog(); this.rememberSelection(); void this.refresh();
+        }
+        return;
+      }
       if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-category')) this.category = target.value;
       if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-sort')) {
         const sort = (['name', 'buy-low', 'sell-high', 'owned'] as const).find(value => value === target.value);
@@ -107,6 +139,16 @@ export class Marketplace {
     root.addEventListener('click', event => {
       const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null;
       if (!button) return;
+      if (button.dataset.marketSection) {
+        if (this.pending || confirmationOpen()) return;
+        this.asset = button.dataset.marketSection === 'resources' ? 'wood' : marketAssets.find(asset => !isMarketResource(asset))!;
+        this.category = 'all'; this.query = ''; this.ownedOnly = false;
+        this.root.querySelector<HTMLInputElement>('[data-market-search]')!.value = '';
+        this.root.querySelector<HTMLInputElement>('[data-market-owned]')!.checked = false;
+        this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.value = 'all';
+        this.side = isMarketResource(this.asset) ? 'sell' : 'buy'; this.mode = 'spot';
+        this.fresh = false; this.configureQuantity(true); this.balances(); this.rememberSelection(); void this.refresh();
+      }
       if (button.dataset.marketView === 'grid' || button.dataset.marketView === 'table') { this.catalogView = button.dataset.marketView; this.catalog(); }
       if (button.dataset.marketHistory) {
         const count = Number(button.dataset.marketHistory);
@@ -128,12 +170,13 @@ export class Marketplace {
           this.root.querySelector<HTMLElement>('[data-market-catalog] summary')!.focus({ preventScroll: true });
         }
         if (button.dataset.marketQuickSide) {
-          this.root.querySelector<HTMLElement>('.exchange-order-entry')!.scrollIntoView({ block: 'start' });
-          this.root.querySelector<HTMLElement>('[data-market-order-title]')!.focus({ preventScroll: true });
+          const entry = this.root.querySelector<HTMLElement>(isMarketResource(this.asset) && this.side === 'sell' && this.mode === 'spot' ? '[data-market-resource-sale]' : '.exchange-order-entry')!;
+          entry.scrollIntoView({ block: 'start' });
+          entry.querySelector<HTMLElement>('h3, h2')?.focus({ preventScroll: true });
         }
       }
-      if (button.dataset.marketSide === 'buy' || button.dataset.marketSide === 'sell') { this.side = button.dataset.marketSide; this.preview(); this.rememberSelection(); }
-      if (button.dataset.marketMode === 'spot' || button.dataset.marketMode === 'limit') { this.mode = button.dataset.marketMode; this.preview(); }
+      if (button.dataset.marketSide === 'buy' || button.dataset.marketSide === 'sell') { this.side = button.dataset.marketSide; this.configureQuantity(true); this.preview(); this.rememberSelection(); void this.refresh(); }
+      if (button.dataset.marketMode === 'spot' || button.dataset.marketMode === 'limit') { this.mode = button.dataset.marketMode; this.fresh = false; this.preview(); void this.refresh(); }
       if (button.dataset.marketStep) this.setQuantity(Math.max(1, Math.min(marketQuantityLimit(this.asset), (Number.isSafeInteger(this.quantity()) ? this.quantity() : 1) + Number(button.dataset.marketStep))));
       if (button.dataset.marketAmount) this.setQuantity(Number(button.dataset.marketAmount));
       if (button.hasAttribute('data-market-max')) this.setQuantity(Math.min(marketQuantityLimit(this.asset), isMarketResource(this.asset)
@@ -147,9 +190,9 @@ export class Marketplace {
       }
       if (button.dataset.marketCancel) void this.execute({ type: 'cancel', orderId: Number(button.dataset.marketCancel) });
     });
-    root.querySelector('form')!.addEventListener('submit', event => {
+    root.querySelector('[data-market-form]')!.addEventListener('submit', event => {
       event.preventDefault();
-      if (this.pending || !this.fresh || !this.root.querySelector<HTMLFormElement>('form')!.reportValidity() || !this.data) return;
+      if (this.pending || !this.fresh || !this.root.querySelector<HTMLFormElement>('[data-market-form]')!.reportValidity() || !this.data) return;
       const quantity = this.quantity(), price = accountingPrice(this.asset, Number(this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value));
       const quote = this.data.market.quotes[this.side];
       if (this.mode === 'limit') void this.execute({ type: 'limit', asset: this.asset, side: this.side, quantity, price });
@@ -165,9 +208,11 @@ export class Marketplace {
   private price(value: number, asset = this.asset): string { return `${formatResourcePrice(asset, value, locale(this.language))} FTH$/${tradingUnit(asset, locale(this.language))}`; }
   private name(asset: MarketAsset): string { return translate(marketAssetName(asset), this.language); }
   private art(asset: MarketAsset): string { return isMarketResource(asset) ? icon(asset) : itemArt(asset); }
-  private quantity(): number { return accountingQuantity(this.asset, Number(this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!.value)); }
+  private quantity(): number { return isMarketResource(this.asset) && this.side === 'sell' && this.mode === 'limit'
+    ? this.resourceQuantity.quantity : accountingQuantity(this.asset, Number(this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!.value)); }
   private configureQuantity(reset = false): void {
     const input = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
+    if (isMarketResource(this.asset)) this.resourceQuantity.configure(this.asset, marketOwned(this.state(), this.asset), reset);
     input.min = input.step = String(displayQuantity(this.asset, 1));
     input.max = String(displayQuantity(this.asset, marketQuantityLimit(this.asset)));
     if (reset || !input.validity.valid) input.value = input.min;
@@ -227,6 +272,7 @@ export class Marketplace {
     }
   }
   balances(): void {
+    if (isMarketResource(this.asset) && this.resourceQuantity.configure(this.asset, marketOwned(this.state(), this.asset))) this.fresh = false;
     this.root.querySelector('[data-market-balance]')!.textContent = `FTH$ ${this.money(this.state().dollars)}`;
     this.catalog();
     this.preview();
@@ -238,7 +284,8 @@ export class Marketplace {
     const list = this.root.querySelector<HTMLElement>('[data-market-assets]')!;
     const scrollTop = list.scrollTop, scrollLeft = list.scrollLeft;
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
-    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
+    const resources = isMarketResource(this.asset);
+    const tickers = filterMarketCatalog(this.data.market.tickers.filter(ticker => isMarketResource(ticker.asset) === resources), this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
     list.innerHTML = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending);
     this.root.querySelector('[data-market-count]')!.textContent = String(tickers.length);
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketView === this.catalogView)));
@@ -247,6 +294,23 @@ export class Marketplace {
     if (focusedAsset) this.root.querySelector<HTMLButtonElement>(`[data-market-asset="${focusedAsset}"]${focusedSide ? `[data-market-quick-side="${focusedSide}"]` : ':not([data-market-quick-side])'}`)?.focus({ preventScroll: true });
   }
   private preview(): void {
+    const resources = isMarketResource(this.asset), resourceSpotSale = resources && this.side === 'sell' && this.mode === 'spot';
+    const resourceLimitSale = resources && this.side === 'sell' && this.mode === 'limit';
+    this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.closest('label')!.hidden = resources;
+    const search = this.root.querySelector<HTMLInputElement>('[data-market-search]')!;
+    search.placeholder = translate(resources ? 'Search resources' : 'Search items', this.language);
+    search.closest('label')!.firstChild!.textContent = search.placeholder;
+    this.root.querySelectorAll<HTMLButtonElement>('[data-market-section]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.marketSection === 'resources') === resources)));
+    const seller = this.root.querySelector<HTMLElement>('[data-market-resource-sale]')!;
+    seller.hidden = !resourceSpotSale;
+    if (resourceSpotSale && isMarketResource(this.asset)) { this.resourceSale.select(this.asset); this.resourceSale.mount(seller); }
+    this.root.querySelector<HTMLElement>('[data-market-resource-quantity]')!.hidden = !resourceLimitSale;
+    this.root.querySelector<HTMLElement>('.ticket-quantity')!.hidden = resourceSpotSale || resourceLimitSale;
+    this.root.querySelector<HTMLElement>('[data-market-preview]')!.hidden = resourceSpotSale;
+    this.root.querySelector<HTMLElement>('[data-market-submit]')!.hidden = resourceSpotSale;
+    this.root.querySelector<HTMLElement>('[data-market-requirement]')!.hidden = resourceSpotSale;
+    this.root.querySelectorAll<HTMLElement>('.exchange-pool > span, .exchange-pool > strong').forEach(element => { element.hidden = resourceSpotSale; });
+    this.resourceQuantity.disable(this.pending || !resourceLimitSale);
     this.root.querySelector('[data-pool-funding-asset]')!.textContent = this.name(this.asset);
     this.root.querySelector<HTMLButtonElement>('[data-pool-submit]')!.disabled = this.pending || !isLiquidAsset(this.asset);
     this.root.dataset.tradeSide = this.side;
@@ -256,11 +320,11 @@ export class Marketplace {
     this.root.querySelector<HTMLElement>('[data-market-limit]')!.hidden = this.mode !== 'limit';
     const price = this.root.querySelector<HTMLInputElement>('[data-market-price]')!; price.disabled = this.mode !== 'limit' || this.pending;
     const amount = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
-    amount.disabled = this.pending;
+    amount.disabled = this.pending || resourceLimitSale || resourceSpotSale;
     const quantity = this.quantity(), bag = this.state().inventory, owned = marketOwned(this.state(), this.asset);
-    this.root.querySelector('[data-market-order-side]')!.textContent = translate(this.side === 'buy' ? 'Buy' : 'Sell', this.language);
+    this.root.querySelector('[data-market-order-side]')!.textContent = translate(resourceSpotSale ? 'Resource orders' : this.side === 'buy' ? 'Buy' : 'Sell', this.language);
     this.root.querySelector('[data-market-order-asset]')!.textContent = this.name(this.asset);
-    this.root.querySelector<HTMLElement>('[data-market-amounts]')!.hidden = !isLiquidAsset(this.asset);
+    this.root.querySelector<HTMLElement>('[data-market-amounts]')!.hidden = !isLiquidAsset(this.asset) || resources && this.side === 'sell';
     const maximum = this.root.querySelector<HTMLButtonElement>('[data-market-max]')!;
     maximum.hidden = this.side !== 'sell'; maximum.disabled = this.pending || (isMarketResource(this.asset) ? owned : sellableItemCount(bag, this.asset)) < 1;
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-mode], [data-market-side], [data-market-amount]').forEach(button => button.disabled = this.pending);
@@ -269,7 +333,8 @@ export class Marketplace {
     const dollars = this.mode === 'limit' && price.validity.valid && Number.isSafeInteger(quantity) && quantity > 0
       ? quantity * dollarsUnits(accountingPrice(this.asset, Number(price.value))) / dollarsScale : this.mode === 'spot' && quote?.available ? quote.dollars : undefined;
     let reason = this.state().game.stage < 0 ? 'Establish a settlement before trading.' : '';
-    if (!amount.validity.valid || !Number.isSafeInteger(quantity)) reason = this.amountError();
+    if ((resourceLimitSale ? !this.resourceQuantity.valid : !amount.validity.valid) || !Number.isSafeInteger(quantity)) reason = resourceLimitSale
+      ? translate('Enter a whole trading lot within the available amount.', this.language) : this.amountError();
     if (this.mode === 'limit' && !price.validity.valid) reason = translate('Enter a price in the displayed trading-unit increments.', this.language);
     if (!isMarketResource(this.asset)) {
       if (this.side === 'buy') {
@@ -288,7 +353,7 @@ export class Marketplace {
     const button = this.root.querySelector<HTMLButtonElement>('[data-market-submit]')!;
     button.textContent = translate(this.pending ? 'Saving...' : this.side === 'buy' ? 'Review buy' : 'Review sell', this.language);
     button.disabled = this.pending || !this.fresh || !!reason || !Number.isSafeInteger(quantity) || quantity < 1
-      || !amount.validity.valid || (this.mode === 'limit' && !price.validity.valid)
+      || (resourceLimitSale ? !this.resourceQuantity.valid : !amount.validity.valid) || (this.mode === 'limit' && !price.validity.valid)
       || (this.mode === 'spot' && (!quote?.available || !quote.dollars));
     localize(this.root.querySelector('[data-market-preview]')!);
   }
@@ -318,7 +383,8 @@ export class Marketplace {
     const pricing = isMarketResource(this.asset)
       ? 'Resource prices move gently with trades and a 1% spread. Insufficient sale liquidity converts origin FTHG at the active Gold rate. Dollar treasury funds are used only after confirmed origin exhaustion and Ethereum settlement.'
       : 'Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.';
-    this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span>Prices for this amount</span><strong><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>${translate(pricing, this.language)}</small></div>`;
+    const separateSale = isMarketResource(this.asset) && this.side === 'sell' && this.mode === 'spot';
+    this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span ${separateSale ? 'hidden' : ''}>Prices for this amount</span><strong ${separateSale ? 'hidden' : ''}><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>${translate(pricing, this.language)}</small></div>`;
     this.root.querySelector('[data-market-orders]')!.innerHTML = this.table(['Item', 'Type', 'Price each', 'Completed / total', 'Status', 'Action'], market.orders.map(order =>
       `<tr><td>${this.name(order.asset)}</td><td>${translate(order.side === 'buy' ? 'Buy' : 'Sell', this.language)}</td><td>${this.price(order.price, order.asset)}</td><td>${this.fmt(order.quantity - order.remaining, order.asset)} / ${this.fmt(order.quantity, order.asset)}</td><td>${translate(order.status === 'open' && order.price < marketPriceFloor(order.asset) ? 'Below floor — cancel for refund' : ({ open: 'Waiting', filled: 'Done', cancelled: 'Cancelled' })[order.status], this.language)}</td><td>${order.status === 'open' ? `<button class="button" data-market-cancel="${order.id}" ${this.pending ? 'disabled' : ''}>Cancel</button>` : '—'}</td></tr>`).join(''), 'No offers yet.');
     this.root.querySelector('[data-market-trades]')!.innerHTML = this.table(['Item', 'Type', 'Amount', 'FTH$', 'With'], market.trades.map(fill =>
@@ -337,7 +403,7 @@ export class Marketplace {
   }
   private async refresh(): Promise<void> {
     const quantity = this.quantity();
-    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketQuantityLimit(this.asset)) { this.fresh = false; this.preview(); return; }
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > (this.side === 'sell' ? marketSaleQuantityLimit(this.asset) : marketQuantityLimit(this.asset))) { this.fresh = false; this.preview(); return; }
     const sequence = ++this.sequence, asset = this.asset;
     try {
       const data = await readMarket(asset, quantity);

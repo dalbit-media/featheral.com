@@ -4,7 +4,7 @@ import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { note } from '../src/engine.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketResources } from '../src/market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
@@ -55,11 +55,12 @@ export function parseMarketCommand(value: unknown): MarketCommand {
   if (!fields.length || Object.keys(c).sort().join() !== fields.sort().join()) throw new ApiError(400, 'Invalid market command fields.');
   if (c.type === 'cancel') {
     if (!positive(c.orderId, Number.MAX_SAFE_INTEGER)) throw new ApiError(400, 'Invalid market command values.');
-  } else if (!isMarketAsset(c.asset) || !['buy', 'sell'].includes(String(c.side)) || !positive(c.quantity, marketQuantityLimit(c.asset))) {
+  } else if (!isMarketAsset(c.asset) || !['buy', 'sell'].includes(String(c.side)) || !positive(c.quantity, c.side === 'sell' ? marketSaleQuantityLimit(c.asset) : marketQuantityLimit(c.asset))) {
     throw new ApiError(400, 'Invalid market command values.');
   }
   if (c.type === 'cancel') return c as MarketCommand;
-  const units = paymentUnits(c.type === 'spot' ? c.limitDollars : c.price, c.type === 'spot' ? 10000000000 : 1000000);
+  const units = paymentUnits(c.type === 'spot' ? c.limitDollars : c.price, c.type === 'spot'
+    ? c.side === 'sell' && isMarketAsset(c.asset) && isMarketResource(c.asset) ? Number.MAX_SAFE_INTEGER / dollarsScale : 10000000000 : 1000000);
   return { ...c, ...(c.type === 'spot' ? { limitDollars: units } : { price: units }) } as MarketCommand;
 }
 function paymentUnits(value: unknown, maximum: number): number {
@@ -243,8 +244,10 @@ export class Exchange {
     return { ...snapshot(account), halfSale: { sales, dollars: units / dollarsScale,
       available: account.game.stage >= 0 && sales.length > 0 && sales.every(sale => sale.available) } };
   }
-  collectionQuote(owner: string, account: Account, resource: MarketResource, realTime: number): Snapshot & { collectionQuote: CollectionQuote } {
-    const quantity = Math.floor(account.pending[resource] / 60000);
+  collectionQuote(owner: string, account: Account, resource: MarketResource, realTime: number, requested?: number): Snapshot & { collectionQuote: CollectionQuote } {
+    const completed = Math.floor(account.pending[resource] / 60000);
+    const quantity = requested ?? completed;
+    if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > completed) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
     const steps = quantity ? this.plan(owner, resource, 'sell', quantity, realTime) : [];
     const total = steps.reduce((sum, step) => sum + step.dollars, 0);
     const fee = account.pickupFees?.[resource] ?? 0;
@@ -254,15 +257,15 @@ export class Exchange {
       available: quantity > 0 && total > fee && steps.reduce((sum, step) => sum + step.quantity, 0) === quantity } };
   }
   collectSell(owner: string, account: Account, command: Extract<Command, { type: 'collect-sell' }>, now: number, realTime: number): string {
-    const quantity = Math.floor(account.pending[command.resource] / 60000);
-    if (quantity !== command.quantity) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
+    const completed = Math.floor(account.pending[command.resource] / 60000), quantity = command.quantity;
+    if (quantity > completed) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
     const fee = account.pickupFees?.[command.resource] ?? 0;
     if (!Number.isSafeInteger(command.minimumDollars + fee)) throw new ApiError(409, 'Account limit reached.');
-    if (!Number.isSafeInteger(account.game.stock[command.resource] + quantity)) throw new ApiError(409, 'Account limit reached.');
-    account.game.stock[command.resource] += quantity;
+    if (!Number.isSafeInteger(account.game.stock[command.resource] + completed)) throw new ApiError(409, 'Account limit reached.');
+    account.game.stock[command.resource] += completed;
     this.processOrder(owner, account, { type: 'spot', asset: command.resource, side: 'sell', quantity, limitDollars: command.minimumDollars + fee }, now, realTime);
     account.game.dollars -= fee;
-    account.pending[command.resource] -= quantity * 60000;
+    account.pending[command.resource] -= completed * 60000;
     if (account.pickupFees) account.pickupFees[command.resource] = 0;
     this.check(account);
     return note(account.game, 'Completed resources sold. FTH$ transport deducted from proceeds.');

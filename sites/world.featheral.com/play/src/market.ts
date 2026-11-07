@@ -16,8 +16,8 @@ export function marketPriceAvailable(price: number): boolean {
 }
 export const marketResources: MarketResource[] = ['wood', 'water', 'metal', 'oil'];
 export function marketPriceFloor(_asset: MarketAsset): number { return .0001; }
-export const marketAssets: MarketAsset[] = [...marketResources, ...craftableKeys, ...automationItems,
-  ...(Object.keys(terrainDetails) as Terrain[]).map(terrain => `relic-${terrain}` as const)];
+export const marketAssets: MarketAsset[] = [...new Set<MarketAsset>([...marketResources, ...craftableKeys, ...automationItems,
+  ...(Object.keys(terrainDetails) as Terrain[]).map(terrain => `relic-${terrain}` as const)])];
 export function isMarketAsset(value: unknown): value is MarketAsset {
   return typeof value === 'string' && marketAssets.some(asset => asset === value);
 }
@@ -26,13 +26,17 @@ export function isMarketResource(asset: MarketAsset): asset is MarketResource {
 }
 export function isLiquidAsset(asset: MarketAsset): boolean { return !isCollectible(asset); }
 export function marketQuantityLimit(asset: MarketAsset): number { return isLiquidAsset(asset) ? 10000 : 1; }
+export function marketSaleQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : marketQuantityLimit(asset); }
 export function marketAssetName(asset: MarketAsset): string {
   return isMarketResource(asset) ? ({ wood: 'Wood', water: 'Water', metal: 'Metal', oil: 'Oil' })[asset] : itemName(asset);
 }
 export function marketBasePrice(asset: MarketAsset): number {
   // Reserve genesis pins this seed price; trading floors must not change it.
   if (isMarketResource(asset)) return prices[asset] * 2;
-  if (isCollectionItem(asset)) return monetaryPolicy.collectibleBase + collectionItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
+  if (isCollectionItem(asset)) {
+    const { resource, weeks } = collectionItemDetails(asset);
+    return (resource === 'all' ? 4 : 1) * (monetaryPolicy.collectibleBase + weeks * monetaryPolicy.collectiblePerWeek);
+  }
   if (isActivityItem(asset)) return monetaryPolicy.collectibleBase + activityItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
   if (!isCraftableItem(asset)) return monetaryPolicy.collectibleBase + terrainDetails[asset.slice(6) as Terrain].weeks * monetaryPolicy.collectiblePerWeek;
   return Math.max(10, Math.floor(Object.entries(craftableItems[asset].cost).reduce((sum, [resource, count]) =>

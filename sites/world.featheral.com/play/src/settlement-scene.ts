@@ -24,10 +24,13 @@ export function settlementScene(state: ApiState, language: Language, editing = f
   const buildings = settlementBuildings(game).length;
   const readyResources = Object.values(state.pending).filter(amount => amount > 0).length;
   const next = stages[game.stage + 1];
+  const customName = state.customization?.settlementName;
+  const displayName = customName ? customName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : translate(profile.name, language);
+  const region = state.customization?.regionName?.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return `<section class="settlement-district ${editing ? 'decoration-mode' : ''}" id="settlement-scene" aria-labelledby="district-title">
-    <h1 class="visually-hidden" id="district-title">${profile.name} settlement</h1>
+    <h1 class="visually-hidden" id="district-title" data-no-localize>${displayName}</h1>
     <aside class="settlement-command-card" aria-label="${translate('Your settlement', language)}">
-      <header class="settlement-command-heading"><div><span class="eyebrow">${translate('Your settlement', language)}</span><h2>${translate(profile.name, language)}</h2></div><span class="settlement-stage-tag">${translate(profile.style, language)}</span></header>
+      <header class="settlement-command-heading"><div><span class="eyebrow">${translate('Your settlement', language)}</span><h2 data-no-localize>${displayName}</h2>${region ? `<small data-no-localize>${region}</small>` : ''}</div><span class="settlement-stage-tag">${translate(profile.style, language)}</span></header>
       <div class="settlement-command-stats">
         <div><small>${translate('Residents', language)}</small><strong>${game.population.toLocaleString(locale(language))}</strong><span>${state.availableWorkers.toLocaleString(locale(language))} available</span></div>
         <div><small>${translate('Buildings', language)}</small><strong>${buildings.toLocaleString(locale(language))}</strong><span>${decorations.toLocaleString(locale(language))} ${translate('decorations', language)}</span></div>

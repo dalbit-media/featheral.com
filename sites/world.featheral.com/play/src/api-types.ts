@@ -7,6 +7,7 @@ import type { IncomeFacility } from './income.ts';
 import type { Construction } from './constructions.ts';
 import type { CollectionItem } from './collection.ts';
 import type { ActivityItem, ActivityKind } from './automation.ts';
+import type { Customization, CustomizationItem } from './customization.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
@@ -24,6 +25,7 @@ export type Command =
   | { type: 'claim'; resource?: Resource }
   | { type: 'collect-sell'; resource: Resource; quantity: number; minimumDollars: number }
   | { type: 'activate-collection'; item: CollectionItem }
+  | { type: 'use-customization'; item: CustomizationItem; value: string }
   | { type: 'activate-activity'; item: ActivityItem }
   | { type: 'activity-automation'; activity: ActivityKind; enabled: boolean }
   | { type: 'upgrade' | 'invite' | 'home' | 'warehouse' | 'item-storage' | 'collect-items' | 'gather' };
@@ -57,6 +59,7 @@ export interface Workforce {
   expeditions: Expedition[];
 }
 export interface Snapshot {
+  customization?: Customization;
   physicalVersion?: 1;
   collection?: { fees: Stock; automationUntil: Stock };
   activityAutomation?: Record<ActivityKind, { until: number; enabled: boolean; nextAt: number; reason: string | null }>;

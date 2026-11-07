@@ -13,6 +13,12 @@ import { resourceBasePrice, resourceEconomy } from './resource-units.ts';
 
 export const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
 export const emptyAllocation = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
+export function warehouseCapacity(game: Game, warehouse: number): number {
+  if (game.stage < 0) return 0;
+  const tier = stages[game.stage + 1] ?? stages[game.stage];
+  const requirement = Math.max(...resourceKeys.map(resource => tier.cost[resource] ?? 0));
+  return Math.max(100 + game.stage * 100 + warehouse * 500, requirement * (warehouse + 1));
+}
 export function expeditionSurveyRadius(game: Game): number { return Math.max(1, radius(game) - .25); }
 export function emergencyCollection(pending: Stock, fees: Stock, dollars: number): Stock {
   return { wood: pending.wood >= 1 && fees.wood > dollars ? pending.wood : 0,

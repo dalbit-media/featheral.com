@@ -29,7 +29,8 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
   };
   const heading = element('h2', t(quote.title));
   heading.id = 'consumption-title';
-  const description = element('p', t(quote.subject), 'consumption-subject');
+  const description = element('p', quote.literalSubject ? quote.subject : t(quote.subject), 'consumption-subject');
+  if (quote.literalSubject) description.setAttribute('data-no-localize', '');
   description.id = 'consumption-description';
   dialog.append(element('small', t('Confirm action'), 'consumption-eyebrow'), heading, description);
   const list = (title: string, values: ConsumptionAmount[], spending: boolean) => {

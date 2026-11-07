@@ -3,6 +3,13 @@ import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { ApiError } from './economy.ts';
 import { chatCapacity, chatHistoryLimit, chatMessageLimit } from '../src/chat.ts';
 import type { ChatMessage, ChatProfile, ChatSubmission } from '../src/chat.ts';
+import { isTitleItem } from '../src/customization.ts';
+import type { TitleItem } from '../src/customization.ts';
+
+function messageRow(row: Record<string, unknown>): ChatMessage {
+  return { id: Number(row.id), author: String(row.author), nickname: String(row.nickname), text: String(row.text), time: Number(row.time),
+    ...(isTitleItem(row.title) ? { title: row.title } : {}) };
+}
 
 function fields(body: unknown, keys: string[]): Record<string, unknown> {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== keys.length
@@ -32,10 +39,12 @@ export function chatSubmission(body: unknown): ChatSubmission {
 const frame = (event: string, value: unknown): string => `event: ${event}\ndata: ${JSON.stringify(value)}\n\n`;
 export class ChatArchive {
   private readonly db: SqliteDatabase;
+  private readonly titleForOwner: (owner: string) => TitleItem | undefined;
   private messages: ChatMessage[];
   historyFrame: string;
-  constructor(db: SqliteDatabase) {
+  constructor(db: SqliteDatabase, titleForOwner: (owner: string) => TitleItem | undefined = () => undefined) {
     this.db = db;
+    this.titleForOwner = titleForOwner;
     db.exec(`CREATE TABLE IF NOT EXISTS chat_profiles (
       owner TEXT PRIMARY KEY, publicId TEXT NOT NULL UNIQUE, nickname TEXT NOT NULL, nameKey TEXT NOT NULL UNIQUE, updatedAt INTEGER NOT NULL, lastMessageAt INTEGER);
       CREATE TABLE IF NOT EXISTS chat_messages (
@@ -48,13 +57,17 @@ export class ChatArchive {
     db.exec('CREATE INDEX IF NOT EXISTS chat_message_room ON chat_messages(room,id)');
     if (!db.prepare('PRAGMA table_info(chat_profiles)').all().some(row => row.name === 'worldAddress'))
       db.exec('ALTER TABLE chat_profiles ADD COLUMN worldAddress TEXT');
+    if (!db.prepare('PRAGMA table_info(chat_messages)').all().some(row => row.name === 'title'))
+      db.exec('ALTER TABLE chat_messages ADD COLUMN title TEXT');
     this.messages = db.prepare("SELECT * FROM (SELECT * FROM chat_messages WHERE room='global' ORDER BY id DESC LIMIT ?) ORDER BY id").all(chatHistoryLimit)
-      .map(row => ({ id: Number(row.id), author: String(row.author), nickname: String(row.nickname), text: String(row.text), time: Number(row.time) }));
+      .map(messageRow);
     this.historyFrame = frame('history', this.messages);
   }
   profile(owner: string): ChatProfile | null {
     const row = this.db.prepare('SELECT publicId, nickname, worldAddress FROM chat_profiles WHERE owner = ?').get(owner);
-    return row ? { id: String(row.publicId), nickname: String(row.nickname), ...(row.worldAddress ? { address: String(row.worldAddress) } : {}) } : null;
+    const title = row ? this.titleForOwner(owner) : undefined;
+    return row ? { id: String(row.publicId), nickname: String(row.nickname), ...(row.worldAddress ? { address: String(row.worldAddress) } : {}),
+      ...(title ? { title } : {}) } : null;
   }
   worldAddress(owner: string): string | null {
     const row = this.db.prepare('SELECT worldAddress FROM chat_profiles WHERE owner=?').get(owner);
@@ -66,7 +79,7 @@ export class ChatArchive {
     this.db.prepare(`INSERT INTO chat_profiles(owner,publicId,nickname,nameKey,updatedAt,worldAddress) VALUES(?,?,?,?,?,?)
       ON CONFLICT(owner) DO UPDATE SET nickname=excluded.nickname,nameKey=excluded.nameKey,updatedAt=excluded.updatedAt,worldAddress=excluded.worldAddress`)
       .run(owner, id, username, `world:${address.toLowerCase()}:${owner}`, now, address);
-    return { id, nickname: username, address };
+    return this.profile(owner)!;
   }
   unlinkWorldProfile(owner: string): void {
     this.db.prepare('UPDATE chat_profiles SET worldAddress=NULL WHERE owner=?').run(owner);
@@ -74,12 +87,12 @@ export class ChatArchive {
   history(room = 'global'): string {
     if (room === 'global') return this.historyFrame;
     const messages = this.db.prepare('SELECT * FROM (SELECT * FROM chat_messages WHERE room=? ORDER BY id DESC LIMIT ?) ORDER BY id')
-      .all(room, chatHistoryLimit).map(row => ({ id: Number(row.id), author: String(row.author), nickname: String(row.nickname), text: String(row.text), time: Number(row.time) }));
+      .all(room, chatHistoryLimit).map(messageRow);
     return frame('history', messages);
   }
   rename(owner: string, nickname: string, now: number): ChatProfile {
     const previous = this.db.prepare('SELECT * FROM chat_profiles WHERE owner = ?').get(owner);
-    if (previous?.nickname === nickname) return { id: String(previous.publicId), nickname };
+    if (previous?.nickname === nickname) return this.profile(owner)!;
     if (previous && now - Number(previous.updatedAt) < 60000) throw new ApiError(429, 'Wait one minute before changing your nickname.');
     const key = nickname.toLowerCase(), taken = this.db.prepare('SELECT owner FROM chat_profiles WHERE nameKey = ?').get(key);
     if (taken && taken.owner !== owner) throw new ApiError(409, 'That nickname is already in use.');
@@ -87,7 +100,7 @@ export class ChatArchive {
     this.db.prepare(`INSERT INTO chat_profiles (owner,publicId,nickname,nameKey,updatedAt) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(owner) DO UPDATE SET nickname=excluded.nickname, nameKey=excluded.nameKey, updatedAt=excluded.updatedAt`)
       .run(owner, id, nickname, key, now);
-    return { id, nickname };
+    return this.profile(owner)!;
   }
   lastSent(owner: string): number | null {
     const row = this.db.prepare('SELECT lastMessageAt FROM chat_profiles WHERE owner = ?').get(owner);
@@ -104,9 +117,10 @@ export class ChatArchive {
     this.db.exec('BEGIN IMMEDIATE');
     let message: ChatMessage;
     try {
-      const result = this.db.prepare('INSERT INTO chat_messages (author,nickname,text,time,room) VALUES (?,?,?,?,?)')
-        .run(profile.id, profile.nickname, request.text, now, room);
-      message = { id: Number(result.lastInsertRowid), author: profile.id, nickname: profile.nickname, text: request.text, time: now };
+      const result = this.db.prepare('INSERT INTO chat_messages (author,nickname,text,time,room,title) VALUES (?,?,?,?,?,?)')
+        .run(profile.id, profile.nickname, request.text, now, room, profile.title ?? null);
+      message = { id: Number(result.lastInsertRowid), author: profile.id, nickname: profile.nickname, text: request.text, time: now,
+        ...(profile.title ? { title: profile.title } : {}) };
       this.db.prepare('INSERT INTO chat_receipts (owner,requestId,request,message,time) VALUES (?,?,?,?,?)')
         .run(owner, request.id, JSON.stringify(room === 'global' ? request : { ...request, room }), JSON.stringify(message), now);
       this.db.prepare('UPDATE chat_profiles SET lastMessageAt = ? WHERE owner = ?').run(now, owner);

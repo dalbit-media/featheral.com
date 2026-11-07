@@ -273,6 +273,21 @@ test('system liquidity covers every catalog item and raw resource, records real 
     assert.equal(h.read(user.token, 'oil').game.bank, false);
   } finally { h.store.close(); }
 });
+test('single resource sales can sell all inventory above 10,000 lots while buys and item sales stay capped', () => {
+  const h = setup(), user = h.create();
+  try {
+    assert.throws(() => parseMarketCommand({ type: 'spot', asset: 'wood', side: 'buy', quantity: 20001, limitDollars: 1 }), /Invalid market command/);
+    assert.throws(() => parseMarketCommand({ type: 'spot', asset: 'torch', side: 'sell', quantity: 20001, limitDollars: 1 }), /Invalid market command/);
+    h.act(user.token, { type: 'fund-pool', asset: 'wood', quantity: 10000, dollars: 40000 });
+    h.store.transaction(user.token, session => { session.account.game.stock.wood = 20001; });
+    const total = h.store.publicTotals().dollars;
+    const quote = h.read(user.token, 'wood', 20001).market.quotes.sell;
+    assert.ok(quote.available);
+    const sold = h.act(user.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 20001, limitDollars: quote.dollars });
+    assert.equal(sold.game.stock.wood, 0);
+    assert.equal(h.store.publicTotals().dollars, total);
+  } finally { h.store.close(); }
+});
 test('best execution prefers cheaper pools over expensive asks and better player prices over pools', () => {
   const h = setup(':memory:', false), a = h.create(), b = h.create();
   try {

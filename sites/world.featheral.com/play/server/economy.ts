@@ -2,7 +2,7 @@ import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruit
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, workforceCounts } from '../src/workforce.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
 import { arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, inventory } from './inventory.ts';
@@ -18,7 +18,9 @@ import { constructionCost, constructionLevel, constructions, isConstruction } fr
 import { collectionItemDetails, isCollectionItem } from '../src/collection.ts';
 import { activityItemDetails, activityKinds, isActivityItem, isActivityKind } from '../src/automation.ts';
 import type { ActivityKind } from '../src/automation.ts';
-import { findActivityItem } from './inventory.ts';
+import { findActivityItem, findCustomizationItem, useCustomization } from './inventory.ts';
+import { customizationName, isCustomizationItem, isTitleItem, titleItems } from '../src/customization.ts';
+import type { Customization } from '../src/customization.ts';
 import { expeditionFindPlan } from '../src/climate.ts';
 
 interface LegacyWorkforce {
@@ -35,6 +37,7 @@ export class ApiError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 export interface Account {
+  customization?: Customization;
   physicalVersion?: 1;
   physicalStartedAt?: number;
   currencyVersion: 2 | 3 | 4;
@@ -103,10 +106,7 @@ export function migrateClock(account: Account, realTime: number, serverTime: num
   }
 }
 export function capacity(account: Account): number {
-  if (account.game.stage < 0) return 0;
-  const tier = stages[account.game.stage + 1] ?? stages[account.game.stage];
-  const requirement = Math.max(...resources.map(resource => tier.cost[resource] ?? 0));
-  return Math.max(100 + account.game.stage * 100 + account.warehouse * 500, requirement * (account.warehouse + 1));
+  return warehouseCapacity(account.game, account.warehouse);
 }
 export function rates(account: Account): Stock {
   const production = empty();
@@ -362,6 +362,7 @@ export function accrue(account: Account, time: number): void {
         if (expedition.finds?.collectible ?? true) findCollectible(account, terrain);
         for (let i = 0; i < (expedition.finds?.collection ?? 1); i++) findCollectionItem(account, terrain);
         for (let i = 0; i < (expedition.finds?.activity ?? 1); i++) findActivityItem(account, terrain);
+        if (expedition.finds?.collectible ?? true) findCustomizationItem(account, terrain);
       }
       account.game.contribution += discovered;
       exploringWorkers -= expedition.workers;
@@ -514,7 +515,7 @@ export function snapshot(account: Account): Snapshot {
     const use = settlementUpkeep(resource, account.game.population, Math.max(0, account.game.stock[resource] - (account.settlementUpkeep?.remainder[resource] ?? 0) / 10000), supplyTime);
     return [resource, { dailyConsumption: use.required, weeklyConsumption: settlementConsumptionForDays(resource, account.game.population, supplyTime, 7), shortage: use.shortage }];
   })) as NonNullable<Snapshot['settlementUpkeep']>['resources'];
-  return { physicalVersion: account.physicalVersion, fthg: account.fthg / fthgScale, dollars: account.game.dollars / dollarsScale, income: { weekly: weeklyIncome(account.game) / dollarsScale, readyAt: 0 }, inventory: structuredClone(bag), game: structuredClone(account.game), pending, rates: rates(account), capacity: cap, claimThreshold: Math.ceil(cap / 2),
+  return { ...(account.customization ? { customization: structuredClone(account.customization) } : {}), physicalVersion: account.physicalVersion, fthg: account.fthg / fthgScale, dollars: account.game.dollars / dollarsScale, income: { weekly: weeklyIncome(account.game) / dollarsScale, readyAt: 0 }, inventory: structuredClone(bag), game: structuredClone(account.game), pending, rates: rates(account), capacity: cap, claimThreshold: Math.ceil(cap / 2),
     ...(account.activityAutomation ? { activityAutomation: {
       exploration: { ...account.activityAutomation.exploration, reason: activityReason(account, 'exploration') },
       attraction: { ...account.activityAutomation.attraction, reason: activityReason(account, 'attraction') },
@@ -545,6 +546,7 @@ export function parseCommand(value: unknown): Command {
     craft: Object.hasOwn(c, 'quantity') ? ['item', 'quantity'] : ['item'], 'map-collect': ['x', 'y'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
     arrange: ['entity', 'position'],
     'activate-collection': ['item'], 'collect-sell': ['resource', 'quantity', 'minimumDollars'],
+    'use-customization': ['item', 'value'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
   };
   if (typeof c.type !== 'string' || !Object.hasOwn(fields, c.type)
@@ -567,6 +569,8 @@ export function parseCommand(value: unknown): Command {
       || typeof c.workers !== 'number' || !Number.isSafeInteger(c.workers) || c.workers < 0 || c.workers > 1000000))
     || (c.type === 'automatic' && typeof c.enabled !== 'boolean')
     || (c.type === 'activate-collection' && !isCollectionItem(c.item))
+    || (c.type === 'use-customization' && (!isCustomizationItem(c.item) || typeof c.value !== 'string'
+      || (isTitleItem(c.item) ? c.value !== titleItems[c.item].title : !customizationName(c.value))))
     || (c.type === 'activate-activity' && !isActivityItem(c.item))
     || (c.type === 'activity-automation' && (!isActivityKind(c.activity) || typeof c.enabled !== 'boolean'))
     || (c.type === 'collect-sell' && (!oneOf(c.resource, resources) || typeof c.quantity !== 'number' || !Number.isSafeInteger(c.quantity) || c.quantity < 1
@@ -654,15 +658,18 @@ export function execute(account: Account, command: Command, realTime = account.u
     case 'collect-sell':
       if (!sellPickup) throw new ApiError(409, 'Collection sale requires the marketplace.');
       return sellPickup(command);
+    case 'use-customization': return useCustomization(account, command.item, command.value);
     case 'activate-collection': {
       const bag = inventory(account), index = bag.items.indexOf(command.item);
       if (index < 0) throw new ApiError(409, 'This collection item is not available in your inventory.');
       const { resource, weeks } = collectionItemDetails(command.item);
+      if (game.stage < 0) throw new ApiError(409, 'Settlement required.');
       const automation = account.automationUntil ??= empty();
-      const expiry = Math.max(account.updatedAt, automation[resource]) + weeks * worldWeekMs;
-      if (!Number.isSafeInteger(expiry)) throw new ApiError(409, 'Account limit reached.');
+      const targets = resource === 'all' ? resources : [resource];
+      const expiries = targets.map(asset => Math.max(account.updatedAt, automation[asset]) + weeks * worldWeekMs);
+      if (expiries.some(expiry => !Number.isSafeInteger(expiry))) throw new ApiError(409, 'Account limit reached.');
       bag.items.splice(index, 1);
-      automation[resource] = expiry;
+      targets.forEach((asset, index) => { automation[asset] = expiries[index]; });
       return note(game, 'Auto-collection activated. Transport is still paid in FTH$.');
     }
     case 'activate-activity': {

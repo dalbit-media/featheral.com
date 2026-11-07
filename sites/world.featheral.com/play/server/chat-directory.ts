@@ -30,19 +30,20 @@ export class ChatDirectoryStore {
     const reach = radius(game);
     for (const row of this.db.prepare(`SELECT s.id, json_extract(s.data,'$.account.game.home.x') AS x,
       json_extract(s.data,'$.account.game.home.y') AS y, json_extract(s.data,'$.account.game.population') AS population,
-      json_extract(s.data,'$.account.game.federation') AS federation, p.nickname FROM sessions s
+      json_extract(s.data,'$.account.game.federation') AS federation, json_extract(s.data,'$.account.customization.settlementName') AS settlementName,
+      json_extract(s.data,'$.account.customization.regionName') AS regionName, p.nickname FROM sessions s
       LEFT JOIN chat_profiles p ON p.owner=s.id${this.profileFilter} WHERE s.expires>? AND json_extract(s.data,'$.account.game.stage')>=0
       AND (s.id=? OR (json_extract(s.data,'$.account.game.home.x') BETWEEN ? AND ?
         AND json_extract(s.data,'$.account.game.home.y') BETWEEN ? AND ?)) ORDER BY s.id`)
       .all(now, owner, game.position.x - reach, game.position.x + reach, game.position.y - reach, game.position.y + reach)) {
       const own = row.id === owner;
       if (!own && Math.hypot(Number(row.x) - game.position.x, Number(row.y) - game.position.y) > radius(game)) continue;
-      const name = row.nickname == null ? 'Unnamed settlement' : String(row.nickname);
+      const name = row.settlementName == null ? row.nickname == null ? 'Unnamed settlement' : String(row.nickname) : String(row.settlementName);
       const publicRoom = this.room('explore', String(row.id), name);
       const privateRoom = this.room('settlement', String(row.id), name);
       publicRoom.settlement = privateRoom.id;
       settlements.push({ id: privateRoom.id, name, x: Number(row.x), y: Number(row.y), population: Number(row.population),
-        federation: row.federation == null ? null : String(row.federation), own });
+        federation: row.federation == null ? null : String(row.federation), own, ...(row.regionName ? { regionName: String(row.regionName) } : {}) });
       if (own) ownSettlement = privateRoom.id;
       // Own public channel remains available even while exploring away from home.
       rooms.push(publicRoom);
@@ -72,11 +73,11 @@ export class ChatDirectoryStore {
         throw new ApiError(403, 'This chat is not available here.');
       return { id: roomId, kind: 'federation', name: String(room.target) };
     }
-    const row = this.db.prepare(`SELECT r.target, p.nickname FROM chat_rooms r
+    const row = this.db.prepare(`SELECT r.target, p.nickname, json_extract(s.data,'$.account.customization.settlementName') AS settlementName FROM chat_rooms r
       JOIN sessions s ON s.id=r.target AND s.expires>? AND json_extract(s.data,'$.account.game.stage')>=0
       LEFT JOIN chat_profiles p ON p.owner=r.target${this.profileFilter} WHERE r.id=?`).get(now, roomId);
     if (!row) throw new ApiError(403, 'This chat is not available here.');
-    const name = row.nickname == null ? 'Unnamed settlement' : String(row.nickname);
+    const name = row.settlementName == null ? row.nickname == null ? 'Unnamed settlement' : String(row.nickname) : String(row.settlementName);
     if (room.kind === 'explore') {
       const target = this.db.prepare(`SELECT json_extract(data,'$.account.game.home.x') AS x,
         json_extract(data,'$.account.game.home.y') AS y FROM sessions WHERE id=?`).get(room.target!)!;
@@ -101,9 +102,11 @@ export class ChatDirectoryStore {
     if (this.authorize(owner, settlement, now).kind !== 'settlement') throw new ApiError(403, 'This chat is not available here.');
     const row = this.db.prepare(`SELECT s.id, json_extract(s.data,'$.account.game.home.x') AS x,
       json_extract(s.data,'$.account.game.home.y') AS y, json_extract(s.data,'$.account.game.population') AS population,
-      json_extract(s.data,'$.account.game.federation') AS federation, p.nickname FROM chat_rooms r JOIN sessions s ON s.id=r.target
+      json_extract(s.data,'$.account.game.federation') AS federation, json_extract(s.data,'$.account.customization.settlementName') AS settlementName,
+      json_extract(s.data,'$.account.customization.regionName') AS regionName, p.nickname FROM chat_rooms r JOIN sessions s ON s.id=r.target
       LEFT JOIN chat_profiles p ON p.owner=s.id${this.profileFilter} WHERE r.id=?`).get(settlement)!;
-    return { id: settlement, name: row.nickname == null ? 'Unnamed settlement' : String(row.nickname), x: Number(row.x), y: Number(row.y),
-      population: Number(row.population), federation: row.federation == null ? null : String(row.federation), own: row.id === owner };
+    return { id: settlement, name: row.settlementName == null ? row.nickname == null ? 'Unnamed settlement' : String(row.nickname) : String(row.settlementName), x: Number(row.x), y: Number(row.y),
+      population: Number(row.population), federation: row.federation == null ? null : String(row.federation), own: row.id === owner,
+      ...(row.regionName ? { regionName: String(row.regionName) } : {}) };
   }
 }

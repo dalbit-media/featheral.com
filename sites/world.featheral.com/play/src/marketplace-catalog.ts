@@ -8,6 +8,7 @@ import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { isAutomationItem } from './automation.ts';
 import { displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, tradingUnit } from './resource-units.ts';
+import { isCustomizationItem } from './customization.ts';
 
 export type CatalogView = 'grid' | 'table';
 export type CatalogSort = 'name' | 'buy-low' | 'sell-high' | 'owned';
@@ -20,7 +21,7 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
   category: string, query: string, sort: CatalogSort, ownedOnly: boolean): Ticker[] {
   const name = (asset: MarketAsset) => translate(marketAssetName(asset), language);
   return tickers.filter(({ asset }) => {
-    const group = isMarketResource(asset) ? 'resources' : isAutomationItem(asset) ? 'automation' : isVisibilityItem(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
+    const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isAutomationItem(asset) ? 'automation' : isVisibilityItem(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
     return (category === 'all' || category === group) && name(asset).toLocaleLowerCase(locale(language)).includes(query.toLocaleLowerCase(locale(language)).trim())
       && (!ownedOnly || marketOwned(state, asset) > 0);
   }).sort((a, b) => {
@@ -43,7 +44,7 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
       return `<button type="button" class="catalog-price catalog-${side}" data-market-asset="${ticker.asset}" data-market-quick-side="${side}" data-quoted="${available}" aria-label="${text(side === 'buy' ? 'Buy' : 'Sell')} ${name}, ${price}${available ? ` FTH$/${unit}` : ''}" ${pending || (side === 'sell' && marketOwned(state, ticker.asset) === 0) ? 'disabled' : ''}><small>${text(side === 'buy' ? 'Buy' : 'Sell')}</small><strong>${available || view === 'table' ? price : text('No quote')}</strong>${available ? `<span class="catalog-currency">FTH$/${unit}</span>` : ''}</button>`;
     };
     const last = ticker.last === null ? '—' : formatResourcePrice(ticker.asset, ticker.last, locale(language));
-    const category = isMarketResource(ticker.asset) ? 'Resources' : isAutomationItem(ticker.asset) ? 'Automation'
+    const category = isMarketResource(ticker.asset) ? 'Resources' : isCustomizationItem(ticker.asset) ? 'Names & titles' : isAutomationItem(ticker.asset) ? 'Automation'
       : isVisibilityItem(ticker.asset) ? 'Equipment' : isDecorationItem(ticker.asset) ? 'Decorations' : 'Collectibles';
     return view === 'grid'
       ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`

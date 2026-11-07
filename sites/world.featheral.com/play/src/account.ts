@@ -15,6 +15,7 @@ import { formatUnits, hexlify, toUtf8Bytes } from 'ethers';
 import { chatProfileChangedEvent, chatProfileSettingsEvent } from './chat.ts';
 import { worldProfileLinkMessage } from './world-profile.ts';
 import type { WorldProfile } from './world-profile.ts';
+import { titleItems } from './customization.ts';
 
 type AccountView = 'account' | typeof accountPageKeys[number];
 
@@ -67,6 +68,10 @@ export class AccountPane {
         <details class="account-section" open><summary>Settings</summary><label class="account-setting"><span>Language</span><select data-language aria-label="Language"><option value="ko" lang="ko">한국어</option><option value="en" lang="en">English</option></select></label><label class="account-setting"><span>Show world conditions</span><input type="checkbox" data-account-weather></label></details>
       </div><div class="account-subview" data-account-journal hidden></div><div class="account-subview" data-account-help hidden></div>`;
     document.body.append(this.dialog);
+    const identity = document.createElement('section');
+    identity.className = 'account-section';
+    identity.innerHTML = '<h3>Settlement identity</h3><p data-custom-settlement data-no-localize></p><p data-custom-region data-no-localize></p><p data-custom-title></p><a class="button" href="/settlement/#inventory">Use naming permits and title badges</a>';
+    this.dialog.querySelector('.account-profile')!.after(identity);
     this.walletReady = window.FeatheralProfile.mount(this.dialog.querySelector<HTMLButtonElement>('[data-world-profile-button]')!,
       { panelRoot: this.dialog, primaryCurrency: 'fthDollar', walletUrl: '/wallet/', profileUrl: '/#/setup', ethereumProvider: true });
     window.addEventListener('featheral:wallet', () => {
@@ -234,6 +239,10 @@ export class AccountPane {
     }
   }
   updateBalance(_balance: number, numberLocale: string): void {
+    const custom = this.snapshot().customization;
+    this.dialog.querySelector('[data-custom-settlement]')!.textContent = `${this.t('Settlement name')}: ${custom?.settlementName ?? this.t('Unnamed settlement')}`;
+    this.dialog.querySelector('[data-custom-region]')!.textContent = `${this.t('Region name')}: ${custom?.regionName ?? this.t('Unnamed region')}`;
+    this.dialog.querySelector('[data-custom-title]')!.textContent = `${this.t('Player title')}: ${custom?.title ? this.t(titleItems[custom.title].title) : this.t('No player title')}`;
     this.dialog.querySelector('[data-account-dollars]')!.textContent = `FTH$${formatDollars(this.snapshot().dollars, numberLocale)}`;
     const raw = window.FeatheralProfile.snapshot().balances?.fthg;
     this.dialog.querySelector('[data-account-balance]')!.textContent = typeof raw === 'bigint' ? `${formatFthg(Number(formatUnits(raw, 18)), numberLocale)} FTHG` : 'Unavailable';

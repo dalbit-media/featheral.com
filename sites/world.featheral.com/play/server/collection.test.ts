@@ -20,6 +20,9 @@ import { seedFixturePools } from './test-support.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { once } from 'node:events';
+import { createApi } from './http.ts';
+import type { CollectionResponse } from '../src/api-types.ts';
 
 const start = 1000000;
 test('map pickup collects completed output at zero funds, preserves currency and is retry-safe', () => {
@@ -134,7 +137,8 @@ test('zero-FTH$ crews can work, but pickup cannot silently waive transport or lo
   assert.ok(account.pending.wood > 0);
 });
 test('1/4/12-week consumables stack time, are resource-specific and pay normal pickup fees', () => {
-  assert.equal(collectionItems.length, 12);
+  assert.equal(collectionItems.filter(item => item.startsWith('collection-')).length, 12);
+  assert.equal(collectionItems.length, 32);
   for(const weeks of collectionDurations) {
     const account = colony(), bag = inventory(account), item = `collection-wood-${weeks}` as const;
     bag.items.push(item, item);
@@ -258,4 +262,68 @@ test('cashless collect-and-sell burns only transport, rolls back bad quotes and 
     assert.deepEqual(store.read(identity.token,s=>s.account),after);
     assert.equal(Number(db.prepare('SELECT COUNT(*) AS total FROM market_fills').get()!.total),1);
   }finally{db.close();store.close();rmSync(directory,{recursive:true});}
+});
+test('collection percentage sales collect all output, retain unsold stock, pay full fees and replay once', () => {
+  for (const quantity of [5, 10, 15, 20]) {
+    const store = new SqliteStore(':memory:', () => start + 1000), identity = store.create();
+    seedFixturePools(store);
+    try {
+      store.transaction(identity.token, session => {
+        session.account.game.stage = 0; session.account.game.population = 0; session.account.game.dollars = 0;
+        session.account.game.stock.wood = 3; session.account.pending.wood = 20 * 60000 + 30000;
+        session.account.pickupFees = { wood: dollarsScale, water: 0, metal: 0, oil: 0 };
+      });
+      const quote = store.transaction(identity.token, (session, _, real, exchange, owner) => {
+        assert.equal(exchange.collectionQuote(owner, session.account, 'wood', real).collectionQuote.quantity, 20);
+        assert.throws(() => exchange.collectionQuote(owner, session.account, 'wood', real, 21), /Resources changed/);
+        return exchange.collectionQuote(owner, session.account, 'wood', real, quantity).collectionQuote;
+      });
+      assert.equal(quote.quantity, quantity); assert.equal(quote.transport, 1); assert.ok(quote.available);
+      const body = { id: randomUUID(), revision: store.read(identity.token, session => session.account.revision),
+        command: { type: 'collect-sell', resource: 'wood', quantity, minimumDollars: Math.round(quote.net * dollarsScale) } };
+      const run = (request: unknown) => store.transaction(identity.token, (session, time, real, exchange, owner) =>
+        apply(session.account, request, time, real, command => exchange.collectSell(owner, session.account, command, time, real)));
+      const before = store.read(identity.token, session => structuredClone(session.account));
+      assert.throws(() => run({ ...body, id: randomUUID(), command: { ...body.command, minimumDollars: 99999999999 } }), /Quote changed/);
+      assert.deepEqual(store.read(identity.token, session => session.account), before);
+      const result = run(body);
+      assert.equal(result.pending.wood, 0);
+      assert.equal(store.read(identity.token, session => session.account.pending.wood), 30000);
+      assert.equal(result.game.stock.wood, 3 + 20 - quantity);
+      assert.equal(result.collection!.fees.wood, 0);
+      assert.equal(result.dollars, quote.net);
+      assert.deepEqual(run(body), result);
+      assert.equal(store.read(identity.token, session => session.account.game.stock.wood), 3 + 20 - quantity);
+    } finally { store.close(); }
+  }
+});
+test('HTTP collection quantity quotes validate input and fund only the selected sale', async () => {
+  const store = new SqliteStore(':memory:', () => start + 1000), identity = store.create();
+  seedFixturePools(store);
+  store.transaction(identity.token, session => {
+    session.account.game.stage = 0; session.account.game.population = 0; session.account.pending.wood = 20 * 60000;
+  });
+  const origin = 'http://127.0.0.1:5173', server = createApi(store, origin);
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}/api/collection`;
+  const headers = { Cookie: `terra-dev=${identity.token}` };
+  const funded: number[] = [];
+  store.ensureLiquidity = async (_, __, quantity) => { funded.push(quantity ?? 0); };
+  try {
+    assert.equal((await fetch(`${base}?asset=wood&quantity=10`)).status, 401);
+    for (const query of ['asset=wood&quantity=0', 'asset=wood&quantity=1.5', 'asset=wood&quantity=NaN',
+      'asset=wood&quantity=10&quantity=20', 'asset=wood&asset=water', 'asset=torch&quantity=1', 'asset=wood&other=1']) {
+      assert.equal((await fetch(`${base}?${query}`, { headers })).status, 400, query);
+    }
+    assert.deepEqual(funded, []);
+    const response = await fetch(`${base}?asset=wood&quantity=10`, { headers });
+    assert.equal(response.status, 200);
+    const state = await response.json() as CollectionResponse;
+    assert.equal(state.collectionQuote.quantity, 10);
+    assert.deepEqual(funded, [10]);
+    assert.equal((await fetch(`${base}?asset=wood&quantity=21`, { headers })).status, 409);
+    assert.deepEqual(funded, [10]);
+    assert.equal(store.read(identity.token, session => session.account.pending.wood), 20 * 60000);
+  } finally { server.close(); await once(server, 'close'); store.close(); }
 });

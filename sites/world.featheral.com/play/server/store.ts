@@ -14,6 +14,7 @@ import type { DollarFunds, FundRequest, FundView, WalletView } from './funds.ts'
 import type { ClockSpeed } from '../src/environment.ts';
 import { enforceMonetaryPolicy } from './monetary-policy.ts';
 import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit } from '../src/market.ts';
+import { isTitleItem } from '../src/customization.ts';
 import type { MarketAsset } from '../src/market.ts';
 
 export interface Session { csrf: string; expires: number; account: Account }
@@ -61,7 +62,10 @@ export class SqliteStore implements Store {
       throw new Error('Legacy simulated fund database detected. Back it up and start the new zero-funded economy.');
     }
     this.funds = dollarFunds ? new GameFunds(this.db, dollarFunds) : null;
-    this.chat = new ChatArchive(this.db);
+    this.chat = new ChatArchive(this.db, owner => {
+      const row = this.db.prepare("SELECT json_extract(data,'$.account.customization.title') AS title FROM sessions WHERE id=?").get(owner);
+      return isTitleItem(row?.title) ? row.title : undefined;
+    });
     this.chatDirectory = new ChatDirectoryStore(this.db);
     this.db.exec('BEGIN IMMEDIATE');
     try {

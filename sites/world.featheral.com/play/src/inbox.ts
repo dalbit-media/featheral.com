@@ -145,7 +145,7 @@ export class SettlementChat {
       if (settlement) await visitSettlement(csrf(), id);
       const target = await readVisitedSettlement(id);
       if (this.closed) return;
-      this.root.querySelector('[data-visitor-status]')!.textContent = `${target.name === 'Unnamed settlement' ? translate(target.name, this.language) : target.name} · ${target.x}, ${target.y} · ${target.population.toLocaleString(locale(this.language))} ${translate('residents', this.language)}`;
+      this.root.querySelector('[data-visitor-status]')!.textContent = `${target.name === 'Unnamed settlement' ? translate(target.name, this.language) : target.name}${target.regionName ? ` · ${target.regionName}` : ''} · ${target.x}, ${target.y} · ${target.population.toLocaleString(locale(this.language))} ${translate('residents', this.language)}`;
       if (!this.chat) this.chat = new Communicate(this.root.querySelector<HTMLElement>('[data-communicate]')!, csrf, this.language, id, 'Settlement visitor chat', true);
     } catch (error) {
       if (!this.closed) this.root.querySelector('[data-visitor-status]')!.textContent = translate(error instanceof Error ? error.message : 'Connection failed.', this.language);

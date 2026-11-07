@@ -5,6 +5,7 @@ import { isDecorationItem, isVisibilityItem } from './items.ts';
 import type { DecorationItem, ItemId } from './items.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, isActivityItem } from './automation.ts';
+import { isCustomizationItem, isTitleItem } from './customization.ts';
 
 const equipmentDrawings = {
   fire: '<path d="m19 51 27 9m-29 0 29-9" stroke="#ad8053" stroke-width="6"/><path d="M32 13c4 11 15 13 12 26-2 12-23 13-25 0-1-8 9-14 13-26Z" fill="#e9b86c"/><path d="M32 32c8 10 5 15 0 15s-8-5 0-15" fill="#f3e4a0"/>',
@@ -22,7 +23,8 @@ const decorationDrawings: Record<DecorationItem, string> = {
 };
 export function decorationDrawing(id: DecorationItem): string { return decorationDrawings[id]; }
 export function itemArt(id: ItemId): string {
-  if (isCollectionItem(id)) return `<div class="item-art collection-item-art">${icon(collectionItemDetails(id).resource)}<b>${collectionItemDetails(id).weeks}w</b></div>`;
+  if (isCollectionItem(id)) return `<div class="item-art collection-item-art">${icon(collectionItemDetails(id).resource === 'all' ? 'warehouse' : collectionItemDetails(id).resource)}<b>${collectionItemDetails(id).weeks}w</b></div>`;
+  if (isCustomizationItem(id)) return `<div class="item-art collection-item-art">${icon(isTitleItem(id) ? 'spark' : id === 'permit-region-name' ? 'world' : 'home')}</div>`;
   if (isActivityItem(id)) {
     const { activity, weeks } = activityItemDetails(id);
     return `<div class="item-art collection-item-art">${icon(activity === 'exploration' ? 'compass' : 'people')}<b>${weeks}w</b></div>`;

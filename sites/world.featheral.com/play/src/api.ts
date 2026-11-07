@@ -25,7 +25,7 @@ export async function connect(): Promise<ApiState> {
   }
 }
 export const refresh = (): Promise<ApiState> => request('state');
-export const readCollection = (resource: Resource): Promise<CollectionResponse> => request(`collection?asset=${resource}`);
+export const readCollection = (resource: Resource, quantity?: number): Promise<CollectionResponse> => request(`collection?asset=${resource}${quantity === undefined ? '' : `&quantity=${quantity}`}`);
 async function submit<T>(state: ApiState, command: Command | MarketCommand, path: string): Promise<T> {
   if (state.fundWallet && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
   const body = JSON.stringify({ id: crypto.randomUUID(), revision: state.revision, command });

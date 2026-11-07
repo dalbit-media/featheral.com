@@ -7,6 +7,10 @@ import { collectionItemName, isCollectionItem } from './collection.ts';
 import type { CollectionItem } from './collection.ts';
 import { activityItemName, isActivityItem } from './automation.ts';
 import type { ActivityItem } from './automation.ts';
+import { customizationItems, isCustomizationItem } from './customization.ts';
+import type { CustomizationItem } from './customization.ts';
+import { collectorRecipes } from './collector-recipes.ts';
+import type { CollectorBundle } from './collector-recipes.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15, water: 5 }), symbol: 'sun' },
@@ -24,7 +28,7 @@ export const decorationItems = {
   canopy: { name: 'Market canopy', cost: { wood: 50, metal: 15 } },
 } satisfies Record<string, { name: string; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {
@@ -38,7 +42,7 @@ export const decorationSpaces = {
 export type DecorationSlot = keyof typeof decorationSpaces;
 export const decorationSlots = Object.keys(decorationSpaces) as DecorationSlot[];
 export type Collectible = `relic-${Terrain}`;
-export type ExplorationFind = Collectible | CollectionItem | ActivityItem;
+export type ExplorationFind = Collectible | CollectionItem | ActivityItem | CustomizationItem;
 export type ItemId = CraftableItem | ExplorationFind;
 export interface ItemInventory {
   version: 1;
@@ -87,17 +91,36 @@ export function placedSlot(bag: ItemInventory, item: DecorationItem): Decoration
   return decorationSlots.find(slot => bag.placements?.[slot] === item);
 }
 export function itemName(id: ItemId): string {
+  if (isCustomizationItem(id)) return customizationItems[id].name;
   if (isCollectionItem(id)) return collectionItemName(id);
   if (isActivityItem(id)) return activityItemName(id);
   return isCraftableItem(id) ? craftableItems[id].name : `${terrainDetails[id.slice(6) as Terrain].name} keepsake`;
 }
 export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
+  const resources = Object.keys(craftableItems[item].cost).filter(resource => resource !== 'dollars');
+  if (!resources.length) return true;
   const found = new Set<Resource>(game.explored.map(key => {
     const [x, y] = key.split(',').map(Number);
     return terrainResources[terrainAt(x, y, game.seed)];
   }));
-  return Object.keys(craftableItems[item].cost).every(resource => resource === 'dollars' || found.has(resource as Resource));
+  return resources.every(resource => found.has(resource as Resource));
 }
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
   return Object.fromEntries(Object.entries(craftableItems[item].cost).map(([resource, amount]) => [resource, amount * quantity]));
+}
+export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<CollectionItem, number>> {
+  if (!Object.hasOwn(collectorRecipes, item)) return {};
+  return Object.fromEntries(Object.entries(collectorRecipes[item as CollectorBundle].ingredients).map(([id, count]) => [id, count * quantity]));
+}
+export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableItem): number {
+  const ingredients = craftingIngredients(item);
+  const count = Object.values(ingredients).reduce((sum, amount) => sum + amount, 0);
+  const room = itemStorage[bag.storage].capacity - inventoryUsed(bag);
+  return Math.max(0, Math.min(100, ...(count ? [] : [room]),
+    ...Object.entries(craftableItems[item].cost).filter(([, amount]) => amount > 0).map(([resource, amount]) =>
+      Math.floor((resource === 'dollars' ? game.dollars / 10000 : game.stock[resource as Resource]) / amount)),
+    ...Object.entries(ingredients).map(([id, amount]) => Math.floor(bag.items.filter(owned => owned === id).length / amount))));
+}
+export function craftingFits(bag: ItemInventory, item: CraftableItem, quantity: number): boolean {
+  return inventoryUsed(bag) - Object.values(craftingIngredients(item, quantity)).reduce((sum, amount) => sum + amount, 0) + quantity <= itemStorage[bag.storage].capacity;
 }

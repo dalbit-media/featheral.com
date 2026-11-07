@@ -1,0 +1,23 @@
+.resource-sale{margin-top:16px;padding:20px;border-radius:16px;background:#1b2826;color:#edf1df}
+.resource-sale form{display:grid;gap:12px;max-width:580px}
+.resource-sale h3{margin:0 0 12px}
+.resource-sale label{display:grid;gap:8px;font-size:13px}
+.resource-sale input,.resource-sale select{box-sizing:border-box;width:100%;min-height:44px;border:1px solid #647669;border-radius:8px;background:#14201e;color:inherit;padding:10px;font:inherit}
+.resource-sale-quantity{display:grid;gap:12px;min-width:0}
+.resource-sale-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.resource-sale-percentages,.resource-sale-sources,.resource-sale-actions{display:flex;gap:8px}
+.resource-sale-percentages button,.resource-sale-sources button{flex:1;min-height:44px;border:0;border-radius:8px;background:#34443d;color:inherit;font:inherit;cursor:pointer}
+.resource-sale-percentages button[aria-pressed=true],.resource-sale-sources button[aria-pressed=true]{background:#e6c58b;color:#17211e;font-weight:700}
+.resource-sale [data-sale-slider]{padding:0;border:0;accent-color:#e6c58b;cursor:pointer}
+.resource-sale small,.resource-sale>p{font-size:13px;line-height:1.5}
+.resource-sale-total{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0;padding:12px 0}
+.resource-sale-total strong{font-size:24px;font-variant-numeric:tabular-nums}
+.resource-sale [role=status]{min-height:20px;color:#e6c58b;font-size:13px}
+.resource-sale button:disabled{opacity:.5;cursor:default}
+.resource-sale-actions{flex-wrap:wrap}
+.resource-sale-actions button{flex:1;min-height:44px}
+.resource-sale input:focus-visible,.resource-sale button:focus-visible,.resource-sale select:focus-visible{outline:2px solid #e6c58b;outline-offset:3px}
+.resource-sale [hidden]{display:none!important}
+.resource-market-navigation{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.resource-market-navigation button{min-height:44px;flex:1}
+.resource-market-navigation button[aria-pressed=true]{background:#e6c58b;color:#17211e}

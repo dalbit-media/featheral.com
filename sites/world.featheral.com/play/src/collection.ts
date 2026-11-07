@@ -4,20 +4,21 @@ import type { Snapshot } from './api-types.ts';
 export const collectionDurations = Object.freeze([1, 4, 12] as const);
 export const collectionPolicy = Object.freeze({ version: 1, payOnPickup: true, allWorkersPay: true,
   automationDurations: Object.freeze([...collectionDurations]) });
-export type CollectionItem = `collection-${Resource}-${typeof collectionDurations[number]}`;
+export type CollectionItem = `collection-${Resource}-${typeof collectionDurations[number]}` | `collector-${Resource | 'all'}-${4 | 12 | 26 | 52}`;
 const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
-export const collectionItems = resourceKeys.flatMap(resource =>
-  collectionDurations.map(weeks => `collection-${resource}-${weeks}` as const));
+export const collectionItems: CollectionItem[] = [...resourceKeys.flatMap(resource =>
+  collectionDurations.map(weeks => `collection-${resource}-${weeks}` as const)),
+  ...[...resourceKeys, 'all' as const].flatMap(resource => ([4, 12, 26, 52] as const).map(weeks => `collector-${resource}-${weeks}` as const))];
 export function isCollectionItem(value: unknown): value is CollectionItem {
   return typeof value === 'string' && collectionItems.some(item => item === value);
 }
-export function collectionItemDetails(item: CollectionItem): { resource: Resource; weeks: number } {
+export function collectionItemDetails(item: CollectionItem): { resource: Resource | 'all'; weeks: number } {
   const [, resource, weeks] = item.split('-');
-  return { resource: resource as Resource, weeks: Number(weeks) };
+  return { resource: resource as Resource | 'all', weeks: Number(weeks) };
 }
 export function collectionItemName(item: CollectionItem): string {
   const { resource, weeks } = collectionItemDetails(item);
-  return `${resource[0].toUpperCase()}${resource.slice(1)} auto-collection · ${weeks} game ${weeks === 1 ? 'week' : 'weeks'}`;
+  return `${resource === 'all' ? 'All resources' : resource[0].toUpperCase() + resource.slice(1)} auto-collection · ${weeks} game ${weeks === 1 ? 'week' : 'weeks'}`;
 }
 export function collectionClaimReason(state: Snapshot, resource: Resource): string | null {
   if (state.game.stage < 0) return 'Settlement required.';

@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { GameError } from '../src/engine.ts';
 import { accrue, ApiError, apply, parseActionEnvelope, parseCommand, snapshot } from './economy.ts';
 import type { Store } from './store.ts';
-import { isMarketAsset, isMarketResource, marketQuantityLimit, marketResources } from '../src/market.ts';
+import { isMarketAsset, isMarketResource, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
 import { ChatHub, chatNickname, chatSubmission } from './chat.ts';
@@ -246,13 +246,20 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       if (((request.url === '/api/state' || marketRead || halfRead || collectionRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
       if (halfRead && [...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid half-sale query.');
       const asset = marketUrl.searchParams.get('asset') ?? 'wood', quantity = Number(marketUrl.searchParams.get('quantity') ?? '1');
-      if (collectionRead && ([...marketUrl.searchParams.keys()].length !== 1 || !marketUrl.searchParams.has('asset') || !isMarketAsset(asset) || !isMarketResource(asset))) throw new ApiError(400, 'Invalid collection query.');
+      if (collectionRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || marketUrl.searchParams.getAll('asset').length !== 1
+        || marketUrl.searchParams.getAll('quantity').length > 1 || !isMarketAsset(asset) || !isMarketResource(asset)
+        || marketUrl.searchParams.has('quantity') && (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset)))) throw new ApiError(400, 'Invalid collection query.');
       if (marketRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || !isMarketAsset(asset)
-        || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketQuantityLimit(asset))) throw new ApiError(400, 'Invalid market query.');
+        || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset))) throw new ApiError(400, 'Invalid market query.');
       if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
+      if (collectionRead && isMarketAsset(asset) && isMarketResource(asset) && marketUrl.searchParams.has('quantity')) {
+        store.read(token, session => {
+          if (quantity > Math.floor(session.account.pending[asset] / 60000)) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
+        });
+      }
       if (request.method === 'GET' && (marketRead || collectionRead) && isMarketAsset(asset)) {
         const saleQuantity = isMarketResource(asset) ? store.read(token, session => collectionRead
-          ? Math.floor(session.account.pending[asset] / 60000) : Math.min(quantity, session.account.game.stock[asset])) : 0;
+          ? Math.min(marketUrl.searchParams.has('quantity') ? quantity : Number.MAX_SAFE_INTEGER, Math.floor(session.account.pending[asset] / 60000)) : Math.min(quantity, session.account.game.stock[asset])) : 0;
         await store.ensureLiquidity?.(token, asset, saleQuantity);
       }
       if (request.method === 'GET' && halfRead) {
@@ -287,7 +294,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         })
         : store.transaction(token, (session, time, realTime, exchange, owner) => {
           accrue(session.account, time);
-          return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity) : snapshot(session.account)),
+          return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity) : snapshot(session.account)),
             csrf: session.csrf };
         });
       const lifetime = store.read(token, (session, _time, realTime) => session.expires - realTime);

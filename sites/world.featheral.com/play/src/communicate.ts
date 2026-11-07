@@ -1,6 +1,7 @@
 import { chatPing, chatSend, readChat } from './api.ts';
 import { chatHistoryLimit, chatMessageLimit, chatProfileChangedEvent, chatProfileSettingsEvent, chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
 import type { ChatInfo, ChatMessage, ChatSubmission } from './chat.ts';
+import { isTitleItem, titleItems } from './customization.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { localize } from './i18n-dom.ts';
@@ -93,7 +94,7 @@ export class Communicate {
       if (this.closed || attempt !== this.attempt) return;
       this.info = info; this.syncedAt = performance.now(); this.presence(info.online, info.capacity);
       if (!info.profile) { this.root.querySelector('[data-chat-self]')!.textContent = ''; this.status('Use your World profile in the avatar menu to join chat.'); return; }
-      this.root.querySelector('[data-chat-self]')!.textContent = info.profile.nickname;
+      this.root.querySelector('[data-chat-self]')!.textContent = `${info.profile.nickname}${info.profile.title ? ` · ${translate(titleItems[info.profile.title].title, this.language)}` : ''}`;
       if (info.online >= info.capacity && !info.connected) { this.fail('Global chat is full (1,000 users). Gameplay is still available. Try again later.'); return; }
       this.connect();
     } catch (error) { if (attempt === this.attempt) this.fail(error instanceof Error ? error.message : 'Connection failed.'); }
@@ -184,7 +185,7 @@ export class Communicate {
         node = document.createElement('article'); node.className = 'chat-message'; node.dataset.chatMessage = String(message.id); node.dataset.noLocalize = '';
         node.classList.toggle('own', message.author === this.info?.profile?.id);
         const header = document.createElement('header'), author = document.createElement('strong'), time = document.createElement('time'), text = document.createElement('p');
-        author.textContent = message.nickname; time.dateTime = new Date(message.time).toISOString();
+        author.textContent = `${message.nickname}${isTitleItem(message.title) ? ` · ${translate(titleItems[message.title].title, this.language)}` : ''}`; time.dateTime = new Date(message.time).toISOString();
         time.textContent = `${new Date(message.time).toLocaleTimeString(locale(this.language), { timeZone: 'UTC', hour12: false })} UTC`;
         text.textContent = message.text; header.append(author, time); node.append(header, text); this.nodes.set(message.id, node);
       }
