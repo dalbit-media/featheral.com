@@ -110,8 +110,8 @@ test('dynamic resource pricing and finite treasury explanations are available in
   for (const text of [
     'Current market price', 'Production and upkeep value', 'Baseline output per worker/week', 'Baseline upkeep per resident/week',
     'Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.',
-    'Resource prices move with trades, with deeper pricing liquidity to slow declines and a 1% spread. Existing treasury FTH$ replenishes low market funds; no currency is created.',
-    'Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.',
+    'Resource prices move gently with trades and a 1% spread. Insufficient sale liquidity converts origin FTHG at the active Gold rate. Dollar treasury funds are used only after confirmed origin exhaustion and Ethereum settlement.',
+    'Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.',
     'Not enough resources in the market. Buy less or try again after players sell.',
   ]) assert.notEqual(translate(text, 'ko'), text);
 });

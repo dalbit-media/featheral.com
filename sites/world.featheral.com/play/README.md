@@ -216,13 +216,24 @@ inventory and dollars cap execution, including collect-and-sell and half-sales.
 Other item pools keep their ordinary curve. Existing balances, receipts, valid
 low-price orders, filled history and genesis reserve seeds are preserved.
 
-An authenticated settled player's quotes and trades check resource funding.
-Below 25% of the unchanged genesis funding target, Gold transfers already-issued
-FTH$ from the system treasury, capped at that target and the treasury's available
-whole game units. Every refill is signed and replayable in the Dollar journal.
-It never allocates additional FTHG, mints dollars or spends redemption escrow.
-Repeated reads of a funded market do not drain treasury. Exhausted funds produce
-an explicit sell-less/retry error; no order partially spends inventory on failure.
+An authenticated settled player's resource sale quotes and trades check funding
+for the actual owned/pending quantity, including large half-sales. Funding solves
+the shared sell curve against real reserves; sufficient funds require no top-up.
+Gold converts verified origin FTHG first using its active rate, issuing quoted
+whole-game-unit FTH$, updating allocated Gold and the dynamic rate. The original
+finite cap and confirmed origin holdings less pending obligations bound issuance.
+Initial resource inventory seeds once; subsequent signed `resource-liquidity`
+journal operations add only dollars.
+
+Only after actual origin holdings are zero at a finalized Ethereum block and all
+incoming obligations are reconciled does funding use existing available system
+treasury FTH$. Exhausting the allocation cap while tokens remain at origin blocks
+new conversions and asks for authorized Ethereum settlement; it never silently
+falls back to treasury. Redemption escrow is never spent. Exhausted backing or
+failed verification is explicit; orders never partially spend inventory on failure.
+Conversions remain off-chain obligations, not automatic Ethereum transfers.
+Historical treasury-only entries replay unchanged, but new entries require an
+updated ledger reader; older releases cannot replay this new operation.
 
 Physical production and consumption quantities are unchanged. The expandable
 market reference values them at the current Buy/Sell ticker, not a static price.
@@ -254,7 +265,7 @@ Authenticated Dollar routes include `GET /api/dollar/game/market?asset=metal&qua
 
 ### Permanent monetary policy, version 1
 
-FTH$ issuance is closed, including new bridge conversion and staking rewards. Gameplay payments transfer to the **system treasury** without changing supply. Historical burns remain unchanged on replay. Trades only transfer existing wallet, escrow and pool balances; non-resource pool spreads stay in the reserves. Pools require voluntary donations of owned assets and existing FTH$; no opening-rate estimate creates funds. Demand raises non-resource marginal buy prices on the existing constant-product curve. Resource shop prices remain static. A zero-supply journal cannot bootstrap liquidity under this policy.
+Ordinary FTH$ credits and staking rewards remain closed. Only signed Gold operations may issue finite origin-backed market liquidity; World cannot issue dollars. Gameplay payments transfer to the **system treasury** without changing supply. Historical burns replay unchanged. Trades transfer wallet, escrow and pool balances; pool spreads stay in reserves. Resource prices remain demand-driven without commodity floors. Without a configured finite Gold engine, zero-funded pools require voluntary donations of owned assets and existing FTH$.
 
 **Isolated finite-reserve exception:** the opt-in test deployment uses Gold-authorized initial allocations capped by verified finalized origin holdings, at 1 FTHG = 1,000 FTH$. Dollar uses treasury funds first and issues only the exact reserve-backed deficit for one-time market bootstrap. No repeat refills, staking rewards or personal grants occur. Unsynced backing cannot redeem; redeemed FTH$ remains locked until confirmed returned FTHG is reconverted without increasing supply. Gold shows actual holdings separately from pending obligations and offers a prominently warned sync preview, not Mainnet submission. The live ledger remains unchanged. See the root README for isolation settings and production prerequisites.
 

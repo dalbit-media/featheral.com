@@ -31,7 +31,7 @@ export interface DollarFunds {
   supply(): string;
   prepare(entries: FundEntry[]): FundTransaction;
   commit(transaction: FundTransaction): void;
-  ensureLiquidity?(asset: string, quantity: number, dollars: string): Promise<unknown>;
+  ensureLiquidity?(asset: string, quantity: number, dollars: string, required?: string): Promise<unknown>;
   poolSeed?(asset: string): { quantity: number } | null;
   nonce?(account: string): number;
   depositMessage?(payment: FundPayment): string;
@@ -183,11 +183,12 @@ export class GameFunds {
     }
   }
   get liquidityEnabled(): boolean { return Boolean(this.ledger.ensureLiquidity); }
-  async ensureLiquidity(asset: string, quantity: number, pricePerLot: number): Promise<void> {
+  async ensureLiquidity(asset: string, quantity: number, pricePerLot: number, required = 0n): Promise<void> {
     if (!this.ledger.ensureLiquidity) return;
     this.recover();
     try {
-      await this.ledger.ensureLiquidity(asset, quantity, (BigInt(quantity) * BigInt(pricePerLot) * BASE_UNITS_PER_GAME_UNIT).toString());
+      await this.ledger.ensureLiquidity(asset, quantity, (BigInt(quantity) * BigInt(pricePerLot) * BASE_UNITS_PER_GAME_UNIT).toString(),
+        (required * BASE_UNITS_PER_GAME_UNIT).toString());
     } catch (error) {
       if (error instanceof Error && 'status' in error && typeof error.status === 'number'
         && [400, 401, 409, 503].includes(error.status)) throw new ApiError(error.status, error.message);

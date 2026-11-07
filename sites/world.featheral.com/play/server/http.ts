@@ -251,10 +251,13 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketQuantityLimit(asset))) throw new ApiError(400, 'Invalid market query.');
       if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
       if (request.method === 'GET' && (marketRead || collectionRead) && isMarketAsset(asset)) {
-        await store.ensureLiquidity?.(token, asset);
+        const saleQuantity = isMarketResource(asset) ? store.read(token, session => collectionRead
+          ? Math.floor(session.account.pending[asset] / 60000) : Math.min(quantity, session.account.game.stock[asset])) : 0;
+        await store.ensureLiquidity?.(token, asset, saleQuantity);
       }
       if (request.method === 'GET' && halfRead) {
-        for (const resource of marketResources) await store.ensureLiquidity?.(token, resource);
+        for (const resource of marketResources) await store.ensureLiquidity?.(token, resource,
+          store.read(token, session => Math.floor(session.account.game.stock[resource] / 2)));
       }
       const body = request.method === 'POST' ? await json(request) : null;
       if (request.method === 'POST' && store.liquidityEnabled) {
@@ -263,16 +266,17 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
           if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
         });
         const envelope = parseActionEnvelope(body);
-        const assets: MarketAsset[] = [];
+        const assets = new Map<MarketAsset, number>();
         if (marketAction) {
           const command = parseMarketCommand(envelope.command);
-          if (command.type === 'spot' || command.type === 'limit') assets.push(command.asset);
-          else if (command.type === 'sell-half') assets.push(...command.sales.map(sale => sale.asset));
+          if (command.type === 'spot' || command.type === 'limit') assets.set(command.asset, command.side === 'sell' ? command.quantity : 0);
+          else if (command.type === 'sell-half') for (const sale of command.sales) assets.set(sale.asset, sale.quantity);
         } else {
           const command = parseCommand(envelope.command);
-          if (command.type === 'collect-sell') assets.push(command.resource);
+          if (command.type === 'collect-sell') assets.set(command.resource, command.quantity);
         }
-        for (const asset of assets) await store.ensureLiquidity?.(token, asset);
+        const fresh = store.read(token, session => envelope.revision === session.account.revision);
+        if (fresh) for (const [asset, saleQuantity] of assets) await store.ensureLiquidity?.(token, asset, saleQuantity);
       }
       const result = request.method === 'POST'
         ? store.transaction(token, (session, time, realTime, exchange, owner) => {

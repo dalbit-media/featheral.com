@@ -13,7 +13,7 @@ import { GameFunds } from './funds.ts';
 import type { DollarFunds, FundRequest, FundView, WalletView } from './funds.ts';
 import type { ClockSpeed } from '../src/environment.ts';
 import { enforceMonetaryPolicy } from './monetary-policy.ts';
-import { isLiquidAsset, marketBasePrice, marketQuantityLimit } from '../src/market.ts';
+import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit } from '../src/market.ts';
 import type { MarketAsset } from '../src/market.ts';
 
 export interface Session { csrf: string; expires: number; account: Account }
@@ -36,7 +36,7 @@ export interface Store {
   wallet(token: string): string | null;
   population(federation: string | null): PopulationTotals;
   publicTotals(): PublicTotals;
-  ensureLiquidity?(token: string, asset: MarketAsset): Promise<void>;
+  ensureLiquidity?(token: string, asset: MarketAsset, saleQuantity?: number): Promise<void>;
   close(): void;
 }
 const hash = (token: string): string => createHash('sha256').update(token).digest('hex');
@@ -190,11 +190,27 @@ export class SqliteStore implements Store {
       throw error;
     }
   }
-  async ensureLiquidity(token: string, asset: MarketAsset): Promise<void> {
+  async ensureLiquidity(token: string, asset: MarketAsset, saleQuantity = 0): Promise<void> {
     if (!this.funds || !isLiquidAsset(asset)) return;
-    const settled = this.read(token, session => session.account.game.stage >= 0);
+    const settled = this.read(token, session => {
+      if (isMarketResource(asset) && saleQuantity > marketQuantityLimit(asset)
+        && saleQuantity > Math.max(session.account.game.stock[asset], Math.floor(session.account.pending[asset] / 60000)))
+        throw new ApiError(409, 'Not enough resources for the requested sale funding.');
+      return session.account.game.stage >= 0;
+    });
     if (!settled) return;
-    await this.funds.ensureLiquidity(asset, marketQuantityLimit(asset), dollarsUnits(marketBasePrice(asset)));
+    if (!Number.isSafeInteger(saleQuantity) || saleQuantity < 0) throw new ApiError(400, 'Invalid resource funding quantity.');
+    let required = 0n;
+    if (isMarketResource(asset) && saleQuantity > 0) {
+      let target = this.exchange.resourceFundingRequired(asset, saleQuantity);
+      if (target === null) {
+        await this.funds.ensureLiquidity(asset, marketQuantityLimit(asset), dollarsUnits(marketBasePrice(asset)));
+        target = this.exchange.resourceFundingRequired(asset, saleQuantity);
+      }
+      if (target === null) throw new ApiError(503, 'Resource pricing requires funded inventory.');
+      required = target;
+    }
+    await this.funds.ensureLiquidity(asset, marketQuantityLimit(asset), dollarsUnits(marketBasePrice(asset)), required);
   }
   get liquidityEnabled(): boolean { return Boolean(this.funds?.liquidityEnabled); }
   read<T>(token: string, operation: (session: Session, now: number, realTime: number) => T): T {

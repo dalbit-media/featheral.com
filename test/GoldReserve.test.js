@@ -87,7 +87,7 @@ describe("Isolated finite Gold reserve", () => {
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
-  it("refills resource markets only from existing treasury dollars, conserves supply and replays safely", async () => {
+  it("replays historical treasury-only refills without changing prior supply or balances", async () => {
     await engine.initialize();
     await fund("wood");
     const amount = total("wood") * 9n / 10n;
@@ -100,10 +100,8 @@ describe("Isolated finite Gold reserve", () => {
     assert.throws(() => ledger.commitAuthorized(signedGold("over-budget", { ...pending, dollars: (amount + 10n ** 14n).toString() })), /limit/);
     assert.throws(() => adapter.prepare([{ account: TREASURY, delta: (-amount).toString() },
       { account: pool("wood"), delta: amount.toString() }]), /treasury/);
-    store = new SqliteStore(":memory:", Date.now, 1, adapter);
-    const identity = store.create();
-    store.transaction(identity.token, session => { session.account.game.stage = 0; });
-    await store.ensureLiquidity(identity.token, "wood");
+    const refill = signedGold("historical-refill", pending);
+    ledger.commitAuthorized(refill);
     assert.equal(ledger.balance(pool("wood")).available, total("wood").toString());
     assert.equal(ledger.balance(TREASURY).available, "0");
     assert.equal(ledger.summary().supply, supply);
@@ -114,32 +112,194 @@ describe("Isolated finite Gold reserve", () => {
     assert.equal(entry.recordType, "treasury-circulation");
     assert.equal(entry.treasuryDollars, amount.toString());
     const tip = ledger.tipHash;
-    await store.ensureLiquidity(identity.token, "wood");
+    ledger.commitAuthorized(refill);
     assert.equal(ledger.tipHash, tip, "repeated reads do not spend more treasury dollars");
     assert.throws(() => ledger.commitAuthorized(signedGold("already-funded", pending)), /low market funds/);
-    store.close(); store = undefined;
     ledger.close(); open();
     assert.equal(ledger.tipHash, tip);
     move(pool("wood"), walletAccountId(source.address), total("wood"));
-    assert.deepEqual(await engine.refillMarket("wood"), { transferred: "0", exhausted: true });
     assert.equal(ledger.summary().supply, supply);
     assert.equal(engine.status().allocated, allocated);
     conserved();
   });
-  it("caps partial treasury refills at available whole game units and blocks nonresource targets", async () => {
+  it("rejects unsupported resource targets and unavailable writers without changing the journal", async () => {
     await engine.initialize(); await fund("wood");
     const one = 10n ** 14n;
     adapter.commit(adapter.prepare([{ account: pool("wood"), delta: (-one).toString() }]));
     move(pool("wood"), walletAccountId(source.address), total("wood") - one);
-    assert.deepEqual(await engine.refillMarket("wood"), { transferred: one.toString(), exhausted: true });
-    assert.equal(ledger.balance(pool("wood")).available, one.toString());
-    assert.equal(ledger.balance(TREASURY).available, "0");
-    await assert.rejects(engine.refillMarket("scanner"), /Only resource/);
+    await assert.rejects(engine.resourceLiquidity("scanner"), /Invalid resource/);
     const blocked = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider,
       beforeMutation: () => { throw Object.assign(new Error("Writer is unavailable."), { status: 503 }); } });
     const tip = ledger.tipHash;
-    await assert.rejects(blocked.refillMarket("wood"), /Writer is unavailable/);
+    await assert.rejects(blocked.resourceLiquidity("wood"), /Writer is unavailable/);
     assert.equal(ledger.tipHash, tip);
+    conserved();
+  });
+  it("uses origin before treasury and repeatedly funds resources at the active conversion rate", async () => {
+    await engine.initialize(); await engine.activatePricing();
+    await fund("water");
+    const treasury = total("water") / 2n;
+    adapter.commit(adapter.prepare([{ account: pool("water"), delta: (-treasury).toString() }]));
+    const treasuryBefore = ledger.balance(TREASURY).available;
+    const stateBefore = structuredClone(ledger.goldReserve);
+    await engine.resourceLiquidity("wood");
+    const seeded = ledger.findTx(ledger.ids.get(engine.activity({ limit: 1 }).items[0].id)).tx;
+    assert.equal(seeded.d.op, "resource-liquidity");
+    assert.equal(BigInt(seeded.d.dollars), pricing.quote(stateBefore, "fthg-to-fthdollar", seeded.d.fthg) / 10n ** 14n * 10n ** 14n);
+    assert.equal(ledger.balance(TREASURY).available, treasuryBefore, "origin funding never spends existing treasury");
+    assert.equal(ledger.goldReserve.pools.wood.quantity, targets.wood.quantity);
+    const seed = structuredClone(ledger.goldReserve.pools.wood);
+    const spot = engine.status().spotRateFthDollarPerFthg;
+    const beforeSupply = BigInt(ledger.summary().supply);
+    move(pool("wood"), walletAccountId(source.address), total("wood"));
+    const previousState = structuredClone(ledger.goldReserve);
+    await engine.resourceLiquidity("wood");
+    const entry = engine.activity({ limit: 1 }).items[0];
+    assert.equal(entry.quantity, null, "refills never add resource inventory");
+    assert.equal(entry.treasuryDollars, "0");
+    assert.equal(BigInt(entry.dollars), pricing.quote(previousState, "fthg-to-fthdollar", entry.fthg) / 10n ** 14n * 10n ** 14n);
+    assert.equal(BigInt(ledger.summary().supply), beforeSupply + BigInt(entry.dollars));
+    assert.ok(BigInt(engine.status().spotRateFthDollarPerFthg) > BigInt(spot));
+    assert.deepEqual(ledger.goldReserve.pools.wood, seed);
+    const tip = ledger.tipHash;
+    await engine.resourceLiquidity("wood");
+    assert.equal(ledger.tipHash, tip);
+    ledger.close(); open();
+    assert.equal(ledger.tipHash, tip); assert.deepEqual(ledger.goldReserve.pools.wood, seed);
+    assert.equal(ledger.balance(TREASURY).available, treasuryBefore);
+    conserved();
+  });
+  it("concurrent origin refills and persistence recovery allocate once without duplicating inventory", async () => {
+    await engine.initialize(); await engine.activatePricing();
+    await engine.resourceLiquidity("wood");
+    const seed = structuredClone(ledger.goldReserve.pools.wood);
+    move(pool("wood"), walletAccountId(source.address), total("wood"));
+    const append = ledger.store.append;
+    ledger.store.append = () => { throw new Error("isolated disk failure"); };
+    await assert.rejects(engine.resourceLiquidity("wood"), /could not be persisted/);
+    ledger.store.append = append;
+    const before = BigInt(ledger.summary().supply);
+    await Promise.all([engine.resourceLiquidity("wood"), engine.resourceLiquidity("wood"), engine.resourceLiquidity("wood")]);
+    assert.equal(BigInt(ledger.summary().supply), before + total("wood"));
+    assert.deepEqual(ledger.goldReserve.pools.wood, seed);
+    const tip = ledger.tipHash;
+    ledger.close(); open();
+    assert.equal(ledger.tipHash, tip);
+    assert.deepEqual(ledger.goldReserve.pools.wood, seed);
+    conserved();
+  });
+  it("blocks treasury until actual origin is zero and all outgoing origin obligations are reconciled", async () => {
+    ledger.close();
+    fs.rmSync(path.join(directory, "ledger"), { recursive: true, force: true });
+    provider.origin = ethers.parseEther("40");
+    open(); await engine.initialize(); await engine.resourceLiquidity("wood");
+    const issued = BigInt(ledger.summary().supply);
+    assert.equal(ledger.goldReserve.allocated, ledger.goldReserve.cap);
+    adapter.commit(adapter.prepare([{ account: pool("wood"), delta: (-issued).toString() }]));
+    const tip = ledger.tipHash;
+    await assert.rejects(engine.resourceLiquidity("wood"), /wallet is not zero/);
+    assert.equal(ledger.tipHash, tip); assert.equal(BigInt(ledger.balance(TREASURY).available), issued);
+    provider.origin = 0n;
+    await assert.rejects(engine.resourceLiquidity("wood"), /Reconcile/);
+    provider.origin = ethers.parseEther("40");
+    await reconcile(ethers.parseEther("40"));
+    assert.equal(provider.origin, 0n);
+    const allocated = engine.status().allocated;
+    await engine.resourceLiquidity("wood");
+    const entry = engine.activity({ limit: 1 }).items[0];
+    assert.equal(entry.direction, "treasury-to-market"); assert.equal(entry.fthg, "0");
+    assert.equal(BigInt(ledger.balance(TREASURY).available), 0n);
+    assert.equal(BigInt(ledger.summary().supply), issued); assert.equal(engine.status().allocated, allocated);
+    move(pool("wood"), walletAccountId(source.address), issued);
+    await assert.rejects(engine.resourceLiquidity("wood"), /cannot fund/);
+    conserved();
+  });
+  it("funds large resource sales through World while preserving one-time inventory and signed liquidity limits", async () => {
+    await engine.initialize(); await engine.activatePricing();
+    store = new SqliteStore(":memory:", Date.now, 1, adapter);
+    const identity = store.create();
+    store.transaction(identity.token, session => {
+      session.account.game.stage = 0; session.account.game.stock.wood = 2000000;
+    });
+    await store.ensureLiquidity(identity.token, "wood");
+    const seedUnits = store.transaction(identity.token, (_session, _time, _real, exchange, owner) =>
+      exchange.read(owner, _session.account, _time, _real, "wood", 1)).market.quotes.sell;
+    assert.ok(seedUnits.available);
+    const beforeSupply = BigInt(ledger.summary().supply);
+    await store.ensureLiquidity(identity.token, "wood", 1000000);
+    assert.ok(BigInt(ledger.summary().supply) > beforeSupply, "large sales fund more than the old seed target");
+    const read = quantity => store.transaction(identity.token, (session, time, real, exchange, owner) =>
+      exchange.read(owner, session.account, time, real, "wood", quantity));
+    // Normal spot orders cap at 10,000; the half-sale API supports larger holdings.
+    const half = store.transaction(identity.token, (session, _time, real, exchange, owner) => exchange.halfQuote(owner, session.account, real));
+    assert.equal(half.halfSale.available, true);
+    assert.equal(half.halfSale.sales[0].quantity, 1000000);
+    const tip = ledger.tipHash;
+    await store.ensureLiquidity(identity.token, "wood", 1000000);
+    assert.equal(ledger.tipHash, tip);
+    assert.equal(read(1).market.quotes.sell.available, true);
+    const request = { id: crypto.randomUUID(), revision: half.revision, command: { type: "sell-half",
+      sales: half.halfSale.sales.map(sale => ({ asset: sale.asset, quantity: sale.quantity, limitDollars: sale.dollars })) } };
+    const sold = store.transaction(identity.token, (session, time, real, exchange, owner) =>
+      exchange.action(owner, session, request, time, real));
+    assert.equal(sold.game.stock.wood, 1000000);
+    assert.equal(sold.dollars, half.halfSale.dollars);
+    const retry = store.transaction(identity.token, (session, time, real, exchange, owner) =>
+      exchange.action(owner, session, request, time, real));
+    assert.deepEqual(retry, sold);
+    const escrow = ledger.balance(REDEMPTION_ESCROW);
+    const tx = ledger.findTx(ledger.ids.get(engine.activity({ limit: 1 }).items[0].id)).tx;
+    const { signature, ...data } = tx.d;
+    assert.throws(() => ledger.commitAuthorized(signedGold("bad-conversion", { ...data, dollars: (BigInt(data.dollars) + 10n ** 14n).toString() })), /quote/);
+    assert.throws(() => ledger.commitAuthorized(signedGold("bad-fallback", { ...data, fthg: "0" })), /fallback/);
+    assert.deepEqual(ledger.balance(REDEMPTION_ESCROW), escrow);
+    conserved();
+  });
+  it("HTTP sale quotes fund origin conversions and retries or rejected large orders do not allocate again", async () => {
+    await engine.initialize(); await engine.activatePricing();
+    store = new SqliteStore(":memory:", Date.now, 1, adapter);
+    const identity = store.create(), origin = "http://127.0.0.1";
+    store.transaction(identity.token, session => {
+      session.account.game.stage = 0; session.account.game.stock.wood = 2000000;
+      session.account.game.stock.water = 0; session.account.game.stock.metal = 0;
+    });
+    const server = createApi(store, origin);
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const base = `http://127.0.0.1:${server.address().port}`;
+      const headers = { cookie: `terra-dev=${identity.token}`, origin, "content-type": "application/json", "x-csrf-token": identity.csrf };
+      const quoteResponse = await fetch(`${base}/api/market/half`, { headers });
+      assert.equal(quoteResponse.status, 200);
+      const quote = await quoteResponse.json();
+      assert.equal(quote.halfSale.available, true);
+      const body = JSON.stringify({ id: crypto.randomUUID(), revision: quote.revision, command: { type: "sell-half",
+        sales: quote.halfSale.sales.map(sale => ({ asset: sale.asset, quantity: sale.quantity, limitDollars: sale.dollars })) } });
+      const sale = await fetch(`${base}/api/market/actions`, { method: "POST", headers, body });
+      assert.equal(sale.status, 200, await sale.clone().text());
+      const result = await sale.json();
+      assert.equal(result.game.stock.wood, 1000000);
+      const tip = ledger.tipHash;
+      const retry = await fetch(`${base}/api/market/actions`, { method: "POST", headers, body });
+      assert.equal(retry.status, 200);
+      assert.equal((await retry.json()).dollars, result.dollars);
+      assert.equal(ledger.tipHash, tip, "receipt retries never replenish again");
+      const invalid = JSON.stringify({ id: crypto.randomUUID(), revision: result.revision, command: { type: "sell-half",
+        sales: [{ asset: "wood", quantity: 100000000, limitDollars: 1 }] } });
+      assert.equal((await fetch(`${base}/api/market/actions`, { method: "POST", headers, body: invalid })).status, 409);
+      assert.equal(ledger.tipHash, tip);
+      conserved();
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  });
+  it("sufficient market funds still permit sale quotes when origin is exhausted or Ethereum is unavailable", async () => {
+    await engine.initialize(); await engine.resourceLiquidity("wood");
+    const tip = ledger.tipHash, treasury = ledger.balance(TREASURY).available;
+    provider.getNetwork = async () => { throw new Error("Ethereum is unavailable."); };
+    await engine.resourceLiquidity("wood", 10n ** 18n);
+    assert.equal(ledger.tipHash, tip); assert.equal(ledger.balance(TREASURY).available, treasury);
+    move(pool("wood"), walletAccountId(source.address), total("wood"));
+    const emptyTip = ledger.tipHash;
+    await assert.rejects(engine.resourceLiquidity("wood", 10n ** 18n), /Ethereum is unavailable/);
+    assert.equal(ledger.tipHash, emptyTip);
     conserved();
   });
   it("uses the exact gradual origin curve, including trade-size movement and conservative rounding", () => {

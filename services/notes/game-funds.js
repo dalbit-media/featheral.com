@@ -54,11 +54,9 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
     },
     supply: () => ledger.summary().supply,
     ...(reserveEngine ? {
-      ensureLiquidity: async (asset, quantity, dollars) => {
-        const seed = await reserveEngine.fundMarket(asset, quantity, BigInt(dollars));
-        if (["wood", "water", "metal", "oil"].includes(asset)) await reserveEngine.refillMarket(asset);
-        return seed;
-      },
+      ensureLiquidity: (asset, quantity, dollars, required = "0") => ["wood", "water", "metal", "oil"].includes(asset)
+        ? reserveEngine.resourceLiquidity(asset, BigInt(required))
+        : reserveEngine.fundMarket(asset, quantity, BigInt(dollars)),
       poolSeed: asset => ledger.goldReserve?.pools[asset] || null,
     } : {}),
     prepare(entries) {

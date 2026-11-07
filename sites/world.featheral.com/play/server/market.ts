@@ -139,6 +139,16 @@ export class Exchange {
       ORDER BY o.price ${side === 'sell' ? 'ASC' : 'DESC'}, o.id ASC`).all(asset, side, owner, realTime).map(orderRow)
       .filter(order => order.price >= dollarsUnits(marketPriceFloor(asset)));
   }
+  resourceFundingRequired(asset: MarketAsset, quantity: number): bigint | null {
+    if (!isMarketResource(asset) || quantity === 0) return 0n;
+    const pool = this.pool(asset);
+    if (pool.depthUnits === undefined || pool.depthDollars === undefined) return null;
+    const q = BigInt(quantity), spread = BigInt(monetaryPolicy.poolSpreadPercent);
+    // Solve payment(q) <= real dollars; virtual pricing depth is never spendable.
+    const numerator = (100n - spread) * q * pool.depthDollars;
+    const denominator = 100n * (BigInt(pool.units) + pool.depthUnits) + spread * q;
+    return (numerator + denominator - 1n) / denominator;
+  }
   private plan(owner: string, asset: MarketAsset, side: MarketSide, quantity: number, realTime: number, limit?: number): Step[] {
     const makers = this.orders(asset, side === 'buy' ? 'sell' : 'buy', owner, realTime)
       .filter(order => limit === undefined || (side === 'buy' ? order.price <= limit : order.price >= limit));
@@ -320,7 +330,7 @@ export class Exchange {
       const filled = steps.reduce((sum, step) => sum + step.quantity, 0), total = steps.reduce((sum, step) => sum + step.dollars, 0);
       if (command.type === 'spot' && filled !== command.quantity && isMarketResource(asset))
         throw new ApiError(409, command.side === 'sell'
-          ? 'Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.'
+          ? 'Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.'
           : 'Not enough resources in the market. Buy less or try again after players sell.');
       if (command.type === 'spot' && (filled !== command.quantity || (command.side === 'buy' ? total > command.limitDollars : total < command.limitDollars))) throw new ApiError(409, 'Quote changed or liquidity is insufficient. Refresh the quote.');
       const reservedDollars = command.side === 'buy' ? command.type === 'limit' ? command.price * command.quantity : total : 0;

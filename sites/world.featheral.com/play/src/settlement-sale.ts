@@ -23,7 +23,7 @@ export class SettlementSale {
     this.state = privateState; this.update = privateUpdate; this.notify = privateNotify; this.language = privateLanguage;
     const prefix = resource ? `settlement-sale-${resource}` : 'settlement-sale';
     this.root.className = 'settlement-section settlement-sale';
-    this.root.innerHTML = `<h3>Sell resources for FTH$</h3><p>Sell owned resources at current market prices, or better player bids. Existing treasury funds replenish the market while available. Claim pending resources first.</p>
+    this.root.innerHTML = `<h3>Sell resources for FTH$</h3><p>Sell at current market prices. Origin Gold conversions fund insufficient liquidity first; Dollar treasury is used only after verified origin exhaustion. Claim pending resources first.</p>
       <form><label for="${prefix}-resource" ${resource ? 'hidden' : ''}>Resource</label><select id="${prefix}-resource" ${resource ? 'hidden' : ''}>${(resource ? [resource] : marketResources).map(asset => `<option value="${asset}">${marketAssetName(asset)}</option>`).join('')}</select>
       <label for="${prefix}-quantity">Amount</label><div class="settlement-sale-amount"><input id="${prefix}-quantity" type="number" min="1" max="10000" step="1" value="1" required><button type="button" data-sale-max>Max</button></div>
       <p><span>You get · FTH$</span> <strong data-sale-total>—</strong></p><p role="status" data-sale-status></p>
@@ -66,7 +66,7 @@ export class SettlementSale {
     const reason = message || (!this.input.validity.valid || !Number.isSafeInteger(quantity)
       ? translate(`Enter an amount from ${this.input.min} to ${this.input.max} ${tradingUnit(this.asset)} in steps of ${this.input.step}.`, this.language)
       : quantity > this.state().game.stock[this.asset] ? translate('Not enough owned resources for this order.', this.language)
-      : this.quote && !this.quote.available ? translate('Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.', this.language) : '');
+      : this.quote && !this.quote.available ? translate('Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.', this.language) : '');
     this.root.querySelector('[data-sale-total]')!.textContent = this.quote?.available ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-sale-status]')!.textContent = reason;
     this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!.disabled = this.pending || !!reason || !this.quote?.available || !this.quote.dollars;

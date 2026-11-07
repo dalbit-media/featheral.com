@@ -175,7 +175,7 @@ test('insufficient real liquidity never spends virtual dollars or partially spen
     const before = h.read(player.token, 'wood');
     const quote = h.read(player.token, 'wood', 3).market.quotes.sell;
     assert.equal(quote.available, false);
-    assert.throws(() => h.act(player.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 3, limitDollars: 7.5 }), /Not enough market funds/);
+    assert.throws(() => h.act(player.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 3, limitDollars: 7.5 }), /Backing is unavailable/);
     assert.equal(h.read(player.token).dollars, before.dollars);
     assert.equal(h.read(player.token).game.stock.wood, before.game.stock.wood);
     assert.equal(h.read(player.token).market.history.length, 0);
