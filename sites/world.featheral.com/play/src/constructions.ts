@@ -1,12 +1,12 @@
 import type { Cost, Game, Resource } from './engine.ts';
-import { withDollarFee } from './costs.ts';
+import { maximumUpgradeLevel, withDollarFee } from './costs.ts';
 import { monetaryPolicy } from './monetary-policy.ts';
 
 export const constructions = {
-  housing: { name: 'Residential quarter', stage: 0, maxLevel: 8, cost: withDollarFee({ wood: 60, water: 20, metal: 10 }), benefit: 'Recruitment batch +25% per level' },
-  cistern: { name: 'Water reservoir', stage: 0, maxLevel: 8, cost: withDollarFee({ wood: 80, metal: 30 }), benefit: 'One extra week of Water capacity per level' },
-  workshop: { name: 'Commercial workshop', stage: 2, maxLevel: 8, cost: { wood: 200, metal: 100, dollars: monetaryPolicy.constructionFees.workshop }, benefit: 'Wood, Metal and Oil output +25% per level' },
-  logistics: { name: 'Trade hub', stage: 4, maxLevel: 8, cost: { wood: 500, metal: 300, dollars: monetaryPolicy.constructionFees.logistics }, benefit: 'Collection routes shortened by two tiles per level' },
+  housing: { name: 'Residential quarter', stage: 0, maxLevel: maximumUpgradeLevel, cost: withDollarFee({ wood: 60, water: 20, metal: 10 }), benefit: 'Recruitment batch +25% per level' },
+  cistern: { name: 'Water reservoir', stage: 0, maxLevel: maximumUpgradeLevel, cost: withDollarFee({ wood: 80, metal: 30 }), benefit: 'One extra week of Water capacity per level' },
+  workshop: { name: 'Commercial workshop', stage: 2, maxLevel: maximumUpgradeLevel, cost: { wood: 200, metal: 100, dollars: monetaryPolicy.constructionFees.workshop }, benefit: 'Wood, Metal and Oil output +25% per level' },
+  logistics: { name: 'Trade hub', stage: 4, maxLevel: maximumUpgradeLevel, cost: { wood: 500, metal: 300, dollars: monetaryPolicy.constructionFees.logistics }, benefit: 'Collection routes shortened by two tiles per level' },
 } satisfies Record<string, { name: string; stage: number; maxLevel: number; cost: Cost; benefit: string }>;
 export type Construction = keyof typeof constructions;
 export const constructionKeys = Object.keys(constructions) as Construction[];

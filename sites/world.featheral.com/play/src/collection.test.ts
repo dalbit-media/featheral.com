@@ -17,10 +17,14 @@ test('direct collection exposes readiness and transport without changing the aut
   assert.equal(state.collection.fees.wood, 2);
 });
 test('collection feedback uses only the matching successful receipt, never estimated stock differences', () => {
-  for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
+  for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {
     assert.equal(collectionReceiptQuantity(`Collected 123 ${resource}. FTH$ transport paid.`, resource), 123);
+    assert.equal(collectionReceiptQuantity(`Collected 123 ${resource} from the map. No transport fee.`, resource), 123);
+  }
   for (const message of [undefined, 'Connection failed.', 'Collected 123 metal. FTH$ transport paid.',
     'Collected 0 wood. FTH$ transport paid.', 'Collected 1.5 wood. FTH$ transport paid.',
-    'Collected 9007199254740992 wood. FTH$ transport paid.'])
+    'Collected 9007199254740992 wood. FTH$ transport paid.',
+    'Collected 0 wood from the map. No transport fee.',
+    'Collected 1.5 wood from the map. No transport fee.'])
     assert.equal(collectionReceiptQuantity(message, 'wood'), null);
 });

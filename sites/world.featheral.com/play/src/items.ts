@@ -98,3 +98,6 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   }));
   return Object.keys(craftableItems[item].cost).every(resource => resource === 'dollars' || found.has(resource as Resource));
 }
+export function craftingCost(item: CraftableItem, quantity = 1): Cost {
+  return Object.fromEntries(Object.entries(craftableItems[item].cost).map(([resource, amount]) => [resource, amount * quantity]));
+}

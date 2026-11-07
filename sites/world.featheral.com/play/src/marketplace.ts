@@ -3,7 +3,7 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from './items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketBasePrice, marketPriceAvailable, marketQuantityLimit } from './market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketBasePrice, marketPriceAvailable, marketPriceFloor, marketQuantityLimit } from './market.ts';
 import type { MarketAsset, MarketCommand, MarketFill, MarketResponse, MarketSide } from './market.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -72,6 +72,10 @@ export class Marketplace {
       event.preventDefault();
       const quantity = accountingQuantity(this.asset, Number(funding.querySelector<HTMLInputElement>('[data-pool-quantity]')!.value));
       const dollars = Number(funding.querySelector<HTMLInputElement>('[data-pool-dollars]')!.value);
+      if (!Number.isSafeInteger(quantity) || quantity < 1 || !Number.isFinite(dollars) || dollars < quantity * marketPriceFloor(this.asset)) {
+        this.notify(translate('Pool funding must meet the resource price floor.', this.language), true);
+        return;
+      }
       void this.execute({ type: 'fund-pool', asset: this.asset, quantity, dollars });
     });
     localize(root);
@@ -170,7 +174,12 @@ export class Marketplace {
     input.setAttribute('aria-label', `${translate('Amount', this.language)} (${tradingUnit(this.asset, locale(this.language))})`);
     input.closest('label')!.firstChild!.textContent = `${translate('Amount', this.language)} (${tradingUnit(this.asset, locale(this.language))})`;
     const price = this.root.querySelector<HTMLInputElement>('[data-market-price]')!;
-    price.min = price.step = String(displayPrice(this.asset, .0001));
+    price.step = String(displayPrice(this.asset, .0001));
+    price.min = String(displayPrice(this.asset, marketPriceFloor(this.asset)));
+    price.title = `${translate('Minimum price', this.language)}: ${price.min} FTH$/${tradingUnit(this.asset, locale(this.language))}`;
+    const floorLabel = price.closest('label')!.querySelector('small') ?? document.createElement('small');
+    floorLabel.textContent = price.title;
+    price.closest('label')!.append(floorLabel);
     price.max = String(displayPrice(this.asset, 1000000));
     price.closest('label')!.firstChild!.textContent = `${translate('Price each', this.language)} · FTH$/${tradingUnit(this.asset, locale(this.language))}`;
     this.root.querySelector('.exchange-chart-card .exchange-section-title > span')!.textContent = `FTH$/${tradingUnit(this.asset, locale(this.language))} · UTC`;
@@ -298,7 +307,7 @@ export class Marketplace {
     const quotedAmount = this.fresh && market.quantity === this.quantity();
     this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span>Prices for this amount</span><strong><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.</small></div>`;
     this.root.querySelector('[data-market-orders]')!.innerHTML = this.table(['Item', 'Type', 'Price each', 'Completed / total', 'Status', 'Action'], market.orders.map(order =>
-      `<tr><td>${this.name(order.asset)}</td><td>${translate(order.side === 'buy' ? 'Buy' : 'Sell', this.language)}</td><td>${this.price(order.price, order.asset)}</td><td>${this.fmt(order.quantity - order.remaining, order.asset)} / ${this.fmt(order.quantity, order.asset)}</td><td>${translate(({ open: 'Waiting', filled: 'Done', cancelled: 'Cancelled' })[order.status], this.language)}</td><td>${order.status === 'open' ? `<button class="button" data-market-cancel="${order.id}" ${this.pending ? 'disabled' : ''}>Cancel</button>` : '—'}</td></tr>`).join(''), 'No offers yet.');
+      `<tr><td>${this.name(order.asset)}</td><td>${translate(order.side === 'buy' ? 'Buy' : 'Sell', this.language)}</td><td>${this.price(order.price, order.asset)}</td><td>${this.fmt(order.quantity - order.remaining, order.asset)} / ${this.fmt(order.quantity, order.asset)}</td><td>${translate(order.status === 'open' && order.price < marketPriceFloor(order.asset) ? 'Below floor — cancel for refund' : ({ open: 'Waiting', filled: 'Done', cancelled: 'Cancelled' })[order.status], this.language)}</td><td>${order.status === 'open' ? `<button class="button" data-market-cancel="${order.id}" ${this.pending ? 'disabled' : ''}>Cancel</button>` : '—'}</td></tr>`).join(''), 'No offers yet.');
     this.root.querySelector('[data-market-trades]')!.innerHTML = this.table(['Item', 'Type', 'Amount', 'FTH$', 'With'], market.trades.map(fill =>
       `<tr><td>${this.name(fill.asset)}</td><td>${translate(fill.side === 'buy' ? 'Buy' : 'Sell', this.language)}</td><td>${this.fmt(fill.quantity, fill.asset)}</td><td>${this.money(fill.dollars)}</td><td>${translate(fill.venue === 'players' ? 'Player' : 'Game shop', this.language)}</td></tr>`).join(''), 'No purchases or sales yet.');
     localize(this.root);

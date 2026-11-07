@@ -1,7 +1,7 @@
 import { canAfford, GameError, note, pay, radius } from '../src/engine.ts';
 import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
-import { craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
+import { craftingCost, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
 import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
 import { arrangementError, cellKey, legacySpaceCells, positionEntries, settlementEntityName, settlementPositions } from '../src/settlement-layout.ts';
@@ -22,18 +22,20 @@ export function inventory(account: Account): ItemInventory {
   account.game.visibilityRadius = account.inventory.equipped ? visibilityItems[account.inventory.equipped].radius : 4;
   return account.inventory;
 }
-export function craft(account: Account, item: CraftableItem): string {
+export function craft(account: Account, item: CraftableItem, quantity = 1): string {
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) throw new GameError('Invalid crafting quantity.');
   const bag = inventory(account), game = account.game;
   if (game.stage < 0) throw new GameError('Establish a settlement before crafting.');
-  if (inventoryUsed(bag) >= itemStorage[bag.storage].capacity) throw new GameError('Item inventory is full. Upgrade item storage first.');
+  if (inventoryUsed(bag) + quantity > itemStorage[bag.storage].capacity) throw new GameError('Item inventory is full. Upgrade item storage first.');
   if (!recipeDiscovered(game, item)) throw new GameError('Explore the ingredient resources before crafting this item.');
   const recipe = craftableItems[item];
-  if (!canAfford(game, recipe.cost)) throw new GameError('Not enough resources to craft this item.');
-  pay(game, recipe.cost);
-  bag.items.push(item);
+  const cost = craftingCost(item, quantity);
+  if (!canAfford(game, cost)) throw new GameError('Not enough resources to craft this item.');
+  pay(game, cost);
+  for (let index = 0; index < quantity; index++) bag.items.push(item);
   if (isVisibilityItem(item) && visibilityItems[item].radius > radius(game)) bag.equipped = item;
   inventory(account);
-  return note(game, `Crafted ${recipe.name}. It is now in your item inventory.`);
+  return note(game, quantity === 1 ? `Crafted ${recipe.name}. It is now in your item inventory.` : `Crafted ${quantity} × ${recipe.name}.`);
 }
 export function decorate(account: Account, slot: DecorationSlot, item: DecorationItem | null): string {
   const bag = inventory(account), placements = bag.placements ??= {};

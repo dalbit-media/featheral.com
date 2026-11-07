@@ -1,5 +1,6 @@
 import { prices, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import { dollarsScale } from './dollars.ts';
+import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
 import type { Expedition, ResourceAccess } from './api-types.ts';
 import { dailyWaterPerResident, waterRequirement } from './upkeep.ts';
@@ -123,7 +124,7 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
     goals.wood += waterFacilities[nextFacility].cost.wood;
     goals.metal += waterFacilities[nextFacility].cost.metal;
   }
-  if (warehouse < 10) {
+  if (warehouse < maximumUpgradeLevel) {
     goals.wood += 80 * (warehouse + 1);
     goals.metal += 20 * (warehouse + 1);
   }

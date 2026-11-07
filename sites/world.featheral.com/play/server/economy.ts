@@ -11,7 +11,7 @@ import { fthgScale } from '../src/fthg.ts';
 import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, settlementConsumptionForDays, settlementUpkeep, suppliedWorkWeeks, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
 import { isWaterFacility } from '../src/water-facilities.ts';
 import { isIncomeFacility, weeklyIncome } from '../src/income.ts';
-import { warehouseCost } from '../src/costs.ts';
+import { maximumUpgradeLevel, warehouseCost } from '../src/costs.ts';
 import { dollarsScale } from '../src/dollars.ts';
 import { constructionCost, constructionLevel, constructions, isConstruction } from '../src/constructions.ts';
 import { collectionItemDetails, isCollectionItem } from '../src/collection.ts';
@@ -280,11 +280,11 @@ function beginCycle(account: Account, now: number, access = resourceAccess(accou
     work.crews[resource] = { workers, readyAt: work.cycleAt, weeklyYield: Math.min(workers * site.perWorker, room), weeklyMetalCost: 0, weeklyDollarsCost, payOnPickup: true };
   }
 }
-export function collectResource(account: Account, resource: Resource): number {
+export function collectResource(account: Account, resource: Resource, manual = false): number {
   const quantity = Math.floor(account.pending[resource] / minute), fee = account.pickupFees?.[resource] ?? 0;
   if (quantity < 1) throw new ApiError(409, 'No completed resources to collect.');
   if (!Number.isSafeInteger(account.game.stock[resource] + quantity)) throw new ApiError(409, 'Account limit reached.');
-  pay(account.game, { dollars: fee / dollarsScale });
+  if (!manual) pay(account.game, { dollars: fee / dollarsScale });
   account.game.stock[resource] += quantity;
   account.pending[resource] -= quantity * minute;
   if (account.pickupFees) account.pickupFees[resource] = 0;
@@ -520,7 +520,7 @@ export function snapshot(account: Account): Snapshot {
       exploration: { ...account.activityAutomation.exploration, reason: activityReason(account, 'exploration') },
       attraction: { ...account.activityAutomation.attraction, reason: activityReason(account, 'attraction') },
     } } : {}),
-    warehouse: account.warehouse, warehouseCost: account.warehouse >= 10 ? null : warehouseCost(account.warehouse + 1),
+    warehouse: account.warehouse, warehouseCost: account.warehouse >= maximumUpgradeLevel ? null : warehouseCost(account.warehouse + 1),
     revision: account.revision, serverTime: account.updatedAt, environment: environmentAt(account.updatedAt),
     inviteReadyAt: account.inviteReadyAt, recruitment: structuredClone(account.recruitment ?? null),
     waterUpkeep: account.waterUpkeep ? { ...account.waterUpkeep, paused: water.shortage > 0, dailyConsumption: water.required, weeklyConsumption: waterRequirement(account.game.population, climateTime(account, waterTime), !physicalAt(account, waterTime)),
@@ -543,7 +543,7 @@ export function parseCommand(value: unknown): Command {
     move: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: ['action'],
     upgrade: [], invite: [], home: [], gather: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
     assign: ['resource', 'workers'], automatic: ['enabled'],
-    craft: ['item'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
+    craft: Object.hasOwn(c, 'quantity') ? ['item', 'quantity'] : ['item'], 'map-collect': ['x', 'y'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
     arrange: ['entity', 'position'],
     'activate-collection': ['item'], 'collect-sell': ['resource', 'quantity', 'minimumDollars'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
@@ -555,11 +555,11 @@ export function parseCommand(value: unknown): Command {
     const position = object(c.position);
     if (Object.keys(position).sort().join() !== 'x,y' || ![position.x, position.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000)) throw new ApiError(400, 'Invalid command values.');
   }
-  if ((c.type === 'move' && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
+  if (((c.type === 'move' || c.type === 'map-collect') && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
     || (c.type === 'trade' && (!oneOf(c.resource, resources) || !oneOf(c.direction, ['buy', 'sell']) || typeof c.amount !== 'number' || !Number.isSafeInteger(c.amount) || c.amount < 1 || c.amount > 10000))
     || (c.type === 'build' && !oneOf(c.kind, ['bank', 'townhall']) && !isWaterFacility(c.kind) && !isIncomeFacility(c.kind))
     || (c.type === 'construction' && !isConstruction(c.kind))
-    || (c.type === 'craft' && !isCraftableItem(c.item))
+    || (c.type === 'craft' && (!isCraftableItem(c.item) || (Object.hasOwn(c, 'quantity') && (typeof c.quantity !== 'number' || !Number.isSafeInteger(c.quantity) || c.quantity < 1 || c.quantity > 100))))
     || (c.type === 'equip' && c.item !== null && !isVisibilityItem(c.item))
     || (c.type === 'decorate' && (!isDecorationSlot(c.slot) || (c.item !== null && !isDecorationItem(c.item))))
     || (c.type === 'arrange' && !isSettlementEntity(c.entity))
@@ -648,7 +648,7 @@ export function execute(account: Account, command: Command, realTime = account.u
         ...game.incomeFacilities, [command.kind === 'workshop' ? 'workshop' : 'trade-hub']: true };
       return note(game, `${facility.name} upgraded to level ${level}. Benefits apply to new activity.`);
     }
-    case 'craft': return craft(account, command.item);
+    case 'craft': return craft(account, command.item, command.quantity);
     case 'equip': return equip(account, command.item);
     case 'decorate': return decorate(account, command.slot, command.item);
     case 'arrange': return arrange(account, command.entity, command.position);
@@ -722,6 +722,15 @@ export function execute(account: Account, command: Command, realTime = account.u
       pay(game, cost);
       account.warehouse++;
       return note(game, `Warehouse upgraded to level ${account.warehouse}.`);
+    }
+    case 'map-collect': {
+      const resource = terrainResources[terrainAt(command.x, command.y, game.seed)];
+      if (game.stage < 0 || !game.explored.includes(`${command.x},${command.y}`) || !resource
+        || !resourceAccess(game)[resource].available) throw new ApiError(409, 'Discover an accessible resource tile before collecting.');
+      if (account.lastClaimAt && realTime - account.lastClaimAt < claimCooldownMs) throw new ApiError(429, 'Wait half a second between claims.');
+      const quantity = collectResource(account, resource, true);
+      account.lastClaimAt = realTime;
+      return note(game, `Collected ${quantity} ${resource} from the map. No transport fee.`);
     }
     case 'claim': {
       if (command.resource) {

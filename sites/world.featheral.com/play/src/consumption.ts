@@ -1,7 +1,7 @@
 import { buildingCosts, diplomacyCosts, recruitmentAmount, stages } from './engine.ts';
 import type { Cost, Resource } from './engine.ts';
 import type { Command, Snapshot } from './api-types.ts';
-import { craftableItems, itemName, itemStorage } from './items.ts';
+import { craftingCost, itemName, itemStorage } from './items.ts';
 import { explorationQuote } from './workforce.ts';
 import { activityItemDetails, activityName } from './automation.ts';
 import { isWaterFacility, waterFacilities } from './water-facilities.ts';
@@ -90,7 +90,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const next = itemStorage[state.inventory.storage + 1];
       return next ? quote('Expand storage', next.name, { metal: next.metal, dollars: next.dollars }) : null;
     }
-    case 'craft': return quote('Craft', itemName(command.item), craftableItems[command.item].cost);
+    case 'craft': return quote('Craft', `${command.quantity ?? 1} × ${itemName(command.item)}`, craftingCost(command.item, command.quantity));
     case 'diplomacy':
       if (command.action === 'gift') return quote('Send goodwill shipment', 'Evergreen Union', diplomacyCosts.gift);
       if (command.action === 'form') return quote('Found federation', 'Verdant Federation', diplomacyCosts.form);

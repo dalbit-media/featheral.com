@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { accrue, apply, migrateEconomy, snapshot } from './economy.ts';
+import { accrue, apply, execute, migrateEconomy, snapshot } from './economy.ts';
 import { createFundedFixtureAccount as createAccount } from './test-support.ts';
 import type { Account } from './economy.ts';
 import type { Command } from '../src/api-types.ts';
@@ -935,4 +935,24 @@ test('reject forged costs, tile assignments, timestamps, invalid quantities and 
   ]) assert.throws(() => apply(account, { id: randomUUID(), revision: account.revision, command }, start + 1000), /Invalid command/);
   assert.throws(() => apply(account, envelope(account, { type: 'gather' }), start + 1000), /resident crews/);
   assert.equal(terrainDetails[terrainAt(5, 0, account.game.seed)].weeks >= 1, true);
+});
+test('level 99 warehouse and construction upgrades stop exactly at the cap', () => {
+  const account = createAccount(start);
+  account.game.stage = 8;
+  account.game.home = { ...account.game.position };
+  account.game.stock = { wood: 10000000, water: 10000000, metal: 10000000, oil: 0 };
+  account.game.dollars = 10000000 * 10000;
+  account.warehouse = 98;
+  execute(account, { type: 'warehouse' });
+  assert.equal(account.warehouse, 99);
+  assert.equal(snapshot(account).warehouseCost, null);
+  assert.throws(() => execute(account, { type: 'warehouse' }), /maximum level/);
+  for (const kind of ['housing', 'cistern', 'workshop', 'logistics'] as const) {
+    account.game.constructionLevels = { ...account.game.constructionLevels, [kind]: 98 };
+    execute(account, { type: 'construction', kind });
+    assert.equal(account.game.constructionLevels[kind], 99);
+    const saved = structuredClone(account);
+    assert.throws(() => execute(account, { type: 'construction', kind }), /maximum level/);
+    assert.deepEqual(account, saved);
+  }
 });

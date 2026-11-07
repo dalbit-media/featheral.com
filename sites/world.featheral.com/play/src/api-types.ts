@@ -15,7 +15,8 @@ export type Command =
   | { type: 'trade'; resource: Resource; direction: 'buy' | 'sell'; amount: number }
   | { type: 'build'; kind: 'bank' | 'townhall' | WaterFacility | IncomeFacility }
   | { type: 'construction'; kind: Construction }
-  | { type: 'craft'; item: CraftableItem }
+  | { type: 'craft'; item: CraftableItem; quantity?: number }
+  | { type: 'map-collect'; x: number; y: number }
   | { type: 'equip'; item: VisibilityItem | null }
   | { type: 'decorate'; slot: DecorationSlot; item: DecorationItem | null }
   | { type: 'arrange'; entity: SettlementEntity; position: GridPosition | null }

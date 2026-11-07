@@ -9,10 +9,37 @@ import { radius, terrainAt, terrainDetails } from '../src/engine.ts';
 import type { Cost } from '../src/engine.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { decorationItems, inventoryPageSize, itemStorage, visibilityItems } from '../src/items.ts';
-import { collectFinds, findCollectible, inventory } from './inventory.ts';
+import { craft, collectFinds, findCollectible, inventory } from './inventory.ts';
+import { craftingCost } from '../src/items.ts';
+import { gameConsumption } from '../src/consumption.ts';
 import { cellKey, legacySpaceCells, settlementPositions } from '../src/settlement-layout.ts';
 
 const start = 1000000;
+test('batch crafting is atomic, totals confirmation costs and counts reserved slots', () => {
+  const account = settled(), bag = inventory(account);
+  account.game.stock = { wood: 10000, water: 10000, metal: 10000, oil: 10000 };
+  for (let x = -10; x <= 10; x++) for (let y = -10; y <= 10; y++) account.game.explored.push(`${x},${y}`);
+  bag.items = []; bag.marketReserved = [];
+  const cost = craftingCost('torch', 3);
+  const before = structuredClone(account.game);
+  const quote = gameConsumption(snapshot(account), { type: 'craft', item: 'torch', quantity: 3 })!;
+  assert.deepEqual(quote.costs, Object.entries(cost).map(([asset, amount]) => ({ asset, amount })));
+  craft(account, 'torch', 3);
+  assert.equal(bag.items.length, 3);
+  assert.equal(account.game.stock.wood, before.stock.wood - (cost.wood ?? 0));
+  assert.equal(account.game.dollars, before.dollars - (cost.dollars ?? 0) * 10000);
+  const saved = structuredClone(account);
+  assert.throws(() => craft(account, 'torch', 100), /inventory is full/);
+  assert.deepEqual(account, saved);
+  bag.marketReserved = Array.from({ length: itemStorage[bag.storage].capacity - bag.items.length }, () => 'torch');
+  assert.throws(() => craft(account, 'torch'), /inventory is full/);
+  bag.marketReserved = [];
+  account.game.stock.wood = 0;
+  const unfunded = structuredClone(account);
+  assert.throws(() => craft(account, 'torch', 3), /Not enough/);
+  assert.deepEqual(account, unfunded);
+  for (const quantity of [0, -1, .5, 101, Infinity]) assert.throws(() => craft(account, 'torch', quantity), /Invalid crafting quantity/);
+});
 const request = (account: Account, command: Command) => ({ id: randomUUID(), revision: account.revision, command });
 function act(account: Account, command: Command) {
   return apply(account, request(account, command), account.updatedAt + 1000);

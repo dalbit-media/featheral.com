@@ -153,3 +153,16 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
   #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-header-height:80px}
   #app .topbar{grid-template-rows:minmax(0,1fr)}
 }
+.upkeep-meters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 24px; gap: 4px; height: 104px; align-items: center; }
+.upkeep-meter { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; color: inherit; text-decoration: none; font-size: 10px; }
+.upkeep-meter > svg { width: 16px; height: 16px; }
+.upkeep-meter strong { font-size: 10px; white-space: nowrap; }
+.upkeep-meter.shortage { color: var(--danger, #e3a26d); }
+.vertical-consumption { display: flex; width: 10px; height: 40px; align-items: center; justify-content: center; }
+#app .vertical-consumption .completion-meter { display: block; flex: none; width: 40px; min-width: 40px; margin: 0; gap: 0; transform: rotate(-90deg); }
+#app .vertical-consumption .completion-caption { display: none; }
+.vertical-consumption progress { display: block; width: 40px; height: 8px; }
+.upkeep-manage svg { width: 18px; height: 18px; }
+.construction-card { grid-column: 1 / -1; }
+.crafting-quantity { display: flex; align-items: center; gap: 12px; }
+.crafting-quantity input { width: 88px; padding: 8px; }

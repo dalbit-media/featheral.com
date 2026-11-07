@@ -1,4 +1,21 @@
 export const korean: Record<string, string> = {
+  'Batch': '제작 수량',
+  'Maximum craftable': '최대 제작 가능',
+  'Below floor — cancel for refund': '최저가 미만 — 취소하면 반환됩니다',
+  'game day': '게임 하루',
+  'Tap Collect on a discovered resource tile to pick up completed crew output for free, even at zero FTH$. Header collection and automatic collection still pay transport. Recruitment, exploration, crafting and sales require confirmation.': '발견한 자원 타일의 받기를 누르면 FTH$가 0이어도 완료된 생산물을 무료로 수령할 수 있습니다. 헤더 수령과 자동 수령에는 운송비가 필요합니다. 모집, 탐험, 제작 및 판매는 확인 후 실행됩니다.',
+  'Resource storage scales with tier requirements and warehouse level. Warehouse, housing, reservoir, workshop and trade hub upgrades reach level 99 with linear next-level costs. Housing adds 25% recruitment, reservoirs add a week of Water capacity, workshops add 25% raw output and trade hubs shorten routes by two tiles per level. Item storage stays separate.': '자원 저장량은 정착지 등급과 창고 레벨에 따라 늘어납니다. 창고, 주거 구역, 저수조, 작업장 및 교역 허브는 99레벨까지 업그레이드하며 비용은 다음 레벨에 비례합니다. 레벨마다 주거 구역은 모집 인원 25%, 저수조는 일주일 물 저장량, 작업장은 생산량 25%를 추가하고 교역 허브는 운송 경로를 두 칸 줄입니다. 아이템 저장소는 별도입니다.',
+  'Choose a crafting quantity from 1 to 100 and filter affordable recipes. Cards show total batch cost and the material/storage maximum. Confirmation spends the full cost atomically; unaffordable batches spend nothing.': '1~100개 제작 수량을 선택하고 제작 가능한 레시피를 필터링하세요. 카드에 전체 비용과 자원·저장소 기준 최대 수량이 표시됩니다. 확인 후 전체 비용을 한 번에 정산하며 제작 불가 시 소비하지 않습니다.',
+  'Fixed game-policy minimum prices are FTH$0.05/kg Wood, FTH$0.001/L Water, FTH$100/t Metal and FTH$30/bbl Oil. These are low-end-inspired references, not live commodity quotes. Below-floor liquidity cannot trade; no currency is created to support a price.': '게임 정책 최저 가격은 목재 FTH$0.05/kg, 물 FTH$0.001/L, 금속 FTH$100/t, 석유 FTH$30/bbl입니다. 저가 벌크 자원에서 착안한 기준이며 실시간 시세가 아닙니다. 최저가 미만 유동성은 거래할 수 없으며 가격 유지를 위해 통화를 발행하지 않습니다.',
+  'Affordable': '제작 가능',
+  'Minimum price': '최저 가격',
+  'Next level': '다음 레벨',
+  'Invalid crafting quantity.': '제작 수량은 1~100 사이의 정수여야 합니다.',
+  'Total batch cost shown below. Nothing is spent until you confirm.': '아래에 전체 제작 비용이 표시됩니다. 확인 전에는 자원이 소비되지 않습니다.',
+  'No affordable recipes for this quantity.': '이 수량으로 제작 가능한 레시피가 없습니다.',
+  'Pool funding must meet the resource price floor.': '유동성 공급은 자원 최저 가격을 충족해야 합니다.',
+  'Price is below the resource price floor.': '자원 최저 가격보다 낮습니다.',
+  'Discover an accessible resource tile before collecting.': '수령하기 전에 접근 가능한 자원 타일을 발견하세요.',
   'Heating and repairs. Every day.': '매일 난방과 수리.',
   'Reserve Wood for heating and Metal for settlement repairs.': '난방용 목재와 정착지 수리용 금속을 비축하세요.',
   'Reference demand is 2 kg of Wood and 0.2 kg of Metal per resident per game day. Season, temperature and weather change the daily average. Cold and wet weather increases heating; storms and extreme temperatures increase repairs.': '기준 수요는 주민 1인당 게임 하루 목재 2 kg와 금속 0.2 kg입니다. 계절, 기온 및 날씨가 일평균 수요를 바꿉니다. 춥고 습한 날씨는 난방 수요를, 폭풍과 극한 기온은 수리 수요를 늘립니다.',
@@ -1697,6 +1714,10 @@ export const korean: Record<string, string> = {
 };
 
 export const koreanPatterns: readonly (readonly [string, string])[] = [
+  ['{item} collected: {amount}. No transport fee.', '{item} 수령: {amount}. 운송비가 없습니다.'],
+  ['Collected {count} {resource} from the map. No transport fee.', '지도에서 {resource} {count}개를 받았습니다. 운송비가 없습니다.'],
+  ['Crafted {count} × {item}.', '{item} {count}개 제작 완료.'],
+  ['{count} × {item}', '{item} {count}개'],
   ['{resource} collected: {amount}. FTH$ transport paid.', '{resource} {amount} 수거 완료. FTH$ 운송비를 정산했습니다.'],
   ['Enter an amount from {min} to {max} {unit} in steps of {step}.', '{min}~{max} {unit} 범위에서 {step} 단위로 입력하세요.'],
   ['{weeks}w', '{weeks}주'],

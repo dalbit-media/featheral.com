@@ -148,7 +148,7 @@ test('all construction levels pay their exact linear material and FTH$ costs, re
   for (const kind of Object.keys(constructions) as (keyof typeof constructions)[]) {
     const account = colony();
     account.game.stage = 6;
-    account.game.stock = { wood: 1000000, water: 1000000, metal: 1000000, oil: 1000000 };
+    account.game.stock = { wood: 10000000, water: 10000000, metal: 10000000, oil: 10000000 };
     account.game.dollars = 10000000 * dollarsScale;
     for (let level = 1; level <= constructions[kind].maxLevel; level++) {
       const cost = constructionCost(account.game, kind)!, before = structuredClone(account);

@@ -15,6 +15,11 @@ export function marketPriceAvailable(price: number): boolean {
   return price > 0 && price < Number.MAX_SAFE_INTEGER / dollarsScale;
 }
 export const marketResources: MarketResource[] = ['wood', 'water', 'metal', 'oil'];
+// Fixed game-policy references per accounting lot, not live commodity quotes.
+export const resourcePriceFloors: Readonly<Record<Resource, number>> = { wood: 2.5, water: .01, metal: 1, oil: 30 };
+export function marketPriceFloor(asset: MarketAsset): number {
+  return isMarketResource(asset) ? resourcePriceFloors[asset] : .0001;
+}
 export const marketAssets: MarketAsset[] = [...marketResources, ...craftableKeys, ...automationItems,
   ...(Object.keys(terrainDetails) as Terrain[]).map(terrain => `relic-${terrain}` as const)];
 export function isMarketAsset(value: unknown): value is MarketAsset {
@@ -29,7 +34,7 @@ export function marketAssetName(asset: MarketAsset): string {
   return isMarketResource(asset) ? ({ wood: 'Wood', water: 'Water', metal: 'Metal', oil: 'Oil' })[asset] : itemName(asset);
 }
 export function marketBasePrice(asset: MarketAsset): number {
-  if (isMarketResource(asset)) return prices[asset] * 2;
+  if (isMarketResource(asset)) return Math.max(prices[asset] * 2, marketPriceFloor(asset));
   if (isCollectionItem(asset)) return monetaryPolicy.collectibleBase + collectionItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
   if (isActivityItem(asset)) return monetaryPolicy.collectibleBase + activityItemDetails(asset).weeks * monetaryPolicy.collectiblePerWeek;
   if (!isCraftableItem(asset)) return monetaryPolicy.collectibleBase + terrainDetails[asset.slice(6) as Terrain].weeks * monetaryPolicy.collectiblePerWeek;

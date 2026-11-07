@@ -1,5 +1,5 @@
-import { hash, radius, terrainAt } from './engine.ts';
-import type { Game, Terrain } from './engine.ts';
+import { hash, radius, terrainAt, terrainResources } from './engine.ts';
+import type { Game, Stock, Terrain } from './engine.ts';
 import type { Environment } from './environment.ts';
 import { drawDiamond, drawEnvironment, drawHouse, drawTree, explorationFringe, project, terrainColors as colors, tileColor, tileHeight, tileWidth, unproject } from './map-art.ts';
 
@@ -26,15 +26,20 @@ export class World {
   private game: () => Game;
   private select: (x: number, y: number) => void;
   private environment: () => Environment;
+  private pending: () => Stock;
+  private collectLabel: () => string;
   constructor(
     canvas: HTMLCanvasElement,
     minimap: HTMLCanvasElement,
     game: () => Game,
     select: (x: number, y: number) => void,
     environment: () => Environment,
+    pending: () => Stock = () => ({ wood: 0, water: 0, metal: 0, oil: 0 }),
+    collectLabel: () => string = () => 'Collect',
   ) {
     this.canvas = canvas; this.minimap = minimap; this.game = game; this.select = select;
     this.environment = environment;
+    this.pending = pending; this.collectLabel = collectLabel;
     const ctx = canvas.getContext('2d'), mini = minimap.getContext('2d'), fog = this.fogCanvas.getContext('2d');
     if (!ctx || !mini || !fog) throw new Error('Your browser does not support the canvas renderer.');
     this.ctx = ctx; this.mini = mini; this.fog = fog;
@@ -107,7 +112,8 @@ export class World {
       this.exploredRef = g.explored;
     }
     const environment = this.environment();
-    const renderKey = `${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${g.stage}:${radius(g)}:${this.known.size}:${environment.season}:${environment.phase}:${environment.weather}:${environment.daylight}`;
+    const pending = this.pending();
+    const renderKey = `${this.collectLabel()}:${Object.values(pending).map(value => value >= 1).join()}:${g.bank}:${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${g.stage}:${radius(g)}:${this.known.size}:${environment.season}:${environment.phase}:${environment.weather}:${environment.daylight}`;
     if (renderKey === this.renderKey) return;
     this.renderKey = renderKey;
     c.clearRect(0, 0, this.width, this.height);
@@ -196,6 +202,13 @@ export class World {
     c.restore();
     this.drawFog(tiles);
     c.save(); c.translate(this.width / 2, this.height / 2); c.scale(this.zoom, this.zoom);
+    for (const tile of tiles) {
+      const resource = terrainResources[tile.terrain];
+      if (!tile.visible || g.stage < 0 || !resource || pending[resource] < 1 || (resource === 'oil' && !g.bank)) continue;
+      c.fillStyle = '#d7eab4'; c.fillRect(tile.sx - 18, tile.sy - 7, 36, 14);
+      c.fillStyle = '#243a2c'; c.font = 'bold 9px sans-serif'; c.textAlign = 'center';
+      c.fillText(this.collectLabel(), tile.sx, tile.sy + 3);
+    }
     const { x: px, y: py } = project(g.position.x - this.camera.x, g.position.y - this.camera.y);
     c.strokeStyle = '#d7eab4'; c.lineWidth = 1.5;
     c.beginPath(); c.ellipse(px, py, 26, 13, 0, 0, Math.PI * 2); c.stroke();

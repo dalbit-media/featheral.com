@@ -11,6 +11,7 @@ import { collectionDurations, collectionItemDetails, collectionItems, isCollecti
 import { dollarsScale } from '../src/dollars.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { emptyAllocation, resourceAccess, resourceCapacity } from '../src/workforce.ts';
+import { terrainAt, terrainResources } from '../src/engine.ts';
 import { marketAssets } from '../src/market.ts';
 import type { Account } from './economy.ts';
 import type { Resource } from '../src/engine.ts';
@@ -21,6 +22,63 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const start = 1000000;
+test('map pickup collects completed output at zero funds, preserves currency and is retry-safe', () => {
+  const account = colony();
+  const tile = account.game.explored.find(key => {
+    const [x, y] = key.split(',').map(Number);
+    return terrainResources[terrainAt(x, y, account.game.seed)] === 'wood';
+  })!;
+  const [x, y] = tile.split(',').map(Number);
+  account.game.dollars = 0;
+  account.pending.wood = 7 * 60000;
+  account.pickupFees!.wood = 3 * dollarsScale;
+  account.workforce!.crews = {};
+  const body = { id: randomUUID(), revision: account.revision, command: { type: 'map-collect', x, y } };
+  const before = account.game.stock.wood;
+  const result = apply(account, body, account.updatedAt, start + 2000);
+  assert.equal(account.game.stock.wood, before + 7);
+  assert.equal(account.game.dollars, 0);
+  assert.equal(account.pending.wood, 0);
+  assert.equal(account.pickupFees!.wood, 0);
+  assert.deepEqual(apply(account, body, account.updatedAt, start + 2000), result);
+  assert.equal(account.game.stock.wood, before + 7);
+  assert.throws(() => execute(account, { type: 'map-collect', x, y }, start + 2100), /half a second/);
+  assert.throws(() => execute(account, { type: 'map-collect', x, y }, start + 3000), /No completed/);
+});
+test('map pickup rejects undiscovered tiles and invalid coordinate commands without clearing output', () => {
+  const account = colony();
+  account.pending.wood = 60000;
+  const before = structuredClone(account);
+  assert.throws(() => execute(account, { type: 'map-collect', x: 90000, y: 90000 }), /Discover/);
+  assert.deepEqual(account, before);
+  assert.throws(() => apply(account, { id: randomUUID(), revision: account.revision, command: { type: 'map-collect', x: .5, y: 0 } }, account.updatedAt), /Invalid command/);
+  assert.deepEqual(account, before);
+});
+test('map pickup handles all resource types but keeps the Oil bank unlock', () => {
+  const account = colony();
+  account.game.dollars = 0;
+  for (let x = -10; x <= 10; x++) for (let y = -10; y <= 10; y++) account.game.explored.push(`${x},${y}`);
+  for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {
+    const tile = account.game.explored.find(key => {
+      const [x, y] = key.split(',').map(Number);
+      return terrainResources[terrainAt(x, y, account.game.seed)] === resource;
+    })!;
+    const [x, y] = tile.split(',').map(Number);
+    account.pending[resource] = 5 * 60000; account.pickupFees![resource] = dollarsScale;
+    account.lastClaimAt = 0;
+    const before = account.game.stock[resource];
+    if (resource === 'oil') {
+      account.game.bank = false;
+      assert.throws(() => execute(account, { type: 'map-collect', x, y }, start + 5000), /Discover/);
+      assert.equal(account.pending[resource], 5 * 60000);
+      account.game.bank = true;
+    }
+    execute(account, { type: 'map-collect', x, y }, start + 5000);
+    assert.equal(account.game.stock[resource], before + 5);
+    assert.equal(account.game.dollars, 0);
+    assert.equal(account.pickupFees![resource], 0);
+  }
+});
 function colony(): Account {
   const account = createAccount(start);
   account.game.seed = 1542;

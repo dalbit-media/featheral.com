@@ -27,7 +27,7 @@ export function collectionClaimReason(state: Snapshot, resource: Resource): stri
   return null;
 }
 export function collectionReceiptQuantity(message: string | undefined, resource: Resource): number | null {
-  const receipt = message?.match(/^Collected (\d+) (wood|water|metal|oil)\. FTH\$ transport paid\.$/);
+  const receipt = message?.match(/^Collected (\d+) (wood|water|metal|oil)(?:\. FTH\$ transport paid\.| from the map\. No transport fee\.)$/);
   if (!receipt || receipt[2] !== resource) return null;
   const quantity = Number(receipt[1]);
   return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : null;

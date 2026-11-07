@@ -34,6 +34,28 @@ high-contrast **Collect** badge and pending quantity; existing pickup fees,
 disabled-state explanations and server authorization are unchanged. Header
 buttons are borderless, retaining keyboard focus outlines.
 
+The Explore sidebar uses one fixed-height row of three icon-based vertical
+consumption meters for Water, Wood heating and Metal repair. Hover/focus exposes
+the daily amount and shortage reason; each meter links directly to buying that
+resource. Detailed demand remains in the settlement production panel.
+
+Completed crew output can be collected **free from discovered resource tiles on
+the exploration map**, including at zero FTH$. Collect markers appear only when
+that resource has completed output (Oil still requires the bank). Map pickup
+clears the corresponding transport bill once; it never creates new raw output or
+currency. Paid header pickup and paid automatic transport remain unchanged.
+
+Resource warehouse, housing, reservoir, workshop and trade hub upgrades reach
+**level 99**, with linear next-level costs. Compact cards show current/max level,
+next level, benefit and total upgrade cost. One-time water facilities, bank and
+town hall retain their existing unlock behavior.
+
+Crafting supports atomic batches of **1–100 copies**, limited by owned resources
+and free item slots (including market reservations). Quantity selection updates
+the full recipe cost, affordable filter and maximum craftable count; confirmation
+uses the same total-cost helper as the server. Invalid/unaffordable batches spend
+nothing. Existing single-item commands remain valid.
+
 - `/about/` is the search-readable landing page with optional live public totals. World `/about/` serves the same landing page; `/about/` remains canonical. It fetches anonymous `/api/stats` without cookies, never creates a session, and remains readable if the API is unavailable.
 - `/` opens the simulator; all Start/Play calls to action go there and resume the same browser session.
 - `/settlement/` uses the exploration map's shared isometric projection, tile palette, trees, house artwork and weather renderer. Its 21-by-21 local parcel grows through all nine tiers, including built banks and town halls. The six-action dock opens residents, production, inventory, crafting, Layout and buildings in focused panels (bottom sheets on smaller screens). Click buildings to manage them. In Layout, drag buildings or owned decorations to empty land cells, or choose Move on map and tap a destination. Coordinate inputs provide precise and keyboard-accessible placement; arrow keys and Enter also select grid cells. Pan by dragging empty ground and zoom with the wheel or buttons. Moves cost nothing and change no gameplay effects. Buildings cannot be demolished or duplicated; decorations can return to inventory without losing their item slot. Occupied cells, water and out-of-bounds positions are rejected by both client and authoritative API. Positions persist across reloads, retries and restarts; legacy six-space decorations migrate without losing items or paid work. New tier buildings find empty cells without displacing custom layouts. The parcel is cosmetic local space, not newly revealed exploration territory. The canvas and camera survive task changes and server refreshes alongside crew drafts, filters, disclosures and panel scroll. Direct `#inventory`, `#crafting`, `#management` and task links, sessions and language preferences remain supported.
@@ -171,6 +193,28 @@ The standalone `/market/` exchange has **53 markets**: four raw resources, ten c
 Exploration and recruitment permits last 1, 4 or 12 game weeks, like collection permits. Activate from inventory or Population → Allocation & automation; activation consumes one copy and stacks its duration. Auto-exploration keeps one team travelling and waits for all existing manual teams to return. Auto-recruitment starts the next paid batch after the previous arrival. Both use normal FTH$ fees, Water requirements and full-week deadlines; recruitment includes housing bonuses and their cost. Blocked activity exposes its reason and retries once per game day. Pausing or expiry prevents new jobs, never cancels paid jobs, and does not stop the permit clock. Offline settlement follows the same scheduled events as frequent polling.
 
 Player limit orders use price-time priority and cannot match themselves. Constant-product pools provide additional liquidity with a 1% spread per side. Exact BigInt arithmetic rounds buys up and sells down to 0.0001 FTH$. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and require permanent donations of existing funds and owned assets. The opt-in isolated Gold reserve prototype can seed each eligible market once, up to 10,000 accounting lots at its genesis-pinned base price. Metal's FTH$200/t reference is not a peg.
+
+All new raw-resource offers and executions have fixed **game-policy** minimum
+prices inspired by conservative low-end bulk commodity values, not current
+quotes, guaranteed real-dollar values, or historical record lows:
+
+| Resource | Reference basis | Minimum per accounting lot | Displayed minimum |
+| --- | --- | --- | --- |
+| Wood | 50 / metric tonne | FTH$2.50 / 50 kg | FTH$0.05 / kg |
+| Water | 1 / cubic metre | FTH$0.01 / 10 L | FTH$0.001 / L |
+| Metal | 100 / metric tonne (scrap-like reference) | FTH$1 / 10 kg | FTH$100 / t |
+| Oil | 30 / barrel | FTH$30 / bbl | FTH$30 / bbl |
+
+These deliberately rounded design references are not a live feed; commodity
+history and units can be compared with the [EIA petroleum price series](https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm)
+and [IMF commodity data](https://www.imf.org/en/Research/commodity-prices).
+Floors apply to both order sides, maker matching, pool execution, collection
+sales and half-sales. Below-floor legacy orders remain visible to their owners
+for cancellation/refund but are excluded from matching and public depth. Actual
+historical fills remain unchanged. An under-floor pool cannot pay a fictitious
+floor price; its unavailable side is explicitly shown as having no quote.
+Donations must meet the floor individually and for the resulting reserve ratio.
+No reserves, escrow or balances are repriced, and no currency is issued.
 
 Buy orders escrow FTH$ and sell orders escrow owned assets. Partial fills retain unfilled escrow; cancellation returns it. Item bids and asks reserve inventory slots. The limit is 50 open orders per session; orders expire with the seven-day session. Raw quantities are 1–10,000 accounting lots with the physical increments below. Items use whole pieces; collectibles use one. Limit prices are FTH$0.0001–1,000,000 per accounting lot with four decimals, converted to physical-unit display prices. Charts show the latest 120 real executions, never fabricated history. Quotes refresh every five seconds. SQLite persists both accounts, escrow, reserves, trades and idempotent receipts atomically.
 

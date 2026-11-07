@@ -43,6 +43,7 @@ import { activityKinds, activityName, isActivityItem, isActivityKind } from './a
 import type { ActivityKind } from './automation.ts';
 import { downloadSnapshot, renderJournalEntries } from './journal.ts';
 import './mobile.css';
+import { maximumUpgradeLevel } from './costs.ts';
 import './collection.css';
 import './game-layout.css';
 import './world-chat.css';
@@ -69,6 +70,7 @@ let inventorySelection: ItemId | null = null;
 let selectedBuilding: SettlementEntity = 'centre';
 let settlementTask = settlementTaskFromHash(location.hash);
 let craftingFilter: CraftingFilter = 'all';
+let craftingQuantity = 1;
 let pendingPlacement: { entity: SettlementEntity; origin: SettlementTask } | null = null;
 let settlementMap: SettlementMap | null = null;
 const crewDrafts = new Map<string, string>();
@@ -283,7 +285,12 @@ chatOverlay?.addEventListener('keydown', event => {
 function focusWorldChat(): void { setChatExpanded(true); chatOverlay?.focus(); }
 const managementDialog = document.querySelector<HTMLDialogElement>('#management-dialog')!;
 managementDialog.addEventListener('close', () => { management = null; render(); });
-const world = !explorePage ? null : new World(document.querySelector<HTMLCanvasElement>('#world')!, document.querySelector<HTMLCanvasElement>('#minimap')!, () => game, requestMove, () => environment);
+const world = !explorePage ? null : new World(document.querySelector<HTMLCanvasElement>('#world')!, document.querySelector<HTMLCanvasElement>('#minimap')!, () => game, (x, y) => {
+  const resource = terrainResources[terrainAt(x, y, game.seed)];
+  if (resource && game.explored.includes(`${x},${y}`) && state.resourceAccess[resource].available && state.pending[resource] >= 1) {
+    void act({ type: 'map-collect', x, y });
+  } else requestMove(x, y);
+}, () => environment, () => state.pending, () => translate('Collect', language));
 function requestMove(x: number, y: number): void {
   if (!game.explored.includes(`${x},${y}`)) {
     const reason = upkeepPauseReason();
@@ -309,7 +316,7 @@ function toast(message: string, error = false): void {
   for (const resource of resources) {
     const quantity = collectionReceiptQuantity(message, resource);
     if (quantity !== null) {
-      message = translate(`${names[resource]} collected: ${resourceFmt(resource, quantity)}. FTH$ transport paid.`, language);
+      message = translate(`${names[resource]} collected: ${resourceFmt(resource, quantity)}. ${message.endsWith('No transport fee.') ? 'No transport fee.' : 'FTH$ transport paid.'}`, language);
       break;
     }
   }
@@ -889,7 +896,7 @@ function renderSettlement(): void {
   else if (settlementTask === 'production') content = storagePanel();
   else if (settlementTask === 'sell') content = '<div data-settlement-half-sale></div>';
   else if (settlementTask === 'inventory') content = inventoryPanel(state, costChips, inventoryFilter, language, 'settlement', inventoryPage, inventorySelection);
-  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter);
+  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', craftingQuantity);
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
   if (settlementTask === 'buildings' || settlementTask === 'production') content += '<div data-settlement-sale></div>';
@@ -917,12 +924,14 @@ function renderSettlement(): void {
 function waterUpkeepPanel(compact = false): string {
   const upkeep = state.waterUpkeep;
   if (!upkeep) return '';
-  if (compact) return `<div class="water-upkeep-row${upkeep.paused ? ' water-shortage' : ''}">
-    <span class="water-upkeep-use" title="${escape(translate('50 L per resident / day before climate adjustments.', language))}">${icon('water')}<strong>${resourceFmt('water', upkeep.dailyConsumption)}<small>/${translate('day', language)}</small></strong></span>
-    ${completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)}
-    <a href="/market/?asset=water&amp;side=buy" aria-label="${escape(translate('Buy Water', language))}" title="${escape(translate('Buy Water', language))}">${icon('plus')}</a>
-    <a href="/settlement/#buildings" aria-label="${escape(translate('Water facilities', language))}" title="${escape(translate('Water facilities', language))}">${icon('settings')}</a>
-    ${upkeep.paused ? '<small class="water-shortage-text" role="status">Water shortage pauses advanced activity, not residents.</small>' : ''}</div>${settlementUpkeepPanel(true)}`;
+  if (compact) return `<div class="upkeep-meters" aria-label="${escape(translate('Next consumption', language))}">${(['water', 'wood', 'metal'] as const).map(resource => {
+    const use = resource === 'water' ? { dailyConsumption: upkeep.dailyConsumption, shortage: upkeep.paused } : state.settlementUpkeep?.resources[resource];
+    if (!use) return '';
+    const readyAt = resource === 'water' ? upkeep.readyAt : state.settlementUpkeep!.readyAt;
+    const label = `${translate(resource === 'water' ? 'Daily Water' : resource === 'wood' ? 'Wood heating' : 'Metal repairs', language)}: ${resourceFmt(resource, use.dailyConsumption)}/${translate('game day', language)}`;
+    const detail = use.shortage ? `${label}. ${translate('Supply shortage pauses advanced activity, not residents or buildings.', language)}` : label;
+    return `<a class="upkeep-meter${use.shortage ? ' shortage' : ''}" href="/market/?asset=${resource}&amp;side=buy" title="${escape(detail)}" aria-label="${escape(detail)}">${icon(resource)}<span class="vertical-consumption">${completionMeter(readyAt - worldDayMs, readyAt, label, true)}</span><strong>${resourceFmt(resource, use.dailyConsumption)}</strong><small>/${translate('game day', language)}${use.shortage ? ' !' : ''}</small></a>`;
+  }).join('')}<a class="upkeep-manage" href="/settlement/#production" aria-label="${escape(translate('Manage production', language))}">${icon('settings')}</a></div>`;
   return `<div class="notice water-upkeep" role="status"><div class="water-upkeep-heading"><strong>Daily Water</strong>${costChips({ water: upkeep.dailyConsumption })}</div>
     <div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>
     <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Water shortage pauses advanced activity, not residents.</p>' : ''}</div>
@@ -1024,7 +1033,7 @@ function buildingsPanel(): string {
     <p class="fineprint">Expand housing, Water reserves, production and collection routes. Upgrade costs grow linearly by target level. Benefits never mint FTH$.</p>
     <div class="building-grid compact-buildings">${constructionKeys.map(kind => {
       const facility = constructions[kind], level = constructionLevel(game, kind), cost = constructionCost(game, kind);
-      return `<div class="building"><h3>${facility.name}</h3><strong>${translate(`Level ${level} / ${facility.maxLevel}`, language)}</strong><p class="building-benefit">${facility.benefit}</p>${requirement('home', stages[facility.stage].name, game.stage >= facility.stage)}${cost ? `<div class="upgrade-cost">${costChips(cost)}</div>` : ''}<button class="button wide" data-action="construction" data-construction="${kind}" ${!cost || game.stage < facility.stage || !canAfford(game, cost) ? 'disabled' : ''}>${!cost ? 'Max' : level ? 'Upgrade' : 'Build'}</button></div>`;
+      return `<div class="warehouse-card construction-card"><span class="building-emblem">${icon(kind === 'housing' ? 'people' : kind === 'cistern' ? 'water' : kind === 'workshop' ? 'tools' : 'market')}</span><div class="warehouse-info"><h3>${facility.name} <small>${level}/${facility.maxLevel}</small></h3><p class="building-benefit">${facility.benefit}</p>${requirement('home', stages[facility.stage].name, game.stage >= facility.stage)}${cost ? `<small>${translate('Next level', language)}: ${level + 1}</small>` : ''}</div><div class="warehouse-upgrade">${cost ? `<div class="upgrade-cost">${costChips(cost)}</div>` : ''}<button class="button" data-action="construction" data-construction="${kind}" ${!cost || game.stage < facility.stage || !canAfford(game, cost) ? 'disabled' : ''}>${!cost ? 'Max' : level ? 'Upgrade' : 'Build'}</button></div></div>`;
     }).join('')}</div><h3 class="panel-section-heading">Commercial buildings</h3>
     <p class="fineprint">FTH$ is never granted for founding, residents, buildings or exploration. Sell owned resources at marketplace spot prices to fund your settlement.</p>
     <div class="building-grid compact-buildings">${incomeFacilityKeys.filter(key => key === 'market-stall').map(key => {
@@ -1060,7 +1069,7 @@ function resourceStockCard(resource: Resource): string {
 function storagePanel(): string {
   return `<h3 class="panel-section-heading">Production <span>Resource flow</span></h3>
     <div class="storage-grid">${resources.map(resourceStockCard).join('')}</div>
-    <div class="warehouse-card"><span class="building-emblem">${icon('warehouse')}</span><div class="warehouse-info"><h3>Resource warehouse <small>${state.warehouse}/10</small></h3><div class="level-dots" aria-label="Warehouse level ${state.warehouse} of 10">${Array.from({ length: 10 }, (_, n) => `<i class="${state.warehouse > n ? 'filled' : ''}"></i>`).join('')}</div><small>Storage scales with tier and warehouse level</small></div><div class="warehouse-upgrade">${state.warehouseCost ? `<div class="upgrade-cost">${costChips(state.warehouseCost)}</div>` : ''}<button class="button" data-action="warehouse" aria-label="${state.warehouse ? 'Upgrade warehouse' : 'Build warehouse'}" ${!state.warehouseCost || game.stage < 0 || !canAfford(game, state.warehouseCost) ? 'disabled' : ''}>${icon(state.warehouseCost ? 'plus' : 'check')}${!state.warehouseCost ? 'Max' : state.warehouse ? 'Upgrade' : 'Build'}</button></div></div>
+    <div class="warehouse-card"><span class="building-emblem">${icon('warehouse')}</span><div class="warehouse-info"><h3>Resource warehouse <small>${state.warehouse}/${maximumUpgradeLevel}</small></h3>${state.warehouseCost ? `<small>${translate('Next level', language)}: ${state.warehouse + 1}</small>` : ''}<small>Storage scales with tier and warehouse level</small></div><div class="warehouse-upgrade">${state.warehouseCost ? `<div class="upgrade-cost">${costChips(state.warehouseCost)}</div>` : ''}<button class="button" data-action="warehouse" aria-label="${state.warehouse ? 'Upgrade warehouse' : 'Build warehouse'}" ${!state.warehouseCost || game.stage < 0 || !canAfford(game, state.warehouseCost) ? 'disabled' : ''}>${icon(state.warehouseCost ? 'plus' : 'check')}${!state.warehouseCost ? 'Max' : state.warehouse ? 'Upgrade' : 'Build'}</button></div></div>
     ${game.stage < 0 ? `<div class="requirement-list">${requirement('home', 'Settlement', false)}</div>` : ''}`;
 }
 function federationPanel(): string {
@@ -1149,6 +1158,15 @@ async function saveCrewAssignments(): Promise<void> {
   } finally { processingCrewAssignments = false; }
 }
 app.addEventListener('change', event => {
+  if (event.target instanceof HTMLInputElement && event.target.hasAttribute('data-crafting-quantity')) {
+    const quantity = event.target.valueAsNumber;
+    if (!event.target.validity.valid || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) {
+      toast('Invalid crafting quantity.', true); event.target.value = String(craftingQuantity); return;
+    }
+    craftingQuantity = quantity;
+    if (settlementPage) renderSettlement(); else renderSidebar();
+    return;
+  }
   if (event.target instanceof HTMLSelectElement && event.target.hasAttribute('data-management-resource')) {
     const view = event.target.value;
     if (view === 'funds' || isResource(view)) openManagement(view);
@@ -1259,7 +1277,7 @@ app.addEventListener('click', event => {
       if (isConstruction(target.dataset.construction)) void act({ type: 'construction', kind: target.dataset.construction });
       break;
     case 'craft':
-      if (isCraftableItem(target.dataset.item)) void act({ type: 'craft', item: target.dataset.item });
+      if (isCraftableItem(target.dataset.item)) void act({ type: 'craft', item: target.dataset.item, quantity: craftingQuantity });
       break;
     case 'equip':
       if (isVisibilityItem(target.dataset.item)) void act({ type: 'equip', item: target.dataset.item });
@@ -1323,7 +1341,7 @@ app.addEventListener('click', event => {
     }
     case 'crafting-filter': {
       const filter = target.dataset.filter;
-      if (filter === 'all' || filter === 'utility' || filter === 'decoration') {
+      if (filter === 'all' || filter === 'utility' || filter === 'decoration' || filter === 'affordable') {
         craftingFilter = filter;
         if (settlementPage) renderSettlement(); else renderSidebar();
       }

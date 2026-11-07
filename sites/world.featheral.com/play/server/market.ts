@@ -4,7 +4,7 @@ import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { note } from '../src/engine.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketQuantityLimit, marketResources } from '../src/market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
@@ -77,6 +77,10 @@ function poolCost(pool: Pool, side: MarketSide, quantity: number): number {
   try { return poolPayment(pool, side, quantity); }
   catch (error) { if (!(error instanceof RangeError)) throw error; throw new ApiError(409, 'Market pool limit reached.'); }
 }
+function poolSideAvailable(pool: Pool, side: MarketSide, floor: number): boolean {
+  return pool.units > (side === 'buy' ? 1 : 0) && pool.dollars > 0 && poolCost(pool, side, 1) >= floor
+    && (side === 'buy' || compareMarginal(pool, side, 1, floor) >= 0);
+}
 function compareMarginal(pool: Pool, side: MarketSide, quantity: number, price: number): number {
   const units = pool.units + (side === 'buy' ? -quantity : quantity);
   if (units <= 0) return 1;
@@ -118,15 +122,16 @@ export class Exchange {
   private orders(asset: MarketAsset, side: MarketSide, owner: string, realTime: number): Order[] {
     return this.db.prepare(`SELECT o.* FROM market_orders o JOIN sessions s ON s.id = o.owner
       WHERE o.asset = ? AND o.side = ? AND o.status = 'open' AND o.owner != ? AND s.expires > ?
-      ORDER BY o.price ${side === 'sell' ? 'ASC' : 'DESC'}, o.id ASC`).all(asset, side, owner, realTime).map(orderRow);
+      ORDER BY o.price ${side === 'sell' ? 'ASC' : 'DESC'}, o.id ASC`).all(asset, side, owner, realTime).map(orderRow)
+      .filter(order => order.price >= dollarsUnits(marketPriceFloor(asset)));
   }
   private plan(owner: string, asset: MarketAsset, side: MarketSide, quantity: number, realTime: number, limit?: number): Step[] {
     const makers = this.orders(asset, side === 'buy' ? 'sell' : 'buy', owner, realTime)
       .filter(order => limit === undefined || (side === 'buy' ? order.price <= limit : order.price >= limit));
-    const pool = this.pool(asset), steps: Step[] = [];
-    const pooled = isLiquidAsset(asset) && pool.units > 0 && pool.dollars > 0;
+    const pool = this.pool(asset), steps: Step[] = [], floor = dollarsUnits(marketPriceFloor(asset));
     let remaining = quantity, index = 0;
     while (remaining > 0) {
+      const pooled = isLiquidAsset(asset) && poolSideAvailable(pool, side, floor);
       const maker = makers[index], comparison = maker && pooled ? compareMarginal(pool, side, 1, maker.price) : 0;
       if (maker && (!pooled || (side === 'buy' ? comparison >= 0 : comparison <= 0))) {
         const quantity = Math.min(remaining, maker.remaining);
@@ -137,7 +142,7 @@ export class Exchange {
       }
       if (!pooled) break;
       const boundary = side === 'buy' ? Math.min(maker?.price ?? Infinity, limit ?? Infinity)
-        : Math.max(maker?.price ?? 0, limit ?? 0);
+        : Math.max(maker?.price ?? 0, limit ?? 0, floor);
       let low = 0, high = Math.min(remaining, side === 'buy' ? pool.units - 1 : remaining);
       while (low < high) {
         const middle = Math.ceil((low + high) / 2), comparison = compareMarginal(pool, side, middle, boundary);
@@ -145,7 +150,7 @@ export class Exchange {
       }
       if (low) {
         const dollars = poolCost(pool, side, low);
-        if (dollars <= 0) break;
+        if (BigInt(dollars) < BigInt(low) * BigInt(floor)) break;
         steps.push({ quantity: low, dollars, maker: null }); movePool(pool, side, low, dollars); remaining -= low;
       } else if (maker) {
         const quantity = Math.min(remaining, maker.remaining);
@@ -157,8 +162,8 @@ export class Exchange {
   }
   read(owner: string, account: Account, _now: number, realTime: number, asset: MarketAsset, quantity: number): ExchangeResult {
     const level = (side: MarketSide) => this.db.prepare(`SELECT price, SUM(remaining) AS quantity FROM market_orders o
-      JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = ? AND status = 'open' AND s.expires > ?
-      GROUP BY price ORDER BY price ${side === 'buy' ? 'DESC' : 'ASC'} LIMIT 12`).all(asset, side, realTime)
+      JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = ? AND status = 'open' AND s.expires > ? AND price >= ?
+      GROUP BY price ORDER BY price ${side === 'buy' ? 'DESC' : 'ASC'} LIMIT 12`).all(asset, side, realTime, dollarsUnits(marketPriceFloor(asset)))
       .map(row => ({ price: Number(row.price) / dollarsScale, quantity: Number(row.quantity) }));
     const quote = (side: MarketSide) => {
       const steps = this.plan(owner, asset, side, quantity, realTime), filled = steps.reduce((sum, step) => sum + step.quantity, 0);
@@ -173,10 +178,13 @@ export class Exchange {
       tickers: marketAssets.map(asset => {
         const pool = this.pool(asset), last = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 1').get(asset);
         const pooled = isLiquidAsset(asset) && pool.units > 0 && pool.dollars > 0;
-        const bid = this.db.prepare(`SELECT MAX(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'buy' AND status = 'open' AND s.expires > ?`).get(asset, realTime);
-        const ask = this.db.prepare(`SELECT MIN(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'sell' AND status = 'open' AND s.expires > ?`).get(asset, realTime);
-        return { asset, bid: Math.max(pooled ? poolCost(pool, 'sell', 1) : 0, Number(bid?.price ?? 0)) / dollarsScale,
-          ask: Math.min(pooled && pool.units > 1 ? poolCost(pool, 'buy', 1) : Number.MAX_SAFE_INTEGER, Number(ask?.price ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
+        const floor = dollarsUnits(marketPriceFloor(asset));
+        const bid = this.db.prepare(`SELECT MAX(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'buy' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
+        const ask = this.db.prepare(`SELECT MIN(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'sell' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
+        const poolBid = pooled && poolSideAvailable(pool, 'sell', floor) ? poolCost(pool, 'sell', 1) : 0;
+        const poolAsk = pooled && poolSideAvailable(pool, 'buy', floor) ? poolCost(pool, 'buy', 1) : 0;
+        return { asset, bid: Math.max(poolBid >= floor ? poolBid : 0, Number(bid?.price ?? 0)) / dollarsScale,
+          ask: Math.min(poolAsk >= floor ? poolAsk : Number.MAX_SAFE_INTEGER, Number(ask?.price ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
           last: last ? Number(last.price) / dollarsScale : null };
       }),
       history: fills(this.db.prepare('SELECT id, asset, quantity, dollars, price, time, venue FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 120').all(asset)).reverse(),
@@ -278,6 +286,9 @@ export class Exchange {
     if (account.game.dollars < dollars) throw new ApiError(409, 'Not enough FTH$ to fund this pool.');
     const pool = this.pool(asset);
     if (!Number.isSafeInteger(pool.units + quantity) || !Number.isSafeInteger(pool.dollars + dollars)) throw new ApiError(409, 'Market pool limit reached.');
+    const floor = BigInt(dollarsUnits(marketPriceFloor(asset)));
+    if (BigInt(dollars) < floor * BigInt(quantity) || BigInt(pool.dollars + dollars) < floor * BigInt(pool.units + quantity))
+      throw new ApiError(409, 'Pool funding must meet the resource price floor.');
     this.reserve(account, { type: 'spot', asset, side: 'sell', quantity, limitDollars: 0 }, 0);
     this.release(account, asset, quantity, 'sell');
     account.game.dollars -= dollars;
@@ -286,6 +297,7 @@ export class Exchange {
   }
   private processOrder(owner: string, account: Account, command: Extract<MarketCommand, { type: 'spot' | 'limit' }>, now: number, realTime: number): void {
       const asset = command.asset;
+      if (command.type === 'limit' && command.price < dollarsUnits(marketPriceFloor(asset))) throw new ApiError(409, 'Price is below the resource price floor.');
       if (command.type === 'limit' && Number(this.db.prepare("SELECT COUNT(*) AS count FROM market_orders WHERE owner = ? AND status = 'open'").get(owner)!.count) >= 50) throw new ApiError(409, 'Cancel an open order before placing more. Maximum 50.');
       const steps = this.plan(owner, asset, command.side, command.quantity, realTime, command.type === 'limit' ? command.price : undefined);
       const filled = steps.reduce((sum, step) => sum + step.quantity, 0), total = steps.reduce((sum, step) => sum + step.dollars, 0);
