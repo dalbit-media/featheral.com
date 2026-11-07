@@ -111,7 +111,20 @@ let store;
 const gold = createGoldApi({ env });
 const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...env, FTH_GAME_PUBLIC_KEY: keys?.publicKey,
   FTH_GOLD_PUBLIC_KEY: reserveMode === "isolated" ? goldKeys?.publicKey : undefined }, beforeLedgerMutation: () => store?.recoverFunds(), exchangeSigningKey: keys?.privateKey });
-if (reserveMode === "live") activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets());
+const marketAuthorizationFile = path.join(root, ".deployment-market-authorization.pending");
+if (reserveMode === "live") {
+  const deferred = fs.existsSync(marketAuthorizationFile);
+  activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets(), goldKeys.privateKey, { deferExpansion: deferred });
+  if (deferred) process.once("SIGUSR2", () => {
+    try {
+      activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, liquidityTargets(), goldKeys.privateKey);
+      fs.unlinkSync(marketAuthorizationFile);
+      console.log("Approved market authorization persisted after deployment health verification.");
+    } catch (error) {
+      console.error("Approved market authorization could not be confirmed; retain this healthy release and inspect the journal.", error.message);
+    }
+  });
+}
 if (api.ledger.genesis.goldPublicKey && !goldKeys && !runtimeSettings.replica) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
 const reserveEngine = goldKeys ? gold.enableReserve(api.ledger, goldKeys.privateKey, () => store?.recoverFunds()) : null;
 const world = createWorldApi({ env, fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {

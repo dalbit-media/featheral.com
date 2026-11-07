@@ -215,7 +215,26 @@ The bank reuses the unchanged Gold exchange API, reserve formula, 1% spread and 
 
 The standalone `/market/` exchange has **81 unique markets**: four raw resources, ten original crafted items, eight naming/title items, 21 keepsakes and 38 automation permits (12 original collection, 20 crafted collector bundles, three exploration and three recruitment). Resources use gently moving demand-priced liquidity and player-order matching; other non-collectibles retain ordinary demand-priced liquidity. Both retain a 1% spread. Buys and item orders support up to 10,000 whole units, subject to balances and item storage; resource sales can use the full owned amount within safe accounting limits. Each item copy occupies one slot. Crafting additional copies is allowed. One equipped/placed copy is protected, but spares can be sold. Keepsakes remain unique, trade one at a time and use player orders only; without offers they show no quote. A one-time migration retires collectible system pools and redistributes existing marketplace FTH$ to fund item pools, conserving reserves exactly and preserving orders, receipts and monetary-policy constants.
 
-Adding these 28 market assets changes the generated deployment liquidity-target catalog. Existing monetary/collection policy constants and original market seed values remain unchanged. A live rollout must explicitly approve the additive catalog migration through deployment preflight, not bypass its compatibility check or automatically reset existing pools.
+Adding these 28 market assets uses the explicitly approved target list in
+[`market-expansion.js`](../../../services/gold/market-expansion.js). Deployment
+preflight permits only these exact additions, never removal or repricing of
+existing markets or changes to monetary/collection policy. On the live writer,
+startup appends one `GOLD_MARKETS` journal transaction signed by **both original
+game and Gold authorities**, pinned to the preceding ledger tip. It changes only
+market eligibility: no balances, caps, allocations, pool seeds, escrow or
+Ethereum funds move during authorization. Repeated startup is a no-op; replay
+preserves the original genesis block and all prior history. New pools are funded
+on demand through the existing finite reserve rules. Replicas must run code that
+supports `GOLD_MARKETS` before ingesting the new transaction. Do not downgrade to
+a release lacking the approved catalog after authorization, reset ledger data,
+rotate keys or bypass preflight.
+
+During managed deployment, preflight marks approved additions as pending.
+Startup validates both signatures without committing the expansion. The installer
+signals that specific gateway process only **after all gateway/HTTPS health checks
+and PM2 persistence succeed**. Before that point, ordinary rollback remains safe.
+Once authorization starts, an unconfirmed outcome retains the HTTPS-verified
+candidate for operator review instead of restoring an incompatible old reader.
 
 Exploration and recruitment permits last 1, 4 or 12 game weeks, like collection permits. Activate from inventory or Population → Allocation & automation; activation consumes one copy and stacks its duration. Auto-exploration keeps one team travelling and waits for all existing manual teams to return. Auto-recruitment starts the next paid batch after the previous arrival. Both use normal FTH$ fees, Water requirements and full-week deadlines; recruitment includes housing bonuses and their cost. Blocked activity exposes its reason and retries once per game day. Pausing or expiry prevents new jobs, never cancels paid jobs, and does not stop the permit clock. Offline settlement follows the same scheduled events as frequent polling.
 

@@ -16,6 +16,7 @@ const pricing = require("../shared/gold-pricing");
 const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
 const { createDollarApi } = require("../services/notes/dollar");
 const { activateLiveReserve } = require("../services/gold/activation");
+const { approvedMarkets } = require("../services/gold/market-expansion");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
 const { createApi } = require("../sites/world.featheral.com/play/server/http.ts");
 
@@ -87,6 +88,83 @@ describe("Isolated finite Gold reserve", () => {
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
+  it("authorizes additive markets with both original keys, preserves funds and replays without rewriting genesis", async () => {
+    ledger.close();
+    const originalTargets = Object.fromEntries(Object.entries(targets).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset)));
+    const folder = path.join(directory, "market-expansion");
+    ledger = new FthLedger({ directory: folder, blockIntervalMs: 0, genesis: {
+      goldPublicKey: goldKeys.publicKey, gamePublicKey: gameKeys.publicKey, reserveMode: "live",
+      sourceWallet: source.address, reserveWallet: reserve.address, goldMarkets: originalTargets,
+    } }).open();
+    engine = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider });
+    await engine.initialize(); await fund("wood");
+    const originalGenesis = ledger.headers[0].H, reserveState = structuredClone(ledger.goldReserve);
+    const supply = ledger.summary().supply, balances = structuredClone([...ledger.balances]);
+    const before = ledger.height;
+    assert.throws(() => activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, targets), /approved additive/);
+    assert.throws(() => activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, {
+      ...targets, wood: { ...targets.wood, quantity: 9999 },
+    }, goldKeys.privateKey), /approved additive/);
+    assert.throws(() => activateLiveReserve(ledger, goldKeys.privateKey, goldKeys.publicKey, targets, goldKeys.privateKey), /both original/);
+    assert.throws(() => activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, targets, gameKeys.privateKey), /both original/);
+    assert.equal(ledger.height, before);
+    const expansion = (data, sign = true) => {
+      const tx = { i: `expansion:${crypto.randomUUID()}`, k: "GOLD_MARKETS", a: "", v: "0", d: data, t: Date.now() };
+      if (sign) {
+        const message = Buffer.from(canonical(tx));
+        tx.d.gameSignature = crypto.sign(null, message, gameKeys.privateKey).toString("base64");
+        tx.d.goldSignature = crypto.sign(null, message, goldKeys.privateKey).toString("base64");
+      }
+      return tx;
+    };
+    assert.throws(() => ledger.commitAuthorized(expansion({ goldMarkets: targets, previousTip: blockHash(1) })), /both original/);
+    assert.throws(() => ledger.commitAuthorized(expansion({ goldMarkets: targets, previousTip: ledger.tipHash }, false)), /both original/);
+    assert.throws(() => ledger.commitAuthorized(expansion({ goldMarkets: targets, previousTip: ledger.tipHash, cap: "999" })), /both original/);
+    const altered = expansion({ goldMarkets: { ...targets }, previousTip: ledger.tipHash });
+    altered.d.goldMarkets["title-pioneer"] = { quantity: 10000, pricePerLot: "1000000000000000000" };
+    assert.throws(() => ledger.commitAuthorized(altered), /both original/);
+    activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, targets, goldKeys.privateKey, { deferExpansion: true });
+    assert.equal(ledger.height, before, "deployment health checks must precede any durable authorization");
+    assert.deepEqual(ledger.genesis.goldMarkets, originalTargets);
+    assert.deepEqual(ledger.goldReserve, reserveState);
+    activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, targets, goldKeys.privateKey);
+    assert.equal(ledger.height, before + 1);
+    assert.equal(ledger.headers[0].H, originalGenesis);
+    assert.deepEqual(ledger.genesis.goldMarkets, targets);
+    assert.equal(ledger.summary().supply, supply);
+    assert.deepEqual([...ledger.balances], balances);
+    assert.deepEqual(ledger.goldReserve, reserveState);
+    activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, targets, goldKeys.privateKey);
+    assert.equal(ledger.height, before + 1, "retry must not authorize twice");
+    assert.throws(() => activateLiveReserve(ledger, gameKeys.privateKey, goldKeys.publicKey, originalTargets, goldKeys.privateKey), /approved additive/);
+    ledger.close();
+    ledger = new FthLedger({ directory: folder, blockIntervalMs: 0 }).open();
+    assert.equal(ledger.headers[0].H, originalGenesis);
+    assert.deepEqual(ledger.genesis.goldMarkets, targets);
+    assert.deepEqual(ledger.goldReserve, reserveState);
+    engine = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider });
+    const result = await fund("collector-all-52");
+    assert.equal(result.quantity, 10000);
+    assert.equal(ledger.goldReserve.cap, reserveState.cap);
+    assert.deepEqual(ledger.goldReserve.pools.wood, reserveState.pools.wood);
+    assert.equal(ledger.balance(REDEMPTION_ESCROW).available, "0");
+    conserved();
+    const reader = new FthLedger({ directory: folder, mode: "reader" }).open();
+    try { assert.deepEqual(reader.genesis.goldMarkets, targets); assert.equal(reader.summary().supply, ledger.summary().supply); }
+    finally { reader.close(); }
+  });
+  it("rejects stale, unsigned or unauthorized market expansion transactions atomically", () => {
+    const original = ledger.genesis.goldMarkets;
+    const tx = { i: "invalid-market-expansion", k: "GOLD_MARKETS", a: "", v: "0",
+      d: { goldMarkets: { ...original, "title-admin": { quantity: 10000, pricePerLot: "1000000000000000000" } }, previousTip: ledger.tipHash }, t: Date.now() };
+    const message = Buffer.from(canonical(tx));
+    tx.d.gameSignature = crypto.sign(null, message, gameKeys.privateKey).toString("base64");
+    tx.d.goldSignature = crypto.sign(null, message, goldKeys.privateKey).toString("base64");
+    const height = ledger.height, supply = ledger.summary().supply;
+    assert.throws(() => ledger.commitAuthorized(tx), /both original/);
+    assert.equal(ledger.height, height); assert.equal(ledger.summary().supply, supply);
+    assert.deepEqual(ledger.genesis.goldMarkets, original);
+  });
   it("replays historical treasury-only refills without changing prior supply or balances", async () => {
     await engine.initialize();
     await fund("wood");

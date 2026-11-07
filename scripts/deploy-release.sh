@@ -284,6 +284,7 @@ if as_root test -f "$nginx_file"; then
   had_nginx=true
 fi
 activated=false
+market_authorization_started=false
 gateway_healthy() {
   local expected="$1" response
   response="$(curl -fsS --max-time 3 "http://$gateway/healthz" 2>/dev/null)" || return 1
@@ -293,6 +294,10 @@ rollback() {
   code="${1:-$?}"
   trap - ERR TERM INT HUP
   printf 'FEATHERAL_FAILURE:%s:%s\n' "$step" "$code" >&3
+  if [[ "$market_authorization_started" == true ]]; then
+    echo "Market authorization outcome requires review. Keeping the HTTPS-verified candidate online; never roll back to code that cannot replay its journal. No monetary data or keys were reset."
+    exit "$code"
+  fi
   echo "Deployment failed ($code); restoring the prior code/configuration, never monetary data."
   if [[ "$had_nginx" == true ]]; then
     as_root cp "$nginx_backup" "$nginx_file"
@@ -469,6 +474,23 @@ for host in $hostnames; do
   fi
 done
 "$pm2" save
+if [[ -f "$release/.deployment-market-authorization.pending" ]]; then
+  step=market-authorization
+  market_pid="$("$pm2" pid featheral)"
+  [[ "$market_pid" =~ ^[1-9][0-9]*$ ]] || { echo "Cannot identify the verified gateway for market authorization."; false; }
+  # Only authorize after every gateway/HTTPS check and PM2 persistence succeeded.
+  market_authorization_started=true
+  kill -USR2 "$market_pid"
+  for attempt in $(seq 1 30); do
+    [[ ! -f "$release/.deployment-market-authorization.pending" ]] && break
+    sleep 1
+  done
+  if [[ -f "$release/.deployment-market-authorization.pending" ]]; then
+    echo "Market authorization was not acknowledged. The healthy candidate is retained; inspect its logs before retrying."
+    false
+  fi
+  echo "Approved additive markets authorized; original ledger history and reserve obligations preserved."
+fi
 echo "Deployment complete: $release_id"
 if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]]; then
   if ! (printf '%s\n' '{"version":1,"complete":true}' > "${archive%/*}/cleanup-complete.json.tmp" &&

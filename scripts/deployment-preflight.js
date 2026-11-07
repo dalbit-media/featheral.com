@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { approvedMarketExpansion } = require("../services/gold/market-expansion");
 
 function readPolicy(root, runtimeRoot = root) {
   const script = `
@@ -40,9 +41,11 @@ function verifyCompatibility(candidate, previous, { policy = readPolicy } = {}) 
   }
   if (!previous) return;
   for (const [field, label] of [["monetaryPolicy", "Permanent monetary policy"], ["collectionPolicy", "Permanent collection policy"], ["markets", "Live reserve authority market policy"]]) {
-    if (JSON.stringify(canonical(next[field])) !== JSON.stringify(canonical(original[field])))
+    if (JSON.stringify(canonical(next[field])) !== JSON.stringify(canonical(original[field]))
+      && !(field === "markets" && approvedMarketExpansion(original.markets, next.markets)))
       throw new Error(`${label} differs from the running release. Activation refused; the working gateway has not been stopped. Preserve the original policy; do not reset ledger data or keys.`);
   }
+  return { marketExpansion: approvedMarketExpansion(original.markets, next.markets) };
 }
 function preflight(candidate, previous) {
   candidate = fs.realpathSync(candidate);
@@ -54,7 +57,8 @@ function preflight(candidate, previous) {
   if (!Array.isArray(assignment.hosts) || !assignment.hosts.length || assignment.hosts.some(host => typeof host !== "string"
     || !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host)))
     throw new Error("Invalid deployment hostname assignment; activation refused before gateway cutover.");
-  if (!(assignment.hosts.length === 1 && assignment.hosts[0] === "db.featheral.com")) verifyCompatibility(candidate, previous);
+  const result = !(assignment.hosts.length === 1 && assignment.hosts[0] === "db.featheral.com") && verifyCompatibility(candidate, previous);
+  if (result?.marketExpansion) fs.writeFileSync(path.join(candidate, ".deployment-market-authorization.pending"), "approved-identity-collectors-v1\n", { mode: 0o600 });
   console.log("Candidate syntax, runtime Settings and pinned financial policies verified before gateway cutover.");
 }
 if (require.main === module) {

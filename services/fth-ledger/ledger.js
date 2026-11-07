@@ -9,7 +9,7 @@ const { verifySignedProfile, assertFreshSignature } = require("../identity/profi
 const { createFthDb, ingestFthBlock } = require("./sql");
 const { validateGoldTransaction, goldEntries, TREASURY, REDEMPTION_ESCROW } = require("../gold/reserve");
 
-const KINDS = new Set(["GENESIS", "CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "PROFILE", "GAME", "GOLD", "GOLD_POLICY"]);
+const KINDS = new Set(["GENESIS", "CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "PROFILE", "GAME", "GOLD", "GOLD_POLICY", "GOLD_MARKETS"]);
 const VALUE_KINDS = new Set(["CREDIT", "RESERVE", "SETTLE", "RELEASE", "TRANSFER", "GAME", "GOLD"]);
 const CREDIT_SOURCES = new Set(["FthgConverted", "StakeClaimed"]);
 const MAX_TX_PER_BLOCK = 1000;
@@ -152,6 +152,20 @@ class FthLedger {
     }
     let commit;
     switch (tx.k) {
+      case "GOLD_MARKETS": {
+        const { gameSignature, goldSignature, ...policy } = d;
+        const message = Buffer.from(canonical({ i: tx.i, k: tx.k, a: tx.a, v: tx.v, d: policy, t: tx.t }));
+        if (!this.genesis?.goldPublicKey || !this.genesis?.gamePublicKey || this.genesis.reserveMode !== "live"
+          || tx.a !== "" || tx.v !== "0" || policy.previousTip !== this.tipHash
+          || Object.keys(policy).length !== 2 || typeof gameSignature !== "string" || typeof goldSignature !== "string"
+          || !crypto.verify(null, message, this.genesis.gamePublicKey, Buffer.from(gameSignature, "base64"))
+          || !crypto.verify(null, message, this.genesis.goldPublicKey, Buffer.from(goldSignature, "base64"))
+          || !require("../gold/market-expansion").approvedMarketExpansion(this.genesis.goldMarkets, policy.goldMarkets)) {
+          throw ledgerError("Market expansion requires both original authorities and approved append-only targets.", 409);
+        }
+        commit = () => { this.genesis.goldMarkets = policy.goldMarkets; };
+        break;
+      }
       case "GOLD_POLICY": {
         const { signature, ...policy } = d;
         if (this.genesis?.goldPublicKey || !this.genesis?.gamePublicKey || tx.a !== "" || tx.v !== "0"
@@ -310,7 +324,7 @@ class FthLedger {
 
   commitAuthorized(tx, { fresh = false } = {}) {
     this.requireWriter();
-    if (!["GAME", "GOLD", "GOLD_POLICY"].includes(tx.k)) throw ledgerError("Only signed gameplay or Gold transactions can use synchronous settlement.");
+    if (!["GAME", "GOLD", "GOLD_POLICY", "GOLD_MARKETS"].includes(tx.k)) throw ledgerError("Only signed gameplay or Gold transactions can use synchronous settlement.");
     const previous = this.ids.get(tx.i);
     if (previous) {
       const existing = this.findTx(previous);
@@ -525,6 +539,7 @@ class FthLedger {
       case "GAME": return { ...base, data: d };
       case "GOLD": return { ...base, data: d };
       case "GOLD_POLICY": return { ...base, data: d };
+      case "GOLD_MARKETS": return { ...base, data: d };
       default: return base;
     }
   }
