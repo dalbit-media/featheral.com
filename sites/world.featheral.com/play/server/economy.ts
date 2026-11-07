@@ -2,7 +2,7 @@ import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruit
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
-import { balancedAllocation, emptyAllocation, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom } from '../src/workforce.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
 import { arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, inventory } from './inventory.ts';
@@ -292,9 +292,7 @@ export function collectResource(account: Account, resource: Resource, manual = f
   return quantity;
 }
 export function availableWorkers(account: Account): number {
-  const work = workforce(account);
-  return account.game.population - Object.values(work.crews).reduce((sum, crew) => sum + crew.workers, 0)
-    - expeditionWorkers(work);
+  return workforceCounts(account.game.population, workforce(account)).available;
 }
 function activityReason(account: Account, activity: ActivityKind): string | null {
   const automation = account.activityAutomation?.[activity];
@@ -618,11 +616,9 @@ export function execute(account: Account, command: Command, realTime = account.u
     case 'assign': {
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');
       const work = workforce(account);
-      const allocation = work.automatic
-        ? Object.fromEntries(resources.map(resource => [resource, work.crews[resource]?.workers ?? 0])) as Stock
-        : { ...work.allocation };
+      const allocation = editableAllocation(work);
       allocation[command.resource] = command.workers;
-      if (resources.reduce((sum, resource) => sum + allocation[resource], 0) > Math.max(0, game.population - Math.max(2, expeditionWorkers(work)))) throw new ApiError(409, 'Keep two residents available for exploration and retain active explorers.');
+      if (resources.reduce((sum, resource) => sum + allocation[resource], 0) > workforceCounts(game.population, work).assignmentCapacity) throw new ApiError(409, 'Keep two residents available for exploration and retain active explorers.');
       if (command.workers && !resourceAccess(game)[command.resource].available) throw new ApiError(409, 'Explore a matching resource first. Oil also requires a city bank.');
       work.automatic = false;
       work.allocation = allocation;
@@ -632,7 +628,7 @@ export function execute(account: Account, command: Command, realTime = account.u
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');
       {
         const work = workforce(account);
-        if (!command.enabled && work.automatic) work.allocation = Object.fromEntries(resources.map(resource => [resource, work.crews[resource]?.workers ?? 0])) as Stock;
+        if (!command.enabled && work.automatic) work.allocation = editableAllocation(work);
         work.automatic = command.enabled;
         return note(game, command.enabled ? 'Automatic balancing enabled for the next work week.' : 'Manual allocation enabled for the next work week.');
       }

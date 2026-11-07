@@ -2,7 +2,7 @@ import { radius, stages, terrainAt, terrainDetails, terrainResources } from './e
 import { dollarsScale } from './dollars.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
-import type { Expedition, ResourceAccess } from './api-types.ts';
+import type { Expedition, ResourceAccess, Workforce } from './api-types.ts';
 import { dailyWaterPerResident, waterRequirement } from './upkeep.ts';
 import { waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { constructionLevel, productionMultiplier } from './constructions.ts';
@@ -13,6 +13,18 @@ import { resourceBasePrice, resourceEconomy } from './resource-units.ts';
 
 export const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
 export const emptyAllocation = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
+export function workforceCounts(population: number, work: Pick<Workforce, 'crews' | 'expeditions'>) {
+  const gathering = Object.values(work.crews).reduce((sum, crew) => sum + crew.workers, 0);
+  const exploring = work.expeditions.reduce((sum, expedition) => sum + expedition.workers, 0);
+  return { gathering, exploring, available: population - gathering - exploring,
+    assignmentCapacity: Math.max(0, population - Math.max(2, exploring)) };
+}
+export function editableAllocation(work: Pick<Workforce, 'automatic' | 'crews' | 'allocation'>): Stock {
+  return work.automatic ? {
+    wood: work.crews.wood?.workers ?? 0, water: work.crews.water?.workers ?? 0,
+    metal: work.crews.metal?.workers ?? 0, oil: work.crews.oil?.workers ?? 0,
+  } : { ...work.allocation };
+}
 const base: Stock = { wood: resourceEconomy.wood.weeklyProduction, water: resourceEconomy.water.weeklyProduction,
   metal: resourceEconomy.metal.weeklyProduction, oil: resourceEconomy.oil.weeklyProduction };
 const legacyBase: Stock = { wood: 30, water: 300, metal: 10, oil: 6 };

@@ -39,6 +39,17 @@ consumption meters for Water, Wood heating and Metal repair. Hover/focus exposes
 the daily amount and shortage reason; each meter links directly to buying that
 resource. Detailed demand remains in the settlement production panel.
 
+Population management separates **Gathering now**, **Exploring now** and
+**Available now**; their sum is the total population. Available residents are
+waiting, not inactive/deleted. Two available residents can start an expedition.
+Manual assignments are explicitly for the **next work week** and do not cancel
+current crews or immediately release them. Auto recalculates at that boundary;
+its edit controls start from the actual current crews, not stale target counts.
+Client and server share the same counts and editable allocation. Gathering
+capacity remains `population - max(2, exploring residents)`: active explorers
+count toward the two-person reserve, not in addition to it. Existing half-population
+auto target, supply checks, storage limits, fees and full-week deadlines remain.
+
 Completed crew output can be collected **free from discovered resource tiles on
 the exploration map**, including at zero FTH$. Collect markers appear only when
 that resource has completed output (Oil still requires the bank). Map pickup

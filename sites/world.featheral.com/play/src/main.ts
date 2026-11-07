@@ -14,7 +14,7 @@ import { claimCooldownMs, defaultClockSpeed, displayServerTime, environmentAt, s
 import { compactServerCountdown, completionProgress, environmentDetails, updateClockTime, updateWeekCalendar } from './environment-view.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
-import { nextExploration, resourceCapacity } from './workforce.ts';
+import { editableAllocation, nextExploration, resourceCapacity, workforceCounts } from './workforce.ts';
 import { inventoryPageSize, inventoryUsed, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import type { ItemId } from './items.ts';
 import { craftingPanel, inventoryPanel } from './inventory-view.ts';
@@ -137,7 +137,7 @@ app.innerHTML = `
     <button type="button" class="resource-manager-button" data-action="acquisition-management" aria-label="Resource settings" title="Resource settings" aria-haspopup="dialog" aria-controls="management-dialog">${icon('settings')}<span>Resource settings</span></button>
     <button class="population-health" data-action="population-management" aria-controls="management-dialog" aria-haspopup="dialog">
       ${icon('people')}<span class="population-health-total"><small>Population</small><strong data-population-total>0</strong></span>
-      <span class="population-health-work"><span><i class="population-status active"></i><small>Active</small><strong data-population-active>0</strong></span><span><i class="population-status idle"></i><small>Idle</small><strong data-population-idle>0</strong></span><span class="population-health-meter"><i></i></span></span>
+      <span class="population-health-work"><span><i class="population-status active"></i><small>Busy now</small><strong data-population-active>0</strong></span><span><i class="population-status idle"></i><small>Available now</small><strong data-population-idle>0</strong></span><span class="population-health-meter"><i></i></span></span>
       <span class="population-health-status">${icon('check')}</span>
     </button>
     <div class="topbar-account">
@@ -451,7 +451,8 @@ function renderEnvironment(): void {
 }
 function renderPopulation(): void {
   const compact = new Intl.NumberFormat(languageLocale, { notation: 'compact', maximumFractionDigits: 1, maximumSignificantDigits: 3 });
-  const idle = state.availableWorkers, active = game.population - idle;
+  const counts = workforceCounts(game.population, state.workforce);
+  const idle = counts.available, active = counts.gathering + counts.exploring;
   document.querySelector('[data-population-active]')!.textContent = compact.format(active);
   document.querySelector('[data-population-idle]')!.textContent = compact.format(idle);
   document.querySelector('[data-population-total]')!.textContent = compact.format(game.population);
@@ -461,8 +462,8 @@ function renderPopulation(): void {
     : state.settlementUpkeep?.resources.metal.shortage ? 'Metal repair shortage'
     : game.stock.water < (state.waterUpkeep?.weeklyConsumption ?? 0) ? 'Low Water reserve' : idle < 2 ? 'No explorer crew' : 'Healthy';
   button.dataset.health = !game.population || upkeepPauseReason() ? 'critical' : status === 'Healthy' ? 'healthy' : 'warning';
-  button.title = translate(status, language);
-  button.setAttribute('aria-label', translate(`Population: ${fmt(game.population)} residents · ${fmt(active)} active · ${fmt(idle)} idle`, language) + ' · ' + translate(status, language));
+  button.title = `${translate('Gathering now', language)}: ${fmt(counts.gathering)} · ${translate('Exploring now', language)}: ${fmt(counts.exploring)} · ${translate('Available now', language)}: ${fmt(idle)} · ${translate(status, language)}`;
+  button.setAttribute('aria-label', `${translate('Population', language)}: ${fmt(game.population)} · ${button.title}`);
   button.querySelector<HTMLElement>('.population-health-meter i')!.style.width = `${game.population ? active / game.population * 100 : 0}%`;
   button.querySelector('.population-health-status')!.innerHTML = icon(status === 'Healthy' ? 'check' : status.includes('Water') ? 'water' : 'people');
 }
@@ -685,7 +686,7 @@ function renderManagement(): void {
         const item = state.inventory.items.find(id => isCollectionItem(id) && collectionItemDetails(id).resource === resource && collectionItemDetails(id).weeks === weeks);
         return `<button class="button automation-item" data-action="activate-collection" ${item ? `data-item="${item}"` : 'disabled'}>${icon('warehouse')}<strong>${weeks}w</strong><small>${item ? 'Activate' : 'Find or buy'}</small></button>`;
       }).join('')}</div><p class="fineprint">Find collection items on expeditions or trade them in the marketplace. Transport always costs FTH$.</p></section>
-      <section class="resource-allocation"><h3>Crew allocation</h3><p class="fineprint">${fmt(state.availableWorkers)} ${translate('Unallocated', language)} · ${fmt(game.population)} ${translate('Population', language)}</p>
+      <section class="resource-allocation"><h3>Crew allocation</h3><p class="fineprint">${fmt(state.availableWorkers)} ${translate('Available now', language)} · ${fmt(game.population)} ${translate('Population', language)}</p>
       <button class="button wide" data-action="automatic" aria-pressed="${state.workforce.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</button>
       ${crewManagementCard(resource, false)}</section><section class="resource-trading"><div data-resource-sale="${resource}"></div>
       <div class="collection-links"><button class="button" data-action="population-management">${icon('people')}Manage crews</button><a class="button" href="/market/?asset=collection-${resource}-1">Marketplace ${icon('arrow')}</a></div></section></div>`);
@@ -739,7 +740,7 @@ function renderSidebar(): void {
       ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
       ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
     </div>
-    <div class="sidebar-status"><span>${state.availableWorkers} available residents</span><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></div>
+    <div class="sidebar-status"><span>${state.availableWorkers} ${translate('Available now', language)}</span><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></div>
     ${nextReturn ? `<div class="sidebar-expeditions"><a href="/settlement/#residents">${state.workforce.expeditions.length} expeditions exploring</a>${completionMeter(expeditionStartedAt(nextReturn), nextReturn.readyAt, 'Next return')}</div>` : ''}
     <div class="sidebar-secondary-actions" role="group" aria-label="Additional actions">
       ${game.stage >= 0 && next ? `<button class="button sidebar-upgrade" data-action="upgrade" ${upgradeReady ? '' : 'disabled'}>${icon('plus')} Upgrade ${costChips(next.cost)}</button>` : ''}
@@ -889,7 +890,7 @@ function renderSettlement(): void {
   const next = stages[game.stage + 1], quote = nextExploration(game, state.workforce.expeditions);
   let content = '';
   if (settlementTask === 'overview') content = `${progressionPanel()}<div class="settlement-resource-grid">${resources.map(resource => resourceStockCard(resource)).join('')}</div><div class="settlement-quick-actions">${recruitmentButton()}<button class="button" data-action="explore" ${upkeepPauseReason() || !quote || game.stage < 0 || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition ${quote ? costChips({ dollars: quote.dollars }) : ''}</button></div>
-    <div class="settlement-activity"><button data-settlement-panel="residents">${icon('people')}<span><strong>${state.availableWorkers} available residents</strong><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></span>${icon('chevron')}</button>
+    <div class="settlement-activity"><button data-settlement-panel="residents">${icon('people')}<span><strong>${state.availableWorkers} ${translate('Available now', language)}</strong><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></span>${icon('chevron')}</button>
     <button data-settlement-panel="residents">${icon('compass')}<span><strong>${state.workforce.expeditions.length} expeditions exploring</strong><small>${state.workforce.expeditions.length ? `<span>Next return</span>: <span data-ready-at="${Math.min(...state.workforce.expeditions.map(team => team.readyAt))}"></span>` : 'No expeditions exploring.'}</small></span>${icon('chevron')}</button>
     ${state.inventory.pending.length ? `<button data-settlement-panel="inventory">${icon('layers')}<span><strong>Pending exploration finds</strong><small>${state.inventory.pending.length}</small></span>${icon('chevron')}</button>` : ''}</div>`;
   else if (settlementTask === 'residents') content = management && management !== 'funds' ? '<button class="button" data-action="population-management">Population management</button>' : populationManagement();
@@ -955,34 +956,44 @@ function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal'): string
   }).join('');
 }
 function crewAllocationLimit(resource: Resource): number {
-  const others = resources.reduce((sum, key) => sum + (key === resource ? 0
-    : state.workforce.automatic ? state.workforce.crews[key]?.workers ?? 0 : state.workforce.allocation[key]), 0);
-  const explorers = state.workforce.expeditions.reduce((sum, expedition) => sum + expedition.workers, 0);
-  return Math.max(0, game.population - Math.max(2, explorers) - others);
+  const allocation = editableAllocation(state.workforce);
+  const others = resources.reduce((sum, key) => sum + (key === resource ? 0 : allocation[key]), 0);
+  return Math.max(0, workforceCounts(game.population, state.workforce).assignmentCapacity - others);
 }
 function crewManagementCard(resource: Resource, acquisition = true): string {
   const work = state.workforce, crew = work.crews[resource], access = state.resourceAccess[resource];
   const limit = crewAllocationLimit(resource);
+  const assigned = editableAllocation(work)[resource];
   return `<div class="crew-card" data-resource-card="${resource}"><header class="resource-card-heading"><div class="stock-label resource-${resource}">${icon(resource)}<strong>${names[resource]}</strong><span>${crew ? `${crew.workers} ${translate('residents', language)} · +${resourceFmt(resource, crew.weeklyYield)}/${translate('week', language)}` : 'No crew'}</span></div>${acquisition ? resourceSettingsButton(resource) : ''}</header>
     ${acquisition ? `${resourceAcquisitionActions(resource, true)}<small>${(state.collection?.automationUntil[resource] ?? 0) > state.serverTime ? 'Auto-collection active' : 'Manual collection'}</small>` : ''}
     <p class="fineprint">${access.available ? `<span>Distance from settlement</span>: ${access.distance} · <span>Weekly FTH$ per additional resident</span>: ${access.dollarsPerWorker}` : 'Explore a matching resource first. Oil also requires a city bank.'}</p>
-    <div class="crew-controls"><div class="crew-allocation"><div class="crew-allocation-heading"><label for="crew-slider-${resource}">Next allocation</label><div class="crew-stepper"><button class="button" data-action="crew-step" data-step="-1" aria-label="Decrease allocation" ${!access.available ? 'disabled' : ''}>${icon('minus')}</button><input id="crew-${resource}" type="number" min="0" max="${limit}" step="1" value="${work.allocation[resource]}" required ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} crew residents" aria-describedby="crew-error-${resource}"><button class="button" data-action="crew-step" data-step="1" aria-label="Increase allocation" ${!access.available ? 'disabled' : ''}>${icon('plus')}</button></div></div>
-    <input id="crew-slider-${resource}" data-crew-slider="${resource}" type="range" min="0" max="${limit}" step="1" value="${work.allocation[resource]}" ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} allocation slider" aria-describedby="crew-error-${resource}">
+    <p class="fineprint">${translate('Gathering now', language)}: ${crew?.workers ?? 0} · ${work.automatic ? translate('Auto recalculates next week', language) : `${translate('Next-week assignment', language)}: ${assigned}`}</p>
+    <div class="crew-controls"><div class="crew-allocation"><div class="crew-allocation-heading"><label for="crew-slider-${resource}">Next-week assignment</label><div class="crew-stepper"><button class="button" data-action="crew-step" data-step="-1" aria-label="Decrease allocation" ${!access.available ? 'disabled' : ''}>${icon('minus')}</button><input id="crew-${resource}" type="number" min="0" max="${limit}" step="1" value="${assigned}" required ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} crew residents" aria-describedby="crew-error-${resource}"><button class="button" data-action="crew-step" data-step="1" aria-label="Increase allocation" ${!access.available ? 'disabled' : ''}>${icon('plus')}</button></div></div>
+    <input id="crew-slider-${resource}" data-crew-slider="${resource}" type="range" min="0" max="${limit}" step="1" value="${assigned}" ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} allocation slider" aria-describedby="crew-error-${resource}">
     <small class="crew-input-error" id="crew-error-${resource}" role="status" hidden></small>
     <div class="crew-save-state" data-crew-save="${resource}" hidden><small role="status"></small><button class="button" data-action="retry-assign" data-resource="${resource}" hidden>Retry</button></div></div></div>
     ${crew ? completionMeter(crew.readyAt - worldWeekMs, crew.readyAt, 'Next delivery') : '<small>No active work. New assignments take a full game week.</small>'}</div>`;
 }
 function workforcePanel(): string {
   const work = state.workforce;
+  const counts = workforceCounts(game.population, work);
+  const planned = editableAllocation(work);
+  const plannedTotal = resources.reduce((sum, resource) => sum + planned[resource], 0);
   const next = nextExploration(game, work.expeditions);
   const transport = Object.values(work.crews).reduce((sum, crew) => sum + (crew.weeklyDollarsCost ?? 0), 0);
-  return `<div class="population-workspace"><section class="population-overview"><div class="management-metrics"><div>${icon('people')}<small>Population</small><strong>${fmt(game.population)}</strong></div><div><small>Active</small><strong>${fmt(game.population - state.availableWorkers)}</strong></div><div><small>Unallocated</small><strong>${fmt(state.availableWorkers)}</strong></div></div>
+  const exploreReason = upkeepPauseReason() || (game.stage < 0 ? 'Establish a settlement before sending an expedition.'
+    : counts.available < 2 ? 'Exploration requires two available residents.'
+      : !next ? 'No nearby destination' : state.dollars < next.dollars ? 'Not enough FTH$.' : '');
+  return `<div class="population-workspace"><section class="population-overview"><div class="management-metrics"><div>${icon('people')}<small>Population</small><strong>${fmt(game.population)}</strong></div><div><small>Gathering now</small><strong>${fmt(counts.gathering)}</strong></div><div><small>Exploring now</small><strong>${fmt(counts.exploring)}</strong></div><div><small>Available now</small><strong>${fmt(counts.available)}</strong></div></div>
+    <p class="fineprint">Available residents are not inactive or lost. They can join a two-person expedition now; gathering assignments start at the next work-week boundary.</p>
     <div class="management-supply"><span>Water reserve</span>${meter(game.stock.water, state.waterUpkeep?.weeklyConsumption ?? 0, 'Weekly Water reserve', 'water')}</div>
     ${recruitmentButton()}
-    <h3 class="panel-section-heading">Active residents <span>${state.availableWorkers} / ${game.population} available</span></h3>
+    <h3 class="panel-section-heading">${translate(work.automatic ? 'Gathering now' : 'Next-week assignment', language)} <span>${plannedTotal} / ${counts.assignmentCapacity}</span></h3>
     ${waterUpkeepPanel()}
     <button class="button wide" data-action="automatic" aria-pressed="${work.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${work.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}${work.automatic ? '<span class="allocation-target">50%</span>' : ''}</button>
-    <p class="fineprint">Use +/-, slider or count. Edits switch to manual; active jobs finish first.</p>
+    ${work.automatic ? '<p class="fineprint">Auto uses up to half the population, including explorers. The rest stay available. Auto recalculates next week.</p>' : ''}
+    <p class="fineprint">Edits save automatically and switch to manual. Current gathering and expeditions finish unchanged; reducing next-week assignments does not free residents immediately.</p>
+    <p class="fineprint">Gathering leaves room for at least two explorers in total. Residents already exploring count toward that reserve, not in addition to it.</p>
     <details class="disclosure" data-detail="workforce-help"><summary>Allocation & automation ${icon('chevron')}</summary>${activityKinds.map(activityAutomationPanel).join('')}
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
@@ -991,7 +1002,8 @@ function workforcePanel(): string {
     </details></details>
     <p class="fineprint"><span>Transport on next pickup</span>: ${costChips({ dollars: transport })} · <span>Next allocation</span>: <span data-ready-at="${work.cycleAt}"></span></p>
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
-    <div class="panel-actions"><button class="button" data-action="explore" ${upkeepPauseReason() || game.stage < 0 || state.availableWorkers < 2 || !next || state.dollars < next.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${work.expeditions.length + 1}x</span></small>` : ''}</div>
+    <div class="panel-actions"><button class="button" data-action="explore" ${exploreReason ? 'disabled' : ''}>${icon('compass')} Send expedition · 2 ${translate('residents', language)}</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${work.expeditions.length + 1}x</span></small>` : ''}</div>
+    ${exploreReason ? `<p class="fineprint" role="status">${escape(translate(exploreReason, language))}</p>` : ''}
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
     <p class="fineprint">Each expedition needs two idle residents. Route fees scale by concurrent expedition count: 1x, 2x, 3x... Pay FTH$ upfront; teams return independently after 1–3 game weeks. Known-terrain travel remains free.</p>
     <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon('compass')}<div><strong>2 residents exploring (${expedition.x}, ${expedition.y})</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>

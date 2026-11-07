@@ -8,7 +8,67 @@ import { dailyUpkeepPerResident, dailyWaterPerResident, waterConsumptionForDays,
 import { dollarsUnits } from './dollars.ts';
 import { marketBasePrice, marketPriceFloor } from './market.ts';
 import { translate } from './i18n.ts';
-import { balancedAllocation, emptyAllocation } from './workforce.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, nextExploration, workforceCounts } from './workforce.ts';
+import { availableWorkers, createAccount, execute, snapshot } from '../server/economy.ts';
+
+test('population counts separate current gathering, explorers and waiting residents from next-week plans', () => {
+  const account = createAccount(1000000);
+  account.game.stage = 0; account.game.population = 12;
+  const work = snapshot(account).workforce;
+  work.automatic = true; work.allocation = { wood: 9, water: 0, metal: 0, oil: 0 };
+  work.crews = { wood: { workers: 3, readyAt: work.cycleAt, weeklyYield: 300, weeklyMetalCost: 0, weeklyDollarsCost: 3 } };
+  work.expeditions = [{ x: 5, y: 0, workers: 2, readyAt: work.cycleAt, surveyRadius: 4 }];
+  account.workforce = work;
+  assert.deepEqual(workforceCounts(12, work), { gathering: 3, exploring: 2, available: 7, assignmentCapacity: 10 });
+  assert.equal(availableWorkers(account), 7);
+  assert.deepEqual(editableAllocation(work), { wood: 3, water: 0, metal: 0, oil: 0 });
+  const jobs = structuredClone({ crews: work.crews, expeditions: work.expeditions });
+  execute(account, { type: 'assign', resource: 'wood', workers: 0 });
+  assert.equal(work.automatic, false);
+  assert.equal(work.allocation.wood, 0);
+  assert.equal(availableWorkers(account), 7, 'editing next week never frees current workers');
+  assert.deepEqual({ crews: work.crews, expeditions: work.expeditions }, jobs);
+  const draft = editableAllocation(work); draft.wood = 99;
+  assert.equal(work.allocation.wood, 0, 'editable allocation is a copy, not live state');
+  work.expeditions.push({ x: 6, y: 0, workers: 2, readyAt: work.cycleAt, surveyRadius: 4 });
+  assert.deepEqual(workforceCounts(12, work), { gathering: 3, exploring: 4, available: 5, assignmentCapacity: 8 });
+  assert.throws(() => execute(account, { type: 'assign', resource: 'wood', workers: 9 }), /Keep two residents/);
+  assert.deepEqual({ crews: work.crews, expeditions: work.expeditions.slice(0, 1) }, jobs);
+});
+test('automatic/manual switching preserves current jobs and zero-population counts stay empty', () => {
+  const account = createAccount(1000000);
+  account.game.stage = 0; account.game.population = 12;
+  const work = snapshot(account).workforce;
+  work.allocation.wood = 10;
+  account.workforce = work;
+  execute(account, { type: 'automatic', enabled: false });
+  assert.deepEqual(work.allocation, emptyAllocation(), 'switching from auto uses actual crews');
+  assert.equal(availableWorkers(account), 12);
+  execute(account, { type: 'automatic', enabled: true });
+  assert.equal(availableWorkers(account), 12);
+  assert.deepEqual(workforceCounts(0, work), { gathering: 0, exploring: 0, available: 0, assignmentCapacity: 0 });
+  for (const label of ['Busy now', 'Available now', 'Gathering now', 'Exploring now', 'Next-week assignment', 'Auto recalculates next week'])
+    assert.notEqual(translate(label, 'ko'), label);
+});
+test('an expedition uses two currently available residents, not future assignment space', () => {
+  const account = createAccount(1000000);
+  account.game.stage = 0; account.game.population = 4;
+  account.game.stock = { wood: 1000, water: 1000, metal: 1000, oil: 0 };
+  account.game.dollars = dollarsUnits(1000);
+  const work = snapshot(account).workforce;
+  work.automatic = false; work.allocation = emptyAllocation();
+  work.crews = { wood: { workers: 2, readyAt: work.cycleAt, weeklyYield: 200, weeklyMetalCost: 0, weeklyDollarsCost: 2 } };
+  account.workforce = work;
+  const destination = nextExploration(account.game)!;
+  execute(account, { type: 'move', x: destination.x, y: destination.y });
+  assert.deepEqual(workforceCounts(4, work), { gathering: 2, exploring: 2, available: 0, assignmentCapacity: 2 });
+  const before = structuredClone(account);
+  const another = nextExploration(account.game, work.expeditions)!;
+  assert.throws(() => execute(account, { type: 'move', x: another.x, y: another.y }), /two available residents/);
+  assert.deepEqual(account, before);
+  execute(account, { type: 'assign', resource: 'wood', workers: 0 });
+  assert.equal(availableWorkers(account), 0, 'future reductions cannot double-book gathering residents for exploration');
+});
 
 test('automatic crews value physical output at static prices and prioritize needed Water even below transport cost', () => {
   const game = newGame(1000000);
