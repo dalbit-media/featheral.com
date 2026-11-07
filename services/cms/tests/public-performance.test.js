@@ -132,6 +132,22 @@ test('data-saver and 2G connections fetch only the visible card', () => {
     assert.equal(f.media.size, 1);
   }
 });
+test('decoded swipe lookahead fills five small cards without exceeding two concurrent loads or the byte budget', () => {
+  const f = preloadFixture({}, Array.from({ length: 12 }, (_, i) => item(i + 1)));
+  f.preload();
+  for (let i = 0; i < 5; i++) {
+    for (const media of f.media.values()) media.done = true;
+    f.preload();
+    assert([...f.media.values()].filter(media => media.started && !media.done).length <= 2);
+  }
+  assert.equal(f.media.size, 5);
+  assert.equal([...f.media.values()].filter(media => media.img.src).length, 5);
+});
+test('swipe lookahead also bounds decoded pixels for highly compressed large images', () => {
+  const f = preloadFixture({}, [1, 2, 3].map(id => ({ id, media: { size: 1024, width: 4000, height: 3000, url: `/media/${id}` } })));
+  f.preload(); f.media.get(1).done = true; f.preload();
+  assert.equal(f.media.size, 1, 'an oversized visible image cannot admit more decoded originals');
+});
 test('swiping promotes download priority, cancels unfinished history and never restarts after disposal', () => {
   const f = preloadFixture({}, [item(1), item(2), item(3)]);
   f.preload(); f.media.get(1).done = true; f.preload();

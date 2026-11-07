@@ -175,11 +175,13 @@ const tokenAmount = (v, max, what) => {
 };
 
 class PublicSite {
-  constructor(site, { brand, tagline, notesFile } = {}) {
+  constructor(site, { brand, tagline, notesFile, sharedCards = false } = {}) {
     this.site = site;
     this.brand = brand || site.options(['blogname']).blogname || site.manifest.site || 'Site';
     this.tagline = tagline || null;
     this.store = new Curation(path.join(site.dir, 'public.sqlite'), notesFile, site.key);
+    this.sharedCards = sharedCards;
+    this.store.sharedCards = sharedCards;
     this.analytics = new Analytics(this.store.db);
     this.cms = new CmsStore(path.join(site.dir, 'cms.sqlite'));
     this.economy = new Economy(this.store, this.cms);
@@ -197,6 +199,7 @@ class PublicSite {
       theme: this.cms.theme(),
       pages: this.cms.publicPages({ excludeIds: new Set([...this.site.trashed].filter(id => id < 0).map(id => -id)) }),
       siteSettings: settings,
+      guestComments: this.sharedCards,
       ...(counts ? {
         types: PUBLIC_TYPES.map((id) => ({ id, label: id === 'jpeg' ? 'JPG' : id.toUpperCase(), ...this.status(id) })),
         mix: this.mixStatus(),
@@ -331,11 +334,12 @@ class PublicSite {
     const known = type === 'read' ? this.readingPublished(id)
       : isPublished(this.site, id) && (type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]);
     if (!known) throw httpError(404, 'Post not found');
+    type = this.cardVoteType(id, type);
     const round = this.store.round(type);
     if (expectedRound !== undefined && expectedRound !== round) throw httpError(409, 'The round changed. Reopen this post before voting.');
     const existing = this.store.vote(id, type, round);
     const trashed = this.store.trashRow(id);
-    const ownTrash = trashed && trashed.type === type && trashed.round === round;
+    const ownTrash = trashed && this.cardVoteType(id, trashed.type) === type && trashed.round === round;
     if (vote === 'none') {
       this.store.setVote(id, type, round, null);
       if (existing === 'dislike' && ownTrash) this.restore(id);
@@ -498,7 +502,7 @@ class PublicSite {
 
   comments(id) {
     id = +id;
-    if (!isPublished(this.site, id)) throw httpError(404, 'Post not found');
+    if (!(this.sharedCards && id < 0 ? this.readingPublished(id) : isPublished(this.site, id))) throw httpError(404, 'Post not found');
     // Comments synced from WordPress (read-only) come first, then wallet comments left here.
     let wp = [];
     try {
@@ -506,24 +510,44 @@ class PublicSite {
         WHERE comment_post_ID = ? AND comment_approved = '1' AND comment_type IN ('', 'comment') ORDER BY comment_date_gmt, comment_ID`, id)
         .map((c) => ({ id: `wp${c.id}`, source: 'wordpress', author: T.decodeEntities(c.author || '') || 'Anonymous', content: T.htmlToText(c.content || '').trim(), at: Date.parse(`${c.date}Z`) || null }));
     } catch { /* no comments table in this data set */ }
-    const own = this.store.comments(id).map((c) => ({ id: c.id, source: 'wallet', author: c.address, address: c.address, content: c.content, at: c.at }));
+    const own = this.store.comments(id).map(c => this.commentResult(c));
     return { id, total: wp.length + own.length, items: [...wp, ...own] };
   }
 
-  addComment(id, token, content) {
+  commentResult(c) {
+    const guest = c.address.startsWith('guest:');
+    return { id: c.id, source: guest ? 'visitor' : 'wallet', author: guest ? 'Visitor' : c.address,
+      ...(guest ? {} : { address: c.address }), content: c.content, at: c.at };
+  }
+
+  addComment(id, token, content, { visitor = '', ip = '' } = {}) {
     id = +id;
-    const address = this.walletOf(token);
-    if (!isPublic(this.site, id)) throw httpError(404, 'Post not found');
+    const guest = !token && this.sharedCards;
+    if (guest && (!/^[a-zA-Z0-9_-]{8,64}$/.test(visitor) || !ip)) throw httpError(400, 'A visitor session is required to comment. Reload and retry.');
+    const digest = value => crypto.createHash('sha256').update(value).digest('hex');
+    const prefix = guest ? `guest:${digest(ip)}:` : '';
+    const address = guest ? prefix + digest(visitor) : this.walletOf(token);
+    if (!(this.sharedCards && id < 0 ? this.readingPublished(id) && !this.site.trashed.has(id) : isPublic(this.site, id))) throw httpError(404, 'Post not found');
     const text = String(content ?? '').replace(/\r\n?/g, '\n').trim();
     if (!text) throw httpError(400, 'Write a comment first');
     if (text.length > 2000) throw httpError(400, 'Comments are limited to 2,000 characters');
     this.store.db.exec('BEGIN IMMEDIATE');
     try {
+      if (guest) {
+        const now = Date.now();
+        const recent = this.store.db.prepare('SELECT at, post_id, content FROM comments WHERE address=? AND at>? ORDER BY at DESC').all(address, now - 86400000);
+        if (recent.some(c => c.post_id === id && c.content === text)) throw httpError(409, 'This comment was already posted.');
+        const ipCount = this.store.db.prepare('SELECT COUNT(*) AS n FROM comments WHERE address>=? AND address<? AND at>?').get(prefix, prefix + '~', now - 3600000).n;
+        if (recent.some(c => now - c.at < 10000) || recent.filter(c => now - c.at < 600000).length >= 6 || ipCount >= 20)
+          throw httpError(429, 'Please slow down. Visitor comments are limited to one per 10 seconds, six per 10 minutes and 20 per hour per connection.');
+        if (this.store.db.prepare('SELECT COUNT(*) AS n FROM comments WHERE at>?').get(now - 3600000).n >= 200)
+          throw httpError(429, 'Comments are busy right now. Please try again later.');
+      }
       const c = this.store.addComment(id, address, text);
-      const author = this.store.memberAuthor(id);
+      const author = !guest && id > 0 ? this.store.memberAuthor(id) : null;
       const reward = this.store.notes && author ? this.store.reactionReward(id, address, author, 'comment', true) : null;
       this.store.db.exec('COMMIT');
-      return { id: c.id, source: 'wallet', author: address, address, content: c.content, at: c.at, ...(reward ? { reward } : {}) };
+      return { ...this.commentResult(c), ...(reward ? { reward } : {}) };
     } catch (error) { this.store.db.exec('ROLLBACK'); throw error; }
   }
 
@@ -669,18 +693,19 @@ class PublicSite {
       if (!(type === 'thumbs' ? thumbIds(this.site).has(id) && mainMedia(this.site, id) : this.site.postMetrics().get(id)?.imageBest[type]))
         throw httpError(404, 'Media not found');
     }
+    type = this.cardVoteType(id, type);
     const round = this.store.round(type);
     const counts = this.store.counts([id], type === 'read' ? 'read' : '').get(id) || { likes: 0, dislikes: 0 };
     const trash = this.store.trashRow(id);
     return { id, type, round, vote: this.store.vote(id, type, round), ...counts, deleted: !!trash,
-      canRestore: !trash || (trash.type === type && trash.round === round) };
+      canRestore: !trash || (this.cardVoteType(id, trash.type) === type && trash.round === round) };
   }
 
   publicMediaFile(id, type) {
     if (type === 'read') throw httpError(400, 'Readings do not have a media preview');
     const state = this.curation(id, type);
-    const media = state.type === 'thumbs' ? mainMedia(this.site, +id)
-      : { ...this.site.postMetrics().get(+id).imageBest[state.type], type: state.type };
+    const media = type === 'thumbs' ? mainMedia(this.site, +id)
+      : { ...this.site.postMetrics().get(+id).imageBest[type || state.type], type: type || state.type };
     const prefix = this.site.mediaBase + '/';
     if (!media.url?.startsWith(prefix)) throw httpError(404, 'Local media not found');
     const relative = media.url.slice(prefix.length).split('/').map(decodeURIComponent).join('/');
@@ -696,7 +721,8 @@ class PublicSite {
     const counts = this.store.activity();
     const readingCounts = this.store.activity('read');
     const entries = new Map(this.galleryPosts());
-    for (const [id, value] of readingCounts) if (value.dislikes > value.likes && this.readingPublished(id)) entries.set(id, { deck: 'read' });
+    for (const [id, value] of readingCounts) if (value.dislikes > value.likes && this.readingPublished(id)
+      && (!this.sharedCards || !entries.has(id))) entries.set(id, { deck: 'read' });
     for (const [id] of trash) if (!entries.has(id) && this.readingPublished(id)) entries.set(id, { deck: 'read' });
     const all = [...entries].filter(([id]) => (isPublished(this.site, id) || this.readingPublished(id))
       && (trash.has(id) || (counts.get(id)?.dislikes || 0) > (counts.get(id)?.likes || 0)
@@ -710,7 +736,7 @@ class PublicSite {
     const rows = postRows(this.site, ids), comments = this.commentCounts(ids), members = this.store.memberInfo(ids);
     return { total: all.length, offset, limit, items: slice.map(([id, entry]) => {
       const owner = trash.get(id)?.type;
-      const type = ['thumbs', 'read'].includes(owner) || PUBLIC_TYPES.includes(owner) ? owner : entry.deck;
+      const type = this.cardVoteType(id, ['thumbs', 'read'].includes(owner) || PUBLIC_TYPES.includes(owner) ? owner : entry.deck);
       const state = this.curation(id, type);
       if (type === 'read') return { ...this.readingSummary(id, true), ...state, deck: 'read', reading: true, trashedAt: trash.get(id)?.at || null };
       const media = this.likedMedia({ post_id: id, type });
@@ -815,6 +841,12 @@ class PublicSite {
       if (media) out.set(row.ID, { media, date: row.post_date || '', deck: thumbs.has(row.ID) ? 'thumbs' : media.type });
     }
     return (this.site.memo.publicDecks.gallery = out);
+  }
+
+  cardVoteType(id, type) {
+    if (!this.sharedCards || id < 1) return type;
+    const media = mainMedia(this.site, id);
+    return media ? thumbIds(this.site).has(id) ? 'thumbs' : media.type : type;
   }
 
   // Every tag ranked: tags heating up first (likes and comments ×2 of their posts, recent ones (by the
@@ -1316,6 +1348,8 @@ class Curation {
       CREATE TABLE IF NOT EXISTS wallet_sessions (token TEXT PRIMARY KEY, address TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL, address TEXT NOT NULL, content TEXT NOT NULL, at INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS comments_post ON comments (post_id, at);
+      CREATE INDEX IF NOT EXISTS comments_address_at ON comments (address, at);
+      CREATE INDEX IF NOT EXISTS comments_at ON comments (at);
       CREATE TABLE IF NOT EXISTS wallet_intents (address TEXT NOT NULL, purpose TEXT NOT NULL, nonce TEXT NOT NULL, amount INTEGER, at INTEGER NOT NULL, PRIMARY KEY (address, purpose));
       -- Preserve the legacy table name so FTHX reuses existing balances and history.
       CREATE TABLE IF NOT EXISTS qprn_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL, amount INTEGER NOT NULL, kind TEXT NOT NULL,
@@ -1464,32 +1498,42 @@ class Curation {
   setRound(type, round) { this.db.prepare('INSERT INTO rounds (type, round) VALUES (?, ?) ON CONFLICT(type) DO UPDATE SET round = excluded.round').run(type, round); }
 
   reviewed(type, round) {
-    return new Set(this.db.prepare('SELECT post_id FROM votes WHERE type = ? AND round = ?').all(type, round).map((r) => r.post_id));
+    return new Set(this.db.prepare(`SELECT post_id FROM ${this.voteRows()} WHERE ${this.sharedCards ? "(type=? OR post_id>0)" : "type=?"} AND round = ?`).all(type, round).map((r) => r.post_id));
   }
 
   roundTally(type, round) {
-    return Object.fromEntries(this.db.prepare('SELECT vote, COUNT(*) AS n FROM votes WHERE type = ? AND round = ? GROUP BY vote').all(type, round).map((r) => [r.vote, r.n]));
+    return Object.fromEntries(this.db.prepare(`SELECT vote, COUNT(*) AS n FROM ${this.voteRows()} WHERE type = ? AND round = ? GROUP BY vote`).all(type, round).map((r) => [r.vote, r.n]));
   }
 
-  vote(id, type, round) { return this.db.prepare('SELECT vote FROM votes WHERE post_id = ? AND type = ? AND round = ?').get(id, type, round)?.vote || null; }
+  voteRows() {
+    return this.sharedCards ? "(SELECT post_id,type,round,vote,at FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY post_id,round ORDER BY at DESC,type) AS position FROM votes) WHERE position=1)" : 'votes';
+  }
+
+  voteFilter(type) {
+    if (!this.sharedCards) return type ? 'type=?' : "type<>'read'";
+    return type === 'read' ? "(type=? OR post_id>0)" : type ? "(type=? OR post_id>0)" : "(type<>'read' OR post_id>0)";
+  }
+
+  vote(id, type, round) { return this.db.prepare(`SELECT vote FROM ${this.voteRows()} WHERE post_id = ? AND ${this.voteFilter(type)} AND round = ?`).get(id, type, round)?.vote || null; }
 
   votesIn(type, round, ids) {
     if (!ids.length) return new Map();
-    const rows = this.db.prepare(`SELECT post_id, vote FROM votes WHERE type = ? AND round = ? AND post_id IN (${ids.map(() => '?').join(',')})`).all(type, round, ...ids);
+    const rows = this.db.prepare(`SELECT post_id, vote FROM ${this.voteRows()} WHERE ${this.voteFilter(type)} AND round = ? AND post_id IN (${ids.map(() => '?').join(',')})`).all(type, round, ...ids);
     return new Map(rows.map((r) => [r.post_id, r.vote]));
   }
 
   setVote(id, type, round, vote) {
+    if (this.sharedCards && id > 0) this.db.prepare('DELETE FROM votes WHERE post_id=? AND round=? AND type<>?').run(id, round, type);
     if (!vote) return this.db.prepare('DELETE FROM votes WHERE post_id = ? AND type = ? AND round = ?').run(id, type, round);
     this.db.prepare('INSERT INTO votes (post_id, type, round, vote, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(post_id, type, round) DO UPDATE SET vote = excluded.vote, at = excluded.at')
       .run(id, type, round, vote, Date.now());
   }
 
-  clearVote(id, type, round, vote) { this.db.prepare('DELETE FROM votes WHERE post_id = ? AND type = ? AND round = ? AND vote = ?').run(id, type, round, vote); }
+  clearVote(id, type, round, vote) { this.db.prepare(`DELETE FROM votes WHERE post_id = ? AND ${this.voteFilter(type)} AND round = ? AND vote = ?`).run(id, type, round, vote); }
 
   counts(ids, type = '') {
     if (!ids.length) return new Map();
-    const rows = this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes FROM votes WHERE post_id IN (${ids.map(() => '?').join(',')}) AND ${type ? 'type=?' : "type<>'read'"} GROUP BY post_id`).all(...ids, ...(type ? [type] : []));
+    const rows = this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes FROM ${this.voteRows()} WHERE post_id IN (${ids.map(() => '?').join(',')}) AND ${this.voteFilter(type)} GROUP BY post_id`).all(...ids, ...(type ? [type] : []));
     return new Map(rows.map((r) => [r.post_id, { likes: r.likes, dislikes: r.dislikes }]));
   }
 
@@ -1497,7 +1541,7 @@ class Curation {
   activity(type = '') {
     const out = new Map();
     const get = (id) => out.get(id) || out.set(id, { likes: 0, dislikes: 0, comments: 0, at: 0 }).get(id);
-    for (const r of this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes, MAX(CASE WHEN vote = 'like' THEN at END) AS at FROM votes WHERE ${type ? 'type=?' : "type<>'read'"} GROUP BY post_id`).all(...(type ? [type] : []))) {
+    for (const r of this.db.prepare(`SELECT post_id, SUM(vote = 'like') AS likes, SUM(vote = 'dislike') AS dislikes, MAX(CASE WHEN vote = 'like' THEN at END) AS at FROM ${this.voteRows()} WHERE ${this.voteFilter(type)} GROUP BY post_id`).all(...(type ? [type] : []))) {
       Object.assign(get(r.post_id), { likes: r.likes, dislikes: r.dislikes, at: r.at || 0 });
     }
     for (const r of this.db.prepare('SELECT post_id, COUNT(*) AS n, MAX(at) AS at FROM comments GROUP BY post_id').all()) {
@@ -1508,6 +1552,9 @@ class Curation {
 
   // Liked posts, best-voted first; `type` is the media type of the most recent like.
   likedPosts(kind = 'media') {
+    if (this.sharedCards) return this.db.prepare(`SELECT post_id, SUM(vote='like') AS likes, SUM(vote='dislike') AS dislikes,
+      MAX(CASE WHEN vote='like' THEN at END) AS at, type FROM ${this.voteRows()}
+      WHERE ${kind === 'read' ? "(type='read' OR post_id>0)" : 'post_id>0'} GROUP BY post_id HAVING likes>0 ORDER BY likes-dislikes DESC,at DESC`).all();
     return this.db.prepare(`SELECT v.post_id, SUM(v.vote = 'like') AS likes, SUM(v.vote = 'dislike') AS dislikes, MAX(CASE WHEN v.vote = 'like' THEN v.at END) AS at,
         (SELECT type FROM votes l WHERE l.post_id = v.post_id AND l.vote = 'like' AND ${kind === 'read' ? "l.type='read'" : "l.type<>'read'"} ORDER BY l.at DESC LIMIT 1) AS type
       FROM votes v WHERE ${kind === 'read' ? "v.type='read'" : "v.type<>'read'"} GROUP BY v.post_id HAVING likes > 0 ORDER BY likes - dislikes DESC, at DESC`).all();

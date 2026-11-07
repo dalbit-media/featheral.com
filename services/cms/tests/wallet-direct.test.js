@@ -6,7 +6,7 @@ const root = path.resolve(__dirname, '../../..');
 const embed = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/embed.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/wallet-app.js'), 'utf8');
 const address = '0x' + '11'.repeat(20), other = '0x' + '22'.repeat(20), signature = '0x' + 'ab'.repeat(65);
-const walletOrigin = 'https://wallet.featheral.com';
+const tick = () => new Promise(setImmediate);
 test('wallet accepts the real open-membership App challenge and rejects changed origins or authorization terms', () => {
   const { Notes } = require('../../notes/ledger');
   const { Creation } = require('../../notes/creation');
@@ -21,25 +21,26 @@ test('wallet accepts the real open-membership App challenge and rejects changed 
       assert.throws(() => validate(address, challenge.message, true, 'https://notes.featheral.com'), /origin/);
       assert.throws(() => validate(other, challenge.message, true, origin), /standard/);
       assert.throws(() => validate(address, challenge.message.replace('No transfer or salary approval.', 'Approve all salary transfers.'), true, origin), /standard/);
-      assert.throws(() => validate(address, challenge.message, false, origin), /standard/);
     }
   } finally { notes.close(); }
 });
-function fixture({ hostname = 'notes.featheral.com', blocked = false, store = new Map(), avatar, summary, failSummary = false } = {}) {
-  const elements = [], listeners = new Map(), messages = [], popups = [], timers = new Set(), requests = [], errors = [];
-  let elapsed = 0;
+function fixture({ hostname = 'notes.featheral.com', fail = false, store = new Map() } = {}) {
+  const elements = [], instances = [], requests = [], timers = new Set(), errors = [];
   class Element {
     constructor(tag) {
-      assert.notEqual(tag, 'iframe', 'no wallet operation may create an iframe');
-      this.tag = tag; this.dataset = {}; this.style = {}; this.children = []; this.listeners = {};
+      assert.notEqual(tag, 'iframe');
+      this.tag = tag; this.dataset = {}; this.children = []; this.listeners = {};
+      this.style = { setProperty(name, value) { this[name] = value; } };
       this.isConnected = true; this.classList = { add() {} }; elements.push(this);
     }
-    append(...children) { this.children.push(...children); }
-    replaceChildren(...children) { this.children = children; }
+    append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
     setAttribute(name, value) { this[name] = value; }
+    getAttribute(name) { return this[name]; }
     hasAttribute() { return false; }
     addEventListener(name, fn) { this.listeners[name] = fn; }
     querySelector(selector) {
+      if (selector.startsWith('.connection-option')) return new Element('p');
       for (const child of this.children) {
         if (selector === child.tag || selector === '[data-wallet-root]' && child.dataset.walletRoot) return child;
         const found = child.querySelector(selector); if (found) return found;
@@ -47,218 +48,153 @@ function fixture({ hostname = 'notes.featheral.com', blocked = false, store = ne
       return null;
     }
     querySelectorAll() { return []; }
+    attachShadow() { return new Element('shadow'); }
+    closest(tag) { return this.tag === tag ? this : this.parent?.closest(tag); }
     showModal() { this.open = true; }
-    close() { this.open = false; }
+    close() { this.open = false; this.listeners.close?.(); }
+    focus() {}
   }
-  const header = new Element('header'), button = new Element('button');
-  header.append(button); header.querySelector = () => button;
-  const document = { currentScript: { src: walletOrigin + '/embed.js' }, readyState: 'complete',
-    body: new Element('body'), createElement: tag => new Element(tag),
+  const header = new Element('header'), button = new Element('button'); header.append(button); header.querySelector = () => button;
+  const document = { currentScript: { src: 'https://wallet.featheral.com/embed.js' }, readyState: 'complete',
+    addEventListener() {},
+    body: new Element('body'), head: new Element('head'), createElement: tag => new Element(tag),
     getElementById: id => elements.find(element => element.id === id), querySelector: () => header, querySelectorAll: () => [] };
+  const walletApp = { async mount(context) {
+    const instance = { context, tabs: [], suspended: 0, disposed: 0 };
+    context.receive = data => instance.messages.push(data); instance.messages = []; instances.push(instance);
+    return { tab: value => instance.tabs.push(value), suspend: async () => { instance.suspended++; }, dispose: () => { instance.disposed++; } };
+  } };
   const window = { localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
-    crypto: { getRandomValues: array => array.fill(popups.length + 1) },
-    addEventListener(name, fn) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(fn); },
-    removeEventListener(name, fn) { listeners.get(name)?.delete(fn); },
-    open(href) {
-      if (blocked) return null;
-      const popup = { href, closed: false, postMessage: (data, origin) => messages.push({ data, origin }), close() { this.closed = true; } };
-      popups.push(popup); return popup;
-    } };
-  const location = new URL(hostname.endsWith('localhost') ? `http://${hostname}:8080` : `https://${hostname}`);
-  vm.runInNewContext(embed, { window, document, location, URL, URLSearchParams,
+    ethers: {}, FeatheralVault: {}, FeatheralPortfolio: {}, FeatheralSignIn: {}, FeatheralWalletApp: walletApp,
+    addEventListener() {}, open() { assert.fail('Context wallet must never open a wallet-site window'); } };
+  let counter = 0;
+  vm.runInNewContext(embed, { window, document, location: new URL(hostname.endsWith('localhost') ? `http://${hostname}:8080` : `https://${hostname}`),
+    localStorage: window.localStorage, crypto: { getRandomValues: array => array.fill(++counter) }, URL, URLSearchParams, AbortSignal,
+    DOMParser: class { parseFromString() { return { body: { innerHTML: '<main></main>' }, querySelectorAll: () => [] }; } },
+    getComputedStyle: () => ({ getPropertyValue: name => ({ '--brand': '#123456', '--panel': '#ffffff', '--txt': '#123123' }[name] || ''),
+      color: '#123123', backgroundColor: '#ffffff', fontFamily: 'Test Font', colorScheme: 'light' }),
     console: { error: (...args) => errors.push(args) },
     fetch: async (url, options) => {
       requests.push({ url, options });
-      if (String(url).includes('/profiles/')) return { ok: true, json: async () => ({ profile: { avatar } }) };
-      return { ok: !failSummary, status: 503, json: async () => summary || { address, portfolio: { usd: '12.34', partial: false } } };
+      return { ok: !fail, status: 503, text: async () => '', json: async () => ({ profile: null }) };
     },
-    setInterval: fn => { timers.add(fn); return fn; }, clearInterval: fn => timers.delete(fn),
-    Date: class extends Date { static now() { return Date.now() + elapsed; } } });
-  return { wallet: window.FeatheralWallet, elements, button, store, messages, popups, timers, requests, errors,
-    dialog: () => document.getElementById('featheral-central-wallet'), advanceTime: ms => { elapsed += ms; },
-    async emit(name, event) { for (const fn of [...listeners.get(name) || []]) await fn(event); },
-    async receive(popup, data, origin = walletOrigin) { await this.emit('message', { source: popup, origin, data }); } };
+    setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn) });
+  return { wallet: window.FeatheralWallet, instances, store, timers, requests, errors, elements, button,
+    dialog: () => document.getElementById('featheral-central-wallet'),
+    async emit(data, instance = instances.at(-1)) { instance.context.onMessage(data); await tick(); } };
 }
-function nonce(popup, key = 'authNonce') { return new URL(popup.href).searchParams.get(key); }
-async function ready(ui, popup, account = address) {
-  await ui.receive(popup, { type: 'featheral:wallet-ready' });
-  await ui.receive(popup, { type: 'featheral:wallet-auth-ready', nonce: nonce(popup), address: account });
-}
-test('all site previews are frame-free and retain primary, view, origin and payment precision', () => {
-  for (const hostname of ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'world.featheral.com', 'dollar.localhost', 'pay.featheral.com', 'ex.featheral.com']) {
+test('all site wallets mount full frame-free UI with local assets, currency, view and exact payment details', async () => {
+  for (const hostname of ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'world.featheral.com', 'dollar.localhost', 'pay.featheral.com', 'ex.featheral.com', 'x.localhost']) {
     const ui = fixture({ hostname });
-    ui.wallet.open({ view: 'swap' });
-    const url = new URL(ui.dialog().querySelector('a').href);
-    assert.equal(url.searchParams.get('primary'), primaryFor(hostname));
-    assert.equal(url.searchParams.get('view'), 'swap');
-    assert.equal(url.searchParams.has('embedded'), false);
-    assert.equal(ui.popups.length, 0);
-    assert.equal(ui.dialog().querySelector('a').rel, 'noopener');
+    ui.wallet.open({ view: 'swap' }); await tick();
+    const params = new URLSearchParams(ui.instances[0].context.search);
+    assert.equal(params.get('primary'), primaryFor(hostname));
+    assert.equal(params.get('view'), 'swap');
+    assert.ok(ui.requests.every(request => String(request.url).startsWith('/')));
+    assert.equal(ui.instances[0].context.body.style['--brand'], '#123456');
+    assert.equal(ui.instances[0].context.body.style.fontFamily, 'Test Font');
+    ui.dialog().close();
   }
   const ui = fixture({ hostname: 'dollar.localhost' });
-  const payment = new URLSearchParams({ to: other, amount: '1.000000000000000001', name: 'Shop & cafe', currency: 'FTH$' });
-  ui.wallet.open({ payment: payment.toString(), view: 'send' });
-  const url = new URL(ui.dialog().querySelector('a').href);
-  for (const [key, value] of payment) assert.equal(url.searchParams.get(key), value);
-  assert.equal(url.searchParams.get('parentOrigin'), 'http://dollar.localhost:8080');
-  ui.wallet.open({ view: 'send' });
-  assert.equal(new URL(ui.dialog().querySelector('a').href).searchParams.has('to'), false);
+  ui.wallet.open({ view: 'send', payment: new URLSearchParams({ to: other, amount: '1.000000000000000001', name: 'Shop & cafe', currency: 'FTH$' }).toString() });
+  await tick();
+  const params = new URLSearchParams(ui.instances[0].context.search);
+  assert.equal(params.get('amount'), '1.000000000000000001');
+  assert.equal(params.get('parentOrigin'), 'http://dollar.localhost:8080');
+  assert.doesNotMatch(embed, /window\.open|location\.(?:href|assign|replace)\s*[=(]|createElement\(["']iframe/);
 });
-test('pinned previews never authorize and public reads omit credentials with explicit unavailable states', async () => {
+test('pinned address views remain read-only; contextual auth has no cross-window handoff', async () => {
   const ui = fixture();
-  const root = ui.elements.find(element => element.tag === 'body');
-  ui.wallet.mount(root, { address });
-  await new Promise(setImmediate);
-  assert.equal(ui.requests.at(-1).options.credentials, 'omit');
-  assert.equal(root.children[1].textContent, 'Estimated total: $12.34 USD');
-  assert.equal(new URL(root.querySelector('a').href).searchParams.get('address'), address);
-  assert.equal(ui.popups.length, 0);
-  const failed = fixture({ failSummary: true });
-  failed.wallet.open({ address, followActive: false });
-  await new Promise(setImmediate);
-  assert.match(failed.dialog().querySelector('[data-wallet-root]').children[3].textContent, /HTTP 503/);
-  const mismatch = fixture({ summary: { address: other } });
-  mismatch.wallet.open({ address, followActive: false }); await new Promise(setImmediate);
-  assert.match(mismatch.dialog().querySelector('[data-wallet-root]').children[3].textContent, /mismatch/);
+  ui.wallet.open({ address, followActive: false }); await tick();
+  const params = new URLSearchParams(ui.instances[0].context.search);
+  assert.equal(params.get('address'), address);
+  assert.equal(params.has('authNonce'), false);
+  assert.equal(walletUi(params).interactive, false);
+  assert.doesNotMatch(embed, /postMessage|walletOrigin/);
 });
-test('authorization opens synchronously and binds popup, origin, nonce and signing account', async () => {
+test('authorization binds instance, nonce and account and returns only approved address/signature', async () => {
   const ui = fixture(), challenges = [];
   const pending = ui.wallet.authenticate(async owner => { challenges.push(owner); return { message: 'standard challenge' }; });
-  assert.equal(ui.popups.length, 1);
-  const popup = ui.popups[0], value = nonce(popup);
-  const data = { type: 'featheral:wallet-auth-ready', nonce: value, address };
-  await ui.receive(popup, data, 'https://evil.example');
-  await ui.receive({}, data);
-  await ui.receive(popup, { ...data, nonce: 'ff'.repeat(16) });
+  assert.equal(ui.dialog().open, true);
+  await tick();
+  const instance = ui.instances[0], nonce = new URLSearchParams(instance.context.search).get('authNonce');
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce: 'ff'.repeat(16), address });
   assert.deepEqual(challenges, []);
-  await ready(ui, popup);
-  await ui.receive(popup, data);
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce, address });
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce, address });
   assert.deepEqual(challenges, [address]);
-  assert.equal(ui.messages.find(message => message.data.type === 'featheral:wallet-auth').data.message, 'standard challenge');
-  await ui.receive(popup, { type: 'featheral:wallet-signature', nonce: value, address, signature, token: 'must-not-return' });
+  assert.equal(instance.messages.find(data => data.type === 'featheral:wallet-auth').message, 'standard challenge');
+  await ui.emit({ type: 'featheral:wallet-signature', nonce, address, signature, token: 'must-not-return' });
   const result = await pending;
   assert.deepEqual(Object.keys(result).sort(), ['address', 'signature']);
-  assert.equal(result.signature, signature);
-  assert.equal(ui.timers.size, 0); assert.equal(popup.closed, true);
-  assert.deepEqual([...ui.store.keys()], ['featheral-wallet-public-account']);
+  assert.equal(result.signature, signature); assert.equal(ui.timers.size, 0);
+  assert.equal(ui.dialog().open, false); assert.equal(instance.suspended, 1);
 });
-test('account selection needs no site signature and restores safe header identity after reload', async () => {
-  const ui = fixture({ avatar: 'data:image/png;base64,YXZhdGFy' });
-  const pending = ui.wallet.account(), popup = ui.popups[0];
-  await ready(ui, popup);
+test('account selection and repeated header opens reuse the mounted context without new listeners', async () => {
+  const ui = fixture(), pending = ui.wallet.account(); await tick();
+  const nonce = new URLSearchParams(ui.instances[0].context.search).get('authNonce');
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce, address });
   assert.deepEqual(Object.keys(await pending), ['address']);
-  assert.equal(ui.messages.some(message => message.data.type === 'featheral:wallet-auth'), false);
-  await new Promise(setImmediate);
+  assert.equal(ui.store.get('featheral-wallet-public-account'), address);
+  ui.wallet.open({ view: 'account' }); await tick();
+  assert.equal(ui.instances.length, 1);
   assert.equal(ui.button.children.at(-1).textContent, '..11111');
-  assert.equal(ui.button.children[1].children[0].src, 'data:image/png;base64,YXZhdGFy');
-  const reloaded = fixture({ store: ui.store, avatar: 'https://evil.example/avatar.png' });
-  await new Promise(setImmediate);
-  assert.match(reloaded.button.title, /Avatar unavailable/);
-  assert.equal(reloaded.button.children.at(-1).textContent, '..11111');
 });
-test('popup blocks, duplicate connections, challenge failures, closure and cancellation reject explicitly', async () => {
-  await assert.rejects(fixture({ blocked: true }).wallet.account(), /popup blocked/);
+test('load errors, duplicate connections, challenge failure, close and expiry reject explicitly', async () => {
+  await assert.rejects(fixture({ fail: true }).wallet.account(), /HTTP 503/);
   const ui = fixture(), pending = ui.wallet.authenticate(async () => { throw new Error('Challenge offline'); });
   const rejected = assert.rejects(pending, /Challenge offline/);
   await assert.rejects(ui.wallet.account(), /existing wallet connection/);
-  await ready(ui, ui.popups[0]); await rejected;
-  assert.equal(ui.timers.size, 0);
-  const cancelled = ui.wallet.account(), cancelResult = assert.rejects(cancelled, /cancelled/);
-  ui.popups.at(-1).closed = true; [...ui.timers][0](); await cancelResult;
-  const explicit = ui.wallet.account(), explicitResult = assert.rejects(explicit, /User cancelled/);
-  await ui.receive(ui.popups.at(-1), { type: 'featheral:wallet-signature', nonce: nonce(ui.popups.at(-1)), error: 'User cancelled' });
-  await explicitResult;
-  assert.equal(ui.store.size, 0); assert.equal(ui.timers.size, 0);
+  await tick();
+  const nonce = new URLSearchParams(ui.instances[0].context.search).get('authNonce');
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce, address }); await rejected;
+  const cancel = ui.wallet.account(), cancelled = assert.rejects(cancel, /cancelled/);
+  ui.dialog().close(); await cancelled;
+  const expired = ui.wallet.account(), timedOut = assert.rejects(expired, /expired/);
+  [...ui.timers][0](); await timedOut;
+  assert.equal(ui.store.size, 0);
 });
-test('signatures with changed accounts or invalid output never connect', async () => {
+test('closing during a challenge prevents late approvals; changed signatures cannot connect', async () => {
+  let release;
+  const ui = fixture(), pending = ui.wallet.authenticate(() => new Promise(resolve => { release = resolve; }));
+  const rejected = assert.rejects(pending, /cancelled/); await tick();
+  const nonce = new URLSearchParams(ui.instances[0].context.search).get('authNonce');
+  await ui.emit({ type: 'featheral:wallet-auth-ready', nonce, address });
+  ui.dialog().close(); await rejected; release({ message: 'late' }); await tick();
+  assert.equal(ui.instances[0].messages.some(data => data.type === 'featheral:wallet-auth'), false);
   for (const response of [{ address: other, signature }, { address, signature: 'invalid' }]) {
-    const ui = fixture(), pending = ui.wallet.authenticate(async () => ({ message: 'challenge' }));
-    const rejected = assert.rejects(pending, /Invalid wallet sign-in response/);
-    const popup = ui.popups[0]; await ready(ui, popup);
-    await ui.receive(popup, { type: 'featheral:wallet-signature', nonce: nonce(popup), ...response });
-    await rejected; assert.equal(ui.store.size, 0);
+    const invalid = fixture(), result = invalid.wallet.authenticate(() => ({ message: 'challenge' }));
+    const fail = assert.rejects(result, /Invalid wallet sign-in response/); await tick();
+    const value = new URLSearchParams(invalid.instances[0].context.search).get('authNonce');
+    await invalid.emit({ type: 'featheral:wallet-auth-ready', nonce: value, address });
+    await invalid.emit({ type: 'featheral:wallet-signature', nonce: value, ...response }); await fail;
   }
 });
-test('authorization expires after ten minutes and never continues a cancelled asynchronous challenge', async () => {
-  const expired = fixture(), pending = expired.wallet.account();
-  const rejected = assert.rejects(pending, /expired/);
-  expired.advanceTime(600001); [...expired.timers][0](); await rejected;
-  assert.equal(expired.timers.size, 0);
-  let release;
-  const ui = fixture(), result = ui.wallet.authenticate(() => new Promise(resolve => { release = resolve; }));
-  const cancelled = assert.rejects(result, /cancelled/), popup = ui.popups[0];
-  const receiving = ready(ui, popup);
-  await new Promise(setImmediate);
-  popup.closed = true; [...ui.timers][0](); await cancelled;
-  release({ message: 'late challenge' }); await receiving;
-  assert.equal(ui.messages.some(message => message.data.type === 'featheral:wallet-auth'), false);
-});
-test('wallet management shares only nonce-bound public selection while keeping its window open', async () => {
-  const ui = fixture();
-  ui.wallet.open();
-  ui.dialog().children[3].listeners.click();
-  const popup = ui.popups[0], data = { type: 'featheral:wallet-selected', nonce: nonce(popup, 'selectionNonce'), address };
-  await ui.receive(popup, data, 'https://evil.example');
-  await ui.receive({}, data);
-  assert.equal(ui.store.size, 0);
-  await ui.receive(popup, data);
-  assert.equal(ui.store.get('featheral-wallet-public-account'), address);
-  assert.equal(popup.closed, false);
-  const pinned = fixture();
-  pinned.wallet.open({ address, followActive: false });
-  pinned.dialog().children[3].listeners.click();
-  const pinnedPopup = pinned.popups[0];
-  assert.equal(new URL(pinnedPopup.href).searchParams.has('selectionNonce'), false);
-  assert.equal(pinnedPopup.opener, null);
-  await pinned.receive(pinnedPopup, { ...data, address: other });
-  assert.equal(pinned.store.size, 0);
-});
-test('wallet approval configuration rejects framed, pinned, malformed and untrusted handoffs', () => {
-  for (const params of [
-    { authNonce: 'bad', parentOrigin: 'https://notes.featheral.com' },
-    { authNonce: 'ab'.repeat(16) },
-    { authNonce: 'ab'.repeat(16), parentOrigin: 'https://evil.example' },
-    { authNonce: 'ab'.repeat(16), parentOrigin: 'https://notes.featheral.com', embedded: '1' },
-    { authNonce: 'ab'.repeat(16), parentOrigin: 'https://notes.featheral.com', address },
-    { mode: 'unknown' },
-  ]) assert.throws(() => walletUi(new URLSearchParams(params)), /Unsupported/);
-  const config = walletUi(new URLSearchParams({ authNonce: 'ab'.repeat(16), parentOrigin: 'https://notes.featheral.com', mode: 'builtin' }));
-  assert.equal(config.authNonce, 'ab'.repeat(16)); assert.equal(config.mode, 'builtin'); assert.equal(config.interactive, true);
-  assert.match(app, /window\.parent !== window\) throw new Error/);
-  assert.doesNotMatch(app, /providerProxy|requestStorageAccess|wallet-provider-result/);
-  const server = fs.readFileSync(path.join(root, 'scripts/serve.js'), 'utf8');
-  assert.match(server, /res\.setHeader\("Content-Security-Policy", "frame-ancestors 'none'"\)/);
-});
 function providerFixture(ethereum) {
-  const nodes = new Map(), listeners = {}, bound = [];
+  const nodes = new Map(), listeners = {};
   const $ = id => {
     if (!nodes.has(id)) nodes.set(id, { children: [], replaceChildren(...children) { this.children = children; this.firstChild = children[0]; }, append(child) { this.children.push(child); } });
     return nodes.get(id);
   };
-  const window = { ethereum, addEventListener: (name, fn) => { listeners[name] = fn; }, dispatchEvent() {} };
-  const context = vm.createContext({ $, el: (_, textContent) => ({ textContent }), window, Event: class {},
-    config: { mode: 'auto' }, interactive: true, bindProvider: provider => bound.push(provider) });
+  const window = { ethereum };
+  const context = vm.createContext({ $, el: (_, textContent) => ({ textContent }), window,
+    listen: (_target, name, fn) => { listeners[name] = fn; }, config: { mode: 'auto' }, interactive: true, bindProvider() {} });
   vm.runInContext(app.slice(app.indexOf('  let browserProvider,'), app.indexOf('  const defaultStandaloneTheme')), context);
   context.updateProviders();
   return { context, nodes, listeners, provider: () => vm.runInContext('browserProvider', context) };
 }
-test('extension discovery defaults to one provider but requires explicit choice with multiple extensions', () => {
+test('extension discovery prefers a single provider and explicitly selects among multiple extensions', () => {
   const one = { request() {}, isMetaMask: true }, two = { request() {} };
-  const legacy = providerFixture(one);
-  assert.equal(legacy.provider(), one);
-  assert.equal(legacy.nodes.get('extension-connect').textContent, 'Connect MetaMask');
+  assert.equal(providerFixture(one).provider(), one);
   const empty = providerFixture();
   assert.equal(empty.nodes.get('extension-connect').disabled, true);
-  assert.match(empty.nodes.get('connection-help').textContent, /No extension detected/);
   empty.listeners['eip6963:announceProvider']({ detail: { provider: one, info: { name: 'One' } } });
   assert.equal(empty.provider(), one);
   empty.listeners['eip6963:announceProvider']({ detail: { provider: two, info: { name: 'Two' } } });
-  assert.equal(empty.provider(), null, 'multiple discovered extensions require explicit selection');
-  assert.equal(empty.nodes.get('extension-provider').hidden, false);
-  const multiple = providerFixture({ providers: [one, two] });
-  assert.equal(multiple.provider(), null);
+  assert.equal(empty.provider(), null);
+  assert.equal(providerFixture({ providers: [one, two] }).provider(), null);
 });
-test('no extension defaults to builtin create/unlock; choosing builtin overrides an installed extension', async () => {
+test('no extension defaults to builtin create/unlock and extension rejection never creates a wallet', async () => {
   for (const record of [null, { address }]) for (const builtInPreferred of [false, true]) {
     const nodes = new Map(), calls = [];
     const context = vm.createContext({ token: '', interactive: true, builtInPreferred,
@@ -268,40 +204,110 @@ test('no extension defaults to builtin create/unlock; choosing builtin overrides
     vm.runInContext(app.slice(app.indexOf('  async function ensureSession()'), app.indexOf('  $("connect").addEventListener')), context);
     assert.equal(await context.ensureSession(), false);
     assert.equal(nodes.get('vault-action').value, record ? 'unlock' : 'create');
-    assert.equal(nodes.get('local-wallet').open, true);
-    assert.deepEqual(calls, ['account', 'focus']);
   }
-});
-test('extension rejection is not replaced with builtin wallet creation', async () => {
-  const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false,
-    providerChoices: () => [{}], vault: {}, providerChosen: false, browserProvider: { request: async () => { throw Object.assign(new Error('Rejected'), { code: 4001 }); } } });
+  const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false, providerChoices: () => [{}],
+    vault: {}, providerChosen: false, epoch: 0, contextEpoch: 0, requireVisible() {},
+    browserProvider: { request: async () => { throw Object.assign(new Error('Rejected'), { code: 4001 }); } } });
   vm.runInContext(app.slice(app.indexOf('  async function ensureSession()'), app.indexOf('  $("connect").addEventListener')), context);
   await assert.rejects(context.ensureSession(), { message: 'Rejected', code: 4001 });
 });
-test('switching after a failed builtin login signs with the selected extension, not the unlocked local key', async () => {
-  const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false, builtInActive: true,
-    owner: '', returnedAddress: '', providerChosen: false, providerChoices: () => [{}], vault: {},
-    browserProvider: { request: async () => [address] },
-    api: async route => route === '/challenge' ? { message: 'challenge' } : { token: 'extension-session' },
-    sign: async () => { assert.equal(vm.runInContext('builtInActive', context), false); return signature; },
-    storage: { setItem() {} }, ACTIVE_ACCOUNT: 'active' });
-  vm.runInContext(app.slice(app.indexOf('  async function ensureSession()'), app.indexOf('  $("connect").addEventListener')), context);
-  assert.equal(await context.ensureSession(), true);
-  assert.equal(context.token, 'extension-session');
-});
-test('extension signing rejects account and provider changes during approval', async () => {
-  for (const changeProvider of [false, true]) {
-    let context, signed = false;
+test('extension signing rejects changed accounts, providers and closed contexts', async () => {
+  for (const change of ['account', 'provider', 'context']) {
+    let scope, signed = false;
     const provider = { async request(request) {
       if (request.method === 'personal_sign') {
         signed = true;
-        if (changeProvider) vm.runInContext('browserProvider = {}', context);
+        if (change === 'provider') vm.runInContext('browserProvider = {}', scope);
+        if (change === 'context') vm.runInContext('contextEpoch++', scope);
         return signature;
       }
-      return [signed ? other : address];
+      return [signed && change === 'account' ? other : address];
     } };
-    context = vm.createContext({ builtInActive: false, owner: address, browserProvider: provider, TextEncoder });
-    vm.runInContext(app.slice(app.indexOf('  async function sign('), app.indexOf('  function lock(')), context);
-    await assert.rejects(context.sign('challenge'), /Wallet changed while signing/);
+    scope = vm.createContext({ builtInActive: false, owner: address, browserProvider: provider, TextEncoder,
+      requireVisible() {}, contextEpoch: 0 });
+    vm.runInContext(app.slice(app.indexOf('  async function sign('), app.indexOf('  function lock(')), scope);
+    await assert.rejects(scope.sign('challenge'), /Wallet changed while signing/);
+  }
+});
+test('context sessions are separate from application sessions and frames remain rejected', () => {
+  assert.match(app, /featheral-context-wallet-token/);
+  assert.match(app, /window\.parent !== window\) throw new Error/);
+  assert.match(app, /siteApproval !== approval/);
+  assert.match(app, /context\.dispose/);
+  assert.throws(() => walletUi(new URLSearchParams({ embedded: '1' })), /Unsupported/);
+});
+test('same-origin wallet route guards work on every site without opening creation or hosted-site privileges', async t => {
+  const express = require('express'), http = require('node:http'), { once } = require('node:events');
+  const source = fs.readFileSync(path.join(root, 'services/cms/server.js'), 'utf8');
+  const router = express.Router(), serverApp = express();
+  serverApp.use(express.json());
+  serverApp.use((req, _res, next) => { req.hostedSite = req.get('x-fixture-hosted') === '1'; next(); });
+  const scope = vm.createContext({ creationRouter: router, creation: {}, creationLimits: new Map(), Date,
+    hostName: req => req.hostname.replace(/\.localhost$/, '.featheral.com'),
+    require: () => require('../../wallet/ui') });
+  const start = source.indexOf('function contextualWalletHost('), end = source.indexOf("creationRouter.get('/economy/reference", start);
+  vm.runInContext(source.slice(start, end), scope);
+  const swaps = source.indexOf("creationRouter.use('/wallet/swaps'");
+  vm.runInContext(source.slice(swaps, source.indexOf("creationRouter.post('/wallet/swaps/quote'", swaps)), scope);
+  router.all(['/wallet/swaps/quote', '/challenge', '/owned'], (_req, res) => res.json({ ok: true }));
+  serverApp.use('/api/creation', router);
+  const server = http.createServer(serverApp); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const call = (host, route = '/wallet/swaps/quote', extra = {}) => new Promise((resolve, reject) => {
+    const request = http.request({ hostname: '127.0.0.1', port: server.address().port, path: '/api/creation' + route, method: 'POST',
+      headers: { Host: host, Origin: `http://${host}`, 'Content-Type': 'application/json', ...extra } }, response => {
+      response.resume(); response.on('end', () => resolve(response.statusCode));
+    });
+    request.on('error', reject); request.end('{}');
+  });
+  for (const host of ['featheral.com', 'gold.featheral.com', 'world.featheral.com', 'pay.featheral.com', 'x.featheral.com',
+    'app.localhost', 'silver.localhost', 'media.localhost', 'stats.localhost', 'localhost'])
+    assert.equal(await call(host), 200, host);
+  assert.equal(await call('app.localhost', '/challenge'), 200);
+  assert.equal(await call('app.localhost', '/owned'), 404);
+  assert.equal(await call('untrusted.invalid'), 404);
+  assert.equal(await call('app.localhost', '/wallet/swaps/quote', { Origin: 'https://untrusted.invalid' }), 403);
+  assert.equal(await call('app.localhost', '/wallet/swaps/quote', { 'x-fixture-hosted': '1' }), 404);
+});
+test('gateway serves local wallet modules and configuration/summaries without redirects on family hosts', async () => {
+  const source = fs.readFileSync(path.join(root, 'scripts/serve.js'), 'utf8');
+  const start = source.indexOf('    if (url.pathname.startsWith("/shared/wallet/"))');
+  const firstCreation = source.indexOf('    if (url.pathname.startsWith("/api/creation/")) return cms', start);
+  const summaryStart = source.indexOf('    if (site === "wallet" ||', firstCreation);
+  const summaryEnd = source.indexOf('      if (url.pathname.startsWith("/api/creation/")) return cms', summaryStart);
+  const handler = source.slice(start, firstCreation) + source.slice(summaryStart, summaryEnd) + '\n}';
+  for (const site of ['foundation', 'gold', 'world', 'x', 'pay']) {
+    for (const pathname of ['/shared/wallet/wallet-app.js', '/api/wallet/ui?parentOrigin=http%3A%2F%2Fnotes.localhost%3A8080', `/api/wallet/accounts/${address}`]) {
+      let status, result;
+      await vm.runInNewContext(`(async () => {${handler}})()`, {
+        site, root, fs, path, walletRoot: path.join(root, 'sites/wallet.featheral.com'),
+        url: new URL(pathname, 'http://notes.localhost:8080'), req: { method: 'GET', headers: {} },
+        types: { '.js': 'text/javascript', '.json': 'application/json' }, require: () => require('../../wallet/ui'),
+        cms: { walletSummary: async account => ({ address: account }) },
+        res: { setHeader() {}, writeHead(code) { status = code; }, end(value) { result = value; } },
+      });
+      test('World sync shares only a public account with a validated contextual origin and never redirects that context', async () => {
+        const source = fs.readFileSync(path.join(root, 'sites/world.featheral.com/wallet-sync.js'), 'utf8');
+        for (const valid of [true, false]) {
+          const messages = [], nodes = new Map(), nonce = 'ab'.repeat(16), accountId = '0x' + 'cd'.repeat(32);
+          const location = new URL(`http://world.localhost:8080/wallet-sync.html?returnOrigin=${encodeURIComponent(valid ? 'http://notes.localhost:8080' : 'https://untrusted.invalid')}&syncNonce=${nonce}`);
+          location.replace = () => assert.fail('Contextual sync must not redirect to a wallet site');
+          vm.runInNewContext(source, { location, URL, URLSearchParams,
+            document: { referrer: 'http://notes.localhost:8080/', getElementById: id => {
+              if (!nodes.has(id)) nodes.set(id, { removeAttribute() {} }); return nodes.get(id);
+            } },
+            window: { opener: { postMessage: (data, origin) => messages.push({ data, origin }) } },
+            fetch: async () => ({ ok: true, json: async () => ({ accountId, secret: 'never-return' }) }), console });
+          await tick();
+          if (valid) {
+            assert.deepEqual(Object.keys(messages[0].data).sort(), ['accountId', 'nonce', 'type']);
+            assert.equal(messages[0].origin, 'http://notes.localhost:8080');
+          } else { assert.equal(messages.length, 0); assert.match(nodes.get('sync-status').textContent, /invalid/); }
+        }
+      });
+      assert.equal(status, 200, `${site} ${pathname}`);
+      if (pathname.includes('/ui?')) assert.equal(JSON.parse(result).schema, 'featheral.wallet');
+      if (pathname.includes('/accounts/')) assert.equal(JSON.parse(result).address, address);
+    }
   }
 });

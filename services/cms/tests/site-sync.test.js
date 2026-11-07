@@ -534,6 +534,12 @@ test("sync transport uses the pinned saved target, SFTP and signed stdin-only cr
   assert.match(apply.command, /sha256sum --check/); assert.match(apply.command, /restore-site-sync/);
   const preflight = commands.findIndex(item => item.command.includes("--check-sites"));
   assert.ok(preflight >= 0);
+  const httpsSetup = commands.findIndex(item => item.command.includes("node '") && item.command.includes("/scripts/setup-site-https.js"));
+  assert.ok(httpsSetup >= 0 && httpsSetup < preflight);
+  assert.equal(commands[httpsSetup].input, "ssh-secret\n");
+  assert.match(commands[httpsSetup].command, /set -eu.*sha256sum --check --quiet.*sudo -S/s);
+  assert.ok(names.some(name => name.endsWith("/scripts/setup-site-https.js")));
+  assert.match(review.httpsSetup, /Provision missing or invalid HTTPS/);
   assert.match(commands[preflight].command, /gold\.featheral\.com/);
   assert.ok(preflight < commands.findIndex(item => item.command.includes("systemd-run")));
 });
@@ -677,7 +683,8 @@ async function uiFixture({ shared = false, initialStatus = { phase: "idle", runn
       if (url.endsWith("/plan")) {
         if (failure) throw failure;
         return { id: "review", host: "replica.example", port: 22, directory: "/srv/featheral", files: 10, bytes: 1024,
-          createdAt: "snapshot-time", expiresAt: "expiry-time", hosts: ["gold.example"], exclusions: ["Keep target credentials"] };
+          createdAt: "snapshot-time", expiresAt: "expiry-time", hosts: ["gold.example"], exclusions: ["Keep target credentials"],
+          httpsSetup: "Provision missing HTTPS certificates with the saved target credential." };
       }
       if (url.endsWith("/challenge")) return { message: "review" };
       if (url.endsWith("/start") || url.endsWith("/resume")) {
@@ -704,11 +711,13 @@ test("site Settings waits for review, explicit confirmation and wallet approval 
   const f = await uiFixture();
   assert.match(f.html, /Adding a site such as Pay/);
   assert.match(f.html, /href="#\/settings"/);
-  assert.match(f.html, /does not copy application code or configure DNS\/TLS/);
+  assert.match(f.html, /does not copy application code or configure DNS/);
+  assert.match(f.html, /Sync repairs missing or invalid HTTPS certificates/);
   assert(!f.calls.some(call => call.url.endsWith("/plan")));
   await f.click("#site-sync-start");
   assert.equal(f.signs, 0);
   await f.click("#site-sync-review");
+  assert.match(f.element("#site-sync-plan").innerHTML, /Provision missing HTTPS certificates/);
   assert.equal(f.element("#site-sync-plan").hidden, false); assert.equal(f.element("#site-sync-start").disabled, true);
   f.element("#site-sync-confirm").checked = true; f.element("#site-sync-confirm").listeners.change();
   assert.equal(f.element("#site-sync-start").disabled, false);
@@ -903,6 +912,27 @@ test("interrupted transfer resumes exact acknowledged and partial bytes after re
   assert.equal(f.state.applied, 1); assert.equal(restarted.status().phase, "complete");
   assert.equal(restarted.status().progress.percent, 100);
   assert(!fs.existsSync(f.directory));
+});
+test("HTTPS issuance failure pauses before data transfer and retries the retained snapshot", async t => {
+  const f = resumableFixture(t), execute = f.deployment.execute;
+  f.deployment.execute = async (...args) => {
+    if (args[1].includes("node '") && args[1].includes("/scripts/setup-site-https.js")) {
+      args[5]("HTTPS setup failed: ACME challenge failed; check DNS and port 80.");
+      throw new Error("Certificate provisioning failed");
+    }
+    return execute(...args);
+  };
+  f.service.launch(f.plan); await f.service.transferTask;
+  assert.equal(f.state.remote, null); assert.equal(f.state.manifest, null);
+  assert.equal(f.state.applied, 0); assert.equal(f.state.writes.length, 0);
+  assert.equal(f.service.status().phase, "paused");
+  assert.ok(f.service.status().logs.some(entry => entry.message.includes("ACME challenge failed")));
+  assert.ok(fs.existsSync(f.archive));
+  assert.ok(!f.state.commands.some(command => command.includes("--check-sites")));
+  f.deployment.execute = execute;
+  f.service.resume({ site: "gold" }); await f.service.transferTask;
+  assert.equal(f.service.status().phase, "complete");
+  assert.equal(f.state.applied, 1);
 });
 test("site setup failure pauses before snapshot uploads or target apply and can resume after deployment", async t => {
   const f = resumableFixture(t), execute = f.deployment.execute;

@@ -11,6 +11,7 @@ const action = "SYNC REVIEWED DATABASES AND UPLOADS";
 const syncSteps = [
   ["capture", "Capture source snapshot", 2], ["compress", "Prepare file manifest (no compression)", 15],
   ["digest", "Verify source digest", 25], ["connect", "Connect and check target", 30],
+  ["https", "Prepare HTTPS and verify assigned sites", 32],
   ["upload", "Transfer databases first, then uploads", 35], ["verify", "Verify target files", 72],
   ["stop", "Stop target", 78], ["backup", "Back up target", 80],
   ["install", "Install snapshot", 85], ["restart", "Restart target", 92],
@@ -170,7 +171,8 @@ class SiteSync {
       const plan = { directory, archive, binding, context, expires: this.now() + 10 * 60000,
         review: { ...binding, expiresAt: new Date(this.now() + 10 * 60000).toISOString(),
           files: manifest.entries.length, bytes: manifest.entries.reduce((sum, entry) => sum + entry.bytes, 0),
-          createdAt: manifest.createdAt, hosts: target.hosts, exclusions, readOnly: true } };
+          createdAt: manifest.createdAt, hosts: target.hosts, exclusions, readOnly: true,
+          httpsSetup: "Provision missing or invalid HTTPS certificates for deployed, reviewed target hostnames before transferring data. Uses the saved certificate email and SSH/sudo credential; existing valid certificates are preserved." } };
       this.plans.set(id, plan);
       const expiry = setTimeout(() => {
         try { this.prune(); } catch (error) { console.error("Expired sync snapshot cleanup failed:", error.code || 500); }
@@ -200,7 +202,7 @@ class SiteSync {
   challenge(input, context) {
     const plan = this.reviewed(input, context);
     return this.settings.approvals.challenge(action, plan.binding, context,
-      `${plan.binding.host}: ALL installation databases and uploads, not just this site. Verified backup first; source databases replace target databases. Keep target-only uploads and target server credentials. Restart target as a read-only replica. Snapshot ${plan.review.createdAt}; SHA256 ${plan.binding.digest}.`);
+      `${plan.binding.host}: Provision missing HTTPS certificates for reviewed deployed hostnames using saved Settings. ALL installation databases and uploads, not just this site. Verified backup first; source databases replace target databases. Keep target-only uploads and target server credentials. Restart target as a read-only replica. Snapshot ${plan.review.createdAt}; SHA256 ${plan.binding.digest}.`);
   }
   start(input, context) {
     const plan = this.reviewed(input, context);
@@ -261,7 +263,7 @@ class SiteSync {
   }
   // Receiver updates travel with the snapshot; application code and site setup still require deployment.
   receiverBundle() {
-    const names = ["scripts/restore-site-sync.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js"];
+    const names = ["scripts/restore-site-sync.js", "scripts/setup-site-https.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js"];
     const files = names.map(name => {
       const file = path.join(__dirname, "..", "..", "..", ...name.split("/"));
       return { name, path: file, bytes: fs.statSync(file).size, hash: hash(file) };
@@ -396,8 +398,16 @@ console.log(JSON.stringify({removed,removedBytes,remaining:fs.existsSync(base)?f
         for (const file of receiver.files)
           await uploadFile({ deployment: this.deployment, client, sftp, file: file.path, remote: `${receiverDirectory}/${file.name}`,
             bytes: file.bytes, digest: file.hash, target, signal: this.pauseController.signal });
+        this.progress(32, "Preparing reviewed HTTPS certificates and checking assigned application routes.");
         this.log("Checking assigned sites, HTTPS certificates and application routes before transferring databases or uploads.");
         try {
+          const setup = `node ${quote(receiverDirectory + "/scripts/setup-site-https.js")} ${quote(target.directory)} ${quote(JSON.stringify(target.hosts))} ${quote(target.email || "")}`;
+          await this.deployment.execute(client, [
+            "set -eu",
+            "IFS= read -r password",
+            `cd ${quote(remote)} && printf '%s\\n' ${quote(receiver.files.map(file => `${file.hash}  ${path.posix.basename(receiverDirectory)}/${file.name}`).join("\n"))} | sha256sum --check --quiet`,
+            `if [ "$(id -u)" = 0 ]; then ${setup}; else printf '%s\\n' "$password" | sudo -S -p '' -- ${setup}; fi`,
+          ].join("; "), `${target.password || ""}\n`, target.deploymentTimeoutSeconds, undefined, onLog);
           await this.deployment.execute(client, [
             `cd ${quote(remote)}`,
             `printf '%s\\n' ${quote(receiver.files.map(file => `${file.hash}  ${path.posix.basename(receiverDirectory)}/${file.name}`).join("\n"))} | sha256sum --check --quiet`,

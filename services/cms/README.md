@@ -138,11 +138,14 @@ For a newly added application such as **Pay**, save its server assignment and
 point DNS at the target, then use **Settings > Review release** and deploy first.
 Code deployment installs the new site's files and locked dependencies, updates
 the deployment hostname manifest and Nginx, and provisions HTTPS. Sync never
-copies application code or configures DNS/TLS. Its checksum-verified receiver
+copies application code or configures DNS. For already deployed hostnames, Sync
+repairs missing/invalid HTTPS certificates using the saved certificate email
+and SSH/sudo credential before data transfer. Its checksum-verified receiver
 travels separately; it does not upgrade the installed application.
 
 Before any snapshot data files transfer, sync checks that the target deployment
-manifest covers every currently assigned hostname and probes each site's local
+manifest covers every currently assigned hostname, prepares HTTPS if needed,
+and probes each site's local
 HTTPS virtual host with normal certificate/hostname verification. Pay also needs
 its versioned FTH$ request API to accept both GET and stateless POST, not just a
 generic homepage. Missing
@@ -243,6 +246,19 @@ Sync files bypass Nginx over SSH/SFTP, so HTTP upload size and proxy timeouts
 do not limit sync transfers. Managed Nginx configurations stream HTTP request
 bodies (`proxy_request_buffering off`) rather than spooling entire uploads to
 disk, while retaining the configured upload size and request timeout limits.
+
+The Sync button checks HTTPS before transferring snapshot data and provisions
+missing/invalid certificates with Certbot using the saved target SSH/sudo
+credential and certificate email. For separate targets this scope is shown in
+the review and wallet challenge; shared Sync retains its existing immediate-start
+flow. Only target hostnames already assigned to the deployed release and
+managed Nginx gateway are eligible; Sync never enables undeployed sites, installs
+packages, or bypasses TLS validation. DNS must point to the target and public port
+80 must be reachable. Existing valid certificates are preserved. Certificate
+issuance, renewal timer and TLS are verified before the existing application/Pay
+API checks and snapshot transfer. On failure, the managed Nginx configuration is
+restored and the snapshot is retained for retry; inspect Certbot logs, fix DNS or
+deployment/email setup, then Continue transfer. Replica restrictions remain intact.
 
 Before transfer, target free space is checked only for the snapshot bytes not yet
 staged plus 512 MiB headroom; already uploaded files and resumed prefixes count as
@@ -949,7 +965,7 @@ The shared HTML gateway also adds a scroll-to-top control across sites, independ
 
 The common wallet shell and client are served at `/wallet/` on `dollar.featheral.com`, `ex.featheral.com` and `notes.featheral.com` (including `.localhost`). Only the default primary asset/branding changes: FTH$ for Dollar, FTHX for Exchange/Notes. These are views of the same ledger holdings, not separate custodial deposits. Existing Classic roots, note minting and FTHX liquidity tools remain. Connect the same wallet separately per origin; authentication tokens are not passed across sites. The gateway dispatches native `/api/v1/dollar/*` reads/transfers to Dollar on all three wallet hosts rather than protected CMS administration.
 
-The wallet's **Swap** tab replaces Thanks. On the central wallet and Exchange hosts, `POST /api/creation/wallet/swaps/quote` quotes FTH$, FTHX and funded notes through live Exchange pools. Authenticated `/prepare` binds `{from,to,amount,minOutput,requestId}`; `/:id/complete` executes the same request exactly once, with a wallet signature for outgoing FTH$. `/:id/refresh` recovers pending requests and `/:id/cancel` discards only unsubmitted preparations. Native note-to-note routes settle both FTHX-pair legs atomically; FTH$ routes reuse the signed settlement journal. Every executed pair leg contributes to Exchange trades, volume and candles and appears as a wallet trade in the Exchange terminal. Fees are 0.3% per hop, with price impact and a strict quoted-output minimum. Unfunded markets cannot trade. Ethereum FTHG conversion stays on Gold; its USD estimate is never a swap price. Existing authenticated note-transfer/tip APIs remain compatible for other callers.
+The wallet's **Swap** tab replaces Thanks. On recognized Featheral site hosts, `POST /api/creation/wallet/swaps/quote` quotes FTH$, FTHX and funded notes through live Exchange pools. Authenticated `/prepare` binds `{from,to,amount,minOutput,requestId}`; `/:id/complete` executes the same request exactly once, with a wallet signature for outgoing FTH$. `/:id/refresh` recovers pending requests and `/:id/cancel` discards only unsubmitted preparations. Native note-to-note routes settle both FTHX-pair legs atomically; FTH$ routes reuse the signed settlement journal. Every executed pair leg contributes to Exchange trades, volume and candles and appears as a wallet trade in the Exchange terminal. Fees are 0.3% per hop, with price impact and a strict quoted-output minimum. Unfunded markets cannot trade. Ethereum FTHG conversion stays on Gold; its USD estimate is never a swap price. Existing authenticated note-transfer/tip APIs remain compatible for other callers.
 
 `GET /api/creation/dollar-pool/market?interval=24h` (also `1h`, `7d`, `30d`) returns real 24-hour FTH$/FTHX volumes and completed trade counts, plus both assets' spot ratios and bucketed executed-price histories. Routed trades contribute their actual FTHX intermediate leg, once; initial funding and unsealed settlements are excluded. Pending settlements suppress spot prices until recovery. `/trending` merges these native pair histories/volumes with existing note markets, ranking by real FTHX volume. FTHX's total includes its community-note and Dollar pair legs.
 
@@ -1089,7 +1105,30 @@ To turn the original sync features back on, set `allowSync` to `true` and restar
 
 The public site is at `http://127.0.0.1:5178/` and the CMS is at `http://127.0.0.1:5178/admin` for local development. In deployment, use `https://x.featheral.com/` and `https://admin.featheral.com/`.
 
-- **Standalone X**: X is not advertised in family headers, footers or Foundation discovery cards. Its own app has no ecosystem header/footer, but retains the shared wallet, age gate, posting, saved likes and existing routes. Its host-scoped visual theme uses warm gradients, rounded discovery cards, prominent action buttons and a compact mobile tab strip with visible labels. Other CMS-hosted sites retain their selected themes. This is a visual refresh, not a dating/matching feature or a change to vote semantics.
+- **Standalone X**: X is not advertised in family headers, footers or Foundation discovery cards. On phones, Discover uses the entire dynamic viewport with uncropped media, a transparent overlay header, accessible icon tabs and 44px overlay actions. Captions stay compact; More expands details. Trending, Gallery, Liked and Trash start their image grids at the screen edge, with filters/info in a collapsible overlay rather than reserving image space. Reading navigation also floats above content. Other CMS-hosted sites retain their selected themes.
+
+X reading cards use collectible-style image frames and matching text panels.
+Opening either side opens the same post, comments and view count. The reader's
+image and scrollable text cards share a 3:4 shape, side-by-side on desktop and
+stacked on mobile. Long text remains fully available.
+
+On X, image and reading votes resolve to the post's primary media deck and
+authoritative round (the thumbnail deck for small-image posts). Latest legacy
+votes for a post/round are deduplicated at read time without rewriting snapshots;
+new votes replace aliases for that round. Likes, undo, Trash and reading/media
+Liked lists stay consistent. Historical rounds remain counted. Text-only and CMS
+page cards retain their reading deck; other sites retain separate vote semantics.
+
+X visitors can comment without a wallet. Comments are stored on the same post
+as wallet/WordPress comments, including published CMS pages; visitor identities
+never impersonate wallets or receive wallet rewards. Limits persist in SQLite:
+one per 10 seconds and six per 10 minutes per visitor, 20 per hour per connection,
+and 200 total comments per hour per site. Duplicate text on the same post is
+rejected for 24 hours; the existing 2,000-character limit applies. Connection
+identity trusts the final proxy address only from loopback Nginx. Responses
+expose neither that identifier nor IP addresses. Wallet authors retain deletion
+of their own comments; guest comments have no wallet deletion rights. Other sites
+still require a wallet to post. Read-only replicas still reject comment writes.
 
 ### Public startup performance
 
@@ -1104,14 +1143,27 @@ the cold indexing cost. Other sites remain lazy. This warmup records no views
 or votes and does not change rounds; an indexing failure prevents readiness.
 
 Swipe media gives the visible card high fetch priority and starts background
-downloads only after it loads. Lookahead is limited to three cards and 12 MiB
+downloads only after it loads. Lookahead is limited to five cards, 12 MiB of
+source media and 32 MiB of estimated decoded pixels
 including the visible card; an oversized current card is still allowed.
 Data Saver and 2G connections fetch only the current card. Card construction
 does not bypass this budget, and obsolete requests are cancelled.
 
+After warning acceptance, X prepares the current route's first response and
+nearby media in the same loading overlay, with a hard 1.5-second splash budget.
+No feed/media warmup runs before acceptance. The response is reused by the route
+rather than fetched twice. Slow loads continue in the normal loading UI; there is
+no artificial minimum delay or guarantee of offline availability. Viewer neighbor
+warmup retains at most eight image references/12 MiB and starts at most two
+requests. Data Saver/2G disables speculative viewer/startup image warmup;
+oversized originals remain foreground-only.
+
 Trending, Gallery, Liked and Trash use viewport-windowed grids: at most 80 tile
-elements are mounted, and only visible media is fetched. Fast scrolling defers
-new downloads until scrolling settles for 120 ms; scrolling away, hiding the
+elements are mounted. Ordinary connections buffer previews half a screen behind
+and 1.5 screens ahead, prioritize visible media, and finish decoding before
+marking images ready. Small preview loads continue during scrolling; original-only
+grids defer new downloads until scrolling settles for 120 ms. Scrolling away from
+the buffered window, hiding the
 tab, opening a viewer or leaving the route releases image sources and decoded
 tile references. Already loaded previews take priority over new candidates and
 remain loaded within a 160px viewport-edge margin, avoiding visible images
@@ -1141,13 +1193,13 @@ while its template, body, title and description match; published edits and theme
 changes appear on the next render. These caches retain one entry per shipped
 template, never visitor-specific or wallet responses. Managed Nginx compresses
 JavaScript, CSS, SVG and text assets; JSON APIs are not added to gzip types.
-- **Discover** (the existing Swipe route): one shuffled deck of every GIF and image post, mixed together, with the title, description and like count (all rounds) overlaid. Swipe right (or press →) to like and keep a post. Swipe left (or press ←) to dislike it: in round 1 this deletes the post and its media; from round 2 the dislike is only counted. Undo with ↺ or Backspace. Each post shows its largest attached GIF, or its largest image if it has no GIF. The shuffle is stable within a round, so leaving and coming back continues where you stopped; each new round is shuffled differently. Only published posts with a downloaded file are included. The next cards' media is downloaded and decoded in the background (always the next 5, and up to 12 within a 600 MB budget). Each card's still frame and blurred backdrop are prepared off the main thread, so swiping never waits on loading or decoding. Only the card on top plays; the cards behind it show a still frame. Each card shows up to 6 of its keyword tags as `#tag` chips (most used first); clicking one opens that tag's Trending gallery.
+- **Discover** (the existing Swipe route): one shuffled deck of published, downloaded GIF/image posts. Right/→ likes; left/← dislikes and moves the post to Trash in round 1, while later rounds only count dislikes. Undo with ↺ or Backspace. Each post shows its largest GIF, otherwise its largest still. The stable shuffle resumes within a round. Nearby media follows the five-card/12 MiB policy above; slow networks can still require loading. Still frames and desktop backdrops are prepared off the main thread. Only the top card animates; cards behind it use still frames. More reveals compact mobile details and keyword tags; selecting a tag opens Trending.
 - **Navigation**: only Read and its reader/page routes show the reading sidebar; Discover, Trending, Gallery, Liked and Trash keep their full-width layouts. Pages/categories are fetched on first entering Read, not during unrelated page startup. On mobile and tablets up to 1024px, navigation starts collapsed below the header and expands into touch-friendly page/category chips. Read has labeled search/sort controls, two-column tablet cards and single-column phone cards; category filters persist through paging and can be cleared. FTHX and Whitepaper are available under Read and Pages rather than overcrowding the top tabs. Trash uses an icon-only bin button with an accessible label and a 44px touch target in the header. `GET /api/public/reading-navigation` returns site-scoped published pages and category counts with `Cache-Control: no-store`; draft, private and trashed readings are excluded.
-- **Read**: a separate menu that lists every published post with text. You can search it, filter by reading category and sort it by length (longest by default) or date, and open any post in a clean reader view. Category selection is preserved through search, sorting and pagination. Available local media appear as lazy-loaded still previews, 80px square (64px on phones), in Read and shared Liked/Trash reading cards; text-only readings do not reserve image space. Previews reuse the bounded media-preview service rather than download original images or play GIFs. The reading sidebar separates Pages and Categories into labeled, divided sections with decorative topic icons and a generic folder fallback. Trash remains in the header only, not the reading sidebar.
+- **Read**: lists published posts with text, with search, category/keyword filters and length/date sorting preserved through paging. X uses collectible image-and-text cards; text-only entries show a typography card face. Local artwork uses lazy still previews from the bounded media-preview service, not original images or animated GIFs. Other site themes retain compact thumbnails. Pages and Categories remain in the reading sidebar; Trash stays in the header.
   Read lists and category views share the 1200px maximum content width and 16px side padding used by Liked and Trash, within the available space beside the reading sidebar. Both start with search and sorting followed by compact keyword chips, without introductory headings, page shortcuts or a category-filter banner. Pages and categories remain accessible in the sidebar; its Read link clears the category. Both views show their 40 most-used meaningful keyword tags, ranked by the number of published, unprotected, non-trashed readings in scope (name and ID break ties). Chips share Trending's compact style; counts are available in their tooltips. **Show more** sits at the end of the chips and loads another 40 without dropping existing tags or filters; failed requests show an error and can be retried. Counts cover all readings in scope, not just the current search or page. Clicking a keyword filters readings within the selected category, or all Read content when no category is selected; search, sorting and paging preserve both filters. A selected keyword outside the first 40 remains visible. **All keywords** clears only the keyword filter. `GET /api/public/texts` returns `category`, `keywords` and `keywordTotal` metadata alongside the filtered readings, with optional `category=<taxonomy-id>` and `tag=<tag-taxonomy-id>` filters; `keywordOffset` and `keywordLimit` paginate the keywords independently of readings (default/minimum 40, maximum 1000).
 - **Trending tags**: the compact tag strip starts around 40 tags and fills the last row, reserving room for a trailing **Show more** chip. Each expansion reveals about 40 more; buffered 80-tag API pages avoid leaving the row underfilled. The strip refits when its width changes, keeps a selected tag visible, and shows retry errors without changing the gallery's ranking or filters.
-- **Reading votes**: the reader provides explicit Like/Dislike buttons using the separate `read` deck and its authoritative round. A first-round dislike moves the reading to Trash; later-round dislikes only affect counts. Repeating an active vote undoes it, and like/undo can restore a deletion owned by the current reading round. Reading likes never enter the media timeline or inflate media vote counts. Published CMS readings use negative IDs; their text and publication status remain intact while curation trash hides them from normal navigation. Trash links explicitly request `GET /api/public/texts/:id?trash=1` so the public reading can be opened and restored without exposing private or draft content.
-- **Reading media**: reading details show the post's main original photo or animated GIF above the text, uncropped and bounded by the available screen width and 75% of viewport height. Loading failures offer an explicit Retry media action. Text-only readings remain text-only. Media uses the existing site-scoped public media route, including retained Trash media; opening a reading does not cast a vote.
+- **Reading votes**: controls use the server-returned deck and authoritative round. X media-backed readings share image votes as described above; other sites and text-only readings retain the separate `read` deck. A first-round dislike moves the post to Trash; later-round dislikes only affect counts. Repeating an active vote undoes it, and like/undo can restore a deletion owned by the current round. Published CMS readings use negative IDs and retain their publication status in Trash. Trash links request `GET /api/public/texts/:id?trash=1` without exposing draft/private content.
+- **Reading media**: X details show the original photo/GIF and full text in matching collectible panels, stacked on mobile. Images remain uncropped; text scrolls within its card. Other sites retain ordinary reading styles. Loading failures offer Retry media. The site-scoped media route also serves retained Trash media; opening a reading never votes.
 - **Read card actions**: Read cards include Like and round-aware Delete/Dislike buttons outside the post link. Delete uses the existing first-round reading dislike rule (move to Trash); later rounds show Dislike and only count it. Cards leave Read immediately after the server confirms deletion, with counts and keyboard focus updated; errors and nondeleting dislikes leave cards visible. Restore a deleted reading through Trash. Pressing an active vote on a retained card undoes it. Initial authoritative reading-vote state is included in the list's optional `curation=1` response, avoiding separate status requests per card. Leaving Read disposes all card controls. Trash readings use the shared responsive reading-card grid with equal-height cards, two columns on larger screens and one on phones.
 - **X category maintenance**: `node services/cms/tools/categorize-x-media.js` reports a no-write dry run for the registered Featheral X dataset only. Stop the application before applying with `--apply --backup-file=<new absolute SQLite backup path>`, then restart to clear cached indexes. Only posts whose sole category is Uncategorized move: GIF takes precedence and goes to Videos; other supported still-image formats go to Photos. Text-only posts, pages, attachments, posts with additional categories, tags and content remain untouched. Existing target categories are reused, affected category counts are recomputed, and changes are transactional with an integrity-verified database backup.
 - **Liked tabs**: All media and Readings are the only keyboard-accessible tabs. Media uses larger thumbnails targeting 250px minimum width with at least two columns: typically two on phones, three on tablets and four on desktop. Liked readings use a two-column card grid, collapsing to one column on phones, with titles, snippets, reading time and vote counts. Readings uses `GET /api/public/liked?kind=read`, has its own recent/popular ordering, and retains 24-item infinite scrolling and manual retry.
@@ -1157,8 +1209,8 @@ JavaScript, CSS, SVG and text assets; JSON APIs are not added to gzip types.
 - **Trash**: a public, site-scoped timeline of published media and readings that are either in curation trash or have strictly more dislikes than likes. Reading dislike counts are assessed separately from media counts. Trashed entries come first, newest deletion first, followed by net-disliked entries in descending dislike count. It uses 24-item infinite paging, reading cards and the same multi-column thumbnail grid/full-media viewer as Liked. No permanent-delete action is exposed publicly. Admin purge can permanently remove trashed CMS readings, but protects the active content homepage. Moved media are served only after checking that the post is published and belongs to the selected site; private/draft posts remain hidden. `GET /api/public/trash` supports `offset` and `limit`; `GET /api/public/posts/:id/media` serves that post's selected media, including files moved to trash.
 - **Viewer voting**: explicit Like/Dislike buttons appear beside comments in Discover, Trending, Gallery, Liked and Trash. The viewer reads the authoritative current deck/round/vote from `GET /api/public/posts/:id/curation`; repeated active votes undo that round's vote. A round-1 dislike moves media to Trash; later dislikes only affect counts. A like or undo can restore a deletion owned by the same deck and current round; other deletions require Admin restoration. Navigation never votes. Pending votes block duplicate clicks/navigation, stale rounds return 409, and changed lists refresh when the viewer closes. Trashed posts retain readable approved comments but cannot receive new comments until restored.
 - **Retired private folders**: folder buttons, management dialogs, viewer actions and folder tabs are removed. Former `/api/public/collections` routes and `GET /api/public/liked?collection=...` return explicit no-store HTTP 410 responses. Old folder bookmarks open the shared Liked view with the obsolete filter removed. Existing private folder records remain stored without being exposed or deleted; no likes, media or wallet balances are changed.
-- **X wallet pause**: standalone `x.featheral.com` / `x.localhost` temporarily removes the header wallet and skips the shared wallet loader. Saved wallet sessions are neither loaded nor deleted. Posting, tips, reward-connect prompts and new comments are unavailable in X; browsing, votes and existing comments remain available. Direct `#/post` visits explain the pause. The shared CMS template on other hosts and all other family wallets retain their existing behavior. No wallet keys, balances, backend wallet services or saved data are removed.
-- **Comments & wallet sign-in**: opening a thumbnail shows the image at its original pixel size (only scaled down if it doesn't fit, and the caption says so), with the post's comments beside it. Approved comments synced from WordPress are shown read-only; new comments need an Ethereum wallet. **Connect wallet** (header, or in the comment panel) asks MetaMask or any injected browser wallet to sign a one-time sign-in message. This is not a transaction and costs no gas. The server checks the signature locally (`lib/wallet.js`, EIP-191 `personal_sign`); each request expires after 10 minutes and works once. Comments are posted under the wallet address, kept in `public.sqlite` (the synced WordPress database is not changed), up to 2,000 characters, and can be deleted only by the wallet that wrote them. Every thumbnail shows a small 💬 comment count in its top-left corner (dimmed at 0). Every swipe card has a 💬 button with the comment count on its right edge. Click it or press **C** to open the same viewer and comment panel; swipe keys are paused and GIFs are frozen while it's open, and the card's count updates as you post or delete. Switching accounts in the wallet signs you out.
+- **X social wallet pause**: standalone `x.featheral.com` / `x.localhost` exposes the contextual funds wallet in its header. Saved social wallet sessions are neither loaded nor deleted. Posting, tips and wallet rewards remain paused, but guest comments, browsing and voting are available. Direct `#/post` visits explain the posting pause. Funds connection is independent of social sign-in; no keys, balances or saved data are removed.
+- **Comments & wallet sign-in**: image viewers and reading details reuse the same post-comment component. X allows rate-limited visitors as described above; other hosts require an Ethereum wallet session. Approved WordPress comments are readable but not editable here. Wallet authentication signs a one-time EIP-191 message, not a transaction; it costs no gas. New comments live in `public.sqlite`, not the imported WordPress database, and are limited to 2,000 characters. Only the wallet author can delete a wallet comment. A swipe card's comment button or **C** opens the same discussion; its badge updates after posting/deletion. On mobile X, the viewer's Comments button opens an overlay sheet over the full-viewport image. Switching wallet accounts ends the old session.
 - **Views**: every post has a 👁 view count that goes up automatically as people look at it. A view counts when a swipe card reaches the top of the deck, when a post is opened in the viewer (Thumbs, Trending, Liked; each ← → step counts the post it lands on) or when a text is opened on the Read page. Each browser gets a random visitor id (in `localStorage`); the same visitor viewing the same post again within 30 minutes is not counted again (`VIEW_WINDOW_MS` in `lib/public.js`). Counts are kept in the `views` table in `public.sqlite` and shown on swipe cards, gallery tiles (👁 views · 💬 comments), the viewer bar, Liked tiles and the Read list and page. API: `POST /api/public/posts/:id/view` with `{ visitor }` returns `{ id, views, counted }`.
 - **Visitor analytics** (Admin › 👥 Visitor analytics): the public site reports each page it shows (`POST /api/public/hit`). The admin page shows:
   - all-time and per-period visitors (new vs returning), live visitors (last 5 min), visits, page views, pages per visit, bounce rate and average visit length;
@@ -1268,8 +1320,8 @@ The server only listens on `127.0.0.1`.
 The backend and private data remain in this service directory. Editor assets live in `../../sites/admin.featheral.com/`; the shared public-page shell lives in `../../sites/x.featheral.com/`; shop/exchange demo assets live in `../../sites/ex.featheral.com/`. Both the standalone service and root gateway use those locations. Existing `/site/` asset URLs, host-based routing, CMS authentication and public previews are unchanged.
 # Central wallet integration
 
-Every site uses one central wallet renderer in the same compact 380px top-right
-panel, inheriting its host's theme. Foundation/Gold use FTHG as the primary currency,
+Every site uses one shared wallet renderer in a responsive native dialog up to
+560px wide, inheriting its host's theme. Foundation/Gold use FTHG as the primary currency,
 Dollar/World use FTH$, and Notes/Exchange/X/Sites/Stats and other hosts use FTHX.
 The large balance is the active account's actual available primary currency.
 Smaller lines directly below show the estimated portfolio USD total followed by
@@ -1281,8 +1333,7 @@ discovery failures are reported without suppressing available account balances
 or authoritative portfolio estimates. Missing price sources remain unavailable.
 Combined linked, World and Exchange estimates never replace the spendable balance;
 unpriced assets and unavailable valuations remain explicit.
-Shared controls use compact sizing: 28px Sites/dialog controls, 30px wallet icon
-actions, 32px header wallet controls and 42px wallet tabs. Tooltips, accessible
+Wallet utility controls have 44px touch targets with responsive tabs. Tooltips, accessible
 labels, visible keyboard focus and the narrow-screen tab layout are retained.
 Public-address embeds use read-only summaries; tokens, providers and signing authority
 are not passed to parents. Portfolio results include exact 18-decimal equivalents
@@ -1302,40 +1353,57 @@ retain their signed Dollar API contract; Ethereum/GAME/notes ownership is unchan
 Public header controls no longer restore a second per-site extension account.
 Legacy profile controls delegate to the inline wallet (with a retry message
 while its embed loads); native admin/Ethereum approval controls explicitly opt into
-`ethereumProvider` signing. Normal headers always follow the central active account,
+`ethereumProvider` signing. Normal headers follow the current site's selected wallet account,
 never a site's cached commenting/trading owner. Connection, built-in creation,
 restore, unlock, sending and Swap run inside the same site panel. Closing and
-reopening it preserves the renderer, active session and unlocked signer (subject
-to the existing inactivity lock); changing tabs does not reload the wallet.
-Only a small **Powered by Wallet** link appears at the panel's end.
-The host persists only the selected public address for reloads. The wallet-host
-iframe keeps its own session and encrypted vault; built-in signing sessions remain
-memory-only. Existing extension permissions restore balances through `eth_accounts`
-without a permission popup. Explicit connection or transfer actions can authorize
-the wallet session in-panel. Where extensions are not injected into an iframe, an
-exact-origin/source checked bridge allows only account requests and `personal_sign`,
-verifying the active extension account. No private keys or wallet tokens cross it.
+reopening the same context preserves its renderer and extension session. Closing
+locks the built-in signer, clears password fields and cancels pending approvals;
+changing tabs does not reload the wallet. Wallet markup and styles use Shadow DOM,
+not an iframe, and inherit the current site's palette and typography.
+The host stores its selected address, site-local encrypted vault and a separate
+context-wallet extension session. Built-in signing sessions remain memory-only.
+Import an encrypted recovery backup to reuse a built-in account on another origin;
+otherwise creation produces a new address. No central wallet storage is silently
+copied. Shadow DOM is styling isolation, not a boundary against same-origin scripts:
+only use built-in wallets on trusted sites. Extensions retain their own keys.
+Existing extension permissions restore balances through `eth_accounts` without a
+permission popup; spending and sign-in require explicit approval.
 Pinned address views remain read-only. Transfers and linking use explicit in-panel
 review dialogs, not blocked cross-origin browser confirmation dialogs.
+
+Connection authorization, sign-in, Silver payments, profile updates, transfers,
+swaps and linking share themed native approval dialogs showing the requesting
+origin, signing account and exact request. Reject receives initial focus; Escape
+rejects the current approval without invoking host keyboard handlers. While signing,
+the dialog remains visible with progress; duplicate approval clicks are blocked and
+extension rejections remain retryable. Account changes, disconnects and popup closure
+invalidate pending signatures; late connection tokens are revoked instead of stored.
+Once a financial operation or login is submitted, Reject is disabled and the dialog
+warns that closing cannot undo submission. Extension confirmation still happens in
+the extension; built-in signing stays inside the site wallet.
 
 `FeatheralWallet.authenticate(challenge)` is the shared site sign-in transport used
 by Notes/Sites creation, Exchange and X/community comments. Its inline wallet panel
 selects the account and extension/built-in method, verifies the requesting network
-origin, renderer window and nonce, accepts only fresh standard sign-in messages, and requires
+origin, renderer instance and nonce, accepts only fresh standard sign-in messages, and requires
 explicit approval. The callback obtains a site-specific challenge for that public
 address. Only `{address, signature}` returns; each site then exchanges the signature
-for its own session. The central active address is updated after approval. No
-password, private key or central token leaves the wallet. Financial transfer/admin
-messages cannot be signed through this channel.
-Approved public selections restore normal panels even when iframe storage is isolated.
-Browsers that partition an existing built-in vault can grant storage access through
-**Use existing device wallet** inside Account. If access is blocked, the panel
-explains how to allow storage or restore an encrypted backup in place; it never
-redirects to the wallet site or bypasses browser isolation with keys or tokens.
+for its own session. The site's selected address is updated after approval.
+No keys, passwords or sessions are passed across origins. Arbitrary financial/admin
+messages cannot be signed through this channel; supported Silver purchases and
+profile updates retain their exact validated approval formats.
+If local storage is blocked, the panel explicitly explains how to allow storage.
+It never redirects to the wallet site or bypasses browser isolation.
 The legacy Exchange popup authorization endpoint remains compatible for old clients.
 
 The gateway serves `wallet.featheral.com` and the schema-versioned `/api/wallet/ui`
-configuration. `/api/creation/*` is available on that host with central-origin sessions.
+configuration on all recognized site hosts. Local modules are served at
+`/shared/wallet/*`; the header opens a native dialog without redirecting.
+Only wallet-specific creation routes are enabled on additional hosts;
+site creation, Exchange custody and Admin privileges retain their existing gates.
+World guest-funds sync may open the World host to share a nonce-bound public
+account ID back into the dialog; it does not redirect to the central wallet or
+share cookies or spending authority.
 `setWalletSources` supplies verified Gold-owned mainnet FTHG and native ETH balances
 on Ethereum (1), Base (8453), Arbitrum One (42161), Optimism (10), zkSync Era (324)
 and Linea (59144), plus read-only linked World funds. Native balances use a verified
@@ -1388,45 +1456,33 @@ provenance and unpriced assets remain available in the total tooltips.
 Receive keeps the Mainnet/native-note safety warning visible. Swap stays inline; advanced Exchange tools remain separate.
 Wallet configuration derives its accent from `shared/site-colors.json`, using the
 parent site or a validated `theme` site name, not just the primary token.
-The embed sends `featheral:wallet-theme` on readiness and host theme changes.
-The renderer accepts only bounded color values and light/dark scheme from the exact
-configured parent origin and window; no arbitrary CSS, assets or credentials are passed.
-The iframe loads eagerly behind a host-colored loading surface and becomes visible
-only after acknowledging that its host palette has been applied. Initialization
-errors or a 20-second startup timeout show Retry and a full-wallet link instead of
-a blank panel. Retrying replaces only the renderer and cancels any pending sign-in.
-The full-wallet link retains the currency, view and site context without credentials.
-User-initiated external wallet tools open outside the iframe sandbox; arbitrary
-top-level navigation remains disallowed.
-Embedded extension requests always use the validated parent bridge, even when an
-extension injects a different or non-writable provider inside the frame. Only
-account access and `personal_sign` are bridged; account/provider changes invalidate
-signatures. The site's selected profile provider takes precedence over a generic
-injected provider. EIP-6963-only wallets and legacy multi-provider extensions are
-supported; when multiple providers are available, the panel offers a browser-wallet
-selector rather than silently choosing one. Built-in wallets remain inside the
-central renderer, and pinned public-address embeds receive no signing authority.
-Normal `FeatheralWallet.open` panels set `followActive=1`: the central-origin
+The contextual renderer reads its host's palette and typography and applies them
+to the isolated wallet body. Initialization failures replace partial controls
+with an explicit error; reopening retries. No frame, parent RPC bridge or
+wallet-site navigation is needed. EIP-6963-only wallets and legacy multi-provider
+extensions are supported; multiple providers require explicit selection.
+Account/provider changes and popup closure invalidate pending signatures.
+Built-in wallets stay in the current origin, and pinned public-address mounts
+receive no signing authority.
+Normal `FeatheralWallet.open` panels set `followActive=1`: the site-local
 `featheral-wallet-active-account` public address takes priority over a site's login
-address. Explicit `mount({address})` views remain pinned by default. Embedded views
+address. Explicit `mount({address})` views remain pinned by default. Pinned views
 read built-in public identity and verify linked-account proofs without unlocking
 or creating a signer. Portfolio composition is identical to the full wallet.
-Storage events propagate account selection, World sync and successful central
-operations; no credentials or private keys are posted to parent sites.
-Public-wallet synchronization is automatic; there is no manual sync button or
-popup, and the old `/context/` handoff is no longer served. Embeds read only central
-public storage, never the sign-in token or a parent-provided account context.
+Storage events propagate site-local account selection, World sync and successful
+operations; no credentials or private keys are posted across origins.
+Public-wallet synchronization is site-local, and the old `/context/` handoff is
+no longer served.
 Storage events, focus/visibility changes and 30-second reads refresh holdings.
-Browsers that isolate or block iframe storage (including some `*.localhost`
-configurations) require opening the full central wallet; credentials and keys
-are never shared to bypass that restriction.
+Blocked local storage is reported explicitly; wallet-site storage is never accessed
+or copied to bypass browser isolation.
 Native FTH$ operations use `/api/v1/notes/*` with existing Dollar compatibility
 aliases. Ethereum reads, including all six native ETH balances, belong to Gold's
 API and are supplied to Note summaries by Gold, not separate RPC clients.
-Public `/wallet/` routes contain only the central embed shell. Ethereum conversion
+Public `/wallet/` routes mount the contextual wallet locally. Ethereum conversion
 and staking remain available at the central host's `/ethereum/` route.
 
-The top-level central wallet supports local self-custody without an injected provider.
+Both the standalone and contextual wallets support local self-custody without an injected provider.
 `vault.js` uses the existing ethers bundle for random keys and password-encrypted
 keystores. A downloaded and confirmed recovery backup is required before creation
 persists anything. Only encrypted keystores and verified public link proofs persist;

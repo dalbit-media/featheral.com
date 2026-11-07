@@ -35,7 +35,7 @@ async function sshTarget(t, base) {
   shim(shims, "id", "echo 0");
   shim(shims, "systemd-run", 'while [ "$1" != /bin/bash ]; do shift; done; shift; exec /bin/bash "$@"');
   // The receiver itself is Linux-only and unit-tested separately; here it records the verified invocation.
-  shim(shims, "node", 'if [ "${2:-}" = --check-sites ]; then echo "Site sync readiness verified"; exit 0; fi; printf "%s\\n" "$@" > "$APPLIED"; echo FEATHERAL_SYNC:install; echo FEATHERAL_SYNC:health');
+  shim(shims, "node", 'if [[ "$1" = */setup-site-https.js ]]; then echo "Reviewed HTTPS setup verified"; exit 0; fi; if [ "${2:-}" = --check-sites ]; then echo "Site sync readiness verified"; exit 0; fi; printf "%s\\n" "$@" > "$APPLIED"; echo FEATHERAL_SYNC:install; echo FEATHERAL_SYNC:health');
   const opened = [];
   const server = new Server({ hostKeys: [host.private] }, connection => {
     connection.on("authentication", context => context.method === "password" && context.password === "ssh-secret" ? context.accept() : context.reject(["password"]));

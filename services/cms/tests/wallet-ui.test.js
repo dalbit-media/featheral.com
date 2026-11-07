@@ -118,7 +118,7 @@ test("wallet icon actions have accessible labels and retain visible network safe
     "address input must override legacy ID margins so the inline copy icon stays centered");
   assert.doesNotMatch(css, /\[data-embedded=true\]\s+#local-wallet\s*\{display:none/);
 });
-test("X hides wallet controls without loading saved sessions or changing other CMS hosts", () => {
+test("X keeps its funds wallet without restoring paused social sessions", () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../sites/x.featheral.com/site.js"), "utf8");
   for (const [hostname, enabled] of [["x.featheral.com", false], ["x.localhost", false], ["sites.featheral.com", true]]) {
     let removed = false, suppressed = false, reads = 0;
@@ -129,20 +129,20 @@ test("X hides wallet controls without loading saved sessions or changing other C
     vm.runInContext(source.slice(source.indexOf("if (location.hostname ==="), source.indexOf("const storageKey =")), context);
     vm.runInContext(source.slice(source.indexOf("let wallet ="), source.indexOf("const short =")), context);
     assert.equal(vm.runInContext("walletEnabled", context), enabled);
-    assert.equal(removed, !enabled); assert.equal(suppressed, !enabled);
+    assert.equal(removed, false); assert.equal(suppressed, false);
     assert.equal(reads, enabled ? 1 : 0);
-    if (enabled) assert.equal(button.hidden, false);
+    assert.equal(button.hidden, false);
   }
-  assert.match(source, /if \(!walletEnabled\) \{ f.innerHTML = '<p class="count">Comments are read-only/);
+  assert.match(source, /Comments are read-only on this site/);
   assert.match(source, /if \(!walletEnabled\) return `<div class="vauthor">Posted by/);
   assert.match(source, /#fab'\)\.hidden = !walletEnabled/);
   const links = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");
-  assert.match(links, /current !== "admin" && current !== "x"/);
+  assert.match(links, /current !== "wallet" && current !== "admin" && !document\.querySelector\('script\[data-central-wallet-loader\]'\)/);
   const embed = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/embed.js"), "utf8");
-  assert.match(embed, /!\["x.featheral.com", "x.localhost"\]\.includes\(location.hostname\)/);
+  assert.match(embed, /!button\.dataset\.walletBound && site !== "x"/);
 });
 
-test("shared CMS wallet remains available when enabled but is paused on standalone X", async () => {
+test("shared funds wallet remains available on standalone X while social sign-in stays paused", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../sites/x.featheral.com/site.js"), "utf8");
   const snippet = source.slice(source.indexOf("async function openWalletPanel()"), source.indexOf("// After a like:"));
   const calls = [], root = { style: {} }, dialog = { querySelector: selector => selector === '[data-wallet-root]' ? root : null, append() {} };
@@ -154,7 +154,7 @@ test("shared CMS wallet remains available when enabled but is paused on standalo
   assert.equal(root.style.height, 'calc(100% - 64px)');
   context.walletEnabled = false;
   await context.openWalletPanel();
-  assert.equal(calls.length, 1, "paused X never opens the wallet");
+  assert.equal(calls.length, 2, "X opens its contextual funds wallet independently of social sign-in");
   assert.doesNotMatch(source, /function addFthx|className = 'wpanel'|wallet\/deposit\/request/);
   assert.match(source, /addEventListener\('click', openWalletPanel\)/);
   let applied = 0;
@@ -165,59 +165,6 @@ test("shared CMS wallet remains available when enabled but is paused on standalo
   assert.equal(applied, 1, "site-local sign-ins defer header rendering to the shared wallet");
   assert.equal(button.textContent, 'Shared wallet identity');
 });
-function embedFixture({ withHeader = false, localhost = false, primary, hostStyle, hostname, store = new Map(), provider, profileReader, selectedProvider } = {}) {
-  const elements = [], listeners = {}, messages = [], popups = [], timers = new Set(), timeouts = new Set(), profileCalls = [], errors = [];
-  class Element {
-    constructor(tag) { this.tag = tag; this.dataset = {}; this.style = {}; this.children = []; this.listeners = {}; this.isConnected = true;
-      assert.notEqual(tag, "iframe", "wallet previews must not create frames");
-      this.classes = new Set(); this.classList = { add: name => this.classes.add(name) }; elements.push(this); }
-    append(...children) { this.children.push(...children); }
-    replaceChildren(...children) { this.children = children; }
-    setAttribute(name, value) { this[name] = value; }
-    addEventListener(name, callback) { this.listeners[name] = (event = { preventDefault() {}, stopImmediatePropagation() {} }) => callback(event); }
-    hasAttribute(name) { return name === "data-central-wallet" && this.dataset.centralWallet !== undefined; }
-    getBoundingClientRect() { return { bottom: 97 }; }
-    querySelector(selector) {
-      for (const child of this.children) {
-        const key = selector.match(/^\[data-(.*)\]$/)?.[1].replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (key ? child.dataset[key] : child.tag === selector) return child;
-        const descendant = child.querySelector(selector);
-        if (descendant) return descendant;
-      }
-      return null;
-    }
-    showModal() { if (this.open) throw new Error("Already open"); this.open = true; }
-    close() { this.open = false; }
-  }
-  const header = withHeader ? new Element("header") : null, button = new Element("button"), swap = new Element("a");
-  button.dataset.centralWallet = ""; swap.dataset.walletView = "swap";
-  if (primary) button.dataset.walletPrimary = primary;
-  if (header) { header.append(button, swap); header.querySelector = () => button; header.querySelectorAll = () => [swap]; }
-  const document = { currentScript: { src: "https://wallet.featheral.com/embed.js" }, readyState: "complete",
-    body: new Element("body"), createElement: tag => new Element(tag),
-    getElementById: id => elements.find(el => el.id === id), querySelectorAll: () => [],
-    querySelector: selector => selector === "header .central-wallet-button" ? withHeader ? button : null : header };
-  const window = { ethereum: provider, FeatheralProfile: { getProvider: () => selectedProvider },
-    localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
-    addEventListener: (name, listener) => { listeners[name] = listener; },
-    removeEventListener: (name, listener) => { if (listeners[name] === listener) delete listeners[name]; },
-    crypto: { getRandomValues: array => array.fill(1) },
-    open: href => { const popup = { href, postMessage: (data, origin) => messages.push({ data, origin }), close() { this.closed = true; } }; popups.push(popup); return popup; } };
-  if (hostStyle) window.getComputedStyle = () => ({
-    getPropertyValue: name => hostStyle[name] || '', backgroundColor: '#ffffff', color: '#202337', colorScheme: 'light',
-  });
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/embed.js"), "utf8"),
-    { document, window, location: new URL(hostname ? `${localhost ? "http" : "https"}://${hostname}${localhost ? ":8080" : ""}` : localhost ? "http://notes.localhost:8080" : "https://notes.featheral.com"), URL, URLSearchParams,
-      console: { error: (...args) => errors.push(args) },
-      fetch: async (url, options) => {
-        profileCalls.push({ url: String(url), options });
-        return { ok: true, json: async () => ({ profile: profileReader ? await profileReader(String(url)) : null }) };
-      },
-      setTimeout(callback) { timeouts.add(callback); return callback; }, clearTimeout(callback) { timeouts.delete(callback); },
-      setInterval(callback) { timers.add(callback); return callback; }, clearInterval(callback) { timers.delete(callback); } });
-  return { wallet: window.FeatheralWallet, dialog: () => document.getElementById("featheral-central-wallet"), header, button, swap,
-    listeners, messages, popups, timers, timeouts, store, profileCalls, errors };
-}
 test("legacy Foundation and Gold controls never restore local accounts or connect providers, including before embed loads", async () => {
   const source = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/wallet-profile.js"), "utf8");
   for (const host of ["featheral.com", "gold.featheral.com", "dollar.featheral.com"]) {
@@ -488,9 +435,7 @@ test("native Ethereum pages retain signer IDs and expose a separate central FTHG
     assert.match(html, /data-central-wallet data-wallet-primary="FTHG">Wallet/);
     assert.match(html, new RegExp(`id="${signer}"[^>]+title="Connect Ethereum signer"[^>]+aria-label="Connect Ethereum signer"`));
   }
-  const ui = embedFixture({ withHeader: true, primary: "FTHG" });
-  assert.equal(ui.button["aria-label"], "Open FTHG wallet");
-  ui.button.listeners.click();
-  assert.equal(new URL(ui.dialog().querySelector("a").href).searchParams.get("primary"), "FTHG");
-  assert.match(ui.dialog().style.cssText, /width:min\(460px/);
+  const embed = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/embed.js"), "utf8");
+  assert.match(embed, /const primary = button\.dataset\.walletPrimary \|\| defaultPrimary/);
+  assert.match(embed, /open\(\{ primary, compact: true \}\)/);
 });

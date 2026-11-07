@@ -1,1 +1,1 @@
-document.getElementById("admin-build-version").textContent = "v.05";
+document.getElementById("admin-build-version").textContent = "v.06";

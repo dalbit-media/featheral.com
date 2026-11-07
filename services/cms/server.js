@@ -372,10 +372,15 @@ if (creation) {
 // Public wallet-owned creation is deliberately separate from privileged CMS routes.
 const creationRouter = express.Router();
 const creationLimits = new Map();
+function contextualWalletHost(req) {
+  const { allowedOrigin } = require('../wallet/ui'), host = hostName(req);
+  return !req.hostedSite && (allowedOrigin(`https://${host}`) || allowedOrigin(`http://${host}`));
+}
 creationRouter.use((req, res, next) => {
   if (!creation) return res.status(503).json({ error: 'Site creation is not configured.' });
   const statsRead = hostName(req) === 'stats.featheral.com' && req.method === 'GET' && req.path === '/trending';
-  if (req.hostedSite || !statsRead && !['notes.featheral.com', 'sites.featheral.com', 'ex.featheral.com', 'dollar.featheral.com', 'wallet.featheral.com'].includes(hostName(req))) return res.sendStatus(404);
+  const contextualWallet = contextualWalletHost(req) && /^\/(?:challenge|login|logout|markets|wallet(?:\/.*)?)$/.test(req.path);
+  if (req.hostedSite || !statsRead && !contextualWallet && !['notes.featheral.com', 'sites.featheral.com', 'ex.featheral.com', 'dollar.featheral.com', 'wallet.featheral.com'].includes(hostName(req))) return res.sendStatus(404);
   if (!['GET', 'HEAD'].includes(req.method)) {
     const protocol = req.get('x-forwarded-proto') === 'https' ? 'https' : req.protocol;
     if (req.get('origin') !== `${protocol}://${req.get('host')}`) return res.status(403).json({ error: 'Same-origin creation requests are required.' });
@@ -452,7 +457,8 @@ creationRouter.post('/markets/trade', wrap((req, res) => {
 }));
 creationRouter.use('/wallet/swaps', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
-  if (!['wallet.featheral.com', 'ex.featheral.com'].includes(hostName(req))) return res.status(403).json({ error: 'Use the shared wallet or Exchange to swap.' });
+  if (!contextualWalletHost(req))
+    return res.status(403).json({ error: 'Use a recognized Featheral site wallet to swap.' });
   next();
 });
 creationRouter.post('/wallet/swaps/quote', wrap((req, res) => res.json(dollarExchange.swapQuote(req.body))));
@@ -596,6 +602,7 @@ function publicByKey(key) {
       brand: managed?.hostname || CONFIG.publicBrand,
       tagline: key === CONFIG.siteKey ? CONFIG.publicTagline : null,
       notesFile: notes.file,
+      sharedCards: !managed?.path && (managed?.hostname || CONFIG.publicHost) === 'x.featheral.com',
     });
     publicCache.set(key, cached);
   }
@@ -603,6 +610,12 @@ function publicByKey(key) {
 }
 // Analytics: page hits and on-site searches (the visitor id comes from the browser's localStorage).
 const visitorOf = (req) => String(req.get('x-visitor') || '').slice(0, 64);
+function commentIP(req) {
+  const peer = req.socket.remoteAddress || '';
+  if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer)) return peer;
+  const forwarded = (req.get('x-forwarded-for') || '').split(',').at(-1)?.trim();
+  return require('node:net').isIP(forwarded || '') ? forwarded : peer;
+}
 function logSearch(req, place, q, total) {
   try { publicSite(req).analytics.search(visitorOf(req), place, q, total); } catch (e) { console.error(e); }
 }
@@ -745,7 +758,8 @@ app.post('/api/public/fetch-link', wrap(async (req, res) => {
 }));
 app.get('/api/public/posts/:id/comments', wrap((req, res) => res.json(publicSite(req).comments(req.params.id))));
 app.post('/api/public/posts/:id/view', wrap((req, res) => res.json(publicSite(req).view(req.params.id, req.body?.visitor))));
-app.post('/api/public/posts/:id/comments', wrap((req, res) => res.json(publicSite(req).addComment(req.params.id, walletToken(req), req.body?.content))));
+app.post('/api/public/posts/:id/comments', wrap((req, res) => res.json(publicSite(req).addComment(req.params.id, walletToken(req), req.body?.content,
+  { visitor: visitorOf(req), ip: commentIP(req) }))));
 app.delete('/api/public/comments/:id', wrap((req, res) => res.json(publicSite(req).deleteComment(req.params.id, walletToken(req)))));
 
 // Curation trash, managed from the admin site.

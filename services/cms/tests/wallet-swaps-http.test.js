@@ -50,7 +50,11 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   const token = (await call("/login", { address: owner, signature: await wallet.signMessage(challenge.message) })).body.token;
   const input = { from: "FTHX", to: "FTHA", amount: "100" };
   assert.equal((await call("/wallet/swaps/quote", input, { origin: "https://untrusted.invalid" })).status, 403);
-  assert.equal((await call("/wallet/swaps/quote", input, { host: "notes.featheral.com" })).status, 403);
+  for (const host of ["notes.featheral.com", "featheral.com", "gold.featheral.com", "world.featheral.com", "pay.featheral.com",
+    "x.featheral.com", "app.localhost", "silver.localhost", "media.localhost"])
+    assert.equal((await call("/wallet/swaps/quote", input, { host })).status, 200, `${host} has same-origin contextual swaps`);
+  assert.equal((await call("/wallet/swaps/quote", input, { host: "untrusted.invalid" })).status, 404);
+  assert.equal((await call("/owned", undefined, { host: "app.localhost" })).status, 404);
   const quoted = await call("/wallet/swaps/quote", input);
   assert.equal(quoted.status, 200); assert.equal(quoted.body.output, "99");
   const parameters = { ...input, minOutput: quoted.body.output, requestId: "wallet-http-swap-0001" };
@@ -77,7 +81,7 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   const stats = await call("/trending", undefined, { host: "stats.featheral.com" });
   assert.equal(stats.status, 200);
   assert.equal(stats.body.notes.find(note => note.symbol === "FTHS").circulating, "0");
-  assert.equal((await call("/challenge", { address: owner }, { host: "stats.featheral.com" })).status, 404);
+  assert.equal((await call("/challenge", { address: owner }, { host: "stats.featheral.com" })).status, 200);
   const appHost = { host: "app.localhost", prefix: "/api/intranet" };
   app.setWorkspaceProfiles(address => ({ address, username: "GatewayProfile", avatar: "" }));
   const appChallenge = (await call("/challenge", { address: owner }, appHost)).body;

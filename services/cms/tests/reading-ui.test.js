@@ -266,7 +266,7 @@ test('Read and category views start with search and sort, and page compact keywo
   const keywords = Array.from({ length: 85 }, (_, i) => ({ id: i + 1, name: `Keyword ${i + 1}`, count: 2 }));
   const context = vm.createContext({ AbortController, URLSearchParams, setTimeout, clearTimeout,
     document: { activeElement: null }, location: {}, info: { pages: [{ slug: 'fthx', title: 'FTHX' }] },
-    fmtNum: String, esc: String, view: () => root, $: node,
+    fmtNum: String, esc: String, view: () => root, $: node, overlayTools() {},
     href: (parts, query) => '#/' + parts.join('/') + '?' + new URLSearchParams(query),
     api: async url => {
       calls.push(url);
@@ -362,14 +362,14 @@ test('reading thumbnails use lazy bounded previews, site scoping, and reject inv
   vm.runInContext(source.slice(source.indexOf('function readingThumbnail('), source.indexOf('function readingEntry(')), context);
   const html = context.readingThumbnail({ id: 8, thumbnail: { type: 'gif' } });
   assert.match(html, /src="\/tenant\/api\/public\/posts\/8\/preview\?type=gif"/);
-  assert.match(html, /width="80" height="80" loading="lazy" decoding="async" alt=""/);
+  assert.match(html, /width="480" height="360" loading="lazy" decoding="async" alt=""/);
   for (const item of [{ id: -1, thumbnail: { type: 'png' } }, { id: 1 }, { id: 1, thumbnail: { type: 'read' } }]) {
     assert.equal(context.readingThumbnail(item), '');
   }
   const css = fs.readFileSync(path.join(root, 'sites/x.featheral.com/site.css'), 'utf8');
   assert.match(css, /\.reading-thumbnail \{[^}]+width: 80px; height: 80px/);
   assert.match(css, /\.reading-thumbnail \{[^}]+width: 64px; height: 64px/);
-  assert.equal((source.match(/\$\{readingThumbnail\((?:item|t)\)\}/g) || []).length, 2, 'Read and shared Liked/Trash cards render previews');
+  assert.equal((source.match(/readingThumbnail\((?:item|t)\) \|\|/g) || []).length, 2, 'Read and shared Liked/Trash cards render previews or collectible text art');
 });
 
 test('reading category icons are decorative, semantic, and have a consistent fallback', () => {
@@ -404,6 +404,6 @@ test('reading details show uncropped original media and provide an explicit load
   image.onload();
   assert.equal(status.hidden, true);
   const reader = source.slice(source.indexOf('async function readerView('), source.indexOf('function readingVotes('));
-  assert(reader.indexOf('${readingMedia(t)}') < reader.indexOf('<article>'));
+  assert(reader.indexOf('${readingMedia(t)}') < reader.indexOf('<article class="reader-text-card"'));
   assert.match(reader, /mediaImage.removeAttribute\('src'\)/);
 });

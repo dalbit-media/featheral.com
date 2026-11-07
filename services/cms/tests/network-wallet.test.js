@@ -14,6 +14,7 @@ class Element {
   replaceChildren(...nodes) { this.text = ''; this.children = nodes; }
   setAttribute(name, value) { this[name] = value; }
   getAttribute(name) { return this[name]; }
+  removeAttribute(name) { delete this[name]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   async fire(name, event = {}) { await this.listeners[name]?.({ preventDefault() {}, ...event }); }
   click() { return this.fire('click'); }
@@ -21,13 +22,16 @@ class Element {
 async function fixture(host, { embedded = false, storageBlocked = false, walletData = {}, publicAddress = null, markets = [], noProvider = false, vaultApi,
   activeAddress = null, followActive = false, worldAccount = null, noSession = embedded, view = 'assets', marketError = false,
   selectionNonce = null, authNonce = null, popupBlocked = false, marketDelay = false, manualReview = false,
-  sessionExpired = false, payment = null } = {}) {
+  sessionExpired = false, payment = null, contextual = false, publicReadError = false, signatureDelay = false, loginDelay = false,
+  requestOrigin = 'http://notes.localhost:8080' } = {}) {
   const nodes = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   nodes['wallet-review'].showModal = () => {
     nodes['wallet-review'].open = true;
     if (!manualReview) queueMicrotask(() => nodes['wallet-review-confirm'].fire('click'));
   };
   nodes['wallet-review'].close = () => { nodes['wallet-review'].open = false; };
+  nodes['site-approval'].showModal = () => { nodes['site-approval'].open = true; };
+  nodes['site-approval'].close = () => { nodes['site-approval'].open = false; };
   const panels = ['assets', 'send', 'receive', 'swap', 'activity', 'account'].map(id => nodes[id]);
   const tabs = ['assets', 'send', 'receive', 'swap', 'activity', 'account'].map(id => {
     const node = nodes['tab-' + id]; node.dataset.tab = id; node.role = 'tab'; return node;
@@ -39,8 +43,10 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   const address = '0x1111111111111111111111111111111111111111', calls = [], errors = [], requests = new Map(), tips = new Map();
   let funded = true, rejectSignature = false, tipReceiptLost = false, swapReceiptLost = false, completes = 0, elapsed = 0;
   const pendingMarkets = [];
+  const pendingSignatures = [], pendingLogins = [], providerListeners = {}, providerCalls = [];
   const documentListeners = {}, windowListeners = {}, intervals = [], popups = [], messages = [];
   const store = new Map([['featheral-creation-token', 'test-token']]);
+  if (contextual && !noSession) store.set('featheral-context-wallet-token', 'test-token');
   if (noSession) store.delete('featheral-creation-token');
   if (activeAddress) store.set('featheral-wallet-active-account', activeAddress);
   if (worldAccount) { store.set('featheral-world-account', worldAccount); store.delete('featheral-creation-token'); }
@@ -51,7 +57,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     calls.push({ url, body, headers: options.headers });
     if (url.startsWith('/api/wallet/ui')) return reply(require('../../wallet/ui').walletUi(new URLSearchParams({ primary: require('../../wallet/ui').primaryFor(`${host}.localhost`),
       view, ...(embedded ? { parentOrigin: 'http://notes.localhost:8080' } : {}),
-      ...(authNonce ? { authNonce, parentOrigin: 'http://notes.localhost:8080' } : {}),
+      ...(authNonce ? { authNonce, parentOrigin: requestOrigin } : {}),
       ...(selectionNonce ? { selectionNonce, parentOrigin: 'http://gold.localhost:8080' } : {}),
       ...(publicAddress ? { address: publicAddress } : {}), followActive: followActive ? '1' : '0', ...(payment || {}) })));
     if (url.startsWith('/api/v1/notes/fth/accounts/')) return reply({ fthDollar: { available: '1000000000000000000' }, wallet: null });
@@ -66,10 +72,14 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     if (url.endsWith('/dollar-pool')) return reply({ funded, settlementEnabled: true, dollars: '1000000000000000000000', fthx: 10000 });
     if (url.endsWith('/dollar-pool/market')) return reply({ volumeFthDollar: '1000000000000000000', volumeFthx: '10', trades: 1 });
     if (url.endsWith('/challenge')) return reply({ message: 'mock login challenge' });
-    if (url.endsWith('/login')) return reply({ token: 'test-token' });
+    if (url.endsWith('/login')) {
+      if (loginDelay) return new Promise(resolve => pendingLogins.push(() => resolve(reply({ token: 'late-login-token' }))));
+      return reply({ token: 'test-token' });
+    }
     if (url.endsWith('/logout')) return reply({ ok: true });
     if (url.endsWith('/wallet/send/prepare')) return reply({ message: 'exact native transfer', payment: { to: body.to, amount: body.amount, nonce: 'native-nonce' } });
     if (url === '/api/v1/notes/fth/transfers') return reply({ ok: true });
+    if (publicReadError && url.startsWith('/api/wallet/accounts/')) return { ...reply({ error: 'Public balances unavailable' }), ok: false, status: 503 };
     if (sessionExpired && url.endsWith('/wallet')) return { ...reply({ error: 'Session expired' }), ok: false, status: 401 };
     if (url.endsWith('/wallet') || url.startsWith('/api/wallet/accounts/')) return reply({ address: url.startsWith('/api/wallet/accounts/') ? url.split('/').pop().split('?')[0] : publicAddress || address, holdings: [{ symbol: 'FTHX', balance: 123 }],
       dollar: { balance: { available: '10000000000000000000' }, transactions: [] }, markets: { trades: [] }, exchange: { trades: [], requests: [] }, noteTransfers: [], ...walletData });
@@ -95,20 +105,27 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     throw new Error(`Unexpected mocked API: ${url}`);
   };
   const document = { referrer: 'http://notes.localhost:8080/', body: new Element(), getElementById: id => nodes[id], createElement: () => new Element(),
+    removeEventListener() {},
     addEventListener(name, callback) { (documentListeners[name] ||= []).push(callback); },
     querySelectorAll: selector => selector === '.wallet-panel' ? panels : selector === '[data-tab]' ? [...tabs, ...shortcuts]
       : selector === '[role="tab"]' ? tabs : selector === 'form' ? ['send-form', 'swap-form', 'vault-form'].map(id => nodes[id]) : Object.values(nodes) };
   const clipboard = [];
   const context = { document, navigator: { clipboard: { writeText: async text => clipboard.push(text) } }, location: new URL(`http://${host}.localhost:8080/wallet/#${view === 'assets' ? 'swap' : view}`), localStorage: storage, sessionStorage: storage,
-    URL, URLSearchParams, TextEncoder, crypto, fetch, Event: class {}, Date: class extends Date { static now() { return Date.now() + elapsed; } },
-    setInterval(callback, delay) { intervals.push({ callback, delay }); }, setTimeout, clearTimeout, btoa: value => Buffer.from(value).toString('base64'),
+    URL, URLSearchParams, TextEncoder, crypto, fetch, AbortSignal, Event: class {}, Date: class extends Date { static now() { return Date.now() + elapsed; } },
+    setInterval(callback, delay) { intervals.push({ callback, delay }); }, clearInterval() {}, setTimeout, clearTimeout, btoa: value => Buffer.from(value).toString('base64'),
     console: { error: error => errors.push(error.message) }, history: { replaceState() {} },
     window: { opener: { postMessage: (data, origin) => messages.push({ data, origin }) },
-      open(href) { if (popupBlocked) return null; const popup = { href }; popups.push(popup); return popup; },
+      open(href) { if (popupBlocked) return null; const popup = { href, closed: false, close() { this.closed = true; }, focus() {} }; popups.push(popup); return popup; },
       dispatchEvent() {},
-      addEventListener(name, callback) { (windowListeners[name] ||= []).push(callback); }, ethereum: { on() {}, async request({ method }) {
+      removeEventListener() {},
+      addEventListener(name, callback) { (windowListeners[name] ||= []).push(callback); }, ethereum: { on(name, callback) { providerListeners[name] = callback; }, async request({ method }) {
+      providerCalls.push(method);
       if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [address];
-      if (method === 'personal_sign') { if (rejectSignature) { rejectSignature = false; throw new Error('signature rejected'); } return 'mock-signature'; }
+      if (method === 'personal_sign') {
+        if (rejectSignature) { rejectSignature = false; throw new Error('signature rejected'); }
+        if (signatureDelay) return new Promise(resolve => pendingSignatures.push(() => resolve('mock-signature')));
+        return 'mock-signature';
+      }
       throw new Error(`Unexpected provider method: ${method}`);
     } } } };
   context.window.parent = context.window;
@@ -116,13 +133,28 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   let reloads = 0;
   context.location.reload = () => { reloads++; };
   context.window.FeatheralPortfolio = require('../../../sites/wallet.featheral.com/portfolio-view');
-  context.window.FeatheralSignIn = require('../../../sites/wallet.featheral.com/site-sign-in');
+  const validationModule = { exports: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../../sites/wallet.featheral.com/site-sign-in.js'), 'utf8'),
+    { module: validationModule, Date: context.Date });
+  context.window.FeatheralSignIn = validationModule.exports;
   if (vaultApi) {
     context.window.FeatheralVault = vaultApi;
   }
+  let mounted, visible = true, localContext;
+  if (contextual) {
+    document.currentScript = { hasAttribute: () => true };
+    nodes['ethereum-swap'].querySelector = () => new Element();
+    localContext = { root: document, body: new Element(), search: '', visible: () => visible,
+      onSelected() {}, onMessage: data => messages.push({ data }) };
+  }
   vm.runInNewContext(source, context);
+  if (contextual) mounted = await context.window.FeatheralWalletApp.mount(localContext);
   await new Promise(resolve => setImmediate(resolve));
-  return { nodes, calls, document, errors, tips, store, intervals, popups, messages, clipboard, setFunded: value => { funded = value; },
+  return { nodes, calls, providerCalls, document, errors, tips, store, intervals, popups, messages, clipboard, setFunded: value => { funded = value; },
+    localContext, mounted, closeContext: async () => { visible = false; await mounted.suspend(); },
+    providerChange: accounts => providerListeners.accountsChanged?.(accounts),
+    releaseSignatures: () => { signatureDelay = false; for (const resolve of pendingSignatures.splice(0)) resolve(); },
+    releaseLogins: () => { loginDelay = false; for (const resolve of pendingLogins.splice(0)) resolve(); },
     reloads: () => reloads,
     message: async (data, { origin = 'http://notes.localhost:8080', source = context.window.opener } = {}) => {
       for (const listener of windowListeners.message || []) listener({ origin, source, data });
@@ -221,6 +253,11 @@ test('site wallet authorizes an existing extension inline and never sends withou
   ui.nodes.recipient.value = '0x' + '22'.repeat(20);
   const cancelled = ui.nodes['send-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  assert.equal(ui.nodes['wallet-review-title'].textContent, 'Connect wallet');
+  assert.ok(!ui.calls.some(call => call.url.endsWith('/login')));
+  await ui.nodes['wallet-review-confirm'].fire('click');
+  await new Promise(resolve => setImmediate(resolve));
   assert.ok(ui.calls.some(call => call.url.endsWith('/login')));
   assert.equal(ui.nodes['wallet-review'].open, true);
   assert.match(ui.nodes['wallet-review-message'].textContent, /Send 2 FTHX to 0x22/);
@@ -261,12 +298,13 @@ test('top-level site approval trusts only its opener, rejects financial messages
   const challenge = require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), Date.now());
   const ui = await fixture('notes', { authNonce: nonce, followActive: true });
   await ui.message({ type: 'featheral:wallet-auth-start', nonce }, { source: {} });
-  assert.notEqual(ui.nodes['site-approval'].hidden, false);
+  assert.notEqual(ui.nodes['site-approval'].open, true);
   await ui.message({ type: 'featheral:wallet-auth-start', nonce });
-  assert.equal(ui.nodes['site-approval'].hidden, false);
+  assert.equal(ui.nodes['site-connection'].hidden, false);
   assert.equal(ui.nodes.account.hidden, false);
   assert.ok(ui.messages.some(message => message.data.type === 'featheral:wallet-auth-ready'));
   await ui.message({ type: 'featheral:wallet-auth', nonce, address, message: challenge });
+  assert.equal(ui.nodes['site-approval'].open, true);
   assert.equal(ui.nodes['site-approve'].disabled, false);
   assert.ok(!ui.messages.some(message => message.data.type === 'featheral:wallet-signature'));
   await ui.nodes['site-approve'].fire('click');
@@ -288,6 +326,265 @@ test('site approval waits for a connected signer rather than committing a stale 
   assert.equal(ui.messages.some(message => message.data.type === 'featheral:wallet-auth-ready'), false);
   await ui.nodes['connect'].fire('click');
   assert.equal(ui.messages.filter(message => message.data.type === 'featheral:wallet-auth-ready').length, 1);
+});
+test('contextual wallet uses isolated DOM and session storage with direct in-page approvals', async () => {
+  const address = '0x' + '11'.repeat(20), nonce = 'ab'.repeat(16);
+  const ui = await fixture('notes', { contextual: true, authNonce: nonce, followActive: true });
+  assert.equal(ui.document.body.dataset.primary, undefined, 'host body must not receive wallet layout attributes');
+  assert.equal(ui.localContext.body.dataset.primary, 'FTHX');
+  ui.localContext.receive({ type: 'featheral:wallet-auth-start', nonce: 'ff'.repeat(16) });
+  assert.notEqual(ui.nodes['site-approval'].open, true);
+  ui.localContext.receive({ type: 'featheral:wallet-auth-start', nonce });
+  assert.ok(ui.messages.some(message => message.data.type === 'featheral:wallet-auth-ready'));
+  const challenge = require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), Date.now());
+  ui.localContext.receive({ type: 'featheral:wallet-auth', nonce, address, message: challenge });
+  await ui.nodes['site-approve'].fire('click');
+  assert.equal(ui.messages.find(message => message.data.type === 'featheral:wallet-signature').data.signature, 'mock-signature');
+  await ui.nodes['connect'].fire('click');
+  assert.equal(ui.store.get('featheral-creation-token'), 'test-token', 'funds sign-out must not erase app creation sessions');
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  await ui.closeContext();
+  ui.mounted.dispose();
+});
+test('closing a contextual wallet cancels pending reviews and prevents later mutation requests', async () => {
+  const ui = await fixture('notes', { contextual: true, manualReview: true, view: 'swap' });
+  ui.nodes['swap-amount'].value = '100';
+  const pending = ui.nodes['swap-form'].fire('submit');
+  await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  await ui.closeContext(); await pending;
+  assert.equal(ui.calls.some(call => call.url.endsWith('/complete')), false);
+  const writes = ui.calls.filter(call => call.body).length;
+  await ui.nodes['swap-form'].fire('submit');
+  assert.equal(ui.calls.filter(call => call.body).length, writes);
+  assert.ok(ui.errors.some(error => /popup closed/.test(error)));
+  ui.mounted.dispose();
+});
+test('contextual World funds sync accepts only its popup, origin and nonce without opening the wallet site', async () => {
+  const ui = await fixture('notes', { contextual: true, noSession: true, followActive: true, activeAddress: '0x' + '11'.repeat(20) });
+  await ui.nodes['world-sync'].fire('click');
+  const popup = ui.popups[0], url = new URL(popup.href), accountId = '0x' + 'ab'.repeat(32);
+  assert.equal(url.hostname, 'world.localhost');
+  assert.equal(url.searchParams.get('returnOrigin'), 'http://notes.localhost:8080');
+  const nonce = url.searchParams.get('syncNonce');
+  await ui.message({ type: 'featheral:world-account', nonce, accountId }, { source: {}, origin: 'http://world.localhost:8080' });
+  await ui.message({ type: 'featheral:world-account', nonce: 'ff'.repeat(16), accountId }, { source: popup, origin: 'http://world.localhost:8080' });
+  assert.equal(ui.store.has('featheral-world-account'), false);
+  await ui.message({ type: 'featheral:world-account', nonce, accountId }, { source: popup, origin: 'http://world.localhost:8080' });
+  assert.equal(ui.store.get('featheral-world-account'), accountId);
+  assert.equal(popup.closed, true);
+  await ui.nodes['world-sync'].fire('click');
+  await ui.closeContext();
+  assert.equal(ui.popups[1].closed, true);
+  ui.mounted.dispose();
+});
+test('unavailable public balances do not disable contextual connection or recovery', async () => {
+  const ui = await fixture('notes', { contextual: true, noSession: true, activeAddress: '0x' + '11'.repeat(20),
+    followActive: true, publicReadError: true });
+  assert.match(ui.nodes.status.textContent, /Public balances unavailable/);
+  assert.equal(ui.nodes['extension-connect'].disabled, false);
+  await ui.nodes['connect'].fire('click');
+  assert.ok(ui.store.has('featheral-context-wallet-token'));
+  assert.equal(ui.nodes.status.textContent, '');
+  await ui.closeContext(); ui.mounted.dispose();
+});
+async function siteRequest(ui, message) {
+  const address = '0x' + '11'.repeat(20), nonce = 'ab'.repeat(16);
+  ui.localContext.receive({ type: 'featheral:wallet-auth-start', nonce });
+  ui.localContext.receive({ type: 'featheral:wallet-auth', nonce, address,
+    message: message || require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), Date.now()) });
+}
+test('site approval is a dedicated dialog with origin, account and sign-in safety, not an inline section', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+  await siteRequest(ui);
+  assert.equal(ui.nodes['site-approval'].open, true);
+  assert.equal(ui.nodes['site-connection'].hidden, true);
+  assert.equal(ui.nodes['site-origin'].textContent, 'http://notes.localhost:8080');
+  assert.equal(ui.nodes['site-account'].textContent, '0x' + '11'.repeat(20));
+  assert.equal(ui.nodes['site-approval-title'].textContent, 'Approve sign-in');
+  assert.match(ui.nodes['site-safety'].textContent, /does not transfer funds/);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  await ui.nodes['site-cancel'].fire('click');
+  assert.equal(ui.nodes['site-approval'].open, false);
+  assert.match(ui.messages.at(-1).data.error, /rejected/);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  ui.mounted.dispose();
+});
+test('wallet approval dialogs use shared accessible markup, safe defaults and touch-sized actions', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../../sites/wallet.featheral.com/wallet-app.css'), 'utf8');
+  for (const id of ['wallet-review', 'site-approval'])
+    assert.match(html, new RegExp(`<dialog id="${id}" class="wallet-approval" aria-labelledby="[^"]+" aria-describedby="[^"]+"`));
+  assert.match(html, /id="site-cancel"[^>]*autofocus>Reject/);
+  assert.match(html, /id="wallet-review-cancel"[^>]*autofocus>Reject/);
+  assert.match(css, /\.approval-actions\{position:sticky;bottom:0/);
+  assert.match(css, /max-height:calc\(100dvh - 24px\)/);
+  assert.match(css, /\.wallet-approval \.approval-actions button\{min-height:48px/);
+});
+test('Escape and external dialog closure reject requests without leaving authorization hanging', async () => {
+  for (const action of ['cancel', 'close']) {
+    const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+    await siteRequest(ui);
+    if (action === 'close') ui.nodes['site-approval'].close();
+    await ui.nodes['site-approval'].fire(action);
+    assert.equal(ui.messages.filter(message => message.data.type === 'featheral:wallet-signature').length, 1);
+    assert.equal(ui.nodes['site-approval'].open, false);
+    assert.equal(ui.providerCalls.includes('personal_sign'), false);
+    ui.mounted.dispose();
+  }
+});
+test('duplicate Approve clicks cannot sign twice and Reject invalidates a late extension signature', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true, signatureDelay: true });
+  await siteRequest(ui);
+  const pending = ui.nodes['site-approve'].fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['site-approve'].disabled, true);
+  assert.equal(ui.nodes['site-approval']['aria-busy'], 'true');
+  assert.match(ui.nodes['site-status'].textContent, /Waiting for your wallet extension/);
+  await ui.nodes['site-approve'].fire('click');
+  assert.equal(ui.providerCalls.filter(method => method === 'personal_sign').length, 1);
+  await ui.nodes['site-cancel'].fire('click');
+  ui.releaseSignatures(); await pending;
+  assert.equal(ui.messages.some(message => message.data.signature), false);
+  assert.equal(ui.messages.filter(message => message.data.error).length, 1);
+  assert.equal(ui.nodes['site-approval'].open, false);
+  assert.equal(ui.nodes['extension-connect'].disabled, false);
+  ui.mounted.dispose();
+});
+test('extension rejection leaves a retryable approval dialog and reports failure explicitly', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+  await siteRequest(ui); ui.rejectNextSignature();
+  await ui.nodes['site-approve'].fire('click');
+  assert.match(ui.nodes['site-status'].textContent, /signature rejected[\s\S]*Retry approval/);
+  assert.equal(ui.nodes['site-approve'].disabled, false);
+  assert.equal(ui.nodes['site-approve'].textContent, 'Approve sign-in');
+  assert.equal(ui.nodes['site-approval'].open, true);
+  await ui.nodes['site-approve'].fire('click');
+  assert.equal(ui.messages.filter(message => message.data.signature).length, 1);
+  assert.equal(ui.nodes['site-approval'].open, false);
+  ui.mounted.dispose();
+});
+test('account changes dismiss pending approvals and never sign the old message', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+  await siteRequest(ui);
+  ui.providerChange(['0x' + '22'.repeat(20)]); await new Promise(setImmediate);
+  assert.equal(ui.nodes['site-approval'].open, false);
+  assert.match(ui.messages.find(message => message.data.error).data.error, /changed/);
+  await ui.nodes['site-approve'].fire('click');
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  ui.mounted.dispose();
+});
+test('expired site messages fail revalidation at approval and remain rejectable', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+  await siteRequest(ui);
+  ui.advanceTime(600001);
+  await ui.nodes['site-approve'].fire('click');
+  assert.match(ui.nodes['site-status'].textContent, /expired/);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  await ui.nodes['site-cancel'].fire('click');
+  assert.equal(ui.nodes['site-approval'].open, false);
+  ui.mounted.dispose();
+});
+test('connection requires a review dialog before signing or creating a session', async () => {
+  const ui = await fixture('notes', { contextual: true, noSession: true, followActive: true, manualReview: true });
+  const connecting = ui.nodes['connect'].fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  assert.equal(ui.nodes['wallet-review-title'].textContent, 'Connect wallet');
+  assert.equal(ui.nodes['wallet-review-account'].textContent, '0x' + '11'.repeat(20));
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  await ui.nodes['wallet-review'].fire('cancel'); await connecting;
+  assert.equal(ui.calls.some(call => call.url.endsWith('/login')), false);
+  assert.match(ui.nodes.status.textContent, /connection rejected/);
+  ui.mounted.dispose();
+});
+test('rejecting an approved connection while the extension signs prevents a late login', async () => {
+  const ui = await fixture('notes', { contextual: true, noSession: true, followActive: true, signatureDelay: true });
+  const pending = ui.nodes['connect'].fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  assert.equal(ui.nodes['wallet-review-confirm'].disabled, true);
+  await ui.nodes['wallet-review-cancel'].fire('click');
+  ui.releaseSignatures(); await pending;
+  assert.equal(ui.calls.some(call => call.url.endsWith('/login')), false);
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  ui.mounted.dispose();
+});
+test('a login arriving after the wallet closes is revoked instead of being saved', async () => {
+  const ui = await fixture('notes', { contextual: true, noSession: true, followActive: true, loginDelay: true });
+  const pending = ui.nodes['connect'].fire('click'); await new Promise(setImmediate);
+  assert.ok(ui.calls.some(call => call.url.endsWith('/login')));
+  await ui.closeContext(); ui.releaseLogins(); await pending;
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  assert.ok(ui.calls.some(call => call.url.endsWith('/logout') && call.headers['x-creation-token'] === 'late-login-token'));
+  assert.match(ui.nodes.status.textContent, /cancelled or changed/);
+  ui.mounted.dispose();
+});
+test('built-in wallet uses the same approval dialog, signs only after approval and locks on close', async () => {
+  const address = '0x' + '11'.repeat(20), signed = [];
+  let instance;
+  class LocalVault {
+    constructor() { instance = this; }
+    read() { return { address, links: [] }; }
+    verifiedLinks() { return []; }
+    async unlock() { this.signer = { address }; }
+    async sign(message) { signed.push(message); return 'local-signature'; }
+    lock() { this.signer = null; }
+  }
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true,
+    noSession: true, noProvider: true, vaultApi: { Vault: LocalVault }, manualReview: true });
+  ui.nodes['vault-password'].value = 'fixture-only password';
+  await ui.nodes['vault-form'].fire('submit'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review-title'].textContent, 'Connect built-in wallet');
+  assert.equal(signed.length, 0);
+  await ui.nodes['wallet-review-confirm'].fire('click'); await new Promise(setImmediate);
+  assert.equal(signed.length, 1);
+  await siteRequest(ui);
+  assert.equal(ui.nodes['site-approval'].open, true);
+  assert.match(ui.nodes['site-status'].textContent, /unlocked built-in wallet/);
+  assert.equal(signed.length, 1);
+  await ui.nodes['site-approve'].fire('click');
+  assert.equal(signed.length, 2);
+  assert.equal(ui.messages.find(message => message.data.signature).data.signature, 'local-signature');
+  assert.equal(ui.providerCalls.length, 0);
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  await ui.closeContext();
+  assert.equal(instance.signer, null);
+  assert.equal(ui.nodes['vault-password'].value, '');
+  ui.mounted.dispose();
+});
+test('Silver purchase approval explicitly warns of payment and shows the exact amount/recipient', async () => {
+  const address = '0x' + '11'.repeat(20), recipient = '0x' + '22'.repeat(20), origin = 'http://silver.localhost:8080';
+  const message = `Pay Featheral Silver order.\n\nOrigin: ${origin}\nWallet: ${address}\nOrder: 00000000-0000-4000-8000-000000000001\nProduct: Fixture code\nAmount: 25 FTHS\nRecipient: ${recipient}\nDetails: ${'ab'.repeat(32)}\nIssued: ${new Date().toISOString()}\n\nThis signature authorizes this FTHS payment from your Notes balance. Digital code delivery requires administrator fulfillment. No physical shipping.`;
+  const ui = await fixture('silver', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true, requestOrigin: origin });
+  await siteRequest(ui, message);
+  assert.equal(ui.nodes['site-approval'].open, true);
+  assert.equal(ui.nodes['site-approval-title'].textContent, 'Approve FTHS payment');
+  assert.match(ui.nodes['site-safety'].textContent, /authorizes an FTHS purchase/);
+  assert.equal(ui.nodes['site-message'].textContent, message);
+  assert.equal(ui.nodes['site-origin'].textContent, origin);
+  await ui.nodes['site-cancel'].fire('click');
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  ui.mounted.dispose();
+});
+test('Escape key rejects the site approval without reaching host keyboard handlers', async () => {
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
+  await siteRequest(ui);
+  let prevented = false, stopped = false;
+  await ui.nodes['site-approval'].fire('keydown', { key: 'Escape',
+    preventDefault() { prevented = true; }, stopPropagation() { stopped = true; } });
+  assert.equal(prevented, true); assert.equal(stopped, true);
+  assert.equal(ui.nodes['site-approval'].open, false);
+  assert.match(ui.messages.find(message => message.data.error).data.error, /rejected/);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  ui.mounted.dispose();
+});
+test('Escape key rejects a connection review before any signature', async () => {
+  const ui = await fixture('notes', { contextual: true, followActive: true, noSession: true, manualReview: true });
+  await ui.nodes['extension-connect'].fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  await ui.nodes['wallet-review'].fire('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, false);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  ui.mounted.dispose();
 });
 test('wallet tabs expose one panel and one keyboard stop, with wrapping arrows and Home/End navigation', async () => {
   const ui = await fixture('notes');

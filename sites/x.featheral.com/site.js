@@ -16,10 +16,7 @@ const siteBase = document.querySelector('meta[name=site-base]')?.content || '';
 if (location.hostname === 'x.featheral.com' || location.hostname === 'x.localhost')
   document.body.dataset.standalone = 'x';
 const walletEnabled = document.body.dataset.standalone !== 'x';
-if (!walletEnabled) {
-  $('header')?.setAttribute('data-no-central-wallet', '');
-  $('#wallet')?.remove();
-} else if ($('#wallet')) $('#wallet').hidden = false;
+if ($('#wallet')) $('#wallet').hidden = false;
 const storageKey = (key) => previewSite || hostedSite ? `site:${previewSite || hostedSite}:${key}` : key;
 function publicUrl(url) {
   if (!previewSite) return url.startsWith('/api/') ? siteBase + url : url;
@@ -28,8 +25,14 @@ function publicUrl(url) {
   return target.pathname + target.search;
 }
 
+const warmedRequests = new Map();
 async function api(url, opts = {}) {
-  if (opts.json) { opts = { method: opts.method || 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(opts.json) }; }
+  if (!opts.json && !opts.method && warmedRequests.has(url)) {
+    const result = warmedRequests.get(url); warmedRequests.delete(url);
+    if (opts.signal?.aborted) throw new DOMException('Route closed', 'AbortError');
+    return result;
+  }
+  if (opts.json) { opts = { ...opts, method: opts.method || 'POST', headers: { ...opts.headers, 'Content-Type': 'application/json' }, body: JSON.stringify(opts.json) }; }
   if (wallet.token) opts.headers = { ...opts.headers, 'X-Wallet-Token': wallet.token };
   opts.headers = { ...opts.headers, 'X-Visitor': visitorId };
   const r = await fetch(publicUrl(url), opts);
@@ -94,7 +97,6 @@ async function disconnectWallet() {
 
 // ---------- Shared FTHX wallet ----------
 async function openWalletPanel() {
-  if (!walletEnabled) { toast('Wallet features are temporarily unavailable on Featheral X.'); return; }
   if (window.FeatheralWallet) {
     window.FeatheralWallet.open({ primary: 'FTHX', address: wallet.address, compact: true });
     const dialog = document.getElementById('featheral-central-wallet');
@@ -240,7 +242,7 @@ function readingLink(item, from = location.hash.slice(1), trashed = false) {
 
 function readingThumbnail(item) {
   if (!item.thumbnail || !TYPE_LABEL[item.thumbnail.type] || !Number.isSafeInteger(item.id) || item.id < 1) return '';
-  return `<img class="reading-thumbnail" src="${esc(publicUrl(`/api/public/posts/${item.id}/preview?type=${item.thumbnail.type}`))}" width="80" height="80" loading="lazy" decoding="async" alt="">`;
+  return `<img class="reading-thumbnail" src="${esc(publicUrl(`/api/public/posts/${item.id}/preview?type=${item.thumbnail.type}`))}" width="480" height="360" loading="lazy" decoding="async" alt="">`;
 }
 
 function readingMedia(item) {
@@ -261,9 +263,23 @@ function loadReadingMedia(container) {
 }
 
 function readingEntry(item, from = location.hash.slice(1), trashed = false) {
-  return `<a class="entry" href="${esc(readingLink(item, from, trashed))}"><div class="reading-card-heading">${readingThumbnail(item)}<h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
+  return `<a class="entry collectible" href="${esc(readingLink(item, from, trashed))}"><div class="card-art">${readingThumbnail(item) || '<span class="text-art" aria-hidden="true">Aa</span>'}</div><div class="card-copy"><div class="reading-card-heading"><h3>${esc(item.title)}${item.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
     ${item.snippet ? `<p>${esc(item.snippet)}</p>` : ''}
-    <div class="m">${fmtNum(item.words)} words · ${Math.max(1, Math.round(item.words / 230))} min read${item.likes != null ? ` · ♥ ${fmtNum(item.likes)} · 👎 ${fmtNum(item.dislikes)}` : ''}${trashed ? ` · ${item.deleted ? 'In Trash' : 'More dislikes than likes'}` : ''}</div></a>`;
+    <div class="m">${fmtNum(item.words)} words · ${Math.max(1, Math.round(item.words / 230))} min read${item.likes != null ? ` · ♥ ${fmtNum(item.likes)} · 👎 ${fmtNum(item.dislikes)}` : ''}${trashed ? ` · ${item.deleted ? 'In Trash' : 'More dislikes than likes'}` : ''}</div></div></a>`;
+}
+
+function overlayTools(section, selectors) {
+  if (document.body.dataset.standalone !== 'x') return;
+  const controls = document.createElement('details');
+  controls.className = 'browse-controls';
+  controls.open = !window.matchMedia('(max-width: 760px)').matches;
+  controls.innerHTML = '<summary>Filters &amp; info</summary><div class="browse-panel"></div>';
+  const panel = $('.browse-panel', controls);
+  for (const selector of selectors) {
+    const node = $(selector, section);
+    if (node) panel.append(node);
+  }
+  section.prepend(controls);
 }
 
 function readingCategoryIcon(name) {
@@ -317,6 +333,7 @@ async function loadReadingNavigation() {
 async function render() {
   if (cleanup) { cleanup(); cleanup = null; }
   const { parts, q } = parseHash();
+  document.body.dataset.xView = parts[0] || (info.siteSettings?.homepage === 'media' ? 'swipe' : 'home');
   readingLayout(parts);
   trackHit();
   window.scrollTo(0, 0);
@@ -411,8 +428,8 @@ async function render() {
 function mediaPreloadPolicy(connection = navigator.connection) {
   const constrained = connection?.saveData || /^(slow-)?2g$/.test(connection?.effectiveType || '');
   return constrained
-    ? { maxCards: 1, bytes: 0, parallel: 1, history: 1 }
-    : { maxCards: 3, bytes: 12 * 1024 * 1024, parallel: 2, history: 1 };
+    ? { maxCards: 1, bytes: 0, pixels: 0, parallel: 1, history: 1 }
+    : { maxCards: 5, bytes: 12 * 1024 * 1024, pixels: 32 * 1024 * 1024, parallel: 2, history: 1 };
 }
 function swipeView(type) {
   const t = info.mix || {};
@@ -424,9 +441,9 @@ function swipeView(type) {
     </div>
     <div class="stack" id="stack"></div>
     <div class="actions">
-      <button class="undo" id="b-undo" title="Undo (Backspace)" disabled>↺</button>
-      <button class="nope" id="b-nope" title="Dislike and delete (←)">✕</button>
-      <button class="like" id="b-like" title="Like and keep (→)">♥</button>
+      <button class="undo" id="b-undo" aria-label="Undo swipe" title="Undo (Backspace)" disabled>↺</button>
+      <button class="nope" id="b-nope" aria-label="Dislike" title="Dislike and delete (←)">✕</button>
+      <button class="like" id="b-like" aria-label="Like" title="Like and keep (→)">♥</button>
     </div>
     <div class="hint">Right = like &amp; keep · Left = dislike &amp; delete · ← → keys · Backspace undoes</div>
   </section>`;
@@ -455,15 +472,19 @@ function swipeView(type) {
   const media = new Map();
   function preload() {
     if (disposed) return;
-    const keep = new Set(state.history.slice(-PRELOAD.history).filter(h => media.get(h.item.id)?.done).map(h => h.item.id));
+    const keep = new Set(state.history.slice(-PRELOAD.history).filter(h => media.get(h.item.id)?.done
+      && (h.item.media.size || 1024 * 1024) <= PRELOAD.bytes
+      && (h.item.media.width || 1024) * (h.item.media.height || 1024) * 4 <= PRELOAD.pixels).map(h => h.item.id));
     for (const item of state.queue.slice(0, 2)) keep.add(item.id);
     const wanted = [];
-    let bytes = 0;
+    let bytes = 0, pixels = 0;
     for (let i = 0; i < state.queue.length && i < PRELOAD.maxCards; i++) {
       const item = state.queue[i];
       const size = item.media.size || 1024 * 1024;
-      if (i > 0 && bytes + size > PRELOAD.bytes) break;
+      const decoded = (item.media.width || 1024) * (item.media.height || 1024) * 4;
+      if (i > 0 && (bytes + size > PRELOAD.bytes || pixels + decoded > PRELOAD.pixels)) break;
       bytes += size;
+      pixels += decoded;
       wanted.push(item);
       keep.add(item.id);
     }
@@ -483,7 +504,7 @@ function swipeView(type) {
       m.started = true;
       active++;
       m.img.fetchPriority = item === state.queue[0] ? 'high' : 'low';
-      m.img.src = item.media.url;
+      m.img.src = item.media.url.startsWith('/api/') ? publicUrl(item.media.url) : item.media.url;
     }
   }
   function mediaFor(item) {
@@ -635,6 +656,7 @@ function swipeView(type) {
     setLive(el, false);
     let changed = false;
     openViewer([item], 0, {
+      comments: true,
       focus: !!wallet.address,
       onCount: (v) => { const b = $('.cbtn b', el); if (b) b.textContent = fmtNum(v.comments || 0); },
       onEarned: (v) => { const b = $('.by', el); if (b) b.textContent = `🦊 ${short(v.author)} · 🪙 ${fmtNum(v.earned)}`; },
@@ -819,6 +841,7 @@ async function readListView(q) {
       <label for="sort">Sort by<select id="sort">${[['longest', 'Longest first'], ['shortest', 'Quick reads'], ['newest', 'Newest'], ['oldest', 'Oldest']].map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </div><div id="reading-keywords"></div>
     <div id="list" aria-live="polite"><div class="loading">Loading…</div></div></section>`;
+  overlayTools($('.reading-library'), ['.reading-tools', '#reading-keywords']);
   if (searchFocused) { $('#q').focus({ preventScroll: true }); $('#q').setSelectionRange(selection, selection); }
   const go = (patch) => { location.hash = href(['read'], { q: q.q || '', sort, category, tag, ...patch, page: patch.page || '' }); };
   $('#sort').addEventListener('change', (e) => go({ sort: e.target.value }));
@@ -855,9 +878,9 @@ async function readListView(q) {
   }
   const pages = Math.max(1, Math.ceil(r.total / r.limit));
   $('#list').innerHTML = r.items.length ? `<div class="count" id="reading-list-count">${fmtNum(r.total)} texts · page ${r.page} of ${fmtNum(pages)}</div>
-    <div class="reading-cards">${r.items.map((t) => `<div class="reading-card"><a class="entry" href="${esc(readingLink(t))}"><div class="reading-card-heading">${readingThumbnail(t)}<h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
+    <div class="reading-cards">${r.items.map((t) => `<div class="reading-card"><a class="entry collectible" href="${esc(readingLink(t))}"><div class="card-art">${readingThumbnail(t) || '<span class="text-art" aria-hidden="true">Aa</span>'}</div><div class="card-copy"><div class="reading-card-heading"><h3>${esc(t.title)}${t.type === 'page' ? ' <span class="chip">Page</span>' : ''}</h3></div>
       ${t.snippet && t.snippet !== t.title ? `<p>${esc(t.snippet)}</p>` : ''}
-      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div></a><div class="reading-card-votes" data-reading-id="${t.id}" role="group" aria-label="Votes for ${esc(t.title)}"></div></div>`).join('')}</div>
+      <div class="m">${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · 👁 ${fmtNum(t.views || 0)}${t.date ? ` · ${esc(fmtDate(t.date))}` : ''}</div><span class="card-comments">Open card &amp; comments</span></div></a><div class="reading-card-votes" data-reading-id="${t.id}" role="group" aria-label="Votes for ${esc(t.title)}"></div></div>`).join('')}</div>
     <div class="center">${r.page > 1 ? `<a class="btn" href="${href(['read'], { q: q.q || '', sort, category, tag, page: r.page - 1 })}">← Previous</a> ` : ''}${r.page < pages ? `<a class="btn primary" href="${href(['read'], { q: q.q || '', sort, category, tag, page: r.page + 1 })}">Next page →</a>` : ''}</div>`
     : '<div class="empty"><div class="big">🔎</div>No texts match.</div>';
   for (const item of r.items) {
@@ -881,9 +904,9 @@ async function readListView(q) {
 
 async function readerView(id, q, bySlug = false) {
   const request = new AbortController();
-  let disposed = false, stopVotes, mediaImage;
+  let disposed = false, stopVotes, stopComments, mediaImage;
   cleanup = () => {
-    disposed = true; request.abort(); stopVotes?.(); document.title = info.brand;
+    disposed = true; request.abort(); stopVotes?.(); stopComments?.(); document.title = info.brand;
     if (mediaImage) { mediaImage.onload = null; mediaImage.onerror = null; mediaImage.removeAttribute('src'); }
   };
   view().innerHTML = '<div class="loading">Loading…</div>';
@@ -906,25 +929,28 @@ async function readerView(id, q, bySlug = false) {
     <h1>${esc(t.title)}</h1>
     ${actions}
     <div class="m">${t.date ? `${esc(fmtDate(t.date))} · ` : ''}${fmtNum(t.words)} words · ${Math.max(1, Math.round(t.words / 230))} min read · <span id="r-views">👁 ${fmtNum(t.views || 0)} views</span></div>
-    ${readingMedia(t)}
-    <article>${t.paragraphs.map((p, i) => projectPage && i > 0 && p.length <= 100
-      ? `<h2>${esc(p)}</h2>` : `<p${landing && i === 0 ? ' class="project-lead"' : ''}>${esc(p)}</p>`).join('') || '<p class="m">This post has no text.</p>'}</article>
+    <div class="reader-cards">${readingMedia(t)}
+    <article class="reader-text-card" tabindex="0" aria-label="Read ${esc(t.title)}">${t.paragraphs.map((p, i) => projectPage && i > 0 && p.length <= 100
+      ? `<h2>${esc(p)}</h2>` : `<p${landing && i === 0 ? ' class="project-lead"' : ''}>${esc(p)}</p>`).join('') || '<p class="m">This post has no text.</p>'}</article></div>
     ${actions}
     <div id="reading-votes" class="viewer-votes" role="group" aria-label="Reading votes"></div>
+    <section class="post-comments" id="reading-comments" aria-label="Card comments"></section>
     <div class="nav"><a class="btn" href="${esc(back)}">← Back</a><button class="btn" id="top">↑ Top</button></div>
   </section>`;
   const media = $('.reading-media', view());
   if (media) { mediaImage = $('img', media); loadReadingMedia(media); }
   $('#top').addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
   if (q.trash !== '1') countView(t, (x) => { const e = $('#r-views'); if (e) e.textContent = `👁 ${fmtNum(x.views)} views`; });
-  stopVotes = readingVotes(t, $('#reading-votes'));
+  stopComments = mountComments(t, $('#reading-comments'), { deleted: q.trash === '1' });
+  stopVotes = readingVotes(t, $('#reading-votes'), { onState: state => stopComments.refreshForm(state.deleted) });
 }
 
-function readingVotes(reading, target, { compact = false, initialState = null, onDeleted } = {}) {
+function readingVotes(reading, target, { compact = false, initialState = null, onDeleted, onState } = {}) {
   const request = new AbortController();
   let state = null, busy = false, disposed = false;
   function paint() {
     if (disposed || !state) return;
+    onState?.(state);
     const disabled = busy || !state.canRestore ? 'disabled' : '';
     target.innerHTML = `<div class="row"><button class="btn" data-reading-vote="like" aria-pressed="${state.vote === 'like'}" ${disabled}>♥ Like ${fmtNum(state.likes)}</button>
       <button class="btn" data-reading-vote="dislike" aria-pressed="${state.vote === 'dislike'}" ${disabled}>${compact && state.round === 1 ? 'Delete' : '👎 Dislike'} ${fmtNum(state.dislikes)}</button></div>
@@ -944,7 +970,7 @@ function readingVotes(reading, target, { compact = false, initialState = null, o
     const kind = button.dataset.readingVote, vote = state.vote === kind ? 'none' : kind;
     busy = true; paint();
     try {
-      const result = await api('/api/public/vote', { json: { id: reading.id, type: 'read', round: state.round, vote } });
+      const result = await api('/api/public/vote', { json: { id: reading.id, type: state.type, round: state.round, vote } });
       if (disposed) return;
       state = { ...state, ...result, vote: vote === 'none' ? null : vote };
       if (vote === 'like') rewardNote(result);
@@ -957,6 +983,95 @@ function readingVotes(reading, target, { compact = false, initialState = null, o
   target.addEventListener('click', click);
   if (initialState) { state = initialState; paint(); } else load();
   return () => { disposed = true; request.abort(); target.removeEventListener('click', click); };
+}
+
+function commentHtml(c) {
+  const mine = c.address && c.address === wallet.address;
+  const who = c.address ? `<span class="cwho" title="${esc(c.address)}">🦊 ${esc(short(c.address))}</span>` : `<span class="cwho">${esc(c.author)}</span>`;
+  const when = c.at ? new Date(c.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  return `<div class="comment" data-cid="${esc(c.id)}"><div class="chead">${who}<span class="cwhen">${esc(when)}</span>${mine ? '<button type="button" class="cdel" data-cdel title="Delete your comment">✕</button>' : ''}</div><div class="ctext">${esc(c.content)}</div></div>`;
+}
+
+function mountComments(item, target, { deleted = item.deleted, onCount } = {}) {
+  const request = new AbortController();
+  let disposed = false, posting = false, sequence = 0;
+  target.innerHTML = '<h3>Comments <span class="count" data-comment-count></span></h3><div class="clist" data-comment-list></div><form class="cform"></form>';
+  const list = $('[data-comment-list]', target), form = $('form', target), count = $('[data-comment-count]', target);
+  const updateCount = () => { count.textContent = fmtNum(item.comments || 0); onCount?.(item); };
+  function refreshForm(isDeleted = deleted) {
+    deleted = isDeleted;
+    const draft = $('textarea', form)?.value || '';
+    if (deleted) { form.innerHTML = '<p class="count">Restore this post before adding comments.</p>'; return; }
+    if (!wallet.address && !info.guestComments) {
+      form.innerHTML = walletEnabled ? '<button class="btn primary" type="button" data-comment-connect>Connect wallet to comment</button>'
+        : '<p class="count">Comments are read-only on this site.</p>';
+      return;
+    }
+    form.innerHTML = `<textarea rows="3" maxlength="2000" aria-label="Write a comment" placeholder="Write a comment as ${wallet.address ? esc(short(wallet.address)) : 'a visitor'}…">${esc(draft)}</textarea>
+      <div class="crow"><span class="count">${wallet.address ? 'Ctrl+Enter to post' : 'Visitor · rate limited · no wallet needed'}</span><button class="btn primary" type="submit">Post</button></div>`;
+    $('textarea', form).disabled = posting;
+    $('button[type=submit]', form).disabled = posting;
+  }
+  async function reload() {
+    const my = ++sequence;
+    list.innerHTML = '<div class="loading" role="status">Loading comments...</div>';
+    try {
+      const result = await api(`/api/public/posts/${item.id}/comments`, { signal: request.signal });
+      if (disposed || my !== sequence) return;
+      item.comments = result.total; updateCount();
+      list.innerHTML = result.items.map(commentHtml).join('') || '<p class="cempty">No comments yet. Be the first.</p>';
+    } catch (error) {
+      if (!disposed && my === sequence) list.innerHTML = `<p role="alert">${esc(error.message)}</p><button class="btn" type="button" data-comment-retry>Retry comments</button>`;
+    }
+  }
+  async function post() {
+    const textarea = $('textarea', form), text = textarea?.value.trim();
+    if (disposed || posting || deleted) return;
+    if (!text) { toast('Write a comment first'); textarea?.focus(); return; }
+    posting = true; textarea.disabled = true; $('button[type=submit]', form).disabled = true;
+    try {
+      const comment = await api(`/api/public/posts/${item.id}/comments`, { json: { content: text }, signal: request.signal });
+      if (disposed) return;
+      rewardNote(comment);
+      if (comment.reward?.paid && comment.reward.symbol === 'FTHX') item.earned = (item.earned || 0) + comment.reward.paid;
+      textarea.value = '';
+      await reload();
+      if (!disposed) toast('Comment posted');
+    } catch (error) { if (!disposed) toast(error.message); }
+    finally {
+      posting = false;
+      if (!disposed) {
+        const current = $('textarea', form), button = $('button[type=submit]', form);
+        if (current) { current.disabled = false; current.focus({ preventScroll: true }); }
+        if (button) button.disabled = false;
+      }
+    }
+  }
+  const click = async event => {
+    if (event.target.closest('[data-comment-connect]')) return connectWallet();
+    if (event.target.closest('[data-comment-retry]')) return reload();
+    const button = event.target.closest('[data-cdel]');
+    if (!button || !confirm('Delete your comment?')) return;
+    button.disabled = true;
+    try {
+      await api(`/api/public/comments/${button.closest('.comment').dataset.cid}`, { method: 'DELETE', signal: request.signal });
+      if (!disposed) await reload();
+    } catch (error) { if (!disposed) toast(error.message); }
+    finally { if (button.isConnected) button.disabled = false; }
+  };
+  const submit = event => { event.preventDefault(); post(); };
+  const key = event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); event.stopPropagation(); post(); } };
+  const onWallet = () => { if (!disposed) { refreshForm(); reload(); } };
+  target.addEventListener('click', click); form.addEventListener('submit', submit); form.addEventListener('keydown', key);
+  document.addEventListener('wallet', onWallet);
+  refreshForm(); reload();
+  const close = () => {
+    disposed = true; request.abort(); sequence++;
+    target.removeEventListener('click', click); form.removeEventListener('submit', submit); form.removeEventListener('keydown', key);
+    document.removeEventListener('wallet', onWallet);
+  };
+  close.refreshForm = refreshForm;
+  return close;
 }
 
 // ---------- liked ----------
@@ -982,7 +1097,10 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     if (stopped || paused || document.hidden) return;
     const bounds = grid.getBoundingClientRect();
     const inViewport = tile => tile.position.y + tile.position.h > -bounds.top && tile.position.y < innerHeight - bounds.top;
+    const ahead = constrained ? 160 : innerHeight * 1.5;
     const visible = [...mounted.values()].filter(tile => inViewport(tile)
+      || (previews && tile.position.y + tile.position.h > -bounds.top - innerHeight * .5
+        && tile.position.y < innerHeight - bounds.top + ahead)
       || (tile.state === 'ready' && tile.position.y + tile.position.h > -bounds.top - 160
         && tile.position.y < innerHeight - bounds.top + 160));
     const priority = tile => tile.mode !== 'preview' && tile.state === 'ready' ? 0 : tile.state === 'loading' ? 1 : 2;
@@ -994,6 +1112,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     let bytes = 0, pixels = 0, gifs = 0;
     for (const tile of visible) {
       const m = tile.item.media, size = m.size || 1024 * 1024;
+      if (previews && !inViewport(tile)) continue;
       if (previews && !originalSize && m.type !== 'gif') continue;
       const area = (m.width || 1024) * (m.height || 1024);
       const budget = (previews ? 16 : 24) * 1024 * 1024;
@@ -1018,7 +1137,7 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
     }
     const admitted = [...wanted, ...visible.filter(tile => tile.mode === 'preview')];
     for (const tile of admitted) if (!tile.state) tile.el.dataset.mediaState = 'queued';
-    if (scrolling) return;
+    if (scrolling && !previews) return;
     let active = [...mounted.values()].filter(tile => tile.state === 'loading').length;
     for (const tile of admitted) {
       if (active >= limit) break;
@@ -1039,9 +1158,12 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
         }
         schedule();
       };
-      img.onload = () => settle('ready');
+      img.onload = () => {
+        if (img.decode) img.decode().then(() => settle('ready'), () => settle('error'));
+        else settle('ready');
+      };
       img.onerror = () => settle('error');
-      img.decoding = 'async'; img.fetchPriority = 'low';
+      img.decoding = 'async'; img.fetchPriority = inViewport(tile) ? 'high' : 'low';
       img.src = tile.mode === 'preview'
         ? publicUrl(`/api/public/posts/${tile.item.id}/preview?type=${encodeURIComponent(tile.item.deck || tile.item.media.type)}`)
         : tile.item.media.url.startsWith('/api/') ? publicUrl(tile.item.media.url) : tile.item.media.url;
@@ -1051,7 +1173,9 @@ function mediaGrid(grid, items, tileFor, { justified = false, maxH = Infinity, m
   function paint() {
     frame = 0;
     if (stopped || paused || document.hidden) return;
-    const bounds = grid.getBoundingClientRect(), top = -bounds.top - 240, end = innerHeight - bounds.top + 240;
+    const bounds = grid.getBoundingClientRect();
+    const top = -bounds.top - (previews && !constrained ? innerHeight * .5 : 240);
+    const end = innerHeight - bounds.top + (previews && !constrained ? innerHeight * 1.5 : 240);
     const visibleGroups = groups.filter(group => group.y + 36 >= top && group.y <= end);
     const keys = new Set(visibleGroups.map(group => group.key));
     for (const [key, el] of headings) if (!keys.has(key)) { el.remove(); headings.delete(key); }
@@ -1225,6 +1349,7 @@ async function likedView(q = {}) {
       <label>Group <select id="liked-group"><option value="day">By day</option><option value="month">By month</option><option value="none">No groups</option></select></label>
     </div><p class="m" id="liked-status" role="status"></p>
     <div class="grid media-grid" id="liked-panel" role="tabpanel" aria-label="${readings ? 'Liked readings' : 'All liked media'}"></div><button class="btn" id="liked-more">Load more</button></section>`;
+  overlayTools($('.liked-timeline'), ['h1', 'p.m', '.liked-tabs', '.liked-tools', '#liked-status']);
   const grid = $('.grid', view());
   const navigate = patch => { location.hash = href(['liked'], { sort, group: grouping, kind: readings ? 'read' : '', ...patch }); };
   $('#liked-tabs').addEventListener('keydown', likedTabKeys);
@@ -1362,6 +1487,7 @@ function thumbsView(q) {
       <select id="t-sort">${[['newest', 'Newest'], ['oldest', 'Oldest'], ['largest', 'Largest first'], ['smallest', 'Smallest first']]
         .map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="masonry" id="masonry"></div><div class="loading" id="t-more">Loading…</div></section>`;
+  overlayTools($('.thumbs'), ['.tools']);
   $('#t-sort').addEventListener('change', (e) => { location.hash = href(['thumbs'], { sort: e.target.value }); });
   const grid = $('#masonry');
   const items = [];
@@ -1479,6 +1605,10 @@ function fitTagRow(container, limit) {
   const chips = [...container.querySelectorAll('a.chip')];
   const button = container.querySelector('button.more');
   chips.forEach(chip => { chip.hidden = false; });
+  if (container.clientWidth === 0) {
+    chips.slice(limit).forEach(chip => { chip.hidden = true; });
+    return Math.min(limit, chips.length);
+  }
   if (!button || chips.length <= limit) return chips.length;
   const row = chips[limit - 1].offsetTop;
   let visible = chips.findIndex(chip => chip.offsetTop > row);
@@ -1503,6 +1633,7 @@ function trendingView(q) {
       <select id="t-sort">${TREND_SORTS.map(([v, l]) => `<option value="${v}" ${v === sort ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <div class="ttags" id="t-tags"></div>
     <div class="masonry" id="masonry"></div><div class="loading" id="t-more">Loading…</div></section>`;
+  overlayTools($('.trending'), ['.tools', '#t-tags']);
   $('#t-sort').addEventListener('change', (e) => { location.hash = href(['trending'], { tag: tag || '', q: query, sort: e.target.value === 'hot' ? '' : e.target.value }); });
   // Typing searches every post (a picked tag is dropped); the box keeps focus across the re-render.
   const box = $('#t-q');
@@ -1662,6 +1793,7 @@ async function trashView() {
   view().innerHTML = `<section class="read liked-timeline"><h1><span aria-hidden="true">🗑</span> Trash <span class="count" id="trash-count"></span></h1>
     <p class="m">Trashed posts and readings, plus posts with more dislikes than likes. A round-1 dislike moves an item to Trash; later-round dislikes only affect its score. Nothing here is permanently deleted.</p>
     <p class="m" id="trash-status" role="status"></p><div id="trash-readings" class="reading-cards"></div><div class="grid media-grid"></div><button class="btn" id="trash-more">Load more</button></section>`;
+  overlayTools($('.liked-timeline'), ['h1', 'p.m', '#trash-status']);
   const grid = $('.grid', view()), readingIds = new Set();
   const gallery = mediaGrid(grid, items, v => {
     const tile = document.createElement('button');
@@ -1728,7 +1860,10 @@ async function trashView() {
 function openViewer(list, i, opts = {}) {
   const box = document.createElement('div');
   box.className = 'viewer';
-  let seq = 0; let closed = false; let curation = null; let voting = false;
+  box.classList.toggle('comments-open', !!opts.comments);
+  box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Media card');
+  const previousFocus = document.activeElement;
+  let seq = 0; let closed = false; let curation = null; let voting = false; let comments = null;
   // Keeps a gallery tile's 💬 badge (or the caller's own counter) in step with the comments shown here.
   const badge = (v) => {
     opts.onCount?.(v);
@@ -1739,19 +1874,19 @@ function openViewer(list, i, opts = {}) {
   };
   const show = () => {
     const v = list[i];
+    comments?.();
+    warmImages(list.slice(i, i + 3));
     curation = null;
     $('.vmedia img', box)?.removeAttribute('src');
     const dims = v.media.width && v.media.height ? `${v.media.width}×${v.media.height}` : '';
     box.innerHTML = `<div class="vbar"><b>${esc(v.title)}</b><span class="count">${i + 1} / ${fmtNum(list.length)} · <span id="v-views">👁 ${fmtNum(v.views || 0)}</span> · ${esc(TYPE_LABEL[v.media.type] || '')} · ${dims ? `${dims} · ` : ''}${esc(fmtBytes(v.media.size))}</span>
-      <button class="btn" data-prev aria-label="Previous media" ${i ? '' : 'disabled'}>←</button><button class="btn" data-next aria-label="Next media" ${i < list.length - 1 || opts.hasMore?.() ? '' : 'disabled'}>→</button><button class="btn" data-close aria-label="Close media">✕</button></div>
+      <button class="btn" data-prev aria-label="Previous media" ${i ? '' : 'disabled'}>←</button><button class="btn" data-next aria-label="Next media" ${i < list.length - 1 || opts.hasMore?.() ? '' : 'disabled'}>→</button><button class="btn" data-comments-toggle aria-expanded="${box.classList.contains('comments-open')}" aria-controls="viewer-discussion">Comments</button><button class="btn" data-close aria-label="Close media">✕</button></div>
       <div class="vbody">
         <div class="vmedia">${v.video ? `<figure><div class="ytbox"></div><figcaption>▶ YouTube video · <a href="${esc(ytWatch(v.video))}" target="_blank" rel="noopener noreferrer">open on YouTube ↗</a></figcaption></figure>` : `<figure><img src="${esc(v.media.url.startsWith('/api/') ? publicUrl(v.media.url) : v.media.url)}" alt=""${v.media.width ? ` width="${v.media.width}" height="${v.media.height}"` : ''}>
           <figcaption id="v-size">${dims ? `Original size ${dims}` : ''}</figcaption></figure>`}
           ${v.description ? `<p class="vdesc">${esc(v.description)}</p>` : ''}
           ${v.tags?.length ? `<div class="vtags">${v.tags.map((t) => `<a data-close href="${href(['trending'], { tag: t.id })}" title="Trending posts tagged ${esc(t.name)}">#${esc(t.name)}</a>`).join('')}</div>` : ''}</div>
-        <aside class="vside">${authorHtml(v)}<div class="viewer-votes" id="v-votes" role="group" aria-label="Post votes"><div class="count" role="status">Loading votes...</div></div><h3>💬 Comments <span class="count" id="c-count"></span></h3>
-          <div class="clist" id="c-list"><div class="loading">Loading…</div></div>
-          <form class="cform" id="c-form"></form></aside>
+        <aside class="vside" id="viewer-discussion">${authorHtml(v)}<div class="viewer-votes" id="v-votes" role="group" aria-label="Post votes"><div class="count" role="status">Loading votes...</div></div><section class="post-comments"></section></aside>
       </div>`;
     const img = $('.vmedia img', box);
     if (v.video) $('.ytbox', box).append(ytFrame(v.video, 'ytplayer'));
@@ -1767,8 +1902,8 @@ function openViewer(list, i, opts = {}) {
       if (closed || $('.vmedia img', box) !== img) return;
       $('#v-size', box).innerHTML = 'Media could not load. <button class="btn" data-retry-media>Retry media</button>';
     });
-    paintForm();
-    loadComments(v, ++seq); loadCuration(v, seq);
+    comments = mountComments(v, $('.post-comments', box), { onCount: badge });
+    loadCuration(v, ++seq);
     if (!v.deleted) countView(v, (x) => { if (list[i] === x && !closed) { const e = $('#v-views', box); if (e) e.textContent = `👁 ${fmtNum(x.views)}`; } opts.onViews?.(x); });
   };
   function paintVotes() {
@@ -1783,7 +1918,7 @@ function openViewer(list, i, opts = {}) {
       const state = await api(`/api/public/posts/${v.id}/curation?type=${encodeURIComponent(v.deck || v.media.type)}`);
       if (closed || my !== seq) return;
       curation = state; Object.assign(v, { vote: state.vote, likes: state.likes, dislikes: state.dislikes, deleted: state.deleted });
-      paintVotes(); paintForm();
+      paintVotes(); comments?.refreshForm(state.deleted);
     } catch (error) {
       if (!closed && my === seq) $('#v-votes', box).innerHTML = `<div class="count" role="alert">${esc(error.message)}</div><button class="btn" data-retry-votes>Retry votes</button>`;
     }
@@ -1800,7 +1935,7 @@ function openViewer(list, i, opts = {}) {
       opts.onVote?.(v, result);
       if (closed || my !== seq) return;
       curation = { ...curation, ...result, vote: v.vote };
-      paintForm();
+      comments?.refreshForm(result.deleted);
       toast(result.deleted ? 'Moved to Trash' : next === 'none' ? 'Vote undone' : next === 'like' ? 'Liked' : 'Disliked');
     } catch (error) { if (!closed) { toast(error.message); await loadCuration(v, my); } }
     finally { voting = false; if (!closed && my === seq) paintVotes(); }
@@ -1829,54 +1964,6 @@ function openViewer(list, i, opts = {}) {
       if (/Not enough FTHX/.test(e.message)) toast(e.message, { label: 'Add FTHX', run: openWalletPanel }); else toast(e.message);
     } finally { btn.disabled = false; }
   }
-  async function loadComments(v, my) {
-    try {
-      const r = await api(`/api/public/posts/${v.id}/comments`);
-      if (my !== seq) return;
-      v.comments = r.total; badge(v);
-      $('#c-count', box).textContent = fmtNum(r.total);
-      $('#c-list', box).innerHTML = r.items.length ? r.items.map(commentHtml).join('') : '<div class="cempty">No comments yet. Be the first.</div>';
-    } catch (e) { if (my === seq) $('#c-list', box).innerHTML = `<div class="cempty">${esc(e.message)}</div>`; }
-  }
-  function commentHtml(c) {
-    const mine = c.address && c.address === wallet.address;
-    const who = c.address ? `<span class="cwho" title="${esc(c.address)}">🦊 ${esc(short(c.address))}</span>` : `<span class="cwho">${esc(c.author)}</span>`;
-    const when = c.at ? new Date(c.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
-    return `<div class="comment" data-cid="${esc(c.id)}"><div class="chead">${who}<span class="cwhen">${esc(when)}</span>${mine ? '<button class="cdel" data-cdel title="Delete your comment">✕</button>' : ''}</div>
-      <div class="ctext">${esc(c.content)}</div></div>`;
-  }
-  function paintForm() {
-    const f = $('#c-form', box);
-    if (!f) return;
-    if (!walletEnabled) { f.innerHTML = '<p class="count">Comments are read-only while wallet features are paused.</p>'; return; }
-    if (list[i].deleted) { f.innerHTML = '<p class="count">Restore this post before adding comments.</p>'; return; }
-    f.innerHTML = wallet.address
-      ? `<textarea id="c-text" rows="3" maxlength="2000" placeholder="Write a comment as ${esc(short(wallet.address))}…"></textarea>
-        <div class="crow"><span class="count">Ctrl+Enter to post</span><button class="btn primary" type="submit">Post</button></div>`
-      : `<button class="btn primary" type="button" data-connect>🦊 Connect wallet to comment</button>`;
-  }
-  async function post() {
-    const ta = $('#c-text', box);
-    const text = ta?.value.trim();
-    if (!text) return;
-    const v = list[i]; const my = seq;
-    ta.disabled = true;
-    try {
-      const c = await api(`/api/public/posts/${v.id}/comments`, { json: { content: text } });
-      if (my !== seq) return;
-      if (c.reward?.paid) {
-        rewardNote(c);
-        if (c.reward.symbol === 'FTHX') v.earned = (v.earned || 0) + c.reward.paid;
-      }
-      ta.value = '';
-      const l = $('#c-list', box);
-      $('.cempty', l)?.remove();
-      l.insertAdjacentHTML('beforeend', commentHtml(c));
-      l.scrollTop = l.scrollHeight;
-      v.comments = (v.comments || 0) + 1; badge(v);
-      $('#c-count', box).textContent = fmtNum(v.comments);
-    } catch (e) { toast(e.message); if (!wallet.address) paintForm(); } finally { if (ta.isConnected) { ta.disabled = false; ta.focus(); } }
-  }
   let stepping = false, swipe = null;
   const step = async d => {
     if (closed || stepping || voting) return;
@@ -1901,18 +1988,28 @@ function openViewer(list, i, opts = {}) {
     if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
   });
   box.addEventListener('pointercancel', () => { swipe = null; });
-  const onWallet = () => { paintForm(); const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadComments(list[i], ++seq); loadCuration(list[i], seq); };
-  const close = () => { if (closed) return; closed = true; seq++; $('.vmedia img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); };
+  const onWallet = () => { const a = $('.vauthor', box); if (a) a.outerHTML = authorHtml(list[i]); loadCuration(list[i], ++seq); };
+  const close = () => { if (closed) return; closed = true; seq++; comments?.(); $('.vmedia img', box)?.removeAttribute('src'); box.remove(); document.removeEventListener('keydown', onKey); document.removeEventListener('wallet', onWallet); opts.onClose?.(); if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); };
   const onKey = (e) => {
     if (document.querySelector('dialog[open]')) return;
+    if (e.key === 'Tab') {
+      const nodes = [...box.querySelectorAll('button:not(:disabled),a[href],textarea,input')].filter(node => node.getClientRects().length);
+      const first = nodes[0], last = nodes.at(-1);
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+    }
     if (e.target.closest?.('textarea, input')) {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); post(); } else if (e.key === 'Escape') e.target.blur();
+      if (e.key === 'Escape') e.target.blur();
       return;
     }
     if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight') step(1); else if (e.key === 'ArrowLeft') step(-1);
   };
   box.addEventListener('click', async (e) => {
     if (e.target.closest('[data-close]')) close();
+    else if (e.target.closest('[data-comments-toggle]')) {
+      const open = box.classList.toggle('comments-open');
+      $('[data-comments-toggle]', box).setAttribute('aria-expanded', String(open));
+    }
     else if (e.target.closest('[data-prev]')) step(-1);
     else if (e.target.closest('[data-next]')) step(1);
     else if (e.target.closest('[data-viewer-vote]')) vote(e.target.closest('[data-viewer-vote]').dataset.viewerVote);
@@ -1924,23 +2021,13 @@ function openViewer(list, i, opts = {}) {
     }
     else if (e.target.closest('[data-connect]')) connectWallet();
     else if (e.target.closest('[data-tip]')) { const b = e.target.closest('[data-tip]'); tip(+b.dataset.tip, b); }
-    else if (e.target.closest('[data-cdel]')) {
-      const el = e.target.closest('.comment');
-      if (!confirm('Delete your comment?')) return;
-      try {
-        await api(`/api/public/comments/${el.dataset.cid}`, { method: 'DELETE' });
-        el.remove();
-        const v = list[i]; v.comments = Math.max(0, (v.comments || 1) - 1); badge(v);
-        $('#c-count', box).textContent = fmtNum(v.comments);
-      } catch (err) { toast(err.message); }
-    }
   });
-  box.addEventListener('submit', (e) => { e.preventDefault(); post(); });
   document.addEventListener('keydown', onKey);
   document.addEventListener('wallet', onWallet);
   show();
   document.body.append(box);
-  if (opts.focus) $('#c-text', box)?.focus();
+  $('[data-close]', box).focus({ preventScroll: true });
+  if (opts.focus) $('.cform textarea', box)?.focus();
   return close;
 }
 
@@ -2279,16 +2366,123 @@ function postView() {
   refreshBalance();
 }
 
+const imageBuffer = new Map();
+async function warmImages(items, previews = false) {
+  const policy = mediaPreloadPolicy();
+  if (!policy.bytes) return [];
+  let bytes = 0;
+  const jobs = [];
+  for (const item of items.slice(0, Math.min(policy.parallel, policy.maxCards))) {
+    const size = previews ? 512 * 1024 : Math.max(item.media?.size || 1024 * 1024,
+      (item.media?.width || 1024) * (item.media?.height || 1024) * 4);
+    if (!previews && size > policy.bytes && policy.bytes) continue;
+    if (jobs.length && bytes + size > policy.bytes) break;
+    const type = item.deck || item.media?.type;
+    const url = previews ? `/api/public/posts/${item.id}/preview?type=${encodeURIComponent(type)}` : item.media?.url;
+    if (!url) continue;
+    const source = url.startsWith('/api/') ? publicUrl(url) : url;
+    bytes += size;
+    let job = imageBuffer.get(source);
+    if (!job) {
+      const image = new Image();
+      image.decoding = 'async'; image.fetchPriority = jobs.length ? 'low' : 'high';
+      let timeout, cancel, settled = false;
+      const ready = new Promise(resolve => {
+        const finish = (ok, cancelled = false) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout); image.onload = image.onerror = null;
+          if (!ok) {
+            image.removeAttribute('src');
+            if (imageBuffer.get(source)?.image === image) imageBuffer.delete(source);
+            if (!cancelled) console.warn('Media warmup unavailable:', source);
+          }
+          resolve(ok);
+        };
+        cancel = () => finish(false, true);
+        image.onload = () => image.decode().then(() => finish(true), () => finish(false));
+        image.onerror = () => finish(false);
+        timeout = setTimeout(() => finish(false), 8000);
+        image.src = source;
+      });
+      job = { image, ready, bytes: size, cancel };
+      imageBuffer.set(source, job);
+      while (imageBuffer.size > 8 || [...imageBuffer.values()].reduce((sum, entry) => sum + entry.bytes, 0) > 12 * 1024 * 1024) {
+        const first = imageBuffer.keys().next().value;
+        imageBuffer.get(first).cancel(); imageBuffer.delete(first);
+      }
+    }
+    jobs.push(job.ready);
+  }
+  return Promise.all(jobs);
+}
+
+function initialMediaRequest() {
+  const { parts, q } = parseHash();
+  if (!parts.length && info.siteSettings?.homepage === 'media') return ['/api/public/feed?type=mix&limit=20', false];
+  if (parts[0] === 'thumbs') {
+    const sort = ['newest', 'oldest', 'largest', 'smallest'].includes(q.sort) ? q.sort : 'newest';
+    return [`/api/public/thumbs?${new URLSearchParams({ sort, offset: 0, limit: 80 })}`, true];
+  }
+  if (parts[0] === 'trending') {
+    const sort = TREND_SORTS.some(([v]) => v === q.sort) ? q.sort : 'hot', tag = +q.tag || 0, query = (q.q || '').trim();
+    return [`/api/public/trending?${new URLSearchParams({ sort, offset: 0, limit: 60, ...(tag ? { tag } : {}), ...(query ? { q: query } : {}) })}`, true];
+  }
+  if (parts[0] === 'liked' && q.kind !== 'read') return [`/api/public/liked?${new URLSearchParams({ sort: q.sort === 'likes' ? 'likes' : 'recent', offset: 0, limit: 24 })}`, true];
+  if (parts[0] === 'trash') return ['/api/public/trash?offset=0&limit=24', true];
+  return null;
+}
+
+async function primeInitialView() {
+  if (document.body.dataset.standalone !== 'x') return;
+  const initial = initialMediaRequest(), hash = location.hash, g = $('#gate');
+  if (!initial) { g.hidden = true; g.innerHTML = ''; return; }
+  g.hidden = false;
+  gateBackground(true);
+  g.innerHTML = '<div class="box warmup" role="status" aria-live="polite"><div class="warmup-mark" aria-hidden="true">X</div><h2>Preparing your view</h2><p>Loading nearby images for a smoother start...</p><progress aria-label="Loading nearby media"></progress></div>';
+  const [url, previews] = initial;
+  const pending = api(url);
+  warmedRequests.set(url, pending);
+  let timer;
+  try {
+    await Promise.race([
+      pending.then(result => location.hash === hash ? warmImages(result.items.filter(item => item.media), previews) : undefined),
+      new Promise(resolve => { timer = setTimeout(resolve, 1500); }),
+    ]);
+  } catch (error) { warmedRequests.delete(url); toast(`Initial loading: ${error.message}`); }
+  finally {
+    clearTimeout(timer);
+    if (location.hash !== hash) warmedRequests.clear();
+    g.hidden = true; g.innerHTML = '';
+    gateBackground(false);
+  }
+}
+
 // ---------- age gate & boot ----------
+function gateBackground(inert) {
+  document.querySelectorAll('header.top,.site-sidebar,#view,#fab,.skip-link').forEach(node => { node.inert = inert; });
+}
 function gate() {
   return new Promise((resolve) => {
     if (!info.ageGate || store.get('adult-ok', false)) return resolve();
     const g = $('#gate');
     g.hidden = false;
-    g.innerHTML = `<div class="box"><img src="${esc(document.querySelector('link[rel~="icon"]').href)}" alt="" width="84" height="84"><h2>${esc(info.brand)}</h2>${info.tagline ? `<p class="tl">${esc(info.tagline)}</p>` : ''}<h3>Adults only</h3>
+    gateBackground(true);
+    g.innerHTML = `<div class="box" role="dialog" aria-modal="true" aria-labelledby="gate-title"><img src="${esc(document.querySelector('link[rel~="icon"]').href)}" alt="" width="84" height="84"><h2 id="gate-title">${esc(info.brand)}</h2>${info.tagline ? `<p class="tl">${esc(info.tagline)}</p>` : ''}<h3>Adults only</h3>
       <p>This site may contain explicit material. Confirm that you are 18 or older (or the age of majority where you live) to continue.</p>
       <div class="row"><button class="btn primary" id="g-yes">I'm 18 or older</button><a class="btn" href="https://www.google.com">Leave</a></div></div>`;
-    $('#g-yes').addEventListener('click', () => { store.set('adult-ok', true); g.hidden = true; g.innerHTML = ''; resolve(); });
+    const trap = event => {
+      if (event.key !== 'Tab') return;
+      const nodes = [...g.querySelectorAll('button,a[href]')], first = nodes[0], last = nodes.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    g.addEventListener('keydown', trap);
+    $('#g-yes').focus();
+    $('#g-yes').addEventListener('click', () => {
+      store.set('adult-ok', true); g.removeEventListener('keydown', trap);
+      g.hidden = true; g.innerHTML = ''; gateBackground(false); resolve();
+    }, { once: true });
   });
 }
 
@@ -2320,6 +2514,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   await gate();
   await importLegacyVotes();
+  await primeInitialView();
+  window.matchMedia('(max-width: 760px)').addEventListener('change', event => {
+    document.querySelectorAll('.browse-controls').forEach(control => { control.open = !event.matches; });
+  });
   window.addEventListener('hashchange', render);
   render();
 });

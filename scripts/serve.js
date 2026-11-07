@@ -334,7 +334,17 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "Content-Type": types[path.extname(url.pathname)], "Cache-Control": "no-store" });
       return res.end(fs.readFileSync(path.join(walletRoot, path.basename(url.pathname))));
     }
-    if (site === "wallet") {
+    if (url.pathname.startsWith("/shared/wallet/")) {
+      const name = url.pathname.slice("/shared/wallet/".length);
+      const assets = ["wallet-app.html", "wallet-app.css", "wallet-app.js", "embed.js", "vault.js", "portfolio-view.js", "site-sign-in.js", "ethers.js"];
+      if (!assets.includes(name)) { res.writeHead(404); return res.end("Not found"); }
+      const file = name === "ethers.js" ? path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js") : path.join(walletRoot, name);
+      if (name.endsWith(".html")) res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+      res.writeHead(200, { "Content-Type": types[path.extname(file)], "Cache-Control": "no-store" });
+      return res.end(fs.readFileSync(file));
+    }
+    if (url.pathname.startsWith("/api/creation/")) return cms(req, res);
+    if (site === "wallet" || url.pathname.startsWith("/api/wallet/accounts/") || url.pathname === "/api/wallet/ui") {
       const summary = url.pathname.match(/^\/api\/wallet\/accounts\/(0x[0-9a-fA-F]{40})$/);
       if (url.pathname.startsWith("/api/wallet/accounts/")) {
         const origin = req.headers.origin;

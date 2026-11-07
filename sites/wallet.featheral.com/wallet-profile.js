@@ -1,6 +1,6 @@
 "use strict";
 
-// Compatibility profile control; fund management lives in the central embedded wallet.
+// Compatibility profile control; fund management uses the contextual wallet.
 // Uses raw EIP-1193 / JSON-RPC so it works with or without ethers on the page.
 (() => {
   const TOKEN = "0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665";
@@ -639,7 +639,7 @@
         }
         const available = discoverWallets();
         if (!available.length) {
-          window.open(`${centralOrigin}/?primary=${encodeURIComponent(primary)}`, "_blank", "noopener");
+          throw new Error("No wallet extension detected. Open the site Wallet control to create or unlock a built-in wallet. This signing control requires an extension.");
           return;
         }
         if (available.length === 1) await connectProvider(available[0].provider);

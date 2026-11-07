@@ -236,6 +236,11 @@ body .entry .reading-thumbnail { display: block; width: 80px; height: 80px; max-
 .viewer .vdesc { margin: 12px 0 0; max-width: 720px; color: var(--muted); font-size: 14px; white-space: pre-line; }
 .vside { width: 360px; flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: rgba(22, 22, 31, .9); }
 .vside h3 { margin: 0; padding: 12px 16px; font-size: 15px; border-bottom: 1px solid var(--line); }
+.viewer .post-comments { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.post-comments { min-width: 0; }
+.post-comments .cform { flex: none; }
+.reader .post-comments .clist { max-height: 45dvh; }
+.text-art { display: none; }
 .viewer-votes { padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .viewer-votes .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .viewer-votes [aria-pressed="true"] { border-color: var(--brand); background: var(--panel); }

@@ -33,7 +33,7 @@
       <section class="connection-option"><h3>Wallet extension</h3><p>Keep keys in your existing wallet app. Review every signature in the extension.</p><select id="extension-provider" aria-label="Wallet extension" hidden></select><button id="extension-connect" type="button">Connect extension</button></section>
       <section class="connection-option"><h3>Built-in wallet</h3><p>No extension needed. Your password protects an encrypted key on this device, on the wallet site only.</p><button id="builtin-connect" type="button">Create / unlock built-in wallet</button></section>
     </div>
-    <section id="site-approval" hidden aria-label="Site approval"><p id="site-origin"></p><p>Review the exact request below. Sign-in does not move funds; payment requests require separate explicit approval.</p><pre id="site-message" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre><button id="site-approve" type="button" disabled>Approve sign-in</button><button id="site-cancel" type="button">Cancel</button><p id="site-status" role="status"></p></section>
+    <section id="site-connection" hidden aria-label="Pending site request"><p id="site-connection-status" role="status">Connect or unlock your wallet to review the request.</p><button id="site-connection-cancel" type="button">Cancel request</button></section>
     <a id="profile-link" class="profile-link" href="https://world.featheral.com/#/setup" target="_blank" rel="noopener" title="Edit your public avatar and name on World">World profile ↗</a>
     <details id="local-wallet" class="wallet-hero"><summary>Built-in wallet <span id="vault-state">Create without MetaMask</span></summary>
       <ol class="vault-steps"><li>Choose a password of at least 12 characters.</li><li>Download your encrypted recovery backup.</li><li>Confirm the backup and unlock to activate.</li></ol>
@@ -56,7 +56,22 @@
     </section>
     <section id="activity" class="wallet-panel" role="tabpanel" aria-labelledby="tab-activity" tabindex="0" hidden><h2>Activity</h2><div id="history"></div><a id="ethereum-activity" href="https://etherscan.io/" target="_blank" rel="noopener" title="FTHG transfers on Ethereum Mainnet">Ethereum ↗</a> · <a id="activity-explorer" href="https://dollar.featheral.com/explorer/" target="_blank" rel="noopener" title="Native Featheral ledger transactions">Featheral ↗</a></section>
   </main>
-  <dialog id="wallet-review" aria-label="Review wallet operation"><p id="wallet-review-message"></p><button id="wallet-review-confirm" type="button">Confirm</button><button id="wallet-review-cancel" type="button">Cancel</button></dialog>
+  <dialog id="wallet-review" class="wallet-approval" aria-labelledby="wallet-review-title" aria-describedby="wallet-review-safety">
+    <div class="approval-heading"><span class="approval-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18M16 14h5"/></svg></span><div><p class="approval-eyebrow">Wallet approval</p><h2 id="wallet-review-title">Review wallet operation</h2></div></div>
+    <dl class="approval-identity"><dt>Requesting site</dt><dd id="wallet-review-origin"></dd><dt>Signing account</dt><dd id="wallet-review-account"></dd></dl>
+    <p id="wallet-review-message" class="approval-message"></p>
+    <p id="wallet-review-safety" class="approval-safety">Only approve requests you initiated. Verify the account, asset and exact details.</p>
+    <p id="wallet-review-status" role="status" aria-live="polite"></p>
+    <div class="approval-actions"><button id="wallet-review-cancel" type="button" autofocus>Reject</button><button id="wallet-review-confirm" class="approval-confirm" type="button">Approve</button></div>
+  </dialog>
+  <dialog id="site-approval" class="wallet-approval" aria-labelledby="site-approval-title" aria-describedby="site-safety">
+    <div class="approval-heading"><span class="approval-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M3 9h18M16 14h5"/></svg></span><div><p class="approval-eyebrow">Wallet approval</p><h2 id="site-approval-title">Approve sign-in</h2></div></div>
+    <dl class="approval-identity"><dt>Requesting site</dt><dd id="site-origin"></dd><dt>Signing account</dt><dd id="site-account"></dd></dl>
+    <p id="site-safety" class="approval-safety">Sign-in does not transfer funds or cost gas. Review the exact message before approving.</p>
+    <details class="approval-details" open><summary>Exact request</summary><pre id="site-message" class="approval-message"></pre></details>
+    <p id="site-status" role="status" aria-live="polite"></p>
+    <div class="approval-actions"><button id="site-cancel" type="button" autofocus>Reject</button><button id="site-approve" class="approval-confirm" type="button" disabled>Approve sign-in</button></div>
+  </dialog>
   <footer class="wallet-safety" aria-label="Wallet safety">
     <div><strong>Your keys, your wallet</strong><p>Self-custody keys stay on this device. Save your encrypted recovery backup and keep its password safe.</p></div>
     <div><strong>Check the network</strong><p>Native ledger transfers need no ETH. Ethereum transactions require gas. Always review the asset, network and recipient.</p></div>

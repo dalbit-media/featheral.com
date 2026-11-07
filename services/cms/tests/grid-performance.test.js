@@ -286,6 +286,21 @@ test('every visible Trending tile gets a bounded preview while at most two GIFs 
     const [, top, height] = /top:([\d.]+)px.*height:([\d.]+)px/.exec(el.style.cssText);
     return +top < 800 && +top + +height > 0;
   });
+
+  test('nearby gallery previews are decoded before they scroll into view and remain ready during scrolling', () => {
+    const f = fixture(Array.from({ length: 1000 }, (_, id) => item(id)), { previews: true });
+    f.gallery.layout(); f.flush();
+    for (let i = 0; i < 80; i++) f.complete();
+    const nextScreen = f.grid.children.filter(el => el.img && +/top:([\d.]+)px/.exec(el.style.cssText)[1] >= 800
+      && +/top:([\d.]+)px/.exec(el.style.cssText)[1] < 1600);
+    assert(nextScreen.length > 0);
+    assert(nextScreen.every(el => el.dataset.mediaState === 'ready' && el.img.src.includes('/preview?')));
+    f.scroll(800);
+    assert(nextScreen.every(el => el.dataset.mediaState === 'ready' && el.img.src));
+    assert(f.active().length <= 2);
+    assert(f.grid.children.length <= 80);
+    f.gallery.close();
+  });
   assert(visible.length > 2);
   assert(visible.every(el => el.img.src && el.dataset.mediaState === 'ready'));
   assert.equal(f.loaded().filter(el => el.img.src.startsWith('/media/')).length, 2);

@@ -170,7 +170,7 @@ The terminal shows executed OHLC candles, volume, SMA20, timeframes, zoom/pan,
 full-screen charts, slippage previews, balances, trades, movement history and
 wallet-funded liquidity positions. It does not simulate an order book or leverage.
 
-Dollar retains its original CMS landing page at `/`, with the shared wallet at `/wallet/`: Assets, Send, Receive, Swap, Activity and Account. Every site's wallet dialog uses the same compact top-right renderer; Foundation and Gold lead with FTHG, Dollar and World with FTH$, and all other sites with FTHX. The large primary balance is the active account's actual available currency, never a combined valuation. Smaller lines beneath show the estimated portfolio USD total and the estimated total in the site's primary currency; linked accounts, World and Exchange funds remain separate. Unavailable prices and partial estimates are explicitly labeled. Host colors and themes are preserved. The shared central-origin renderer supports external Ethereum-compatible wallets and the encrypted built-in wallet inline; host sites never receive private keys or wallet sessions. Wallets continue to read authoritative holdings independently of Exchange liquidity. World’s existing wallet transfers, deposits/withdrawals and gameplay APIs are retained.
+Dollar retains its original CMS landing page at `/`, with the shared wallet at `/wallet/`: Assets, Send, Receive, Swap, Activity and Account. Every site's wallet dialog uses the same contextual renderer; Foundation and Gold lead with FTHG, Dollar and World with FTH$, and all other sites with FTHX. The large primary balance is the active account's actual available currency, never a combined valuation. Smaller lines beneath show the estimated portfolio USD total and the estimated total in the site's primary currency; linked accounts, World and Exchange funds remain separate. Unavailable prices and partial estimates are explicitly labeled. Host colors and themes are preserved. The shared renderer supports extensions and a site-local encrypted built-in wallet inline. Extension private keys remain outside the site; built-in signers run in the current site's memory. Wallets continue to read authoritative holdings independently of Exchange liquidity. World’s existing wallet transfers, deposits/withdrawals and gameplay APIs are retained.
 
 Empty wallet primary balances initially display `0.00` for FTH$/FTHX and `0.000` for FTHG/FTHS. Confirmed zero balances use the same precision; failed or unavailable reads remain explicitly unavailable.
 
@@ -178,24 +178,23 @@ The standalone wallet uses a spacious dark/gold layout with labeled connection s
 
 The wallet's **Swap** tab replaces Thanks and executes through the shared Exchange engine without leaving the panel. It supports FTH$, FTHX and all funded native notes, routing note-to-note swaps through FTHX. Live pool quotes include the 0.3% fee per hop and price impact; approval sets the quoted output as a strict minimum. Unfunded markets and indicative FTHG/USD estimates are never executable liquidity. Each executed FTHX-pair leg updates Exchange reserves, trade history, volume and candles. Native-note routes settle atomically; signed FTH$ routes use the existing recoverable settlement journal. Pending requests can be resumed inline, and only unsubmitted preparations can be discarded. Exchange trading custody and World funds remain separate from spendable wallet funds. Ethereum FTHG conversion stays on Gold; no new peg, issuance or guaranteed redemption is introduced.
 
-All public wallet headers open the central wallet without restoring a second
+All public wallet headers open the contextual wallet without restoring a second
 site-local extension account, even before the embed finishes loading. Connect/create
 is visible above its tabs; without an extension the full wallet offers creation,
 recovery or unlocking the existing built-in wallet. Explicit Ethereum/admin
 transaction signers remain separately labeled and do not replace the public wallet.
 
 Exchange, Notes/Sites creation and X/community sign-ins use
-`FeatheralWallet.authenticate` through the central
-`/exchange-auth.html?mode=site&origin=…&nonce=…` popup. Select a built-in wallet or
-extension on the wallet host, review a fresh standard sign-in message and explicitly
-approve. The exact network opener, nonce and account are checked; only an address
-and signature return, never wallet keys/passwords or central sessions. Each site
+`FeatheralWallet.authenticate` through an in-page contextual popup. Select a built-in
+wallet or extension, review a fresh standard sign-in message and explicitly
+approve. The wallet instance, nonce and account are checked; only an address
+and signature return from the approval API. Each site
 keeps its own authenticated session. Payment messages are rejected by this sign-in
 channel; financial approvals remain separate. The original Exchange-only built-in
-protocol remains compatible. Public balances and estimates follow the central active
+protocol remains compatible. Public balances and estimates follow the site's selected
 account, not a site's possibly older commenting or trading session.
 
-Visible wallet views refresh balances and portfolio totals every 30 seconds, with overlapping scheduled refreshes suppressed. The explicit Refresh action remains available. Embedded views also accept a credential-free `featheral:wallet-updated` hint only from their configured parent window and exact origin; hidden views defer reads until visible again.
+Visible wallet views refresh balances and portfolio totals every 30 seconds, with overlapping scheduled refreshes suppressed. The explicit Refresh action remains available; hidden views defer reads until visible again. Site-local storage events refresh account and World sync selections without passing credentials between origins.
 
 Initial pool funding remains explicitly approved using existing balances; no liquidity or volume is created automatically. Notes charts display completed trades and actual pool spot prices. Gold reserve and Ethereum bridge/staking screens are hosted at Exchange `/gold-channel/` and `/ethereum/`, reusing the central implementations and their original APIs/signing restrictions. Old Gold conversion and central Ethereum page URLs redirect there. FTHG is never relabeled as an internal note or made tradable through fictitious reserves.
 
@@ -798,25 +797,33 @@ FTHG is never offered as an internal L3 trading note.
 
 Notes, Exchange, X and Sites share one Wallet header control and responsive layout:
 brand and Wallet on the first mobile row, horizontally scrollable navigation below.
-Header Wallet and Swap controls open a frame-free connection panel with a public
-preview and a link to the full wallet. Signing, transfers, creation and unlocking
-run directly on `wallet.featheral.com` in a top-level tab or window. The wallet
+Header Wallet and Swap controls open the full wallet in a contextual dialog on
+the current site, without an iframe, redirect or wallet-site window. The shared
+renderer uses a Shadow DOM to isolate its layout and inherits the site's colors
+and typography. Signing, transfers, creation and unlocking stay in that dialog. The wallet
 rejects framed execution and serves HTML with `frame-ancestors 'none'`.
 Site login tokens stay on their original host. The requesting site stores only
-the selected public address; pinned address previews remain read-only unless
-`followActive: true` is requested. Public previews refresh on focus and selection
-changes. The full wallet retains linked-account portfolios, World funds and
+the selected public address and its own wallet session; pinned address views remain
+read-only when `followActive: false` is requested. The wallet retains linked-account portfolios, World funds and
 periodic balance refreshes.
 
-`FeatheralWallet.authenticate(challenge)` opens the wallet synchronously from a user
-action. A nonce-bound, exact-origin/source-checked handoff returns only the public
+`FeatheralWallet.authenticate(challenge)` opens the dialog synchronously from a user
+action. An instance- and nonce-bound in-page approval returns only the public
 address and approved signature. `FeatheralWallet.account()` selects an account
 without signing a site challenge. No extension RPC bridge, keys, passwords,
-encrypted backups or wallet-host sessions are shared with the requesting site.
-Approve the displayed requesting origin and exact message in the wallet window.
-Closing that window, cancelling, or exceeding ten minutes rejects the connection.
-If popups are blocked, allow them for the requesting site and retry; a separate
-Open full wallet link is available for wallet management.
+wallet-host sessions are shared across origins. Approve the displayed current
+origin and exact message in the dialog. Closing it, cancelling, or exceeding ten
+minutes rejects the connection. Closing also locks the built-in signer and clears
+password fields. Context wallet extension sessions use a separate storage key
+from application creation sessions.
+
+Connection, sign-in, payment, profile, transfer, swap and account-link requests use
+dedicated wallet approval dialogs with the requesting origin, signing account and
+exact request. Reject is focused by default; Escape rejects the current approval.
+Approval stays visible while signing, with extension failures available to retry.
+Account changes or closing invalidate pending signatures and revoke late connection
+sessions. Once an approved operation is submitted, Reject is disabled: closing
+cannot undo a submitted payment or transaction.
 
 The wallet discovers extensions through EIP-6963 with a legacy injected-provider
 fallback. One detected extension is the default; multiple extensions require an
@@ -835,15 +842,19 @@ Dollar wallet popups also display positive FTHX and community-note holdings. The
 shared Swap screen lists FTHX pairs when FTHX or the paired note is held; funded
 note swaps remain usable even when the separate Dollar pool is unfunded.
 
-Without an extension, use Account in the full wallet to create a built-in Ethereum-compatible
+Without an extension, use Account in the popup to create a built-in Ethereum-compatible
 FTHX wallet, also usable for FTH$ and community notes. Creation requires a password
 of at least 12 characters and downloading/confirming an encrypted recovery backup
 before saving the wallet. Restore and unlock use the same password; neither passwords
-nor plaintext keys are sent to a server. The encrypted keystore stays in central-host
-local storage; the unlocked signer and its session remain in memory. Locking, closing
+nor plaintext keys are sent to a server. The encrypted keystore stays in the current
+site's local storage; the unlocked signer and its session remain in memory. Import
+the encrypted recovery backup on another site to reuse the same address; a new
+wallet otherwise creates a different address. No automatic cross-origin migration
+or key sharing occurs. The standalone wallet retains its own origin's storage. Locking, closing
 the page or ten minutes of inactivity locks the signer. Keep the backup and password
 separately: Featheral cannot recover either. Do not clear browser data without a backup.
-Site previews never generate, unlock or receive keys.
+Only use built-in wallets on sites you trust: Shadow DOM isolates styles, not
+same-origin scripts. An extension keeps private keys outside the site's JavaScript.
 
 An unlocked built-in wallet can link up to four external accounts with signatures
 from both owners. Their portfolio is combined, but account balances remain separate:
@@ -856,28 +867,29 @@ in `services/gold/native.js`, with a fresh CoinGecko ETH/USD feed. USD estimates
 include priced ETH even if the separate FTHG feed/Gold bridge is unavailable.
 
 Foundation and Gold retain their existing header controls and wallet color themes;
-normal header clicks open the shared central renderer. Their legacy
+normal header clicks open the shared contextual renderer. Their legacy
 profile script/style URLs redirect to the central wallet assets. Portfolio reads use
-the public, read-only `wallet.featheral.com/api/wallet/accounts/:ethereumAddress`
+the public, read-only `/api/wallet/accounts/:ethereumAddress`
 endpoint (allowlisted Featheral origins, no cookies or session tokens). Foundation
 shows FTHX first and Gold shows FTHG first, with combined FTHG/USD estimates.
 Gold/Dollar remain the authoritative ledger/Ethereum service owners; signed profile
 editing continues through their compatible API routes, and asset management opens
-the central wallet. Public summaries never expose sessions or authorize transactions.
+the contextual wallet. Public summaries never expose sessions or authorize transactions.
 
 `wallet.featheral.com` hosts the network wallet, profile compatibility assets and
 Ethereum conversion/staking screens (`/ethereum/`). Public sites keep their Classic
-landing pages; `/wallet/` presents a public preview and opens the central wallet directly.
+landing pages; `/wallet/` mounts the contextual wallet directly on the current site.
 Gold defaults to FTHG, World/Dollar to FTH$, and all other sites to FTHX.
 
 Load `https://wallet.featheral.com/embed.js` and add `<div data-wallet-embed></div>`,
 or call `FeatheralWallet.mount(element, {primary: "FTHX", view: "swap", compact: true})`.
 The versioned JSON contract is `/api/wallet/ui?primary=FTHX&view=assets&compact=1`.
-The historical embed API now mounts a public preview, never an iframe.
+The historical embed API now mounts the full contextual renderer, never an iframe.
+Its static modules are served locally at `/shared/wallet/*`; APIs remain same-origin.
 Top-level wallet URLs retain `parentOrigin=<origin>`, primary currency, view and
 payment details; only Featheral and local development origins are allowed.
 `mode=auto|extension|builtin` controls the initial connection preference.
-`authNonce` is reserved for interactive, top-level site approvals and cannot be
+`authNonce` is reserved for interactive site approvals and cannot be
 combined with a pinned address or embedded mode. Browser-blocked storage is
 reported explicitly. The connection dialog inherits the site's CSS theme; the
 full wallet uses the requesting site's configured palette.
