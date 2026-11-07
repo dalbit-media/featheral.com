@@ -24,7 +24,7 @@ World About and Play default to English, independent of browser language. An exp
 
 World landing-page statistics appear once in the main hero section, not in the site header. The header retains site navigation and the wallet control.
 
-Explorer and settlement cameras start at 1.55x and 2.1x respectively; wheel and
+Explorer and settlement cameras start at 1.8x and 2.1x respectively; wheel and
 button zoom remain available. Both 2D maps repaint only when their scene, camera,
 viewport, selection, artwork or environment changes. Settlement drawing culls
 off-screen cells. Decorative weather, water and character motion is static, and
@@ -51,8 +51,10 @@ count toward the two-person reserve, not in addition to it. Existing half-popula
 auto target, supply checks, storage limits, fees and full-week deadlines remain.
 
 Completed crew output can be collected **free from discovered resource tiles on
-the exploration map**, including at zero FTH$. Collect markers appear only when
-that resource has completed output (Oil still requires the bank). Map pickup
+the exploration map**, including at zero FTH$. At most one visible tile per
+resource shows a Collect marker, only when completed output is waiting and its
+transport fee exceeds the player's FTH$ (Oil still requires the bank). Other
+tiles remain travel targets. Map pickup
 clears the corresponding transport bill once; it never creates new raw output or
 currency. Paid header pickup and paid automatic transport remain unchanged.
 
@@ -199,57 +201,34 @@ The bank reuses the unchanged Gold exchange API, reserve formula, 1% spread and 
 - Council accounts and owners with unclaimed positions are exempt from ordinary expired-session cleanup. Bank visits renew their HttpOnly cookie for up to 400 real days; account rows and expiry columns stay synchronized. Do not clear this anonymous browser identity: exports cannot restore access, and this prototype has no wallet-based account recovery.
 - Bank commands and receipts share the authoritative SQLite transaction, revision, CSRF and four-decimal accounting. Public counters and the permanent supply ceiling include treasury rewards and locked principal, preserving the original monetary-policy fingerprint.
 
-The standalone `/market/` exchange has **53 markets**: four raw resources, ten crafted items, 21 keepsakes and 18 automation permits (12 collection, three exploration and three recruitment). Resources use static, low-end-inspired shop prices and player-order matching; other non-collectibles retain demand-priced liquidity with a 1% spread. Orders support up to 10,000 whole units, subject to balances and item storage; each item copy occupies one slot. Crafting additional copies is allowed. One equipped/placed copy is protected, but spares can be sold. Keepsakes remain unique, trade one at a time and use player orders only; without offers they show no quote. A one-time migration retires collectible system pools and redistributes existing marketplace FTH$ to fund item pools, conserving reserves exactly and preserving orders, receipts and monetary-policy constants.
+The standalone `/market/` exchange has **53 markets**: four raw resources, ten crafted items, 21 keepsakes and 18 automation permits (12 collection, three exploration and three recruitment). Resources use gently moving demand-priced liquidity and player-order matching; other non-collectibles retain ordinary demand-priced liquidity. Both retain a 1% spread. Orders support up to 10,000 whole units, subject to balances and item storage; each item copy occupies one slot. Crafting additional copies is allowed. One equipped/placed copy is protected, but spares can be sold. Keepsakes remain unique, trade one at a time and use player orders only; without offers they show no quote. A one-time migration retires collectible system pools and redistributes existing marketplace FTH$ to fund item pools, conserving reserves exactly and preserving orders, receipts and monetary-policy constants.
 
 Exploration and recruitment permits last 1, 4 or 12 game weeks, like collection permits. Activate from inventory or Population → Allocation & automation; activation consumes one copy and stacks its duration. Auto-exploration keeps one team travelling and waits for all existing manual teams to return. Auto-recruitment starts the next paid batch after the previous arrival. Both use normal FTH$ fees, Water requirements and full-week deadlines; recruitment includes housing bonuses and their cost. Blocked activity exposes its reason and retries once per game day. Pausing or expiry prevents new jobs, never cancels paid jobs, and does not stop the permit clock. Offline settlement follows the same scheduled events as frequent polling.
 
-Player limit orders use price-time priority and cannot match themselves. Resource shops trade at the static base price without spread, limited by actual existing FTH$ for sales and owned shop stock for purchases. Better player bids take priority. Non-resource constant-product pools retain a 1% spread per side. Exact integer accounting uses 0.0001 FTH$ subunits. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and require permanent donations of existing funds and owned assets. The opt-in isolated Gold reserve prototype can seed each eligible market once, up to 10,000 accounting lots at its genesis-pinned seed price.
+Player limit orders use price-time priority and cannot match themselves. Better player offers take priority over resource pools. Exact integer accounting uses 0.0001 FTH$ subunits. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and can receive permanent donations of existing funds and owned assets. Gold can bootstrap each eligible market once, up to 10,000 accounting lots at its unchanged genesis-pinned seed price.
 
-All new raw-resource offers and executions have fixed **game-policy** base/minimum
-prices inspired by conservative low-end bulk commodity values, not current
-quotes, guaranteed real-dollar values, or historical record lows:
+Resource prices have no fixed commodity floor; only the accounting increment remains.
+The resource curve pins virtual offsets of nine times its first funded inventory
+and dollars in `market_resource_depth`, providing tenfold initial pricing depth.
+Both directions use the same curve and conservative rounding, with no profitable
+round trip. Offsets are never spendable or recalculated on trades/refills. Actual
+inventory and dollars cap execution, including collect-and-sell and half-sales.
+Other item pools keep their ordinary curve. Existing balances, receipts, valid
+low-price orders, filled history and genesis reserve seeds are preserved.
 
-| Resource | Reference basis | Minimum per accounting lot | Displayed minimum |
-| --- | --- | --- | --- |
-| Wood | 50 / metric tonne | FTH$2.50 / 50 kg | FTH$0.05 / kg |
-| Water | 1 / cubic metre | FTH$0.01 / 10 L | FTH$0.001 / L |
-| Metal | 100 / metric tonne (scrap-like reference) | FTH$1 / 10 kg | FTH$100 / t |
-| Oil | 30 / barrel | FTH$30 / bbl | FTH$30 / bbl |
+An authenticated settled player's quotes and trades check resource funding.
+Below 25% of the unchanged genesis funding target, Gold transfers already-issued
+FTH$ from the system treasury, capped at that target and the treasury's available
+whole game units. Every refill is signed and replayable in the Dollar journal.
+It never allocates additional FTHG, mints dollars or spends redemption escrow.
+Repeated reads of a funded market do not drain treasury. Exhausted funds produce
+an explicit sell-less/retry error; no order partially spends inventory on failure.
 
-These deliberately rounded design references are not a live feed; commodity
-history and units can be compared with the [EIA petroleum price series](https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm)
-and [IMF commodity data](https://www.imf.org/en/Research/commodity-prices).
-Base prices use physical lot sizes rather than treating unlike quantities as
-equally valuable. The shared static model also supplies existing baseline
-production and daily consumption; climate/upgrades still modify actual quantities.
-The market's expandable production/upkeep reference shows:
-
-| Resource | Baseline worker output / week | Gross base-price value | Resident consumption / week | Base-price upkeep value |
-| --- | --- | --- | --- | --- |
-| Wood | 5,000 kg | FTH$250 | 14 kg | FTH$0.70 |
-| Water | 6,000 L | FTH$6 | 350 L | FTH$0.35 |
-| Metal | 1 t | FTH$100 | 1.4 kg | FTH$0.14 |
-| Oil | 14 bbl | FTH$420 | No daily resident use | Activity-dependent |
-
-These are baseline gross values, not equal-profit promises: transport, activity
-materials, climate, terrain and upgrades differ. Production and consumption
-quantities are preserved, not rewritten to subsidize sales. Per-unit prices retain
-enough displayed precision for Water's FTH$0.001/L rather than rounding it to zero.
-Automatic crew profitability estimates use these gameplay base prices rather
-than reserve seed prices. Needed drinking Water remains prioritized even when
-its resale value is lower than transport cost; offline fast-forward uses the same
-profitability bounds as normal weekly planning.
-
-Floors apply to both order sides, maker matching, shop execution, collection
-sales and half-sales. Below-floor legacy orders remain visible to their owners
-for cancellation/refund but are excluded from matching and public depth. Actual
-historical fills remain unchanged. Resource sales pay exactly base price from
-existing funds even if the old reserve ratio is below that price, stopping when
-the next lot cannot be funded. A shop may reach zero funds or zero stock; purchases
-replenish funds and sales replenish stock. Insufficient full-order liquidity
-shows an explicit sell-less/retry message and spends nothing. Donations must
-meet the floor individually; resource shops do not require an aggregate ratio.
-No reserves, escrow or balances are repriced, and no currency is issued.
+Physical production and consumption quantities are unchanged. The expandable
+market reference values them at the current Buy/Sell ticker, not a static price.
+Automatic crew planning retains its stable physical-value estimates (not price
+guarantees), keeping needed Water prioritized and offline behavior unchanged.
+Per-unit displays retain enough precision for very small Water prices.
 Reserve seed prices remain immutable and separate from trading floors. In
 particular, the existing Oil reserve seed is FTH$24/lot even though the trading
 base is FTH$30/bbl; the shop can pay FTH$30 only while its existing funds cover it.

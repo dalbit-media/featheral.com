@@ -83,10 +83,65 @@ describe("Isolated finite Gold reserve", () => {
     return transfer;
   }
   function signedGold(id, data, keys = goldKeys) {
-    const tx = { i: id, k: "GOLD", a: "", v: "0", d: data, t: Date.now() };
+    const tx = { i: id, k: "GOLD", a: "", v: "0", d: { ...data }, t: Date.now() };
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
+  it("refills resource markets only from existing treasury dollars, conserves supply and replays safely", async () => {
+    await engine.initialize();
+    await fund("wood");
+    const amount = total("wood") * 9n / 10n;
+    adapter.commit(adapter.prepare([{ account: pool("wood"), delta: (-amount).toString() }]));
+    const supply = ledger.summary().supply, allocated = engine.status().allocated;
+    const escrow = ledger.balance(REDEMPTION_ESCROW);
+    const pending = { op: "refill-market", asset: "wood", account: pool("wood"), dollars: amount.toString() };
+    assert.throws(() => ledger.commitAuthorized(signedGold("wrong-key", pending, gameKeys)), /signature/);
+    assert.throws(() => ledger.commitAuthorized(signedGold("wrong-pool", { ...pending, account: walletAccountId(source.address) })), /initialized resource/);
+    assert.throws(() => ledger.commitAuthorized(signedGold("over-budget", { ...pending, dollars: (amount + 10n ** 14n).toString() })), /limit/);
+    assert.throws(() => adapter.prepare([{ account: TREASURY, delta: (-amount).toString() },
+      { account: pool("wood"), delta: amount.toString() }]), /treasury/);
+    store = new SqliteStore(":memory:", Date.now, 1, adapter);
+    const identity = store.create();
+    store.transaction(identity.token, session => { session.account.game.stage = 0; });
+    await store.ensureLiquidity(identity.token, "wood");
+    assert.equal(ledger.balance(pool("wood")).available, total("wood").toString());
+    assert.equal(ledger.balance(TREASURY).available, "0");
+    assert.equal(ledger.summary().supply, supply);
+    assert.equal(engine.status().allocated, allocated);
+    assert.deepEqual(ledger.balance(REDEMPTION_ESCROW), escrow);
+    const entry = engine.activity({ limit: 1 }).items[0];
+    assert.equal(entry.operation, "refill-market");
+    assert.equal(entry.recordType, "treasury-circulation");
+    assert.equal(entry.treasuryDollars, amount.toString());
+    const tip = ledger.tipHash;
+    await store.ensureLiquidity(identity.token, "wood");
+    assert.equal(ledger.tipHash, tip, "repeated reads do not spend more treasury dollars");
+    assert.throws(() => ledger.commitAuthorized(signedGold("already-funded", pending)), /low market funds/);
+    store.close(); store = undefined;
+    ledger.close(); open();
+    assert.equal(ledger.tipHash, tip);
+    move(pool("wood"), walletAccountId(source.address), total("wood"));
+    assert.deepEqual(await engine.refillMarket("wood"), { transferred: "0", exhausted: true });
+    assert.equal(ledger.summary().supply, supply);
+    assert.equal(engine.status().allocated, allocated);
+    conserved();
+  });
+  it("caps partial treasury refills at available whole game units and blocks nonresource targets", async () => {
+    await engine.initialize(); await fund("wood");
+    const one = 10n ** 14n;
+    adapter.commit(adapter.prepare([{ account: pool("wood"), delta: (-one).toString() }]));
+    move(pool("wood"), walletAccountId(source.address), total("wood") - one);
+    assert.deepEqual(await engine.refillMarket("wood"), { transferred: one.toString(), exhausted: true });
+    assert.equal(ledger.balance(pool("wood")).available, one.toString());
+    assert.equal(ledger.balance(TREASURY).available, "0");
+    await assert.rejects(engine.refillMarket("scanner"), /Only resource/);
+    const blocked = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider,
+      beforeMutation: () => { throw Object.assign(new Error("Writer is unavailable."), { status: 503 }); } });
+    const tip = ledger.tipHash;
+    await assert.rejects(blocked.refillMarket("wood"), /Writer is unavailable/);
+    assert.equal(ledger.tipHash, tip);
+    conserved();
+  });
   it("uses the exact gradual origin curve, including trade-size movement and conservative rounding", () => {
     const cap = ethers.parseEther("100");
     const state = net => ({ cap: cap.toString(), allocated: ethers.parseEther(String(net)).toString(),

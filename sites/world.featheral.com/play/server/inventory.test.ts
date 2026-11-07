@@ -386,9 +386,9 @@ test('actual returned exploration grants one biome keepsake; overlap and zero-re
 test('equipment changes preserve each active team survey radius and polling-independent finds', () => {
   const account = settled();
   const expedition = act(account, { type: 'move', x: 4, y: 1 }).workforce.expeditions[0];
-  assert.equal(expedition.surveyRadius, 4);
+  assert.equal(expedition.surveyRadius, 3.75);
   act(account, { type: 'craft', item: 'torch' });
-  assert.equal(snapshot(account).workforce.expeditions[0].surveyRadius, 4);
+  assert.equal(snapshot(account).workforce.expeditions[0].surveyRadius, 3.75);
   assert.equal(radius(account.game), visibilityItems.torch.radius);
   const offline = structuredClone(account), polled = structuredClone(account);
   accrue(offline, expedition.readyAt + 3 * worldWeekMs);

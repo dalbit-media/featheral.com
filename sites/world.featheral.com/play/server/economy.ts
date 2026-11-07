@@ -2,7 +2,7 @@ import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruit
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, workforceCounts } from '../src/workforce.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
 import { arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, inventory } from './inventory.ts';
@@ -607,7 +607,7 @@ export function execute(account: Account, command: Command, realTime = account.u
       const quote = explorationQuote(game, command.x, command.y, work.expeditions.length);
       pay(game, { dollars: quote.dollars });
       const expedition: Expedition = { x: command.x, y: command.y, workers: 2,
-        readyAt: account.updatedAt + terrain.weeks * worldWeekMs, surveyRadius: radius(game), dollarReward: quote.reward,
+        readyAt: account.updatedAt + terrain.weeks * worldWeekMs, surveyRadius: expeditionSurveyRadius(game), dollarReward: quote.reward,
         ...(physicalAt(account, account.updatedAt) ? { finds: expeditionFindPlan(game.seed, command.x, command.y, account.updatedAt, terrain.weeks) } : {}) };
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);

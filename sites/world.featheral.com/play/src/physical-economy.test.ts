@@ -88,14 +88,14 @@ test('automatic crews value physical output at static prices and prioritize need
   assert.equal(repairs.crews.metal, 1, 'a break-even Metal lot can restore repair stock without a negative-value trip');
 });
 
-test('static low-end prices value physical production and upkeep without changing reserve seeds', () => {
+test('planning values retain physical production and upkeep without creating price floors or changing reserve seeds', () => {
   const gross = { wood: 250, water: 6, metal: 100, oil: 420 };
   const upkeep = { wood: .7, water: .35, metal: .14, oil: 0 };
   const seeds = { wood: 4, water: 2, metal: 2, oil: 24 };
   for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {
     const reference = resourceEconomy[resource], price = resourceBasePrice(resource);
     assert.equal(displayPrice(resource, price), reference.pricePerUnit);
-    assert.equal(marketPriceFloor(resource), price);
+    assert.equal(marketPriceFloor(resource), .0001);
     assert.equal(marketBasePrice(resource), seeds[resource]);
     assert.equal(reference.weeklyProduction * dollarsUnits(price), dollarsUnits(gross[resource]));
     assert.equal(Math.round(reference.dailyConsumption * 7 * dollarsUnits(price)), dollarsUnits(upkeep[resource]));
@@ -106,12 +106,12 @@ test('static low-end prices value physical production and upkeep without changin
   assert.equal(formatResourcePrice('wood', 2.5, 'ko-KR'), '0.05');
   assert.equal(formatResourcePrice('wood', .0001, 'en-US'), '0.000002');
 });
-test('static resource pricing and liquidity explanations are available in Korean', () => {
+test('dynamic resource pricing and finite treasury explanations are available in Korean', () => {
   for (const text of [
-    'Static base price', 'Production and upkeep value', 'Baseline output per worker/week', 'Baseline upkeep per resident/week',
+    'Current market price', 'Production and upkeep value', 'Baseline output per worker/week', 'Baseline upkeep per resident/week',
     'Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.',
-    'Resources trade at a static base price without spread. Better player bids may pay more. Sales use existing market funds; no currency is created.',
-    'Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.',
+    'Resource prices move with trades, with deeper pricing liquidity to slow declines and a 1% spread. Existing treasury FTH$ replenishes low market funds; no currency is created.',
+    'Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.',
     'Not enough resources in the market. Buy less or try again after players sell.',
   ]) assert.notEqual(translate(text, 'ko'), text);
 });

@@ -3,7 +3,7 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
 import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from './items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketBasePrice, marketPriceAvailable, marketPriceFloor, marketQuantityLimit } from './market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketPriceAvailable, marketPriceFloor, marketQuantityLimit } from './market.ts';
 import type { MarketAsset, MarketCommand, MarketFill, MarketResponse, MarketSide } from './market.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -13,7 +13,7 @@ import { marketConsumption } from './consumption.ts';
 import { confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
-import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceBasePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
+import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
@@ -211,18 +211,18 @@ export class Marketplace {
     const economyOpen = this.root.querySelector<HTMLDetailsElement>('[data-resource-economy]')?.open ?? false;
     const ticker = this.data?.market.tickers.find(ticker => ticker.asset === this.asset);
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
-    const price = isMarketResource(this.asset) ? resourceBasePrice(this.asset) : ticker ? this.side === 'buy' ? ticker.ask : ticker.bid : 0;
+    const price = ticker ? this.side === 'buy' ? ticker.ask : ticker.bid : 0;
     this.root.querySelector('[data-market-selected-price]')!.textContent = ticker
       ? marketPriceAvailable(price) ? this.price(price) : translate('No offers yet.', this.language) : '';
     const economy = isMarketResource(this.asset) ? resourceEconomy[this.asset] : null;
-    const reference = economy ? `<p>${translate('Static base price', this.language)} <strong>${this.price(price)}</strong></p>
+    const reference = economy ? `<p>${translate('Current market price', this.language)} <strong>${marketPriceAvailable(price) ? this.price(price) : '—'}</strong></p>
       <details data-resource-economy ${economyOpen ? 'open' : ''}><summary>${translate('Production and upkeep value', this.language)}</summary>
       <p>${translate('Baseline output per worker/week', this.language)}: ${this.fmt(economy.weeklyProduction)} · ${this.money(economy.weeklyProduction * price)} FTH$</p>
       <p>${translate('Baseline upkeep per resident/week', this.language)}: ${this.fmt(economy.dailyConsumption * 7)} · ${this.money(economy.dailyConsumption * 7 * price)} FTH$</p>
       <small>${translate('Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.', this.language)}</small></details>` : '';
     this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2>${reference}<p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p></div><span class="exchange-venue">Players + game shop</span>`;
     if (!this.priceEdited && ticker) {
-      const value = marketPriceAvailable(price) ? price : Math.max(marketBasePrice(this.asset), marketPriceFloor(this.asset));
+      const value = marketPriceAvailable(price) ? price : marketPriceFloor(this.asset);
       if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = displayPrice(this.asset, value).toFixed(4);
     }
   }
@@ -280,7 +280,7 @@ export class Marketplace {
     if (this.side === 'sell' && owned < quantity) reason = isMarketResource(this.asset) ? 'Not enough owned resources for this order.' : 'This item is not in your inventory.';
     if (this.side === 'buy' && dollars !== undefined && dollars > this.state().dollars) reason = 'Not enough FTH$ for this order.';
     if (this.fresh && this.mode === 'spot' && quote && (!quote.available || !quote.dollars)) reason = isMarketResource(this.asset)
-      ? this.side === 'sell' ? 'Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.'
+      ? this.side === 'sell' ? 'Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.'
         : 'Not enough resources in the market. Buy less or try again after players sell.'
       : 'The price changed or not enough items are available. Please try again.';
     this.root.querySelector('[data-market-requirement]')!.textContent = translate(reason, this.language);
@@ -316,7 +316,7 @@ export class Marketplace {
     const levels = (side: 'bids' | 'asks') => `<div class="${side}"><h3>${side === 'bids' ? 'Buying' : 'Selling'}</h3><table><thead><tr><th>Price each</th><th>Amount</th></tr></thead><tbody>${market[side].map(level => `<tr><td><button type="button" class="book-price" data-market-level="${side === 'bids' ? 'sell' : 'buy'}" data-market-level-price="${level.price}" ${this.pending ? 'disabled' : ''}>${this.price(level.price)}</button></td><td>${this.fmt(level.quantity)}</td></tr>`).join('') || '<tr><td colspan="2">No offers yet.</td></tr>'}</tbody></table></div>`;
     const quotedAmount = this.fresh && market.quantity === this.quantity();
     const pricing = isMarketResource(this.asset)
-      ? 'Resources trade at a static base price without spread. Better player bids may pay more. Sales use existing market funds; no currency is created.'
+      ? 'Resource prices move with trades, with deeper pricing liquidity to slow declines and a 1% spread. Existing treasury FTH$ replenishes low market funds; no currency is created.'
       : 'Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.';
     this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span>Prices for this amount</span><strong><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>${translate(pricing, this.language)}</small></div>`;
     this.root.querySelector('[data-market-orders]')!.innerHTML = this.table(['Item', 'Type', 'Price each', 'Completed / total', 'Status', 'Action'], market.orders.map(order =>

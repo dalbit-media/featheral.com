@@ -7,7 +7,6 @@ import { monetaryPolicy } from './monetary-policy.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, automationItems, isActivityItem } from './automation.ts';
 import { dollarsScale } from './dollars.ts';
-import { resourceBasePrice } from './resource-units.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -16,13 +15,7 @@ export function marketPriceAvailable(price: number): boolean {
   return price > 0 && price < Number.MAX_SAFE_INTEGER / dollarsScale;
 }
 export const marketResources: MarketResource[] = ['wood', 'water', 'metal', 'oil'];
-// Fixed game-policy references per accounting lot, not live commodity quotes.
-export const resourcePriceFloors: Readonly<Record<Resource, number>> = {
-  wood: resourceBasePrice('wood'), water: resourceBasePrice('water'), metal: resourceBasePrice('metal'), oil: resourceBasePrice('oil'),
-};
-export function marketPriceFloor(asset: MarketAsset): number {
-  return isMarketResource(asset) ? resourcePriceFloors[asset] : .0001;
-}
+export function marketPriceFloor(_asset: MarketAsset): number { return .0001; }
 export const marketAssets: MarketAsset[] = [...marketResources, ...craftableKeys, ...automationItems,
   ...(Object.keys(terrainDetails) as Terrain[]).map(terrain => `relic-${terrain}` as const)];
 export function isMarketAsset(value: unknown): value is MarketAsset {

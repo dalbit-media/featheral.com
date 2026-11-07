@@ -4,6 +4,19 @@ import type { Environment } from './environment.ts';
 import { drawDiamond, drawEnvironment, drawHouse, drawTree, explorationFringe, project, terrainColors as colors, tileColor, tileHeight, tileWidth, unproject } from './map-art.ts';
 
 interface WorldTile { sx: number; sy: number; visible: boolean; clarity: number }
+export function emergencyTiles<T extends { x: number; y: number; visible: boolean; terrain: Terrain }>(
+  tiles: T[], pending: Stock, home: { x: number; y: number }, bank: boolean,
+): T[] {
+  const selected = new Map<string, T>();
+  for (const tile of tiles) {
+    const resource = terrainResources[tile.terrain];
+    if (!tile.visible || !resource || pending[resource] < 1 || resource === 'oil' && !bank) continue;
+    const previous = selected.get(resource);
+    const distance = (tile.x - home.x) ** 2 + (tile.y - home.y) ** 2;
+    if (!previous || distance < (previous.x - home.x) ** 2 + (previous.y - home.y) ** 2) selected.set(resource, tile);
+  }
+  return [...selected.values()];
+}
 
 export class World {
   private ctx: CanvasRenderingContext2D;
@@ -13,7 +26,7 @@ export class World {
   private width = 0;
   private height = 0;
   private camera = { x: 0, y: 0 };
-  private zoom = 1.55;
+  private zoom = 1.8;
   private drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null;
   private known = new Set<string>();
   private fringe = new Map<string, number>();
@@ -24,7 +37,8 @@ export class World {
   private canvas: HTMLCanvasElement;
   private minimap: HTMLCanvasElement;
   private game: () => Game;
-  private select: (x: number, y: number) => void;
+  private select: (x: number, y: number, collect: boolean) => void;
+  private collectionTiles = new Set<string>();
   private environment: () => Environment;
   private pending: () => Stock;
   private collectLabel: () => string;
@@ -32,7 +46,7 @@ export class World {
     canvas: HTMLCanvasElement,
     minimap: HTMLCanvasElement,
     game: () => Game,
-    select: (x: number, y: number) => void,
+    select: (x: number, y: number, collect: boolean) => void,
     environment: () => Environment,
     pending: () => Stock = () => ({ wood: 0, water: 0, metal: 0, oil: 0 }),
     collectLabel: () => string = () => 'Collect',
@@ -44,7 +58,7 @@ export class World {
     if (!ctx || !mini || !fog) throw new Error('Your browser does not support the canvas renderer.');
     this.ctx = ctx; this.mini = mini; this.fog = fog;
     new ResizeObserver(() => this.resize()).observe(canvas);
-    this.center();
+    this.center(true);
     canvas.addEventListener('pointerdown', e => {
       this.drag = { x: e.clientX, y: e.clientY, cx: this.camera.x, cy: this.camera.y, moved: false };
       canvas.setPointerCapture(e.pointerId);
@@ -64,7 +78,8 @@ export class World {
         const px = (e.clientX - bounds.left - this.width / 2) / this.zoom;
         const py = (e.clientY - bounds.top - this.height / 2) / this.zoom;
         const delta = unproject(px, py);
-        this.select(Math.round(this.camera.x + delta.x), Math.round(this.camera.y + delta.y));
+        const x = Math.round(this.camera.x + delta.x), y = Math.round(this.camera.y + delta.y);
+        this.select(x, y, this.collectionTiles.has(`${x},${y}`));
       }
       this.drag = null;
     });
@@ -72,8 +87,8 @@ export class World {
     canvas.addEventListener('wheel', e => { e.preventDefault(); this.scale(e.deltaY > 0 ? -0.08 : 0.08); }, { passive: false });
     requestAnimationFrame(this.frame);
   }
-  center(): void { this.camera = { ...this.game().position }; }
-  scale(amount: number): void { this.zoom = Math.max(0.65, Math.min(1.8, this.zoom + amount)); }
+  center(settlement = false): void { this.camera = { ...(settlement ? this.game().home ?? this.game().position : this.game().position) }; }
+  scale(amount: number): void { this.zoom = Math.max(0.65, Math.min(2.2, this.zoom + amount)); }
   private tileColor(terrain: Terrain, variant: number): string {
     return tileColor(terrain, variant, this.environment().season);
   }
@@ -202,9 +217,9 @@ export class World {
     c.restore();
     this.drawFog(tiles);
     c.save(); c.translate(this.width / 2, this.height / 2); c.scale(this.zoom, this.zoom);
-    for (const tile of tiles) {
-      const resource = terrainResources[tile.terrain];
-      if (!tile.visible || g.stage < 0 || !resource || pending[resource] < 1 || (resource === 'oil' && !g.bank)) continue;
+    this.collectionTiles.clear();
+    for (const tile of g.stage < 0 ? [] : emergencyTiles(tiles, pending, g.home ?? g.position, g.bank)) {
+      this.collectionTiles.add(`${tile.x},${tile.y}`);
       c.fillStyle = '#d7eab4'; c.fillRect(tile.sx - 18, tile.sy - 7, 36, 14);
       c.fillStyle = '#243a2c'; c.font = 'bold 9px sans-serif'; c.textAlign = 'center';
       c.fillText(this.collectLabel(), tile.sx, tile.sy + 3);

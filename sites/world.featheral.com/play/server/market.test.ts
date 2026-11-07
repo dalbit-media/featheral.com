@@ -56,7 +56,7 @@ test('owner fill history uses buyer and seller indexes after repeated schema ini
     assert.match(plan, /USING INDEX market_fills_seller\b/);
   } finally { db.close(); }
 });
-test('resource floors reject new offers and under-floor funding without spending', () => {
+test('resource prices have only the accounting minimum and reject zero-price orders without spending', () => {
   const h = setup();
   try {
     const player = h.create();
@@ -64,17 +64,44 @@ test('resource floors reject new offers and under-floor funding without spending
       const floor = marketPriceFloor(asset);
       for (const side of ['buy', 'sell'] as const) {
         const before = h.store.read(player.token, session => structuredClone(session.account));
-        assert.throws(() => h.act(player.token, { type: 'limit', asset, side, quantity: 1, price: floor - .0001 }), /price floor/);
+        assert.throws(() => h.act(player.token, { type: 'limit', asset, side, quantity: 1, price: 0 }), /Invalid market/);
         assert.equal(h.read(player.token).dollars, before.game.dollars / dollarsScale);
         assert.equal(h.read(player.token).game.stock[asset], before.game.stock[asset]);
       }
-      assert.throws(() => h.act(player.token, { type: 'fund-pool', asset, quantity: 1, dollars: floor - .0001 }), /price floor/);
+      assert.equal(floor, .0001);
+      assert.throws(() => h.act(player.token, { type: 'fund-pool', asset, quantity: 1, dollars: 0 }), /Invalid market/);
       const offer = h.act(player.token, { type: 'limit', asset, side: 'buy', quantity: 1, price: floor });
       assert.ok(offer.market.orders.some(order => order.asset === asset && order.price >= floor));
     }
   } finally { h.store.close(); }
 });
-test('static resource quotes use actual funds, hiding legacy offers without repricing balances or history', () => {
+test('resource pricing depth survives exchange reinitialization and never grows with reserves', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    const exchange = new Exchange(db), account = createFundedFixtureAccount(1000000);
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, expires INTEGER, data TEXT)');
+    db.prepare("UPDATE market_pools SET units=10000,dollars=400000000 WHERE asset='wood'").run();
+    const first = exchange.read('buyer', account, 1000000, 1000000, 'wood', 1).market.quotes.sell;
+    const depth = db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get()!;
+    assert.equal(String(depth.units), '90000'); assert.equal(String(depth.dollars), '3600000000');
+    db.prepare("UPDATE market_pools SET units=11000,dollars=360792080 WHERE asset='wood'").run();
+    const next = new Exchange(db).read('buyer', account, 1000000, 1000000, 'wood', 1).market.quotes.sell;
+    assert.ok(next.dollars < first.dollars);
+    assert.deepEqual(db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get(), depth);
+  } finally { db.close(); }
+});
+test('large item quotes narrow to safe accounting capacity rather than overflowing intermediate payments', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    const exchange = new Exchange(db), account = createFundedFixtureAccount(1000000);
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, expires INTEGER, data TEXT)');
+    db.prepare("UPDATE market_pools SET units=10000,dollars=? WHERE asset='torch'").run(Math.floor(Number.MAX_SAFE_INTEGER / 2));
+    const quote = exchange.read('buyer', account, 1000000, 1000000, 'torch', 9999).market.quotes.buy;
+    assert.equal(quote.available, false);
+    assert.ok(quote.dollars > 0 && quote.dollars < Number.MAX_SAFE_INTEGER / dollarsScale);
+  } finally { db.close(); }
+});
+test('resource quotes retain valid offers below old floors without repricing balances or history', () => {
   const db = sqlite.open(':memory:');
   try {
     const exchange = new Exchange(db);
@@ -83,25 +110,25 @@ test('static resource quotes use actual funds, hiding legacy offers without repr
     const account = createFundedFixtureAccount(1000000);
     account.game.stage = 0; account.game.home = { ...account.game.position };
     for (const asset of marketResources) {
-      const floor = Math.round(marketPriceFloor(asset) * dollarsScale);
-      const reserveDollars = Math.floor(floor / 2) * 10000;
+      const floor = 100;
+      const reserveDollars = floor * 10000;
       db.prepare('UPDATE market_pools SET units = ?, dollars = ? WHERE asset = ?').run(10000, reserveDollars, asset);
       for (const side of ['buy', 'sell']) db.prepare('INSERT INTO market_orders(owner,asset,side,price,quantity,remaining,status,createdAt) VALUES(?,?,?,?,?,?,?,?)')
         .run('legacy', asset, side, floor - 1, 5, 5, 'open', 1000000);
       db.prepare('INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES(?,?,?,?,?,?,?,?)')
         .run(asset, 1, floor - 1, floor - 1, 900000, 'system', 'legacy', '');
       const view = exchange.read('buyer', account, 1000000, 1000000, asset, 1).market;
-      assert.equal(view.bids.length, 0); assert.equal(view.asks.length, 0);
+      assert.equal(view.bids.length, 1); assert.equal(view.asks.length, 1);
       assert.equal(view.quotes.sell.available, true);
       assert.equal(view.quotes.buy.available, true);
-      assert.equal(view.quotes.sell.dollars, floor / dollarsScale);
-      assert.equal(view.quotes.buy.dollars, floor / dollarsScale);
+      assert.ok(view.quotes.sell.dollars > 0);
+      assert.ok(view.quotes.buy.dollars > 0);
       assert.equal(view.history.at(-1)!.price, (floor - 1) / dollarsScale);
       assert.ok(exchange.read('legacy', account, 1000000, 1000000, asset, 1).market.orders.some(order => order.asset === asset && order.status === 'open'));
       account.game.stock[asset] = 20000;
-      assert.equal(exchange.halfQuote('legacy', account, 1000000).halfSale.available, false);
-      account.pending[asset] = 10000 * 60000;
-      assert.equal(exchange.collectionQuote('legacy', account, asset, 1000000).collectionQuote.available, false);
+      const large = exchange.read('legacy', account, 1000000, 1000000, asset, 10000).market.quotes.sell;
+      assert.equal(large.available, true);
+      assert.ok(large.dollars * dollarsScale <= reserveDollars);
       const unchanged = db.prepare('SELECT units,dollars FROM market_pools WHERE asset=?').get(asset)!;
       assert.equal(Number(unchanged.units), 10000);
       assert.equal(Number(unchanged.dollars), reserveDollars);
@@ -113,41 +140,34 @@ test('static resource quotes use actual funds, hiding legacy offers without repr
     }
   } finally { db.close(); }
 });
-test('every resource sells at the static base price down to the last funded lot, retries once and replenishes through buying', () => {
+test('every resource uses gently falling funded quotes, retries once and has no profitable round trip', () => {
   for (const asset of marketResources) {
     const h = setup(':memory:', false);
     try {
-      const player = h.create(), price = marketPriceFloor(asset);
-      h.act(player.token, { type: 'fund-pool', asset, quantity: 1, dollars: price * 3 });
+      const player = h.create();
+      h.act(player.token, { type: 'fund-pool', asset, quantity: 10, dollars: 30 });
       const before = h.read(player.token, asset);
       const quote = h.read(player.token, asset, 3).market.quotes.sell;
-      assert.equal(quote.available, true); assert.equal(quote.dollars, price * 3);
-      const request = h.request(player.token, { type: 'spot', asset, side: 'sell', quantity: 3, limitDollars: price * 3 });
+      assert.equal(quote.available, true);
+      const price = quote.dollars;
+      const request = h.request(player.token, { type: 'spot', asset, side: 'sell', quantity: 3, limitDollars: price });
       const sold = h.post(player.token, request);
-      assert.equal(sold.dollars, before.dollars + price * 3);
+      assert.ok(Math.abs(sold.dollars - before.dollars - price) < .00001);
       assert.equal(sold.game.stock[asset], before.game.stock[asset] - 3);
       const retry = h.post(player.token, request);
       assert.equal(retry.dollars, sold.dollars); assert.equal(retry.game.stock[asset], sold.game.stock[asset]);
       assert.equal(retry.market.history.length, 1);
-      assert.equal(h.read(player.token, asset).market.quotes.sell.available, false);
-      assert.equal(h.read(player.token, asset).market.tickers.find(ticker => ticker.asset === asset)!.bid, 0);
-      const empty = h.read(player.token, asset);
-      assert.throws(() => h.act(player.token, { type: 'spot', asset, side: 'sell', quantity: 1, limitDollars: price }), /Not enough market funds/);
-      assert.equal(h.read(player.token, asset).dollars, empty.dollars);
-      assert.equal(h.read(player.token, asset).game.stock[asset], empty.game.stock[asset]);
-      assert.equal(h.read(player.token, asset).market.history.length, 1);
-      const buy = h.read(player.token, asset, 4).market.quotes.buy;
-      assert.equal(buy.available, true); assert.equal(buy.dollars, price * 4);
-      h.act(player.token, { type: 'spot', asset, side: 'buy', quantity: 4, limitDollars: price * 4 });
-      assert.equal(h.read(player.token, asset).market.quotes.buy.available, false);
-      assert.equal(h.read(player.token, asset, 4).market.quotes.sell.available, true);
-      h.act(player.token, { type: 'spot', asset, side: 'sell', quantity: 4, limitDollars: price * 4 });
-      assert.equal(h.read(player.token, asset).dollars, sold.dollars, 'round trip cannot create FTH$');
-      assert.equal(h.read(player.token, asset).game.stock[asset], sold.game.stock[asset]);
+      const next = h.read(player.token, asset, 3).market.quotes.sell;
+      assert.ok(next.dollars < price && next.dollars > price * .9, 'decline stays below 10% for this trade');
+      const buy = h.read(player.token, asset, 3).market.quotes.buy;
+      assert.equal(buy.available, true);
+      h.act(player.token, { type: 'spot', asset, side: 'buy', quantity: 3, limitDollars: buy.dollars });
+      assert.ok(h.read(player.token, asset).dollars <= before.dollars, 'round trip cannot create FTH$');
+      assert.equal(h.read(player.token, asset).game.stock[asset], before.game.stock[asset]);
     } finally { h.store.close(); }
   }
 });
-test('insufficient static liquidity never partially spends inventory or pays proceeds', () => {
+test('insufficient real liquidity never spends virtual dollars or partially spends inventory', () => {
   const h = setup(':memory:', false);
   try {
     const player = h.create();
@@ -159,7 +179,7 @@ test('insufficient static liquidity never partially spends inventory or pays pro
     assert.equal(h.read(player.token).dollars, before.dollars);
     assert.equal(h.read(player.token).game.stock.wood, before.game.stock.wood);
     assert.equal(h.read(player.token).market.history.length, 0);
-    assert.equal(h.read(player.token, 'wood', 2).market.quotes.sell.dollars, 5);
+    assert.ok(h.read(player.token, 'wood', 2).market.quotes.sell.dollars < 5);
   } finally { h.store.close(); }
 });
 test('weekly market receipts return daily Water metadata without replaying trades or billing', () => {
@@ -218,8 +238,7 @@ test('system liquidity covers every catalog item and raw resource, records real 
       assert.ok(quote.market.quotes.buy.available, asset);
       if (quote.market.quotes.sell.available) {
         assert.ok(quote.market.quotes.sell.dollars >= marketPriceFloor(asset), asset);
-        if (isMarketResource(asset)) assert.equal(quote.market.quotes.buy.dollars, quote.market.quotes.sell.dollars, asset);
-        else assert.ok(quote.market.quotes.buy.dollars > quote.market.quotes.sell.dollars, asset);
+        assert.ok(quote.market.quotes.buy.dollars > quote.market.quotes.sell.dollars, asset);
       } else assert.fail(`${asset} fixture should have funded liquidity`);
     }
     const before = h.read(user.token);
@@ -228,7 +247,7 @@ test('system liquidity covers every catalog item and raw resource, records real 
     assert.equal(buy.market.history[0].dollars, buyQuote.dollars);
     const sellQuote = h.read(user.token, 'wood', 100).market.quotes.sell;
     const sold = h.act(user.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 100, limitDollars: sellQuote.dollars });
-    assert.equal(sold.dollars, before.dollars);
+    assert.ok(sold.dollars < before.dollars);
     assert.equal(sold.game.stock.wood, before.game.stock.wood);
     assert.equal(sold.market.history.length, 2);
     assert.ok(sold.market.history.every(fill => fill.venue === 'system'));
@@ -239,17 +258,18 @@ test('system liquidity covers every catalog item and raw resource, records real 
 test('best execution prefers cheaper pools over expensive asks and better player prices over pools', () => {
   const h = setup(':memory:', false), a = h.create(), b = h.create();
   try {
-    h.act(a.token, { type: 'fund-pool', asset: 'wood', quantity: 10, dollars: 100 });
+    h.act(a.token, { type: 'fund-pool', asset: 'wood', quantity: 10, dollars: 30 });
     h.act(a.token, { type: 'limit', asset: 'wood', side: 'sell', quantity: 20, price: 5 });
     const q = h.read(b.token, 'wood', 10).market.quotes.buy;
     assert.ok(q.dollars < 50);
     h.act(b.token, { type: 'spot', asset: 'wood', side: 'buy', quantity: 10, limitDollars: q.dollars });
     assert.equal(h.read(a.token).market.orders[0].remaining, 20);
-    h.act(b.token, { type: 'limit', asset: 'wood', side: 'buy', quantity: 4, price: 4 });
-    const fill = h.act(a.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 7, limitDollars: 23.5 });
+    h.act(b.token, { type: 'limit', asset: 'wood', side: 'buy', quantity: 4, price: 3.7 });
+    const sell = h.read(a.token, 'wood', 7).market.quotes.sell;
+    const fill = h.act(a.token, { type: 'spot', asset: 'wood', side: 'sell', quantity: 7, limitDollars: sell.dollars });
     assert.ok(fill.market.trades.some(trade => trade.venue === 'players'));
     assert.ok(fill.market.trades.some(trade => trade.venue === 'system'));
-    assert.equal(h.read(b.token).market.orders.find(o => o.price === 4)!.status, 'filled');
+    assert.equal(h.read(b.token).market.orders.find(o => o.price === 3.7)!.status, 'filled');
   } finally { h.store.close(); }
 });
 test('crafted item and collectible trading reserves unique slots, protects equipment and survives cancellation', () => {

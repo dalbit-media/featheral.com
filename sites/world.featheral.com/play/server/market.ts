@@ -9,11 +9,11 @@ import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
-import { poolPayment } from '../src/pool-pricing.ts';
+import { poolPayment, poolPaymentUnits } from '../src/pool-pricing.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import type { CollectionQuote, Command } from '../src/api-types.ts';
 
-interface Pool { units: number; dollars: number }
+interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
 interface Step { quantity: number; dollars: number; maker: Order | null }
 export interface ExchangeResult extends Snapshot { market: MarketSnapshot; message?: string }
@@ -78,21 +78,24 @@ function poolCost(pool: Pool, side: MarketSide, quantity: number): number {
   catch (error) { if (!(error instanceof RangeError)) throw error; throw new ApiError(409, 'Market pool limit reached.'); }
 }
 function poolSideAvailable(pool: Pool, side: MarketSide, floor: number): boolean {
-  return pool.units > (side === 'buy' ? 1 : 0) && pool.dollars > 0 && poolCost(pool, side, 1) >= floor
+  if (pool.units < (side === 'buy' ? pool.depthUnits ? 1 : 2 : 0) || pool.dollars <= 0) return false;
+  const cost = poolPaymentUnits(pool, side, 1);
+  return cost >= BigInt(floor) && cost <= BigInt(side === 'buy' ? Number.MAX_SAFE_INTEGER - pool.dollars : pool.dollars)
     && (side === 'buy' || compareMarginal(pool, side, 1, floor) >= 0);
 }
 function compareMarginal(pool: Pool, side: MarketSide, quantity: number, price: number): number {
-  const units = pool.units + (side === 'buy' ? -quantity : quantity);
-  if (units <= 0) return 1;
+  const units = BigInt(pool.units) + (pool.depthUnits ?? 0n) + (side === 'buy' ? -BigInt(quantity) : BigInt(quantity));
+  if (units <= 0n) return 1;
   if (price === Infinity) return -1;
-  const numerator = BigInt(pool.dollars) * BigInt(pool.units) * BigInt(100 + (side === 'buy' ? monetaryPolicy.poolSpreadPercent : -monetaryPolicy.poolSpreadPercent));
-  const boundary = BigInt(price) * 100n * BigInt(units) ** 2n;
+  const numerator = (BigInt(pool.dollars) + (pool.depthDollars ?? 0n)) * (BigInt(pool.units) + (pool.depthUnits ?? 0n))
+    * BigInt(100 + (side === 'buy' ? monetaryPolicy.poolSpreadPercent : -monetaryPolicy.poolSpreadPercent));
+  const boundary = BigInt(price) * 100n * units ** 2n;
   return numerator < boundary ? -1 : numerator > boundary ? 1 : 0;
 }
-function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: number, fixedResource = false): void {
+function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: number, resource = false): void {
   pool.units += side === 'buy' ? -quantity : quantity;
   pool.dollars += side === 'buy' ? dollars : -dollars;
-  if (![pool.units, pool.dollars].every(value => Number.isSafeInteger(value) && (fixedResource ? value >= 0 : value > 0)))
+  if (![pool.units, pool.dollars].every(value => Number.isSafeInteger(value) && (resource ? value >= 0 : value > 0)))
     throw new ApiError(409, 'Market pool limit reached.');
 }
 export class Exchange {
@@ -111,6 +114,7 @@ export class Exchange {
       CREATE INDEX IF NOT EXISTS market_fills_buyer ON market_fills(buyer, id);
       CREATE INDEX IF NOT EXISTS market_fills_seller ON market_fills(seller, id);
       CREATE TABLE IF NOT EXISTS market_receipts (owner TEXT NOT NULL, id TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,id));`);
+    db.exec('CREATE TABLE IF NOT EXISTS market_resource_depth (asset TEXT PRIMARY KEY, units TEXT NOT NULL, dollars TEXT NOT NULL)');
     const insert = db.prepare('INSERT OR IGNORE INTO market_pools VALUES (?, ?, ?)');
     for (const asset of marketAssets) {
       insert.run(asset, 0, 0);
@@ -118,7 +122,16 @@ export class Exchange {
   }
   private pool(asset: MarketAsset): Pool {
     const row = this.db.prepare('SELECT units, dollars FROM market_pools WHERE asset = ?').get(asset)!;
-    return { units: Number(row.units), dollars: Number(row.dollars) };
+    const pool: Pool = { units: Number(row.units), dollars: Number(row.dollars) };
+    if (isMarketResource(asset)) {
+      // Pricing depth is not spendable inventory or money. Pin once, never grow on trades/top-ups.
+      if (pool.units > 0 && pool.dollars > 0)
+        this.db.prepare('INSERT OR IGNORE INTO market_resource_depth VALUES(?,?,?)')
+          .run(asset, (BigInt(pool.units) * 9n).toString(), (BigInt(pool.dollars) * 9n).toString());
+      const depth = this.db.prepare('SELECT units,dollars FROM market_resource_depth WHERE asset=?').get(asset);
+      if (depth) { pool.depthUnits = BigInt(String(depth.units)); pool.depthDollars = BigInt(String(depth.dollars)); }
+    }
+    return pool;
   }
   private orders(asset: MarketAsset, side: MarketSide, owner: string, realTime: number): Order[] {
     return this.db.prepare(`SELECT o.* FROM market_orders o JOIN sessions s ON s.id = o.owner
@@ -132,22 +145,6 @@ export class Exchange {
     const pool = this.pool(asset), steps: Step[] = [], floor = dollarsUnits(marketPriceFloor(asset));
     let remaining = quantity, index = 0;
     while (remaining > 0) {
-      if (isMarketResource(asset)) {
-        const maker = makers[index];
-        const poolQuantity = Math.min(remaining, side === 'buy' ? pool.units : Math.floor(pool.dollars / floor),
-          side === 'buy' ? Math.floor((Number.MAX_SAFE_INTEGER - pool.dollars) / floor) : Number.MAX_SAFE_INTEGER - pool.units);
-        const pooled = poolQuantity > 0 && (limit === undefined || (side === 'buy' ? floor <= limit : floor >= limit));
-        if (maker && (!pooled || (side === 'buy' ? maker.price <= floor : maker.price >= floor))) {
-          const quantity = Math.min(remaining, maker.remaining);
-          steps.push({ quantity, dollars: quantity * maker.price, maker });
-          remaining -= quantity; index++;
-        } else if (pooled) {
-          const dollars = poolQuantity * floor;
-          steps.push({ quantity: poolQuantity, dollars, maker: null });
-          movePool(pool, side, poolQuantity, dollars, true); remaining -= poolQuantity;
-        } else break;
-        continue;
-      }
       const pooled = isLiquidAsset(asset) && poolSideAvailable(pool, side, floor);
       const maker = makers[index], comparison = maker && pooled ? compareMarginal(pool, side, 1, maker.price) : 0;
       if (maker && (!pooled || (side === 'buy' ? comparison >= 0 : comparison <= 0))) {
@@ -160,15 +157,17 @@ export class Exchange {
       if (!pooled) break;
       const boundary = side === 'buy' ? Math.min(maker?.price ?? Infinity, limit ?? Infinity)
         : Math.max(maker?.price ?? 0, limit ?? 0, floor);
-      let low = 0, high = Math.min(remaining, side === 'buy' ? pool.units - 1 : remaining);
+      let low = 0, high = Math.min(remaining, side === 'buy' ? pool.units - (pool.depthUnits ? 0 : 1) : Number.MAX_SAFE_INTEGER - pool.units);
       while (low < high) {
         const middle = Math.ceil((low + high) / 2), comparison = compareMarginal(pool, side, middle, boundary);
-        if (side === 'buy' ? comparison <= 0 : comparison >= 0) low = middle; else high = middle - 1;
+        const cost = poolPaymentUnits(pool, side, middle);
+        const funded = cost <= BigInt(side === 'buy' ? Number.MAX_SAFE_INTEGER - pool.dollars : pool.dollars);
+        if (funded && (side === 'buy' ? comparison <= 0 : comparison >= 0)) low = middle; else high = middle - 1;
       }
       if (low) {
         const dollars = poolCost(pool, side, low);
         if (BigInt(dollars) < BigInt(low) * BigInt(floor)) break;
-        steps.push({ quantity: low, dollars, maker: null }); movePool(pool, side, low, dollars); remaining -= low;
+        steps.push({ quantity: low, dollars, maker: null }); movePool(pool, side, low, dollars, isMarketResource(asset)); remaining -= low;
       } else if (maker) {
         const quantity = Math.min(remaining, maker.remaining);
         steps.push({ quantity, dollars: quantity * maker.price, maker }); remaining -= quantity;
@@ -194,14 +193,12 @@ export class Exchange {
       asset, quantity, bids: level('buy'), asks: level('sell'), quotes: { buy: quote('buy'), sell: quote('sell') },
       tickers: marketAssets.map(asset => {
         const pool = this.pool(asset), last = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 1').get(asset);
-        const pooled = isLiquidAsset(asset) && pool.units > 0 && pool.dollars > 0;
+        const pooled = isLiquidAsset(asset) && pool.dollars > 0;
         const floor = dollarsUnits(marketPriceFloor(asset));
         const bid = this.db.prepare(`SELECT MAX(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'buy' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
         const ask = this.db.prepare(`SELECT MIN(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'sell' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
-        const poolBid = isMarketResource(asset) ? pool.dollars >= floor && pool.units < Number.MAX_SAFE_INTEGER ? floor : 0
-          : pooled && poolSideAvailable(pool, 'sell', floor) ? poolCost(pool, 'sell', 1) : 0;
-        const poolAsk = isMarketResource(asset) ? pool.units > 0 && pool.dollars <= Number.MAX_SAFE_INTEGER - floor ? floor : 0
-          : pooled && poolSideAvailable(pool, 'buy', floor) ? poolCost(pool, 'buy', 1) : 0;
+        const poolBid = pooled && poolSideAvailable(pool, 'sell', floor) ? poolCost(pool, 'sell', 1) : 0;
+        const poolAsk = pooled && poolSideAvailable(pool, 'buy', floor) ? poolCost(pool, 'buy', 1) : 0;
         return { asset, bid: Math.max(poolBid >= floor ? poolBid : 0, Number(bid?.price ?? 0)) / dollarsScale,
           ask: Math.min(poolAsk >= floor ? poolAsk : Number.MAX_SAFE_INTEGER, Number(ask?.price ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
           last: last ? Number(last.price) / dollarsScale : null };
@@ -323,7 +320,7 @@ export class Exchange {
       const filled = steps.reduce((sum, step) => sum + step.quantity, 0), total = steps.reduce((sum, step) => sum + step.dollars, 0);
       if (command.type === 'spot' && filled !== command.quantity && isMarketResource(asset))
         throw new ApiError(409, command.side === 'sell'
-          ? 'Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.'
+          ? 'Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.'
           : 'Not enough resources in the market. Buy less or try again after players sell.');
       if (command.type === 'spot' && (filled !== command.quantity || (command.side === 'buy' ? total > command.limitDollars : total < command.limitDollars))) throw new ApiError(409, 'Quote changed or liquidity is insufficient. Refresh the quote.');
       const reservedDollars = command.side === 'buy' ? command.type === 'limit' ? command.price * command.quantity : total : 0;

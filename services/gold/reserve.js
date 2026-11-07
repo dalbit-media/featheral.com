@@ -38,6 +38,10 @@ function conversionMessage({ amount, nonce, issuedAt, pricing: authorization }, 
     "This reserves an off-chain obligation. It does not transfer Ethereum tokens."].join("\n");
 }
 function goldEntries(ledger, data) {
+  if (data.op === "refill-market") return [
+    { account: data.account, delta: data.dollars },
+    { account: TREASURY, delta: (-BigInt(data.dollars)).toString() },
+  ];
   if (data.op === "fund-market") return [
     { account: data.account, delta: data.dollars },
     { account: TREASURY, delta: (BigInt(data.fthg) * RATE - BigInt(data.dollars)).toString() },
@@ -77,6 +81,23 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
     }; };
   }
   if (!state) throw fail("Finite Gold reserve is not initialized.");
+  if (data.op === "refill-market") {
+    const target = Object.hasOwn(ledger.genesis.goldMarkets || {}, data.asset) ? ledger.genesis.goldMarkets[data.asset] : null;
+    const pool = state.pools[data.asset];
+    if (!["wood", "water", "metal", "oil"].includes(data.asset) || !target || !pool || data.account !== pool.account)
+      throw fail("Treasury refill requires an initialized resource market.");
+    const dollars = integer(data.dollars, true);
+    const balance = BigInt(ledger.balance(pool.account).available);
+    const ceiling = BigInt(target.pricePerLot) * BigInt(target.quantity);
+    if (balance >= ceiling / 4n) throw fail("Resource refill requires low market funds.");
+    if (dollars % GAME_UNIT || balance + dollars > ceiling || balance + dollars > BigInt(Number.MAX_SAFE_INTEGER) * GAME_UNIT
+      || dollars > BigInt(ledger.balance(TREASURY).available))
+      throw fail("Resource refill exceeds existing treasury funds or the market funding limit.");
+    return () => {
+      ledger.account(TREASURY).balance -= dollars;
+      ledger.account(pool.account).balance += dollars;
+    };
+  }
   if (data.op === "pricing-policy") {
     if (state.pricingPolicy || data.policy !== pricing.POLICY || BigInt(state.cap) <= 0n) throw fail("Invalid or already activated Gold pricing policy.");
     pricing.position(state);
@@ -277,16 +298,17 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
           continue;
         }
         const tx = ledger.rawBlock(height).x[index], data = tx.d;
-        if (tx.k === "GOLD" && ["fund-market", "redeem", "convert", "sync"].includes(data.op)) {
+        if (tx.k === "GOLD" && ["fund-market", "refill-market", "redeem", "convert", "sync"].includes(data.op)) {
           const incoming = data.op === "fund-market" || data.op === "convert" || data.direction === "origin-to-reserve";
-          const fthg = data.op === "convert" ? data.request.amount : data.fthg;
+          const fthg = data.op === "refill-market" ? "0" : data.op === "convert" ? data.request.amount : data.fthg;
+          const treasury = data.op === "refill-market" || data.op === "fund-market" && BigInt(fthg) === 0n;
           items.push({ id: tx.i, hash: ledger.ids.get(tx.i), height, time: new Date(tx.t).toISOString(),
-            operation: data.op, direction: data.op === "fund-market" && BigInt(fthg) === 0n ? "treasury-to-market" : incoming ? "origin-to-reserve" : "reserve-to-origin",
-            from: data.op === "fund-market" && BigInt(fthg) === 0n ? TREASURY : incoming ? sourceWallet : reserveWallet,
-            to: data.op === "fund-market" && BigInt(fthg) === 0n ? data.account : incoming ? reserveWallet : sourceWallet,
+            operation: data.op, direction: treasury ? "treasury-to-market" : incoming ? "origin-to-reserve" : "reserve-to-origin",
+            from: treasury ? TREASURY : incoming ? sourceWallet : reserveWallet,
+            to: treasury ? data.account : incoming ? reserveWallet : sourceWallet,
             fthg, dollars: data.op === "sync" ? "0" : data.op === "redeem" ? data.transfer.amount
               : data.op === "convert" ? data.dollars ?? (BigInt(fthg) * RATE).toString() : data.dollars,
-            treasuryDollars: data.op === "fund-market" ? (BigInt(data.dollars) - BigInt(fthg) * RATE).toString() : "0",
+            treasuryDollars: data.op === "fund-market" || data.op === "refill-market" ? (BigInt(data.dollars) - BigInt(fthg) * RATE).toString() : "0",
             asset: data.asset || null, quantity: data.quantity || null,
             recordType: data.op === "sync" ? "ethereum-confirmed" : BigInt(fthg) ? "off-chain-obligation" : "treasury-circulation",
             ethereumTx: data.txHash || null, logIndex: data.logIndex ?? null });
@@ -305,6 +327,22 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
         commit("gold:initialize", { op: "initialize", cap: balance.origin.toString(), rate: RATE.toString(), evidence: balance.evidence });
       }
       return status();
+    }),
+    refillMarket: asset => serialize(async () => {
+      if (!["wood", "water", "metal", "oil"].includes(asset)) throw fail("Only resource markets receive treasury refills.");
+      beforeMutation();
+      const target = Object.hasOwn(ledger.genesis.goldMarkets || {}, asset) ? ledger.genesis.goldMarkets[asset] : null;
+      const pool = ledger.goldReserve?.pools[asset];
+      if (!target || !pool) return null;
+      const ceiling = BigInt(target.pricePerLot) * BigInt(target.quantity);
+      const balance = BigInt(ledger.balance(pool.account).available);
+      if (balance >= ceiling / 4n) return { transferred: "0" };
+      const treasury = BigInt(ledger.balance(TREASURY).available);
+      const deficit = ceiling - balance;
+      const dollars = (treasury < deficit ? treasury : deficit) / GAME_UNIT * GAME_UNIT;
+      if (!dollars) return { transferred: "0", exhausted: true };
+      commit(`gold:refill:${crypto.randomUUID()}`, { op: "refill-market", asset, account: pool.account, dollars: dollars.toString() });
+      return { transferred: dollars.toString(), exhausted: dollars < deficit };
     }),
     fundMarket: (asset, quantity, dollars) => serialize(async () => {
       if (typeof asset !== "string" || !Number.isSafeInteger(quantity) || quantity < 2 || quantity > 10000

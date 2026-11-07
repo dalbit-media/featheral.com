@@ -54,7 +54,7 @@
   }
   function row(item) {
     const tr = node("tr");
-    const labels = { "fund-market": "Market funding", redeem: "Redemption", convert: "Reconversion", sync: "Ethereum settlement" };
+    const labels = { "fund-market": "Market funding", "refill-market": "Treasury market refill", redeem: "Redemption", convert: "Reconversion", sync: "Ethereum settlement" };
     const cell = (text, cls) => { const td = node("td", text, cls); tr.append(td); return td; };
     cell(new Date(item.time).toLocaleString());
     const operation = cell(labels[item.operation]);
@@ -65,7 +65,7 @@
     const currency = cell(item.operation === "sync" ? "No currency movement" : `${dollars(item.dollars)} FTH$`, "numeric");
     currency.title = `Exact FTH$ base units: ${item.dollars}`;
     if (BigInt(item.treasuryDollars)) currency.append(node("small", `${dollars(item.treasuryDollars)} FTH$ from treasury`));
-    if (item.operation === "fund-market") currency.append(node("small", `Into ${item.asset} market`));
+    if (item.operation === "fund-market" || item.operation === "refill-market") currency.append(node("small", `Into ${item.asset} market`));
     if (item.operation === "redeem") currency.append(node("small", "Into locked redemption escrow"));
     if (item.operation === "convert") currency.append(node("small", "Escrow → origin FTH$ account"));
     const status = cell();

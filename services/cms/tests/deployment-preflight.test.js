@@ -15,7 +15,7 @@ test("live reserve seed prices stay genesis-compatible when market floors change
     assert.equal(targets[asset].pricePerLot, (BigInt(price) * 10n ** 18n).toString());
     assert.equal(marketBasePrice(asset), price);
   }
-  assert.equal(marketPriceFloor("oil"), 30, "trade floor may differ without altering immutable reserve seeds");
+  assert.equal(marketPriceFloor("oil"), .0001, "only accounting precision limits prices; reserve seeds stay unchanged");
 });
 test("candidate preflight compares actual module policies without starting a gateway or creating ledger keys", t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-policy-"));

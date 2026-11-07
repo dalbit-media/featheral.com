@@ -13,6 +13,13 @@ import { resourceBasePrice, resourceEconomy } from './resource-units.ts';
 
 export const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
 export const emptyAllocation = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
+export function expeditionSurveyRadius(game: Game): number { return Math.max(1, radius(game) - .25); }
+export function emergencyCollection(pending: Stock, fees: Stock, dollars: number): Stock {
+  return { wood: pending.wood >= 1 && fees.wood > dollars ? pending.wood : 0,
+    water: pending.water >= 1 && fees.water > dollars ? pending.water : 0,
+    metal: pending.metal >= 1 && fees.metal > dollars ? pending.metal : 0,
+    oil: pending.oil >= 1 && fees.oil > dollars ? pending.oil : 0 };
+}
 export function workforceCounts(population: number, work: Pick<Workforce, 'crews' | 'expeditions'>) {
   const gathering = Object.values(work.crews).reduce((sum, crew) => sum + crew.workers, 0);
   const exploring = work.expeditions.reduce((sum, expedition) => sum + expedition.workers, 0);

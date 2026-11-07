@@ -14,7 +14,7 @@ import { claimCooldownMs, defaultClockSpeed, displayServerTime, environmentAt, s
 import { compactServerCountdown, completionProgress, environmentDetails, updateClockTime, updateWeekCalendar } from './environment-view.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
-import { editableAllocation, nextExploration, resourceCapacity, workforceCounts } from './workforce.ts';
+import { editableAllocation, emergencyCollection, nextExploration, resourceCapacity, workforceCounts } from './workforce.ts';
 import { inventoryPageSize, inventoryUsed, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import type { ItemId } from './items.ts';
 import { craftingPanel, inventoryPanel } from './inventory-view.ts';
@@ -285,12 +285,13 @@ chatOverlay?.addEventListener('keydown', event => {
 function focusWorldChat(): void { setChatExpanded(true); chatOverlay?.focus(); }
 const managementDialog = document.querySelector<HTMLDialogElement>('#management-dialog')!;
 managementDialog.addEventListener('close', () => { management = null; render(); });
-const world = !explorePage ? null : new World(document.querySelector<HTMLCanvasElement>('#world')!, document.querySelector<HTMLCanvasElement>('#minimap')!, () => game, (x, y) => {
+const world = !explorePage ? null : new World(document.querySelector<HTMLCanvasElement>('#world')!, document.querySelector<HTMLCanvasElement>('#minimap')!, () => game, (x, y, collect) => {
   const resource = terrainResources[terrainAt(x, y, game.seed)];
-  if (resource && game.explored.includes(`${x},${y}`) && state.resourceAccess[resource].available && state.pending[resource] >= 1) {
+  if (collect && resource && game.explored.includes(`${x},${y}`) && state.resourceAccess[resource].available
+    && emergencyCollection(state.pending, state.collection?.fees ?? { wood: 0, water: 0, metal: 0, oil: 0 }, state.dollars)[resource] >= 1) {
     void act({ type: 'map-collect', x, y });
   } else requestMove(x, y);
-}, () => environment, () => state.pending, () => translate('Collect', language));
+}, () => environment, () => emergencyCollection(state.pending, state.collection?.fees ?? { wood: 0, water: 0, metal: 0, oil: 0 }, state.dollars), () => translate('Collect', language));
 function requestMove(x: number, y: number): void {
   if (!game.explored.includes(`${x},${y}`)) {
     const reason = upkeepPauseReason();

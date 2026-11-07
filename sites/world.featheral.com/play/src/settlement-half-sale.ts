@@ -63,7 +63,7 @@ export class SettlementHalfSale {
     this.root.querySelector('[data-half-total]')!.textContent = this.quote ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-half-status]')!.textContent = this.error || (this.loading ? translate('Loading prices...', this.language)
       : this.quote && !this.quote.sales.length ? translate('Own at least two of a resource to sell half.', this.language)
-      : this.quote && !this.quote.available ? translate('Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.', this.language) : '');
+      : this.quote && !this.quote.available ? translate('Not enough market funds for this sale. Treasury funds are finite. Sell less or try again after funds are replenished.', this.language) : '');
     this.root.querySelector<HTMLButtonElement>('[data-half-submit]')!.disabled = this.pending || this.loading || !!this.error || !this.quote?.available || !this.matches();
     this.root.querySelector<HTMLButtonElement>('[data-half-refresh]')!.disabled = this.pending || this.loading;
   }

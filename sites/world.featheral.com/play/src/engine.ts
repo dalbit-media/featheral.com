@@ -137,7 +137,7 @@ export function discover(game: Game): void {
 }
 export function survey(game: Game, position: Game['position'], r: number): void {
   const known = new Set(game.explored);
-  for (let x = -r; x <= r; x++) for (let y = -r; y <= r; y++) {
+  for (let x = -Math.floor(r); x <= r; x++) for (let y = -Math.floor(r); y <= r; y++) {
     if (x * x + y * y <= r * r) known.add(`${position.x + x},${position.y + y}`);
   }
   game.explored = [...known];
