@@ -1,7 +1,7 @@
 import type { DayPhase, Environment, Season } from './environment.ts';
 import { environmentAt, worldDayMs, worldEpoch, worldWeeksPerYear, worldYearMs, seasonMs } from './environment.ts';
 import { icon } from './icons.ts';
-import { productionClimate, recruitmentClimate, waterDemandClimate } from './climate.ts';
+import { heatingDemandClimate, maintenanceDemandClimate, productionClimate, recruitmentClimate, waterDemandClimate } from './climate.ts';
 
 const seasonIcons: Record<Season, string> = { Spring: 'flower', Summer: 'sun', Autumn: 'leaf', Winter: 'snowflake' };
 const phaseIcons: Record<DayPhase, string> = { Dawn: 'sunrise', Day: 'sun', Dusk: 'sunset', Night: 'moon' };
@@ -130,7 +130,8 @@ export function environmentDetails(environment: Environment, effects = false): s
 export function overallWeatherImpact(environment: Environment): 'best' | 'good' | 'bad' | 'worst' {
   const production = (['wood', 'water', 'metal', 'oil'] as const)
     .reduce((sum, resource) => sum + productionClimate(resource, environment) - 1, 0);
-  const score = (production + recruitmentClimate(environment) - 1 - (waterDemandClimate(environment) - 1)) / 6;
+  const score = (production + recruitmentClimate(environment) - 1 - (waterDemandClimate(environment) - 1)
+    - (heatingDemandClimate(environment) - 1) - (maintenanceDemandClimate(environment) - 1)) / 8;
   return score >= .05 ? 'best' : score >= 0 ? 'good' : score > -.25 ? 'bad' : 'worst';
 }
 export function environmentEffects(environment: Environment): string {
@@ -145,7 +146,9 @@ export function environmentEffects(environment: Environment): string {
   return `<details class="weather-effects"><summary class="weather-impact weather-impact-${impact}" aria-label="${label}" title="${label}">${icon(symbol)}</summary><p><strong>Expected effects</strong></p><p>Season, weather and temperature compared with normal conditions:</p><dl>
     ${(['wood', 'water', 'metal', 'oil'] as const).map(resource => `<div><dt>${{ wood: 'Wood production', water: 'Water production', metal: 'Metal production', oil: 'Oil production' }[resource]}</dt><dd>${change(productionClimate(resource, environment))}</dd></div>`).join('')}
     <div><dt>Recruitment suitability</dt><dd>${change(recruitmentClimate(environment))}</dd></div>
-    <div><dt>Water demand</dt><dd>${change(waterDemandClimate(environment), true)}</dd></div></dl>
-    <p>Overall indicator averages four production modifiers and recruitment suitability, with higher water demand counted as a penalty.</p>
+    <div><dt>Water demand</dt><dd>${change(waterDemandClimate(environment), true)}</dd></div>
+    <div><dt>Wood heating demand</dt><dd>${change(heatingDemandClimate(environment), true)}</dd></div>
+    <div><dt>Metal maintenance demand</dt><dd>${change(maintenanceDemandClimate(environment), true)}</dd></div></dl>
+    <p>Overall indicator includes production, recruitment, water demand, heating and maintenance.</p>
     <p>Current-condition estimates. Actual production and recruitment use daily averages; expedition finds use weekly averages.</p></details>`;
 }

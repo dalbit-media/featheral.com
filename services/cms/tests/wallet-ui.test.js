@@ -150,7 +150,8 @@ test("shared funds wallet remains available on standalone X while social sign-in
     document: { getElementById: () => dialog, createElement: () => ({ dataset: {}, style: {}, addEventListener() {} }) },
     walletEnabled: true, toast() {}, wallet: { address: "0x1111111111111111111111111111111111111111" } });
   vm.runInContext(snippet, context); await context.openWalletPanel();
-  assert.equal(calls[0].primary, "FTHX"); assert.equal(calls[0].compact, true); assert.equal(calls[0].address, context.wallet.address);
+  assert.equal(calls[0].primary, "FTHX"); assert.equal(calls[0].compact, true);
+  assert.equal(calls[0].address, undefined, "social account must not override the current funds wallet");
   assert.equal(root.style.height, 'calc(100% - 64px)');
   context.walletEnabled = false;
   await context.openWalletPanel();
@@ -221,7 +222,7 @@ test("shared header spacing keeps the connected address readable instead of forc
   assert.match(css, /header\[data-wallet-header\] \.central-wallet-button\{[^}]*width:auto;/,
     "shared button sizing must override .wallet-icon[data-central-wallet]");
   assert.match(css, /\.central-wallet-label\{display:inline;white-space:nowrap/);
-  assert.match(css, /\[data-wallet-state=selected\] \.central-wallet-label\{[^}]*font-family:ui-monospace/);
+  assert.match(css, /:is\(\[data-wallet-state=selected\],\[data-wallet-state=authorized\]\) \.central-wallet-label\{[^}]*font-family:ui-monospace/);
   assert.match(css, /header\[data-wallet-header\]:not\(\[data-wallet-header=FTHX\]\)\{flex-wrap:nowrap\}/,
     "mobile brand and wallet stay on one row");
 });

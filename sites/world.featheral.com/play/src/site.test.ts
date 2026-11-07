@@ -24,6 +24,72 @@ import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketp
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
 
+test('2D maps start closer, repaint on interaction and stop painting unchanged scenes', () => {
+  for (const name of ['World', 'SettlementMap']) {
+    const file = name === 'World' ? './world.ts' : './settlement-map.ts';
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const code = stripTypeScriptTypes(source.slice(source.indexOf(`export class ${name}`)).replace('export class', 'class'));
+    let paints = 0;
+    const calls: Record<string, (event: Record<string, number>) => void> = {};
+    const drawing = new Proxy({ clearRect: () => { paints++; }, createRadialGradient: () => ({ addColorStop() {} }),
+      measureText: () => ({ width: 20 }) }, {
+      get(target, key) { return Reflect.get(target, key) ?? (() => {}); },
+    });
+    const canvas = { isConnected: true, width: 0, height: 0, getContext: () => drawing,
+      getBoundingClientRect: () => ({ width: 800, height: 600, left: 0, top: 0 }),
+      addEventListener: (event: string, callback: typeof calls[string]) => { calls[event] = callback; },
+      setPointerCapture() {}, focus() {}, setAttribute() {} };
+    const context = {
+      document: { hidden: false, createElement: () => canvas }, devicePixelRatio: 1, requestAnimationFrame: () => 1,
+      ResizeObserver: class { observe() {} }, Image: class { complete = false; src = ''; },
+      decorationItems: {}, isDecorationItem: () => false, isWaterFacility: () => false,
+      hash: () => .2, radius: () => 3, terrainAt: () => 'grassland', terrainColors: {},
+      explorationFringe: () => new Map(), project, unproject, tileWidth, tileHeight,
+      drawDiamond() {}, drawHouse() {}, drawTree() {}, drawEnvironment() {}, tileColor: () => '#123456',
+      settlementPositions: () => ({}), positionEntries: () => [], settlementTerrain: () => 'grassland',
+      settlementRadius: 8, cellKey,
+    };
+    const Renderer = runInNewContext(`${code}; ${name};`, context);
+    const state = { ...snapshot(createAccount(0)), csrf: 'test', population: { global: 0, federation: null }, clockSpeed: 1 };
+    const environment = environmentAt(worldEpoch);
+    const renderer = name === 'World'
+      ? new Renderer(canvas, canvas, () => state.game, () => {}, () => environment)
+      : new Renderer(canvas, () => ({ state, environment, editing: false, selected: null, pending: null }), () => {}, () => {}, 'en', () => {});
+    renderer.resize();
+    assert.equal(renderer.zoom, name === 'World' ? 1.55 : 2.1);
+    renderer.frame(16);
+    const initialPaints = paints;
+    assert.ok(initialPaints > 0);
+    for (let frame = 32; frame <= 1000; frame += 16) renderer.frame(frame);
+    assert.equal(paints, initialPaints, 'unchanged scenes must not redraw terrain or fog');
+    renderer.scale(.15); renderer.frame(1024);
+    assert.ok(paints > initialPaints, 'zoom must repaint on the next frame');
+    const zoomPaints = paints;
+    calls.pointerdown({ clientX: 400, clientY: 300, pointerId: 1, button: 0 });
+    calls.pointermove({ clientX: 460, clientY: 350, pointerId: 1 });
+    renderer.frame(1040);
+    assert.ok(paints > zoomPaints, 'panning must repaint without a low-frame-rate throttle');
+    context.document.hidden = true;
+    const hiddenPaints = paints;
+    renderer.scale(.15); renderer.frame(1056);
+    assert.equal(paints, hiddenPaints);
+    context.document.hidden = false; renderer.frame(1072);
+    assert.ok(paints > hiddenPaints);
+  }
+});
+
+test('collection readiness uses a visible text badge and game/header controls stay static and borderless', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
+  const shared = readFileSync(new URL('../../../../shared/site-links.css', import.meta.url), 'utf8');
+  assert.match(main, /collection-ready'\)!\.textContent = ready \? translate\('Collect', language\)/);
+  assert.match(css, /\.collection-ready\{[^}]*background:var\(--mint\);color:#102016/);
+  assert.match(css, /#app \*,#app \*::before,#app \*::after\{animation:none!important;transition:none!important/);
+  assert.match(css, /#app \.topbar button[^}]*border:0;box-shadow:none/);
+  assert.match(shared, /body>header button,#app>header button,header\.topbar button\{border:0!important/);
+  assert.doesNotMatch(main.slice(main.indexOf('function showClaimFeedback'), main.indexOf('function wireResourceTooltips')), /claim-ring|claim-spark/);
+});
+
 test('calendar animation bounds updates to ten per second and pauses when hidden or reduced-motion', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const code = stripTypeScriptTypes(main.slice(main.indexOf('let clockFrame:'), main.indexOf('function scheduleClockAnimation()')));
@@ -276,7 +342,9 @@ test('direct claims skip review while other gameplay and market payments retain 
 test('resource tooltips distinguish weekly collection and transport from daily population Water', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const resources = main.slice(main.indexOf('function renderResources()'), main.indexOf('function gearCard()'));
-  assert.match(resources, /consumption = key === 'water' \? state\.waterUpkeep\?\.dailyConsumption \?\? 0 : state\.workforce\.crews\[key\]\?\.weeklyDollarsCost \?\? 0/);
+  assert.match(resources, /dailyUse = key === 'water' \? state\.waterUpkeep\?\.dailyConsumption \?\? 0/);
+  assert.match(resources, /state\.settlementUpkeep\?\.resources\[key\]\.dailyConsumption/);
+  assert.match(resources, /consumption = key === 'water' \? dailyUse : state\.workforce\.crews\[key\]\?\.weeklyDollarsCost \?\? 0/);
   assert.match(resources, /rate = state\.rates\[key\]/);
   assert.match(resources, /'Resource flow' : '1 game week'/);
   assert.match(resources, /'Collection \/ week' : 'Collection'/);
@@ -718,7 +786,7 @@ test('World game pages share responsive chrome, readable surfaces, and independe
   assert.match(shell, /#app :is\(\.community-view,\.marketplace-view\)\{grid-column:1;grid-row:2/);
   assert.match(shell, /#app :is\(\.page-card,\.exchange-card,\.exchange-catalog,\.inbox-directory,\.chat-page\)/);
   assert.match(shell, /#app \.exchange-order-entry\{grid-column:1;grid-row:2;position:static\}/);
-  assert.doesNotMatch(shell, /!important|url\(/);
+  assert.doesNotMatch(shell.replace('animation:none!important;transition:none!important', ''), /!important|url\(/);
 });
 test('Weather overlay explains real climate modifiers with signed and color-coded estimates', () => {
   const mild = { ...environmentAt(worldEpoch), season: 'Spring' as const, weather: 'Clear skies' as const, temperature: 18 };
@@ -735,7 +803,7 @@ test('Weather overlay explains real climate modifiers with signed and color-code
   assert.equal((effects.match(/<summary[^]*?<\/summary>/)?.[0].match(/<svg/g) || []).length, 1);
   assert.doesNotMatch(effects.match(/<summary[^]*?<\/summary>/)?.[0] || '', /%/);
   assert.equal(overallWeatherImpact(mild), 'best');
-  assert.equal(overallWeatherImpact({ ...mild, season: 'Autumn' }), 'good');
+  assert.equal(overallWeatherImpact({ ...mild, season: 'Autumn' }), 'best');
   assert.equal(overallWeatherImpact({ ...mild, season: 'Summer', temperature: 35 }), 'bad');
   assert.equal(overallWeatherImpact({ ...mild, season: 'Winter', weather: 'Snow', temperature: -10 }), 'worst');
   assert.doesNotMatch(environmentDetails(mild), /weather-effects/);

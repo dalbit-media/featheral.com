@@ -27,14 +27,15 @@ header[data-wallet-header=FTHX] .logo img{flex:none;width:34px;height:34px}
 header[data-wallet-header=FTHX] .logo>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 header[data-wallet-header=FTHX] .tabs{display:flex;gap:4px;align-items:center;flex:0 1 auto;min-width:0;margin:0;overflow-x:auto;scrollbar-width:thin}
 header[data-wallet-header=FTHX] .tabs a{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 8px;box-sizing:border-box;white-space:nowrap;font-size:12px;font-weight:500;text-decoration:none;border-radius:5px}
-header[data-wallet-header] .central-wallet-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:0;width:auto;min-height:32px;height:32px;margin:0;padding:0 8px;box-sizing:border-box;border:1px solid var(--line,#3c3740);border-radius:6px;background:transparent;color:inherit;box-shadow:none;opacity:1;font:500 12px/1 system-ui,sans-serif;cursor:pointer;vertical-align:middle}
+header[data-wallet-header] .central-wallet-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:none;min-width:0;width:auto;min-height:32px;height:32px;margin:0;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:inherit;box-shadow:none;opacity:1;font:500 12px/1 system-ui,sans-serif;cursor:pointer;vertical-align:middle}
+body>header button,#app>header button,header.topbar button{border:0!important;box-shadow:none}
 header .central-wallet-icon{display:inline-flex;flex:none;width:16px;height:16px;color:var(--muted,var(--mut,currentColor))}
 header .central-wallet-icon svg{width:100%;height:100%;visibility:visible}
 header .central-wallet-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:20px;height:20px;border-radius:50%;overflow:hidden;background:var(--btn,#2b2b38)}
 header .central-wallet-avatar img,header .central-wallet-avatar svg{display:block;width:20px;height:20px;object-fit:cover;visibility:visible}
 header .central-wallet-label{display:inline;white-space:nowrap;font-variant-numeric:tabular-nums;line-height:20px}
-header .central-wallet-button[data-wallet-state=selected] .central-wallet-label{padding-left:6px;border-left:1px solid var(--line,#3c3740);font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.02em}
-header .central-wallet-button[data-wallet-state=selected] .central-wallet-icon{color:var(--brand,var(--gold,currentColor))}
+header .central-wallet-button:is([data-wallet-state=selected],[data-wallet-state=authorized]) .central-wallet-label{padding-left:6px;font-family:ui-monospace,Consolas,monospace;font-size:11px;letter-spacing:.02em}
+header .central-wallet-button[data-wallet-state=authorized] .central-wallet-icon{color:var(--brand,var(--gold,currentColor))}
 header .central-wallet-button:hover{background:var(--btn,#2b2b38);border-color:var(--brand,var(--gold,#f6c453))}
 header .central-wallet-button:focus-visible,header[data-wallet-header=FTHX] :focus-visible{outline:2px solid var(--brand,var(--gold,#c78d26));outline-offset:3px}
 body.eco-fixed-header>header.top{top:var(--eco-height)}

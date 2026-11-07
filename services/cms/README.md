@@ -1356,10 +1356,17 @@ while its embed loads); native admin/Ethereum approval controls explicitly opt i
 `ethereumProvider` signing. Normal headers follow the current site's selected wallet account,
 never a site's cached commenting/trading owner. Connection, built-in creation,
 restore, unlock, sending and Swap run inside the same site panel. Closing and
-reopening the same context preserves its renderer and extension session. Closing
+reopening the same context preserves its renderer and revalidates its extension session. Closing
 locks the built-in signer, clears password fields and cancels pending approvals;
 changing tabs does not reload the wallet. Wallet markup and styles use Shadow DOM,
 not an iframe, and inherit the current site's palette and typography.
+The wallet opens below the top-right header control, not at the viewport center.
+Its size and position track viewport resizing, including mobile keyboards. Header
+controls mirror the popout's account and `authorized`, `selected` (public balance;
+unlock/approval required), or `disconnected` state. Saved public addresses populate
+the same active account view; they never grant signing authority. Reopening silently
+checks `eth_accounts` and clears stale sessions when the extension account changes
+or disappears. X's commenting session cannot pin the funds popout to another account.
 The host stores its selected address, site-local encrypted vault and a separate
 context-wallet extension session. Built-in signing sessions remain memory-only.
 Import an encrypted recovery backup to reuse a built-in account on another origin;

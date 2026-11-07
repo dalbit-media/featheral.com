@@ -23,7 +23,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   activeAddress = null, followActive = false, worldAccount = null, noSession = embedded, view = 'assets', marketError = false,
   selectionNonce = null, authNonce = null, popupBlocked = false, marketDelay = false, manualReview = false,
   sessionExpired = false, payment = null, contextual = false, publicReadError = false, signatureDelay = false, loginDelay = false,
-  requestOrigin = 'http://notes.localhost:8080' } = {}) {
+  requestOrigin = 'http://notes.localhost:8080', savedPublicAddress = null } = {}) {
   const nodes = Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(([, id]) => [id, new Element(id)]));
   nodes['wallet-review'].showModal = () => {
     nodes['wallet-review'].open = true;
@@ -41,6 +41,8 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   nodes['send-symbol'].value = 'FTH$';
   nodes['swap-from'].value = 'FTHX'; nodes['swap-to'].value = 'FTH$';
   const address = '0x1111111111111111111111111111111111111111', calls = [], errors = [], requests = new Map(), tips = new Map();
+  let providerAccounts = [address];
+  const connectionStates = [];
   let funded = true, rejectSignature = false, tipReceiptLost = false, swapReceiptLost = false, completes = 0, elapsed = 0;
   const pendingMarkets = [];
   const pendingSignatures = [], pendingLogins = [], providerListeners = {}, providerCalls = [];
@@ -49,6 +51,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   if (contextual && !noSession) store.set('featheral-context-wallet-token', 'test-token');
   if (noSession) store.delete('featheral-creation-token');
   if (activeAddress) store.set('featheral-wallet-active-account', activeAddress);
+  if (savedPublicAddress) store.set('featheral-wallet-public-account', savedPublicAddress);
   if (worldAccount) { store.set('featheral-world-account', worldAccount); store.delete('featheral-creation-token'); }
   const storage = { getItem: key => { if (storageBlocked) throw new Error('Storage denied'); return store.get(key) || null; }, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) };
   const reply = data => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => data });
@@ -120,7 +123,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
       removeEventListener() {},
       addEventListener(name, callback) { (windowListeners[name] ||= []).push(callback); }, ethereum: { on(name, callback) { providerListeners[name] = callback; }, async request({ method }) {
       providerCalls.push(method);
-      if (method === 'eth_accounts' || method === 'eth_requestAccounts') return [address];
+      if (method === 'eth_accounts' || method === 'eth_requestAccounts') return providerAccounts;
       if (method === 'personal_sign') {
         if (rejectSignature) { rejectSignature = false; throw new Error('signature rejected'); }
         if (signatureDelay) return new Promise(resolve => pendingSignatures.push(() => resolve('mock-signature')));
@@ -145,13 +148,15 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     document.currentScript = { hasAttribute: () => true };
     nodes['ethereum-swap'].querySelector = () => new Element();
     localContext = { root: document, body: new Element(), search: '', visible: () => visible,
-      onSelected() {}, onMessage: data => messages.push({ data }) };
+      onSelected() {}, onConnectionState: state => connectionStates.push(state), onMessage: data => messages.push({ data }) };
   }
   vm.runInNewContext(source, context);
   if (contextual) mounted = await context.window.FeatheralWalletApp.mount(localContext);
   await new Promise(resolve => setImmediate(resolve));
   return { nodes, calls, providerCalls, document, errors, tips, store, intervals, popups, messages, clipboard, setFunded: value => { funded = value; },
-    localContext, mounted, closeContext: async () => { visible = false; await mounted.suspend(); },
+    localContext, mounted, connectionStates, setProviderAccounts: accounts => { providerAccounts = accounts; },
+    closeContext: async () => { visible = false; await mounted.suspend(); },
+    reopenContext: async () => { visible = true; await mounted.resume(); },
     providerChange: accounts => providerListeners.accountsChanged?.(accounts),
     releaseSignatures: () => { signatureDelay = false; for (const resolve of pendingSignatures.splice(0)) resolve(); },
     releaseLogins: () => { loginDelay = false; for (const resolve of pendingLogins.splice(0)) resolve(); },
@@ -211,6 +216,44 @@ test('payment links prefill FTH$ without transferring until explicit exact-amoun
   await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
   assert.equal(ui.calls.find(call => call.url.endsWith('/send/prepare')).body.amount, '1');
   assert.equal(ui.calls.filter(call => call.url.includes('/transfers')).length, 1);
+});
+test('saved header public account appears in the popout without pretending it is authorized', async () => {
+  const address = '0x' + '22'.repeat(20);
+  const ui = await fixture('notes', { contextual: true, noProvider: true, noSession: true, followActive: true, savedPublicAddress: address });
+  assert.equal(ui.nodes.address.value, address);
+  assert.equal(ui.nodes['wallet-connect'].dataset.state, 'selected');
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  assert.match(ui.nodes['wallet-connect'].title, /Create built-in/);
+  ui.mounted.dispose();
+});
+test('reopening reconciles extension accounts without requesting permission or retaining a stale session', async () => {
+  const ui = await fixture('notes', { contextual: true, followActive: true });
+  assert.equal(ui.connectionStates.at(-1).state, 'authorized');
+  await ui.closeContext();
+  const address = '0x' + '22'.repeat(20);
+  ui.setProviderAccounts([address]);
+  await ui.reopenContext();
+  assert.equal(ui.nodes.address.value, address);
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  assert.ok(ui.calls.some(call => call.url.endsWith('/logout')));
+  assert.equal(ui.providerCalls.includes('eth_requestAccounts'), false);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  await ui.closeContext(); ui.setProviderAccounts([]);
+  await ui.reopenContext();
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address: null, state: 'disconnected' });
+  assert.equal(ui.nodes.address.value, '');
+  ui.mounted.dispose();
+});
+test('initial popout reconciles a stale saved header address with the permitted extension account', async () => {
+  const address = '0x' + '11'.repeat(20);
+  const ui = await fixture('notes', { contextual: true, followActive: true, savedPublicAddress: '0x' + '22'.repeat(20) });
+  assert.equal(ui.nodes.address.value, address);
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'authorized' });
+  assert.ok(ui.providerCalls.includes('eth_accounts'));
+  assert.equal(ui.providerCalls.includes('eth_requestAccounts'), false);
+  assert.equal(ui.providerCalls.includes('personal_sign'), false);
+  ui.mounted.dispose();
 });
 test('without an injected provider the built-in wallet unlocks and authenticates without persisting its signing session', async () => {
   const address = '0x1111111111111111111111111111111111111111';
@@ -547,6 +590,12 @@ test('built-in wallet uses the same approval dialog, signs only after approval a
   await ui.closeContext();
   assert.equal(instance.signer, null);
   assert.equal(ui.nodes['vault-password'].value, '');
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  await ui.reopenContext();
+  assert.equal(ui.nodes.address.value, address);
+  assert.equal(ui.nodes['wallet-connect'].title, 'Unlock built-in wallet');
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  assert.equal(signed.length, 2);
   ui.mounted.dispose();
 });
 test('Silver purchase approval explicitly warns of payment and shows the exact amount/recipient', async () => {

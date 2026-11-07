@@ -194,6 +194,7 @@ test('weekly deliveries and paused maintenance are identical online and offline,
     account.game.stock.wood = 0;
     account.game.dollars = cash * dollarsScale;
     if (cash === 10000) {
+      account.game.stock.wood = 20;
       act(account, { type: 'invite' });
       act(account, { type: 'move', x: 5, y: 0 });
     }

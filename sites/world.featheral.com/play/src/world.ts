@@ -13,14 +13,14 @@ export class World {
   private width = 0;
   private height = 0;
   private camera = { x: 0, y: 0 };
-  private zoom = 1.15;
+  private zoom = 1.55;
   private drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null;
   private known = new Set<string>();
   private fringe = new Map<string, number>();
   private exploredRef: string[] | null = null;
   private lastFrame = 0;
   private minimapKey = '';
-  private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private renderKey = '';
   private canvas: HTMLCanvasElement;
   private minimap: HTMLCanvasElement;
   private game: () => Game;
@@ -79,6 +79,7 @@ export class World {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.minimap.width = 300; this.minimap.height = 190;
     this.minimapKey = '';
+    this.renderKey = '';
     this.fogCanvas.width = Math.ceil(rect.width) + 64; this.fogCanvas.height = Math.ceil(rect.height) + 64;
   }
   private diamond(x: number, y: number, fill: string): void {
@@ -93,7 +94,7 @@ export class World {
   private frame = (time: number): void => {
     requestAnimationFrame(this.frame);
     if (document.hidden || !this.canvas.isConnected || !this.width || !this.height
-      || time - this.lastFrame < (this.reducedMotion ? 200 : this.drag ? 16 : 50)) return;
+      || time - this.lastFrame < 16) return;
     this.lastFrame = time;
     const c = this.ctx, g = this.game();
     if (g.explored !== this.exploredRef) {
@@ -101,9 +102,14 @@ export class World {
       if (known.size !== this.known.size || [...known].some(key => !this.known.has(key))) {
         this.known = known; this.fringe = explorationFringe(known);
         this.minimapKey = '';
+        this.renderKey = '';
       }
       this.exploredRef = g.explored;
     }
+    const environment = this.environment();
+    const renderKey = `${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${g.stage}:${radius(g)}:${this.known.size}:${environment.season}:${environment.phase}:${environment.weather}:${environment.daylight}`;
+    if (renderKey === this.renderKey) return;
+    this.renderKey = renderKey;
     c.clearRect(0, 0, this.width, this.height);
     c.fillStyle = '#111d18'; c.fillRect(0, 0, this.width, this.height);
     c.save(); c.translate(this.width / 2, this.height / 2); c.scale(this.zoom, this.zoom);
@@ -143,7 +149,7 @@ export class World {
         }
       } else if (terrain === 'water' || terrain === 'river' || terrain === 'coast' || terrain === 'wetland') {
         c.strokeStyle = '#a0d4c04a'; c.lineWidth = 1;
-        const drift = this.reducedMotion ? 0 : Math.sin(time / 1800 + n * 10) * 5;
+        const drift = 0;
         c.beginPath(); c.moveTo(sx - 14 + drift, sy - 3); c.lineTo(sx + drift, sy - 3); c.moveTo(sx + 3 - drift, sy + 6); c.lineTo(sx + 15 - drift, sy + 6); c.stroke();
         if (terrain === 'coast') {
           c.strokeStyle = '#dfd4a0'; c.lineWidth = 3; c.beginPath(); c.moveTo(sx - 28, sy + 1); c.quadraticCurveTo(sx, sy + 18, sx + 27, sy + 2); c.stroke();
@@ -195,7 +201,7 @@ export class World {
     c.beginPath(); c.ellipse(px, py, 26, 13, 0, 0, Math.PI * 2); c.stroke();
     c.fillStyle = '#cdebab33'; c.fill();
     c.strokeStyle = '#d7eab488'; c.beginPath(); c.moveTo(px, py - 4); c.lineTo(px, py - 63); c.stroke();
-    const bob = this.reducedMotion ? 0 : Math.sin(time / 700) * 2;
+    const bob = 0;
     c.fillStyle = '#d7eab4'; c.beginPath(); c.arc(px, py - 65 + bob, 10, 0, Math.PI * 2); c.fill();
     c.fillStyle = '#243a2c'; c.beginPath(); c.arc(px, py - 65 + bob, 3, 0, Math.PI * 2); c.fill();
     c.restore();
@@ -221,11 +227,11 @@ export class World {
       fog.lineTo(sx, sy + tileHeight / 2); fog.lineTo(sx - tileWidth / 2, sy); fog.closePath(); fog.fill();
     }
     fog.restore();
-    this.ctx.save(); this.ctx.filter = `blur(${12 * this.zoom}px)`;
+    this.ctx.save();
     this.ctx.drawImage(this.fogCanvas, -32, -32); this.ctx.restore();
   }
   private drawEnvironment(time: number): void {
-    drawEnvironment(this.ctx, this.environment(), this.width, this.height, time, this.reducedMotion);
+    drawEnvironment(this.ctx, this.environment(), this.width, this.height, time, true);
   }
   private drawMinimap(g: Game): void {
     const c = this.mini;

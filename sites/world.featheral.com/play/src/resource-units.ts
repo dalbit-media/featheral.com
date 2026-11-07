@@ -33,6 +33,8 @@ export function accountingPrice(asset: string, pricePerUnit: number): number {
   return Math.abs(scaled - rounded) < 1e-8 ? rounded / dollarsScale : value;
 }
 export function formatResourceAmount(asset: string, lots: number, locale: string, compact = false): string {
+  if (asset === 'metal' && lots > 0 && lots < 1)
+    return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(lots * resourceUnits.metal.kilogramsPerLot)} kg`;
   const value = displayQuantity(asset, lots);
   return `${new Intl.NumberFormat(locale, compact && value >= 10000
     ? { notation: 'compact', maximumFractionDigits: 1 }

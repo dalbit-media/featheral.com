@@ -797,7 +797,7 @@ FTHG is never offered as an internal L3 trading note.
 
 Notes, Exchange, X and Sites share one Wallet header control and responsive layout:
 brand and Wallet on the first mobile row, horizontally scrollable navigation below.
-Header Wallet and Swap controls open the full wallet in a contextual dialog on
+Header Wallet and Swap controls open the full wallet in a top-right header popout on
 the current site, without an iframe, redirect or wallet-site window. The shared
 renderer uses a Shadow DOM to isolate its layout and inherits the site's colors
 and typography. Signing, transfers, creation and unlocking stay in that dialog. The wallet
@@ -806,6 +806,14 @@ Site login tokens stay on their original host. The requesting site stores only
 the selected public address and its own wallet session; pinned address views remain
 read-only when `followActive: false` is requested. The wallet retains linked-account portfolios, World funds and
 periodic balance refreshes.
+
+The popout aligns below the header wallet control and stays within the viewport
+on mobile and desktop, including viewport resizing. All header wallet controls
+mirror its current account and authorization state. A saved public account is not
+an authorized connection: locked or expired sessions explicitly require unlock or
+approval. Reopening checks extension accounts with `eth_accounts` without prompting,
+clears stale authorization, and follows the current funds wallet rather than a
+site's separate commenting account.
 
 `FeatheralWallet.authenticate(challenge)` opens the dialog synchronously from a user
 action. An instance- and nonce-bound in-page approval returns only the public

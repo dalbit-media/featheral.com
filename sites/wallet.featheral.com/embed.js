@@ -3,10 +3,11 @@
   const site = location.hostname.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar", "pay"].includes(site) ? "FTH$" : "FTHX";
   const selectionKey = "featheral-wallet-public-account", headerButtons = new Map(), mounts = new Map();
-  let assets, authorization, selectedPublicAddress, avatarUrl, avatarAccount;
+  let assets, authorization, selectedPublicAddress, avatarUrl, avatarAccount, connectionState = "disconnected", anchorButton;
   try { selectedPublicAddress = localStorage.getItem(selectionKey); }
   catch (error) { console.error("Wallet selection unavailable:", error); }
   if (!/^0x[0-9a-f]{40}$/i.test(selectedPublicAddress || "")) selectedPublicAddress = null;
+  if (selectedPublicAddress) connectionState = "selected";
   function paint() {
     for (const [button, primary] of headerButtons) {
       if (!button.isConnected) { headerButtons.delete(button); continue; }
@@ -20,14 +21,19 @@
       }
       const label = document.createElement("span"); label.className = "central-wallet-label";
       label.textContent = selectedPublicAddress ? `..${selectedPublicAddress.slice(-5)}` : "Wallet"; button.append(label);
-      button.setAttribute("aria-label", `Open ${primary} wallet${selectedPublicAddress ? ` · ${selectedPublicAddress}` : ""}`);
+      const status = connectionState === "authorized" ? "connected" : connectionState === "selected" ? "public account · approval or unlock required" : "not connected";
+      button.setAttribute("aria-label", `Open ${primary} wallet${selectedPublicAddress ? ` · ${selectedPublicAddress}` : ""} · ${status}`);
       button.title = button.getAttribute("aria-label");
-      button.dataset.walletState = selectedPublicAddress ? "selected" : "disconnected";
+      button.dataset.walletState = connectionState;
+      button.setAttribute("aria-haspopup", "dialog");
+      button.setAttribute("aria-controls", "featheral-central-wallet");
+      button.setAttribute("aria-expanded", String(!!document.getElementById("featheral-central-wallet")?.open));
     }
   }
   async function select(address) {
     if (!/^0x[0-9a-f]{40}$/i.test(address || "")) throw new Error("Invalid wallet account.");
     selectedPublicAddress = address;
+    if (connectionState === "disconnected") connectionState = "selected";
     try { localStorage.setItem(selectionKey, address); }
     catch (error) { console.error("Wallet selection could not be saved:", error); }
     paint();
@@ -60,6 +66,20 @@
       params.append(key, value);
     }
     return params;
+  }
+  function position(dialog) {
+    const viewport = window.visualViewport;
+    const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+    const offsetTop = viewport?.offsetTop || 0, offsetLeft = viewport?.offsetLeft || 0;
+    const anchor = anchorButton?.isConnected ? anchorButton : [...headerButtons.keys()].find(button => button.isConnected);
+    const rect = anchor?.getBoundingClientRect();
+    const top = Math.max(8, Math.min((rect?.bottom || 48) + 8 - offsetTop, Math.max(8, height - 200)));
+    dialog.style.top = `${offsetTop + top}px`;
+    dialog.style.left = "auto";
+    const panelWidth = Math.min(460, width - 16);
+    dialog.style.right = `${Math.max(8, Math.min(width - panelWidth - 8, width + offsetLeft - (rect?.right || width - 8)))}px`;
+    dialog.style.width = `${panelWidth}px`;
+    dialog.style.maxHeight = `${height - top - 8}px`;
   }
   function loadScript(file, available) {
     if (available()) return Promise.resolve();
@@ -143,6 +163,16 @@
     if (!params.has("address")) params.set("authNonce", entry.nonce);
     const context = { root: shadow, search: "?" + params, visible: () => !entry.closed && root.isConnected && (!root.closest("dialog") || root.closest("dialog").open),
       onSelected: address => { if (!entry.closed) select(address).catch(error => console.error("Wallet selection:", error)); },
+      onConnectionState: ({ address, state }) => {
+        if (entry.closed || mounts.get(root) !== entry || params.get("followActive") !== "1") return;
+        connectionState = state;
+        if (address) select(address).catch(error => console.error("Wallet selection:", error));
+        else {
+          selectedPublicAddress = null; avatarAccount = null; avatarUrl = null;
+          try { localStorage.removeItem(selectionKey); } catch (error) { console.error("Wallet selection:", error); }
+          paint();
+        }
+      },
       onMessage: data => onMessage(entry, data) };
     entry.context = context;
     entry.ready = loadAssets().then(async ({ html, css }) => {
@@ -186,26 +216,31 @@
     let dialog = document.getElementById("featheral-central-wallet");
     if (!dialog) {
       dialog = document.createElement("dialog"); dialog.id = "featheral-central-wallet"; dialog.setAttribute("aria-label", "Wallet");
-      dialog.style.cssText = "box-sizing:border-box;margin:auto;width:min(560px,calc(100% - 16px));max-height:calc(100dvh - 16px);padding:8px;border:1px solid var(--line,#8886);border-radius:18px;background:var(--panel,Canvas);color:var(--text,var(--txt,CanvasText));overflow:auto;overscroll-behavior:contain";
+      dialog.style.cssText = "position:fixed;box-sizing:border-box;margin:0;bottom:auto;width:min(460px,calc(100% - 16px));padding:8px;border:1px solid var(--line,#8886);border-radius:18px;background:var(--panel,Canvas);color:var(--text,var(--txt,CanvasText));overflow:auto;overscroll-behavior:contain;transform-origin:top right";
       const close = document.createElement("button"); close.type = "button"; close.textContent = "Close wallet";
       close.style.cssText = "position:sticky;top:0;z-index:2;display:block;margin-left:auto;min-height:44px;padding:8px 16px;font:inherit;color:inherit;background:var(--panel,Canvas);border:1px solid var(--line,#8886);border-radius:10px";
       close.addEventListener("click", () => dialog.close());
       const root = document.createElement("div"); root.dataset.walletRoot = "true"; dialog.append(close, root);
       dialog.addEventListener("close", () => {
         if (dialog.open) return;
+        paint();
         const entry = mounts.get(root);
         if (authorization?.entry === entry) authorization.finish(new Error("Wallet connection cancelled."));
         entry?.ready.then(app => app.suspend()).catch(error => console.error("Wallet close:", error));
       });
       document.body.append(dialog);
     }
+    position(dialog);
     if (!dialog.open) dialog.showModal();
+    paint();
     const root = dialog.querySelector("[data-wallet-root]");
     const ready = mount(root, options), entry = mounts.get(root);
-    ready.then(app => {
+    ready.then(async app => {
       if (mounts.get(root) !== entry || entry.closed) return;
       applyTheme(entry.context.body);
       app.tab(options.view || "assets");
+      if (entry.opened) await app.resume();
+      entry.opened = true;
     }).catch(error => console.error("Open wallet:", error));
     return dialog;
   }
@@ -240,15 +275,23 @@
     }).catch(error => console.error("Wallet mount:", error));
     const header = document.querySelector("body > header, #app > header, header.topbar");
     if (!header || site === "wallet" || site === "admin" || header.hasAttribute("data-no-central-wallet")) return;
-    let button = header.querySelector("[data-central-wallet], .wallet-icon, #wallet");
-    if (!button) { button = document.createElement("button"); button.type = "button"; button.dataset.centralWallet = "true"; header.append(button); }
-    const primary = button.dataset.walletPrimary || defaultPrimary;
-    if (button.dataset.walletSigner === "true") return;
-    header.dataset.walletHeader = primary; button.classList.add("central-wallet-button"); headerButtons.set(button, primary); paint();
-    if (selectedPublicAddress) select(selectedPublicAddress).catch(error => console.error("Wallet selection:", error));
-    if (!button.dataset.walletBound && site !== "x") {
-      button.dataset.walletBound = "true";
-      button.addEventListener("click", event => { event.preventDefault(); event.stopImmediatePropagation(); open({ primary, compact: true }); }, true);
+    let buttons = [...header.querySelectorAll("[data-central-wallet], .wallet-icon, #wallet")];
+    if (!buttons.length) {
+      const button = document.createElement("button"); button.type = "button"; button.dataset.centralWallet = "true"; header.append(button); buttons = [button];
+    }
+    for (const button of buttons) {
+      const primary = button.dataset.walletPrimary || defaultPrimary;
+      if (button.dataset.walletSigner === "true") continue;
+      header.dataset.walletHeader = primary; button.classList.add("central-wallet-button"); headerButtons.set(button, primary); paint();
+      if (selectedPublicAddress) select(selectedPublicAddress).catch(error => console.error("Wallet selection:", error));
+      if (!button.dataset.walletBound && site !== "x") {
+        button.dataset.walletBound = "true";
+        button.addEventListener("click", event => { event.preventDefault(); event.stopImmediatePropagation(); anchorButton = button; open({ primary, compact: true }); }, true);
+      }
+      if (!button.dataset.walletAnchorBound) {
+        button.dataset.walletAnchorBound = "true";
+        button.addEventListener("pointerdown", () => { anchorButton = button; });
+      }
     }
     for (const link of header.querySelectorAll("[data-wallet-view]")) if (!link.dataset.walletBound) {
       link.dataset.walletBound = "true";
@@ -260,10 +303,18 @@
     try {
       const address = localStorage.getItem(selectionKey);
       if (address && !/^0x[0-9a-f]{40}$/i.test(address)) throw new Error("Invalid saved wallet selection.");
-      selectedPublicAddress = address; avatarAccount = null; avatarUrl = null; paint();
+      selectedPublicAddress = address; connectionState = address ? "selected" : "disconnected"; avatarAccount = null; avatarUrl = null; paint();
     }
     catch (error) { console.error("Wallet selection:", error); }
   });
+  const reposition = () => {
+    const dialog = document.getElementById("featheral-central-wallet");
+    if (dialog?.open) position(dialog);
+  };
+  window.addEventListener("resize", reposition);
+  window.addEventListener("scroll", reposition, { passive: true });
+  window.visualViewport?.addEventListener("resize", reposition);
+  window.visualViewport?.addEventListener("scroll", reposition);
   window.addEventListener("focus", apply);
   document.addEventListener("featheral:site-ready", apply);
   window.FeatheralWallet = { mount, open, apply, authenticate: challenge => authorize(challenge, false),

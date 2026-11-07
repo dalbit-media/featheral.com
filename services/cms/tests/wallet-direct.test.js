@@ -24,7 +24,7 @@ test('wallet accepts the real open-membership App challenge and rejects changed 
     }
   } finally { notes.close(); }
 });
-function fixture({ hostname = 'notes.featheral.com', fail = false, store = new Map() } = {}) {
+function fixture({ hostname = 'notes.featheral.com', fail = false, store = new Map(), width = 1000, height = 800, buttonCount = 1 } = {}) {
   const elements = [], instances = [], requests = [], timers = new Set(), errors = [];
   class Element {
     constructor(tag) {
@@ -53,18 +53,23 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
     showModal() { this.open = true; }
     close() { this.open = false; this.listeners.close?.(); }
     focus() {}
+    getBoundingClientRect() { return { bottom: 52, right: 984 }; }
   }
   const header = new Element('header'), button = new Element('button'); header.append(button); header.querySelector = () => button;
+  const buttons = [button, ...Array.from({ length: buttonCount - 1 }, () => new Element('button'))];
+  header.querySelectorAll = selector => selector.includes('.wallet-icon') ? buttons : [];
   const document = { currentScript: { src: 'https://wallet.featheral.com/embed.js' }, readyState: 'complete',
     addEventListener() {},
     body: new Element('body'), head: new Element('head'), createElement: tag => new Element(tag),
     getElementById: id => elements.find(element => element.id === id), querySelector: () => header, querySelectorAll: () => [] };
   const walletApp = { async mount(context) {
-    const instance = { context, tabs: [], suspended: 0, disposed: 0 };
+    const instance = { context, tabs: [], suspended: 0, disposed: 0, resumed: 0 };
     context.receive = data => instance.messages.push(data); instance.messages = []; instances.push(instance);
-    return { tab: value => instance.tabs.push(value), suspend: async () => { instance.suspended++; }, dispose: () => { instance.disposed++; } };
+    return { tab: value => instance.tabs.push(value), resume: async () => { instance.resumed++; },
+      suspend: async () => { instance.suspended++; }, dispose: () => { instance.disposed++; } };
   } };
-  const window = { localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value) },
+  const window = { innerWidth: width, innerHeight: height,
+    localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     ethers: {}, FeatheralVault: {}, FeatheralPortfolio: {}, FeatheralSignIn: {}, FeatheralWalletApp: walletApp,
     addEventListener() {}, open() { assert.fail('Context wallet must never open a wallet-site window'); } };
   let counter = 0;
@@ -79,7 +84,7 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
       return { ok: !fail, status: 503, text: async () => '', json: async () => ({ profile: null }) };
     },
     setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn) });
-  return { wallet: window.FeatheralWallet, instances, store, timers, requests, errors, elements, button,
+  return { wallet: window.FeatheralWallet, instances, store, timers, requests, errors, elements, button, buttons,
     dialog: () => document.getElementById('featheral-central-wallet'),
     async emit(data, instance = instances.at(-1)) { instance.context.onMessage(data); await tick(); } };
 }
@@ -139,6 +144,43 @@ test('account selection and repeated header opens reuse the mounted context with
   ui.wallet.open({ view: 'account' }); await tick();
   assert.equal(ui.instances.length, 1);
   assert.equal(ui.button.children.at(-1).textContent, '..11111');
+  assert.equal(ui.instances[0].resumed, 1);
+});
+test('wallet popout anchors below the header at the right edge and stays viewport bounded', async () => {
+  for (const [width, height] of [[1000, 800], [320, 640], [390, 844], [740, 360]]) {
+    const ui = fixture({ width, height });
+    ui.wallet.open(); await tick();
+    assert.match(ui.dialog().style.cssText, /position:fixed/);
+    assert.doesNotMatch(ui.dialog().style.cssText, /margin:auto/);
+    assert.equal(ui.dialog().style.top, '60px');
+    assert.equal(ui.dialog().style.width, `${Math.min(460, width - 16)}px`);
+    assert.equal(ui.dialog().style.maxHeight, `${height - 68}px`);
+    assert.ok(parseFloat(ui.dialog().style.right) >= 8);
+    assert.equal(ui.button['aria-expanded'], 'true');
+    ui.dialog().close();
+    assert.equal(ui.button['aria-expanded'], 'false');
+  }
+});
+test('all header controls mirror live popout authorization and clear disconnected accounts', async () => {
+  const ui = fixture({ buttonCount: 2, store: new Map([['featheral-wallet-public-account', other]]) });
+  assert.equal(ui.button.dataset.walletState, 'selected');
+  assert.match(ui.button.title, /approval or unlock required/);
+  ui.wallet.open(); await tick();
+  const context = ui.instances[0].context;
+  context.onConnectionState({ address, state: 'authorized' }); await tick();
+  for (const button of ui.buttons) {
+    assert.equal(button.dataset.walletState, 'authorized');
+    assert.match(button.title, /1111111.*connected/);
+    assert.equal(button.children.at(-1).textContent, '..11111');
+  }
+  context.onConnectionState({ address, state: 'selected' }); await tick();
+  assert.match(ui.button.title, /approval or unlock required/);
+  context.onConnectionState({ address: null, state: 'disconnected' }); await tick();
+  assert.equal(ui.store.has('featheral-wallet-public-account'), false);
+  for (const button of ui.buttons) {
+    assert.equal(button.dataset.walletState, 'disconnected');
+    assert.equal(button.children.at(-1).textContent, 'Wallet');
+  }
 });
 test('load errors, duplicate connections, challenge failure, close and expiry reject explicitly', async () => {
   await assert.rejects(fixture({ fail: true }).wallet.account(), /HTTP 503/);

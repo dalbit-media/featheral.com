@@ -76,6 +76,7 @@ export interface Snapshot {
   inviteReadyAt: number;
   recruitment: { population: number; startedAt: number; readyAt: number } | null;
   waterUpkeep: { readyAt: number; dailyConsumption: number; weeklyConsumption: number; shortage: number; populationLoss: number; lastPopulationLoss: number; paused: boolean } | null;
+  settlementUpkeep?: { readyAt: number; paused: boolean; resources: Record<'wood' | 'metal', { dailyConsumption: number; weeklyConsumption: number; shortage: number }> } | null;
   workforce: Workforce;
   availableWorkers: number;
   resourceAccess: Record<Resource, ResourceAccess>;

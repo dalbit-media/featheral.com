@@ -286,8 +286,9 @@ managementDialog.addEventListener('close', () => { management = null; render(); 
 const world = !explorePage ? null : new World(document.querySelector<HTMLCanvasElement>('#world')!, document.querySelector<HTMLCanvasElement>('#minimap')!, () => game, requestMove, () => environment);
 function requestMove(x: number, y: number): void {
   if (!game.explored.includes(`${x},${y}`)) {
-    if (state.waterUpkeep?.paused) {
-      toast('Restore Water supplies before starting advanced activity.', true);
+    const reason = upkeepPauseReason();
+    if (reason) {
+      toast(reason, true);
       return;
     }
     if (state.workforce.expeditions.some(expedition => expedition.x === x && expedition.y === y)) {
@@ -296,6 +297,12 @@ function requestMove(x: number, y: number): void {
     }
   }
   void act({ type: 'move', x, y }, true);
+}
+function upkeepPauseReason(): string | null {
+  if (state.waterUpkeep?.paused) return 'Restore Water supplies before starting advanced activity.';
+  if (state.settlementUpkeep?.resources.wood.shortage) return 'Restore Wood heating supplies before starting advanced activity.';
+  if (state.settlementUpkeep?.resources.metal.shortage) return 'Restore Metal repair supplies before starting advanced activity.';
+  return null;
 }
 let toastTimer: ReturnType<typeof setTimeout>;
 function toast(message: string, error = false): void {
@@ -443,8 +450,10 @@ function renderPopulation(): void {
   document.querySelector('[data-population-total]')!.textContent = compact.format(game.population);
   const button = document.querySelector<HTMLButtonElement>('.population-health')!;
   const status = !game.population ? 'Recruit residents' : state.waterUpkeep?.paused ? 'Water shortage'
+    : state.settlementUpkeep?.resources.wood.shortage ? 'Wood heating shortage'
+    : state.settlementUpkeep?.resources.metal.shortage ? 'Metal repair shortage'
     : game.stock.water < (state.waterUpkeep?.weeklyConsumption ?? 0) ? 'Low Water reserve' : idle < 2 ? 'No explorer crew' : 'Healthy';
-  button.dataset.health = !game.population || state.waterUpkeep?.paused ? 'critical' : status === 'Healthy' ? 'healthy' : 'warning';
+  button.dataset.health = !game.population || upkeepPauseReason() ? 'critical' : status === 'Healthy' ? 'healthy' : 'warning';
   button.title = translate(status, language);
   button.setAttribute('aria-label', translate(`Population: ${fmt(game.population)} residents · ${fmt(active)} active · ${fmt(idle)} idle`, language) + ' · ' + translate(status, language));
   button.querySelector<HTMLElement>('.population-health-meter i')!.style.width = `${game.population ? active / game.population * 100 : 0}%`;
@@ -456,8 +465,8 @@ function renderRecruitment(): void {
   const stale = elapsed > serverClockStaleMs;
   const recruitment = state.recruitment;
   document.querySelectorAll<HTMLButtonElement>('[data-action="invite"]').forEach(button => {
-    button.disabled = game.stage < 0 || !!recruitment || remaining > 0 || stale || !!state.waterUpkeep?.paused || state.dollars < state.recruitmentDollars;
-    button.title = 'Pay FTH$ upfront. Residents arrive after one game week. One batch at a time; no automatic repeat.';
+    button.disabled = game.stage < 0 || !!recruitment || remaining > 0 || stale || !!upkeepPauseReason() || state.dollars < state.recruitmentDollars;
+    button.title = upkeepPauseReason() || 'Pay FTH$ upfront. Residents arrive after one game week. One batch at a time; no automatic repeat.';
     button.querySelector('[data-invite-label]')!.textContent = stale ? 'Sync paused' : recruitment && !remaining ? 'Awaiting server confirmation'
       : recruitment ? 'Recruiting' : remaining ? 'Recruitment cooldown' : 'Invite';
     button.setAttribute('aria-label', stale ? 'Invite residents, server sync required' : recruitment
@@ -584,7 +593,7 @@ function showClaimFeedback(resource: Resource, quantity: number, origin: ClaimOr
   effect.setAttribute('aria-hidden', 'true');
   effect.style.left = `${bounds.left + bounds.width / 2}px`;
   effect.style.top = `${bounds.top + bounds.height / 2}px`;
-  effect.innerHTML = `<i class="claim-ring"></i><span class="claim-gain">${icon(resource)}<b>+${resourceFmt(resource, quantity)}</b></span>${[-60, -30, 0, 30, 60].map(x => `<i class="claim-spark" style="--spark-x:${x}px;--spark-y:${-45 - Math.abs(x) / 2}px"></i>`).join('')}`;
+  effect.innerHTML = `<span class="claim-gain">${icon(resource)}<b>+${resourceFmt(resource, quantity)}</b></span>`;
   (scope === managementDialog ? managementDialog : document.body).append(effect);
   const cards = app.querySelectorAll<HTMLElement>(`[data-resource-card="${resource}"]`);
   cards.forEach(card => card.classList.add('resource-claimed'));
@@ -613,20 +622,25 @@ function renderResources(): void {
     const full = capacity > 0 && game.stock[key] >= capacity;
     card.querySelector('.resource-total-full')!.textContent = resourceFmt(key, game.stock[key]);
     card.querySelector('.resource-total-compact')!.textContent = resourceFmt(key, game.stock[key], true);
-    card.classList.toggle('collection-available', pending > 0);
-    card.querySelector<HTMLElement>('.collection-ready')!.innerHTML = pending > 0 ? icon('download') : '';
+    const ready = canClaim(key);
+    card.classList.toggle('collection-available', ready);
+    card.querySelector<HTMLElement>('.collection-ready')!.textContent = ready ? translate('Collect', language) : '';
     const pendingLabel = card.querySelector<HTMLElement>('.resource-pending')!;
     const automation = (state.collection?.automationUntil[key] ?? 0) > state.serverTime;
-    pendingLabel.textContent = pending > 0 ? `+${resourceFmt(key, pending, true)}` : automation ? translate('Auto', language) : rate ? `+${resourceFmt(key, rate, true)}/w` : '\u2014';
+    pendingLabel.textContent = ready ? `+${resourceFmt(key, pending, true)}` : automation ? translate('Auto', language) : rate ? `+${resourceFmt(key, rate, true)}/w` : '\u2014';
     pendingLabel.setAttribute('aria-label', translate(pending > 0 ? 'Ready to collect' : automation ? 'Auto-collection active' : 'Manual collection', language));
     card.classList.toggle('storage-full', full);
     card.querySelector<HTMLElement>('.resource-progress > div')!.style.width = `${capacity ? Math.min(100, game.stock[key] / capacity * 100) : 0}%`;
-    const consumption = key === 'water' ? state.waterUpkeep?.dailyConsumption ?? 0 : state.workforce.crews[key]?.weeklyDollarsCost ?? 0;
+    const dailyUse = key === 'water' ? state.waterUpkeep?.dailyConsumption ?? 0
+      : key === 'wood' || key === 'metal' ? state.settlementUpkeep?.resources[key].dailyConsumption ?? 0 : 0;
+    const consumption = key === 'water' ? dailyUse : state.workforce.crews[key]?.weeklyDollarsCost ?? 0;
     const waterRisk = key === 'water' && !!state.waterUpkeep?.paused;
     card.classList.toggle('water-shortage', waterRisk);
-    const status = game.stage < 0 ? 'Settlement required.' : full ? 'Storage full' : rate === 0 ? 'No crew' : '';
+    const supplyRisk = (key === 'wood' || key === 'metal') && !!state.settlementUpkeep?.resources[key].shortage;
+    card.classList.toggle('supply-shortage', supplyRisk);
+    const status = game.stage < 0 ? 'Settlement required.' : supplyRisk ? key === 'wood' ? 'Wood heating shortage' : 'Metal repair shortage' : full ? 'Storage full' : rate === 0 ? 'No crew' : '';
     card.querySelector('.resource-tooltip')!.innerHTML = `<h3>${names[key]}</h3>
-      <dl><div><dt>Owned</dt><dd>${resourceFmt(key, game.stock[key])}</dd></div><div><dt>Storage capacity</dt><dd>${resourceFmt(key, capacity)}</dd></div><div><dt>Delivery</dt><dd>${automation ? 'Auto-collection active' : 'Manual collection'}</dd></div></dl>
+      <dl><div><dt>Owned</dt><dd>${resourceFmt(key, game.stock[key])}</dd></div><div><dt>Storage capacity</dt><dd>${resourceFmt(key, capacity)}</dd></div><div><dt>Delivery</dt><dd>${automation ? 'Auto-collection active' : 'Manual collection'}</dd></div>${key !== 'oil' ? `<div><dt>Daily consumption</dt><dd>${resourceFmt(key, dailyUse)}</dd></div>` : ''}</dl>
       <section class="resource-weekly"><h4>${key === 'water' ? 'Resource flow' : '1 game week'}</h4><dl>
         <div><dt>${key === 'water' ? 'Collection / week' : 'Collection'}</dt><dd class="${rate ? 'resource-inflow' : 'resource-flow-zero'}">${rate ? '+' : ''}${resourceFmt(key, rate)}</dd></div>
         <div><dt>${key === 'water' ? 'Consumption / day' : 'FTH$ transport / week'}</dt><dd class="${consumption ? 'resource-outflow' : 'resource-flow-zero'}">${consumption ? '&minus;' : ''}${key === 'water' ? resourceFmt(key, consumption) : `${fmt(consumption)} FTH$`}</dd></div>
@@ -656,6 +670,7 @@ function renderManagement(): void {
     const ready = canClaim(resource), automated = expiry > state.serverTime;
     replaceContent(root, `<div class="resource-workspace"><section class="resource-pickup"><div class="management-metrics resource-${resource}"><div>${icon(resource)}<small>Owned</small><strong>${resourceFmt(resource, game.stock[resource])}</strong></div><div><small>Ready to collect</small><strong>${resourceFmt(resource, state.pending[resource])}</strong></div><div>${icon('dollars')}<small>Transport</small><strong>${formatDollars(fee, languageLocale)}</strong></div></div>
       ${crew ? completionMeter(crew.readyAt - worldWeekMs, crew.readyAt, 'Next collection') : '<p class="fineprint">No active work. New assignments take a full game week.</p>'}
+      ${resource === 'wood' || resource === 'metal' ? settlementUpkeepPanel(false, resource) : ''}
       <div class="collection-actions">${resourceClaimButton(resource)}<button class="button" data-action="collect-sell" data-resource="${resource}" ${!ready ? 'disabled' : ''}>${icon('dollars')}Collect and sell</button></div>
       ${ready && state.dollars < fee ? '<p class="notice">Not enough FTH$ for pickup. Collect and sell pays transport from the proceeds.</p>' : ''}
       <div class="automation-heading"><h3>Auto-collection</h3>${automated ? `<span data-ready-at="${expiry}" data-compact-time></span>` : '<span>Inactive</span>'}</div>
@@ -711,7 +726,7 @@ function renderSidebar(): void {
     <div class="sidebar-primary-actions" role="group" aria-label="Frequent actions">
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
-      <button class="button primary wide sidebar-expedition" data-action="explore" ${state.waterUpkeep?.paused || !quote || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost"><small>You spend</small>${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}</small>` : '<small>No nearby destination</small>'}</button>
+      <button class="button primary wide sidebar-expedition" data-action="explore" ${upkeepPauseReason() || !quote || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost"><small>You spend</small>${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}</small>` : '<small>No nearby destination</small>'}</button>
       ${recruitmentButton(true)}
       </div>
       ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
@@ -866,7 +881,7 @@ function renderSettlement(): void {
   }
   const next = stages[game.stage + 1], quote = nextExploration(game, state.workforce.expeditions);
   let content = '';
-  if (settlementTask === 'overview') content = `${progressionPanel()}<div class="settlement-resource-grid">${resources.map(resource => resourceStockCard(resource)).join('')}</div><div class="settlement-quick-actions">${recruitmentButton()}<button class="button" data-action="explore" ${state.waterUpkeep?.paused || !quote || game.stage < 0 || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition ${quote ? costChips({ dollars: quote.dollars }) : ''}</button></div>
+  if (settlementTask === 'overview') content = `${progressionPanel()}<div class="settlement-resource-grid">${resources.map(resource => resourceStockCard(resource)).join('')}</div><div class="settlement-quick-actions">${recruitmentButton()}<button class="button" data-action="explore" ${upkeepPauseReason() || !quote || game.stage < 0 || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition ${quote ? costChips({ dollars: quote.dollars }) : ''}</button></div>
     <div class="settlement-activity"><button data-settlement-panel="residents">${icon('people')}<span><strong>${state.availableWorkers} available residents</strong><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></span>${icon('chevron')}</button>
     <button data-settlement-panel="residents">${icon('compass')}<span><strong>${state.workforce.expeditions.length} expeditions exploring</strong><small>${state.workforce.expeditions.length ? `<span>Next return</span>: <span data-ready-at="${Math.min(...state.workforce.expeditions.map(team => team.readyAt))}"></span>` : 'No expeditions exploring.'}</small></span>${icon('chevron')}</button>
     ${state.inventory.pending.length ? `<button data-settlement-panel="inventory">${icon('layers')}<span><strong>Pending exploration finds</strong><small>${state.inventory.pending.length}</small></span>${icon('chevron')}</button>` : ''}</div>`;
@@ -907,11 +922,28 @@ function waterUpkeepPanel(compact = false): string {
     ${completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)}
     <a href="/market/?asset=water&amp;side=buy" aria-label="${escape(translate('Buy Water', language))}" title="${escape(translate('Buy Water', language))}">${icon('plus')}</a>
     <a href="/settlement/#buildings" aria-label="${escape(translate('Water facilities', language))}" title="${escape(translate('Water facilities', language))}">${icon('settings')}</a>
-    ${upkeep.paused ? '<small class="water-shortage-text" role="status">Water shortage pauses advanced activity, not residents.</small>' : ''}</div>`;
+    ${upkeep.paused ? '<small class="water-shortage-text" role="status">Water shortage pauses advanced activity, not residents.</small>' : ''}</div>${settlementUpkeepPanel(true)}`;
   return `<div class="notice water-upkeep" role="status"><div class="water-upkeep-heading"><strong>Daily Water</strong>${costChips({ water: upkeep.dailyConsumption })}</div>
     <div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>
     <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Water shortage pauses advanced activity, not residents.</p>' : ''}</div>
-    <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>`;
+    <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>${settlementUpkeepPanel()}`;
+}
+function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal'): string {
+  const upkeep = state.settlementUpkeep;
+  if (!upkeep) return '';
+  return (only ? [only] : ['wood', 'metal'] as const).map(resource => {
+    const use = upkeep.resources[resource];
+    const label = resource === 'wood' ? 'Wood heating' : 'Metal repairs';
+    const explanation = resource === 'wood'
+      ? 'Heating baseline: 2 kg of Wood per resident per day at the reference heating demand. Cold, wet and stormy conditions increase use.'
+      : 'Repair baseline: 0.2 kg of Metal per resident per day. Rain, snow, storms and extreme temperatures increase maintenance.';
+    return `<div class="${compact ? 'water-upkeep-row' : 'notice water-upkeep'}${use.shortage ? ' supply-shortage' : ''}">
+      <span class="water-upkeep-use" title="${escape(translate(explanation, language))}">${icon(resource)}<strong>${translate(label, language)} · ${resourceFmt(resource, use.dailyConsumption)}<small>/${translate('day', language)}</small></strong></span>
+      ${compact ? completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)
+        : `<p class="fineprint">${translate(explanation, language)}</p><div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>`}
+      <a href="/market/?asset=${resource}&amp;side=buy">${icon('plus')}${translate(resource === 'wood' ? 'Buy Wood' : 'Buy Metal', language)}</a>
+      ${use.shortage ? `<small role="status">${translate('Supply shortage pauses advanced activity, not residents or buildings.', language)}</small>` : ''}</div>`;
+  }).join('');
 }
 function crewAllocationLimit(resource: Resource): number {
   const others = resources.reduce((sum, key) => sum + (key === resource ? 0
@@ -946,11 +978,11 @@ function workforcePanel(): string {
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
     <p class="fineprint">Every crew needs active residents and a full game week. Collect each resource to pay FTH$ transport for all workers. Auto-collection requires an active resource-specific item. Full storage pauses new work.</p>
-    <p class="fineprint">Residents consume 15 Water per game day. Shortages pause new advanced work, exploration and recruitment without deleting residents or paid jobs. Water crews and basic Wood gathering can restore supplies. Water capacity scales with population.</p>
+    <p class="fineprint">Residents consume Water, Wood for heating and Metal for repairs each game day. Climate changes demand. Shortages pause new exploration and recruitment without deleting residents or paid jobs.</p>
     </details></details>
     <p class="fineprint"><span>Transport on next pickup</span>: ${costChips({ dollars: transport })} · <span>Next allocation</span>: <span data-ready-at="${work.cycleAt}"></span></p>
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
-    <div class="panel-actions"><button class="button" data-action="explore" ${state.waterUpkeep?.paused || game.stage < 0 || state.availableWorkers < 2 || !next || state.dollars < next.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${work.expeditions.length + 1}x</span></small>` : ''}</div>
+    <div class="panel-actions"><button class="button" data-action="explore" ${upkeepPauseReason() || game.stage < 0 || state.availableWorkers < 2 || !next || state.dollars < next.dollars ? 'disabled' : ''}>${icon('compass')} Send expedition</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${work.expeditions.length + 1}x</span></small>` : ''}</div>
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
     <p class="fineprint">Each expedition needs two idle residents. Route fees scale by concurrent expedition count: 1x, 2x, 3x... Pay FTH$ upfront; teams return independently after 1–3 game weeks. Known-terrain travel remains free.</p>
     <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon('compass')}<div><strong>2 residents exploring (${expedition.x}, ${expedition.y})</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>
@@ -1376,6 +1408,7 @@ setInterval(() => {
   if (document.hidden) return;
   renderEnvironment();
   const deadlines = [state.workforce.cycleAt, state.recruitment?.readyAt ?? Infinity,
+    state.waterUpkeep?.readyAt ?? Infinity, state.settlementUpkeep?.readyAt ?? Infinity,
     ...Object.values(state.workforce.crews).map(crew => crew.readyAt),
     ...state.workforce.expeditions.map(expedition => expedition.readyAt)];
   const due = Math.min(...deadlines);

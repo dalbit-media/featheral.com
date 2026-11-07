@@ -18,13 +18,14 @@ export class SettlementMap {
   private width = 0;
   private height = 0;
   private camera = { x: 0, y: 0 };
-  private zoom = 1.6;
+  private zoom = 2.1;
   private drag: Drag | null = null;
   private hover: GridPosition | null = null;
   private hovered: SettlementEntity | null = null;
   private lastFrame = 0;
   private images = new Map<DecorationItem, HTMLImageElement>();
-  private reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private renderKey = '';
+  private artworkRevision = 0;
   private canvas: HTMLCanvasElement;
   private getState: () => MapState;
   private select: (entity: SettlementEntity | null, position: GridPosition) => void;
@@ -36,6 +37,7 @@ export class SettlementMap {
     this.ctx = ctx; this.canvas = canvas; this.getState = getState; this.select = select; this.move = move; this.language = language;
     for (const id of Object.keys(decorationItems) as DecorationItem[]) {
       const image = new Image();
+      image.onload = () => { this.artworkRevision++; };
       image.onerror = () => reportError('Could not load settlement decoration artwork.');
       image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">${decorationDrawing(id)}</svg>`)}`;
       this.images.set(id, image);
@@ -52,7 +54,7 @@ export class SettlementMap {
     });
     canvas.addEventListener('pointermove', event => {
       this.hover = this.cell(event.clientX, event.clientY);
-      this.hovered = this.hit(event.clientX, event.clientY);
+      this.hovered = this.drag ? null : this.hit(event.clientX, event.clientY);
       if (!this.drag || this.drag.id !== event.pointerId) return;
       const dx = (event.clientX - this.drag.x) / this.zoom, dy = (event.clientY - this.drag.y) / this.zoom;
       if (Math.hypot(event.clientX - this.drag.x, event.clientY - this.drag.y) > 5) this.drag.moved = true;
@@ -112,6 +114,7 @@ export class SettlementMap {
     this.width = bounds.width; this.height = bounds.height;
     this.canvas.width = Math.round(bounds.width * dpr); this.canvas.height = Math.round(bounds.height * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.renderKey = '';
   }
   private entity(id: SettlementEntity, x: number, y: number): void {
     const { state, environment } = this.getState(), c = this.ctx;
@@ -129,15 +132,21 @@ export class SettlementMap {
   private frame = (time: number): void => {
     requestAnimationFrame(this.frame);
     if (document.hidden || !this.canvas.isConnected || !this.width || !this.height
-      || time - this.lastFrame < (this.reducedMotion ? 200 : this.drag ? 16 : 50)) return;
+      || time - this.lastFrame < 16) return;
     this.lastFrame = time;
-    const c = this.ctx, view = this.getState(), { game, inventory } = view.state, positions = settlementPositions(game, inventory);
+    const c = this.ctx, view = this.getState(), { game, inventory } = view.state;
+    const hover = view.editing || view.pending || this.drag?.entity ? this.hover : null;
+    const renderKey = `${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${view.state.revision}:${this.artworkRevision}:${view.editing}:${view.selected}:${view.pending}:${hover?.x}:${hover?.y}:${this.hovered}:${this.drag?.entity}:${this.drag?.moved}:${view.environment.season}:${view.environment.phase}:${view.environment.weather}:${view.environment.daylight}`;
+    if (renderKey === this.renderKey) return;
+    this.renderKey = renderKey;
+    const positions = settlementPositions(game, inventory);
     const occupants = new Map(positionEntries(positions).map(([id, position]) => [cellKey(position), id]));
     c.clearRect(0, 0, this.width, this.height); c.fillStyle = '#111d18'; c.fillRect(0, 0, this.width, this.height);
     c.save(); c.translate(this.width / 2, this.height / 2); c.scale(this.zoom, this.zoom);
     const tiles = [];
     for (let y = -settlementRadius; y <= settlementRadius; y++) for (let x = -settlementRadius; x <= settlementRadius; x++) {
       const screen = project(x - this.camera.x, y - this.camera.y), terrain = settlementTerrain(x, y, game.seed);
+      if (Math.abs(screen.x) > this.width / this.zoom / 2 + 90 || Math.abs(screen.y) > this.height / this.zoom / 2 + 110) continue;
       const road = (x === 0 || y === 0) && terrain !== 'river';
       drawDiamond(c, screen.x, screen.y, road ? game.stage >= 4 ? '#9a9f89' : '#aa9e77' : tileColor(terrain, Math.floor(hash(x, y, game.seed + 7) * 3), view.environment.season));
       if (view.editing) { c.strokeStyle = '#d5ebad50'; c.lineWidth = .8; c.stroke(); }
@@ -147,7 +156,7 @@ export class SettlementMap {
     for (const tile of tiles) {
       const { cellX: x, cellY: y, sx, sy, terrain, road } = tile, n = hash(x, y, game.seed), entity = occupants.get(cellKey({ x, y }));
       if (terrain === 'river') {
-        const drift = this.reducedMotion ? 0 : Math.sin(time / 1800 + n * 10) * 5;
+        const drift = 0;
         c.strokeStyle = '#a0d4c04a'; c.lineWidth = 1; c.beginPath(); c.moveTo(sx - 14 + drift, sy - 3); c.lineTo(sx + drift, sy - 3); c.moveTo(sx + 3 - drift, sy + 6); c.lineTo(sx + 15 - drift, sy + 6); c.stroke();
       } else if (game.stage < 0 && x === 0 && y === 0) {
         c.fillStyle = '#183a2938'; c.beginPath(); c.ellipse(sx, sy + 8, 29, 13, 0, 0, Math.PI * 2); c.fill();
@@ -161,7 +170,7 @@ export class SettlementMap {
         drawTree(c, sx - 12, sy, 35 + n * 20, n, view.environment.season);
         if (n > .5) drawTree(c, sx + 13, sy + 5, 28 + n * 12, 1 - n, view.environment.season);
       } else if (road && x === 0 && y > -5 && y < 5 && (y + 5) % 2 === 0 && game.stage >= 0) {
-        const walk = this.reducedMotion ? 0 : Math.sin(time / 1400 + y) * 5;
+        const walk = 0;
         c.fillStyle = '#183a2938'; c.beginPath(); c.ellipse(sx + walk, sy + 2, 4, 2, 0, 0, Math.PI * 2); c.fill();
         c.fillStyle = '#749da0'; c.fillRect(sx - 2 + walk, sy - 7, 4, 8);
         c.fillStyle = '#dbc298'; c.beginPath(); c.arc(sx + walk, sy - 10, 2.5, 0, Math.PI * 2); c.fill();
@@ -184,6 +193,6 @@ export class SettlementMap {
       c.fillStyle = '#142c24ed'; c.fillRect(screen.x - width / 2, screen.y - 100, width, 24); c.fillStyle = '#e5ecd6'; c.textAlign = 'center'; c.fillText(label, screen.x, screen.y - 84, width - 12);
     }
     c.restore();
-    drawEnvironment(c, view.environment, this.width, this.height, time, this.reducedMotion);
+    drawEnvironment(c, view.environment, this.width, this.height, time, true);
   };
 }

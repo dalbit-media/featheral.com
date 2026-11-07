@@ -33,6 +33,16 @@ export function waterDemandClimate(environment: Environment): number {
     + (environment.season === 'Summer' ? .1 : 0)
     + (environment.weather === 'Clear skies' && environment.temperature > 25 ? .05 : 0);
 }
+export function heatingDemandClimate(environment: Environment): number {
+  const season = { Spring: 1, Summer: .8, Autumn: 1.1, Winter: 1.2 }[environment.season];
+  const exposure = { 'Clear skies': 1, Overcast: 1.05, Rain: 1.15, Snow: 1.2, Storm: 1.3 }[environment.weather];
+  return clamp((18 - environment.temperature) / 18, .05, 2) * season * exposure;
+}
+export function maintenanceDemandClimate(environment: Environment): number {
+  const season = { Spring: 1.05, Summer: 1, Autumn: 1.1, Winter: 1.2 }[environment.season];
+  const wear = { 'Clear skies': 1, Overcast: 1.05, Rain: 1.25, Snow: 1.35, Storm: 1.6 }[environment.weather];
+  return season * wear * (1 + Math.max(0, -environment.temperature, environment.temperature - 30) * .015);
+}
 export function dailyClimate(time: number, effect: (environment: Environment) => number): number {
   environmentAt(time);
   const start = worldEpoch + Math.floor((time - worldEpoch) / worldDayMs) * worldDayMs;

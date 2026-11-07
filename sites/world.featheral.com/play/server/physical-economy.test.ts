@@ -22,7 +22,7 @@ test('daily polling and annual offline catch-up preserve climate jobs, paid arri
   act({ type: 'upgrade' }, start);
   account.warehouse = 2;
   account.game.explored = ['0,0', '-3,0', '3,0', '0,3'];
-  account.game.stock = { ...emptyAllocation(), water: 3000 };
+  account.game.stock = { ...emptyAllocation(), wood: 20, metal: 20, water: 3000 };
   account.workforce!.automatic = false;
   account.workforce!.crews = {};
   account.workforce!.allocation = { wood: 2, water: 2, metal: 1, oil: 0 };

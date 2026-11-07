@@ -98,7 +98,7 @@ async function disconnectWallet() {
 // ---------- Shared FTHX wallet ----------
 async function openWalletPanel() {
   if (window.FeatheralWallet) {
-    window.FeatheralWallet.open({ primary: 'FTHX', address: wallet.address, compact: true });
+    window.FeatheralWallet.open({ primary: 'FTHX', compact: true });
     const dialog = document.getElementById('featheral-central-wallet');
     dialog.querySelector('[data-social-signout]')?.remove();
     if (wallet.address) {

@@ -2,16 +2,20 @@
 .founding-guide{grid-column:1/-1;min-width:0;margin-top:12px;padding:14px;border:1px solid #c5e7b43d;border-radius:14px;background:#14271f}
 .founding-guide h3{margin:0 0 8px;font-size:15px}.founding-guide p{font-size:12px;line-height:1.6;color:var(--muted)}
 .founding-actions{display:flex;flex-wrap:wrap;gap:8px}.founding-actions .button{flex:1;min-width:80px}
-#app .button:active:not(:disabled){transform:translateY(1px) scale(.98)}
+#app .button:active:not(:disabled){background-color:#c5e7b426}
 #app .button:focus-visible,#app .nav-button:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
 #app .action-pending .button[data-action]{cursor:progress}
 #app :is(.resource-summary strong,.header-wallet strong,.completion-caption strong){font-variant-numeric:tabular-nums}
 #app :is(.page-card,.building,.upgrade-card){box-shadow:0 4px 16px #06120e20}
-@media(prefers-reduced-motion:no-preference){
-  #app .button,#app .nav-button{transition:transform .12s ease,background-color .15s ease,border-color .15s ease}
-  #app .toast.visible{animation:world-feedback-in .18s ease-out}
-  @keyframes world-feedback-in{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
-}
+#app *,#app *::before,#app *::after{animation:none!important;transition:none!important;scroll-behavior:auto}
+#app .topbar button,#app .topbar button:hover,#app .topbar button:focus-visible{border:0;box-shadow:none}
+#app .topbar #resource-bar{border:0}
+#app .topbar #resource-bar .collection-available{background:#c5e7b42e}
+#app .topbar #resource-bar .collection-available .resource-summary{padding-top:10px}
+#app .topbar #resource-bar .collection-available .resource-summary strong{color:#efffdc}
+#app .topbar #resource-bar .collection-ready{top:0;right:0;padding:2px 5px;border-radius:4px;background:var(--mint);color:#102016;font-size:9px;line-height:12px;font-weight:800}
+#app .topbar #resource-bar .collection-ready:empty{display:none}
+#app .topbar #resource-bar .collection-available .resource-pending{color:#efffdc;font-weight:800}
 @media(prefers-reduced-motion:reduce){
   #app *,#app *::before,#app *::after{animation:none;transition:none;scroll-behavior:auto}
   #app .button:active:not(:disabled){transform:none}

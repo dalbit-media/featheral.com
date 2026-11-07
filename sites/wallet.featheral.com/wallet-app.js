@@ -120,7 +120,7 @@ async function mountFeatheralWallet(context) {
   const savedVault = vaultReader?.read();
   const ACTIVE_ACCOUNT = "featheral-wallet-active-account";
   function selectedAddress() {
-    const address = storage.getItem(ACTIVE_ACCOUNT);
+    const address = storage.getItem(ACTIVE_ACCOUNT) || (context ? storage.getItem("featheral-wallet-public-account") : null);
     if (address && !/^0x[0-9a-f]{40}$/i.test(address)) throw new Error("Stored active wallet address is invalid. Open the full wallet to select an account.");
     return address || vaultReader?.read()?.address || null;
   }
@@ -132,7 +132,7 @@ async function mountFeatheralWallet(context) {
     sendSite({ type: "featheral:wallet-auth-ready", nonce: siteApproval.nonce, address: owner });
   }
   if (savedVault && !browserProvider) token = "";
-  const publicAddress = () => config.followActive ? returnedAddress || selectedAddress() || config.address
+  const publicAddress = () => config.followActive ? returnedAddress !== undefined ? returnedAddress : selectedAddress() || config.address
     : config.address || returnedAddress || (!token ? selectedAddress() : null);
   if (!interactive) token = "";
   const units = (value, symbol) => {
@@ -347,11 +347,15 @@ async function mountFeatheralWallet(context) {
     const label = !interactive ? "Read-only wallet" : token ? "Disconnect wallet" : local ? vaultReader?.read() ? "Unlock built-in wallet" : "Create built-in wallet" : "Connect extension";
     const button = $("wallet-connect");
     button.title = label; button.setAttribute("aria-label", label); button.dataset.tooltip = label;
-    button.dataset.state = token ? "authorized" : publicAddress() ? "selected" : "disconnected";
+    button.dataset.state = token && owner ? "authorized" : publicAddress() ? "selected" : "disconnected";
     $("wallet-connect-label").textContent = label;
     $("connect").textContent = label;
     $("connect").disabled = !interactive || busy;
     button.disabled = !interactive;
+    if (context && interactive) context.onConnectionState?.({
+      address: token ? owner || publicAddress() : publicAddress(),
+      state: button.dataset.state,
+    });
   }
   let worldAccount = storage.getItem("featheral-world-account") || "";
   const publicWalletUrl = address => `/api/wallet/accounts/${address}`
@@ -902,6 +906,7 @@ async function mountFeatheralWallet(context) {
     if (token) await api("/logout", {});
     reset(); owner = address; builtInActive = local; builtInPreferred = local;
     await authorizeSession(address);
+    returnedAddress = address;
     storage.setItem(ACTIVE_ACCOUNT, address);
     if (!local) storage.setItem("featheral-creation-token", token);
     idleAt = Date.now(); await refresh();
@@ -1052,6 +1057,7 @@ async function mountFeatheralWallet(context) {
     };
     const disconnected = () => {
       if (provider !== browserProvider || builtInActive || !interactive) return;
+      returnedAddress = null; storage.removeItem(ACTIVE_ACCOUNT);
       reset(); status(new Error("Extension disconnected. Reconnect before approving an action."));
       refresh().catch(status);
     };
@@ -1089,8 +1095,38 @@ async function mountFeatheralWallet(context) {
   async function refreshVisible() {
     if (busy || visibleRefreshPending || document.hidden || !(token || worldAccount || publicAddress())) return;
     visibleRefreshPending = true;
-    try { await refresh(); } catch (error) { status(error); }
+    try { if (context && interactive) await resume(); else await refresh(); } catch (error) { status(error); }
     finally { visibleRefreshPending = false; }
+  }
+  async function resume() {
+    if (!context || !interactive || !context.visible() || busy) return;
+    const current = contextEpoch, provider = browserProvider;
+    const record = vaultReader?.read(), selected = selectedAddress();
+    if (!builtInActive && record?.address && selected && record.address.toLowerCase() === selected.toLowerCase()) builtInPreferred = true;
+    if (!builtInActive) {
+      const storedToken = builtInPreferred ? "" : storage.getItem("featheral-creation-token") || "";
+      if (token !== storedToken) { reset(false); token = storedToken; }
+    }
+    if (provider && !builtInPreferred) {
+      const startingEpoch = epoch;
+      const accounts = await provider.request({ method: "eth_accounts" });
+      if (current !== contextEpoch || startingEpoch !== epoch || provider !== browserProvider || !context.visible()) return;
+      if (!Array.isArray(accounts) || accounts[0] && !/^0x[0-9a-f]{40}$/i.test(accounts[0]))
+        throw new Error("Wallet extension returned an invalid account.");
+      const address = accounts[0] || null;
+      if (token && (!address || owner && owner.toLowerCase() !== address.toLowerCase())) {
+        const staleToken = token;
+        reset();
+        const resetEpoch = epoch;
+        await endLocalSession(staleToken);
+        if (current !== contextEpoch || resetEpoch !== epoch || provider !== browserProvider || !context.visible()) return;
+      } else if (owner && owner.toLowerCase() !== address?.toLowerCase()) reset(false);
+      returnedAddress = address;
+      if (address) storage.setItem(ACTIVE_ACCOUNT, address);
+      else storage.removeItem(ACTIVE_ACCOUNT);
+    }
+    connectionLabel();
+    await refresh();
   }
   setInterval(refreshVisible, 30000);
   if (config.authNonce) {
@@ -1198,9 +1234,12 @@ async function mountFeatheralWallet(context) {
       if (accounts[0] && /^0x[0-9a-fA-F]{40}$/.test(accounts[0])) storage.setItem(ACTIVE_ACCOUNT, accounts[0]);
     } catch (error) { status(error); }
   }
-  try { await refresh(); } catch (error) { status(error); }
+  try { if (context && interactive) await resume(); else await refresh(); } catch (error) { status(error); }
   return {
     tab,
+    async resume() {
+      try { await resume(); } catch (error) { status(error); throw error; }
+    },
     async suspend() {
       ++contextEpoch;
       cancelWorldSync();
@@ -1210,6 +1249,7 @@ async function mountFeatheralWallet(context) {
       for (const id of ["vault-password", "vault-confirm", "vault-activate-password"]) $(id).value = "";
       const session = builtInActive && token;
       if (session) { builtInActive = false; reset(); await endLocalSession(session); }
+      connectionLabel();
       updateVault();
     },
     dispose() { for (const release of cleanup.splice(0)) release(); },

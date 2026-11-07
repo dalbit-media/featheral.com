@@ -84,23 +84,18 @@ html[data-screen-preview] #app{width:var(--screen-preview-width);max-width:var(-
 .resource-acquisition>.button{flex:1;min-height:44px}
 .population-crews .resource-acquisition>.resource-collect{flex:0 1 auto;margin-left:auto;padding:8px 10px;gap:5px}
 .resource-collect{min-height:44px}
+.supply-shortage{background:#a34d2926;color:#ffd2b8}
+.water-upkeep-row.supply-shortage{flex-wrap:wrap}
 .resource-allocation{margin-top:24px}
 .resource-allocation h3{font-size:14px}
 .resource-allocation>.crew-card{margin-top:12px}
 .storage-grid,.settlement-resource-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px}
 .settlement-resource-grid{margin:16px 0}
-.resource-claimed{animation:claim-card-glow 1s ease-out}
+.resource-claimed{background-color:#c5e7b426}
 .claim-pending{cursor:wait!important}
 .claim-feedback{position:fixed;z-index:10000;pointer-events:none;color:#c6ea9a}
-.claim-gain{position:absolute;display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #c6ea9a88;border-radius:20px;background:#152218ee;color:#edfbd9;white-space:nowrap;font-size:14px;box-shadow:0 4px 20px #0006;animation:claim-gain-rise 1s cubic-bezier(.18,.7,.3,1) forwards}
+.claim-gain{position:absolute;display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;background:#152218ee;color:#edfbd9;white-space:nowrap;font-size:14px;transform:translate(-50%,-110%)}
 .claim-gain>.icon{width:18px;height:18px}
-.claim-ring{position:absolute;width:44px;height:44px;margin:-22px;border:2px solid currentColor;border-radius:50%;animation:claim-ring-expand .7s ease-out forwards}
-.claim-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#e9cc83;animation:claim-spark-burst .8s ease-out forwards}
-@keyframes claim-card-glow{0%,25%{box-shadow:0 0 0 2px #c6ea9a88,0 0 24px #c6ea9a33}100%{box-shadow:0 0 0 0 #c6ea9a00}}
-@keyframes claim-gain-rise{0%{opacity:0;transform:translate(-50%,-20%) scale(.8)}20%{opacity:1;transform:translate(-50%,-110%) scale(1.08)}65%{opacity:1}100%{opacity:0;transform:translate(-50%,-200%) scale(1)}}
-@keyframes claim-ring-expand{0%{opacity:.8;transform:scale(.6)}100%{opacity:0;transform:scale(2.3)}}
-@keyframes claim-spark-burst{0%{opacity:1;transform:translate(0,0) scale(.7)}100%{opacity:0;transform:translate(var(--spark-x),var(--spark-y)) scale(.2)}}
-@media(prefers-reduced-motion:reduce){.resource-claimed,.claim-gain{animation:none}.claim-ring,.claim-spark{display:none}.claim-gain{transform:translate(-50%,-110%)}}
 .topbar #resource-bar .resource-progress{display:block;flex:1;height:3px}
 .topbar #resource-bar .resource-pending{font-size:9px;line-height:12px;white-space:nowrap}
 .topbar #resource-bar .resource-tooltip{display:none}
