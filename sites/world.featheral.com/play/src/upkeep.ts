@@ -1,7 +1,8 @@
 import { dailyClimate, heatingDemandClimate, maintenanceDemandClimate, waterDemandClimate } from './climate.ts';
 import { climateCycleDays, worldDayMs, worldEpoch } from './environment.ts';
+import { resourceEconomy } from './resource-units.ts';
 
-export const dailyWaterPerResident = 5;
+export const dailyWaterPerResident = resourceEconomy.water.dailyConsumption;
 export const weeklyWaterPerResident = dailyWaterPerResident * 7;
 // Allocation plans whole work weeks; upkeep bills one day at a time.
 export function waterRequirement(population: number, time?: number, legacy = false): number {
@@ -20,7 +21,7 @@ export function waterUpkeep(population: number, ownedWater: number, time?: numbe
 const demand = Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, waterDemandClimate));
 const prefixes = new Map<number, number[]>();
 export type SettlementUpkeepResource = 'wood' | 'metal';
-export const dailyUpkeepPerResident = { wood: .04, metal: .02 } as const;
+export const dailyUpkeepPerResident = { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption } as const;
 const upkeepDemand = {
   wood: Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, heatingDemandClimate)),
   metal: Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, maintenanceDemandClimate)),

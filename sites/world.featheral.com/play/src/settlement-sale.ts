@@ -23,7 +23,7 @@ export class SettlementSale {
     this.state = privateState; this.update = privateUpdate; this.notify = privateNotify; this.language = privateLanguage;
     const prefix = resource ? `settlement-sale-${resource}` : 'settlement-sale';
     this.root.className = 'settlement-section settlement-sale';
-    this.root.innerHTML = `<h3>Sell resources for FTH$</h3><p>Sell owned resources at live marketplace spot prices through your market or bank. Pending resources must be claimed first.</p>
+    this.root.innerHTML = `<h3>Sell resources for FTH$</h3><p>Sell owned resources at the static base price, or better player bids, using available market funds. Claim pending resources first.</p>
       <form><label for="${prefix}-resource" ${resource ? 'hidden' : ''}>Resource</label><select id="${prefix}-resource" ${resource ? 'hidden' : ''}>${(resource ? [resource] : marketResources).map(asset => `<option value="${asset}">${marketAssetName(asset)}</option>`).join('')}</select>
       <label for="${prefix}-quantity">Amount</label><div class="settlement-sale-amount"><input id="${prefix}-quantity" type="number" min="1" max="10000" step="1" value="1" required><button type="button" data-sale-max>Max</button></div>
       <p><span>You get · FTH$</span> <strong data-sale-total>—</strong></p><p role="status" data-sale-status></p>
@@ -50,7 +50,7 @@ export class SettlementSale {
   private configure(): void {
     this.input.min = this.input.step = String(displayQuantity(this.asset, 1));
     this.input.max = String(displayQuantity(this.asset, 10000));
-    this.input.value = '1';
+    this.input.value = this.input.min;
     this.root.querySelector(`label[for="${this.input.id}"]`)!.textContent = `${translate('Amount', this.language)} (${tradingUnit(this.asset)})`;
   }
   mount(parent: Element): void {
@@ -66,8 +66,8 @@ export class SettlementSale {
     const reason = message || (!this.input.validity.valid || !Number.isSafeInteger(quantity)
       ? translate(`Enter an amount from ${this.input.min} to ${this.input.max} ${tradingUnit(this.asset)} in steps of ${this.input.step}.`, this.language)
       : quantity > this.state().game.stock[this.asset] ? translate('Not enough owned resources for this order.', this.language)
-      : this.quote && !this.quote.available ? translate('The price changed or not enough items are available. Please try again.', this.language) : '');
-    this.root.querySelector('[data-sale-total]')!.textContent = this.quote ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
+      : this.quote && !this.quote.available ? translate('Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.', this.language) : '');
+    this.root.querySelector('[data-sale-total]')!.textContent = this.quote?.available ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-sale-status]')!.textContent = reason;
     this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!.disabled = this.pending || !!reason || !this.quote?.available || !this.quote.dollars;
     this.root.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('input,select,[data-sale-max],[data-sale-refresh]').forEach(control => control.disabled = this.pending);

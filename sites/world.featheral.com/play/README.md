@@ -188,13 +188,13 @@ The bank reuses the unchanged Gold exchange API, reserve formula, 1% spread and 
 - Council accounts and owners with unclaimed positions are exempt from ordinary expired-session cleanup. Bank visits renew their HttpOnly cookie for up to 400 real days; account rows and expiry columns stay synchronized. Do not clear this anonymous browser identity: exports cannot restore access, and this prototype has no wallet-based account recovery.
 - Bank commands and receipts share the authoritative SQLite transaction, revision, CSRF and four-decimal accounting. Public counters and the permanent supply ceiling include treasury rewards and locked principal, preserving the original monetary-policy fingerprint.
 
-The standalone `/market/` exchange has **53 markets**: four raw resources, ten crafted items, 21 keepsakes and 18 automation permits (12 collection, three exploration and three recruitment). All non-collectible assets are fungible, demand-priced liquid assets using the same reserve formula, 1% spread and player-order matching. Orders support up to 10,000 whole units, subject to balances and item storage; each item copy occupies one slot. Crafting additional copies is allowed. One equipped/placed copy is protected, but spares can be sold. Keepsakes remain unique, trade one at a time and use player orders only; without offers they show no quote. A one-time migration retires collectible system pools and redistributes existing marketplace FTH$ to fund item pools, conserving reserves exactly and preserving orders, receipts and monetary-policy constants.
+The standalone `/market/` exchange has **53 markets**: four raw resources, ten crafted items, 21 keepsakes and 18 automation permits (12 collection, three exploration and three recruitment). Resources use static, low-end-inspired shop prices and player-order matching; other non-collectibles retain demand-priced liquidity with a 1% spread. Orders support up to 10,000 whole units, subject to balances and item storage; each item copy occupies one slot. Crafting additional copies is allowed. One equipped/placed copy is protected, but spares can be sold. Keepsakes remain unique, trade one at a time and use player orders only; without offers they show no quote. A one-time migration retires collectible system pools and redistributes existing marketplace FTH$ to fund item pools, conserving reserves exactly and preserving orders, receipts and monetary-policy constants.
 
 Exploration and recruitment permits last 1, 4 or 12 game weeks, like collection permits. Activate from inventory or Population → Allocation & automation; activation consumes one copy and stacks its duration. Auto-exploration keeps one team travelling and waits for all existing manual teams to return. Auto-recruitment starts the next paid batch after the previous arrival. Both use normal FTH$ fees, Water requirements and full-week deadlines; recruitment includes housing bonuses and their cost. Blocked activity exposes its reason and retries once per game day. Pausing or expiry prevents new jobs, never cancels paid jobs, and does not stop the permit clock. Offline settlement follows the same scheduled events as frequent polling.
 
-Player limit orders use price-time priority and cannot match themselves. Constant-product pools provide additional liquidity with a 1% spread per side. Exact BigInt arithmetic rounds buys up and sells down to 0.0001 FTH$. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and require permanent donations of existing funds and owned assets. The opt-in isolated Gold reserve prototype can seed each eligible market once, up to 10,000 accounting lots at its genesis-pinned base price. Metal's FTH$200/t reference is not a peg.
+Player limit orders use price-time priority and cannot match themselves. Resource shops trade at the static base price without spread, limited by actual existing FTH$ for sales and owned shop stock for purchases. Better player bids take priority. Non-resource constant-product pools retain a 1% spread per side. Exact integer accounting uses 0.0001 FTH$ subunits. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and require permanent donations of existing funds and owned assets. The opt-in isolated Gold reserve prototype can seed each eligible market once, up to 10,000 accounting lots at its genesis-pinned seed price.
 
-All new raw-resource offers and executions have fixed **game-policy** minimum
+All new raw-resource offers and executions have fixed **game-policy** base/minimum
 prices inspired by conservative low-end bulk commodity values, not current
 quotes, guaranteed real-dollar values, or historical record lows:
 
@@ -208,16 +208,40 @@ quotes, guaranteed real-dollar values, or historical record lows:
 These deliberately rounded design references are not a live feed; commodity
 history and units can be compared with the [EIA petroleum price series](https://www.eia.gov/dnav/pet/pet_pri_spt_s1_d.htm)
 and [IMF commodity data](https://www.imf.org/en/Research/commodity-prices).
-Floors apply to both order sides, maker matching, pool execution, collection
+Base prices use physical lot sizes rather than treating unlike quantities as
+equally valuable. The shared static model also supplies existing baseline
+production and daily consumption; climate/upgrades still modify actual quantities.
+The market's expandable production/upkeep reference shows:
+
+| Resource | Baseline worker output / week | Gross base-price value | Resident consumption / week | Base-price upkeep value |
+| --- | --- | --- | --- | --- |
+| Wood | 5,000 kg | FTH$250 | 14 kg | FTH$0.70 |
+| Water | 6,000 L | FTH$6 | 350 L | FTH$0.35 |
+| Metal | 1 t | FTH$100 | 1.4 kg | FTH$0.14 |
+| Oil | 14 bbl | FTH$420 | No daily resident use | Activity-dependent |
+
+These are baseline gross values, not equal-profit promises: transport, activity
+materials, climate, terrain and upgrades differ. Production and consumption
+quantities are preserved, not rewritten to subsidize sales. Per-unit prices retain
+enough displayed precision for Water's FTH$0.001/L rather than rounding it to zero.
+Automatic crew profitability estimates use these gameplay base prices rather
+than reserve seed prices. Needed drinking Water remains prioritized even when
+its resale value is lower than transport cost; offline fast-forward uses the same
+profitability bounds as normal weekly planning.
+
+Floors apply to both order sides, maker matching, shop execution, collection
 sales and half-sales. Below-floor legacy orders remain visible to their owners
 for cancellation/refund but are excluded from matching and public depth. Actual
-historical fills remain unchanged. An under-floor pool cannot pay a fictitious
-floor price; its unavailable side is explicitly shown as having no quote.
-Donations must meet the floor individually and for the resulting reserve ratio.
+historical fills remain unchanged. Resource sales pay exactly base price from
+existing funds even if the old reserve ratio is below that price, stopping when
+the next lot cannot be funded. A shop may reach zero funds or zero stock; purchases
+replenish funds and sales replenish stock. Insufficient full-order liquidity
+shows an explicit sell-less/retry message and spends nothing. Donations must
+meet the floor individually; resource shops do not require an aggregate ratio.
 No reserves, escrow or balances are repriced, and no currency is issued.
 Reserve seed prices remain immutable and separate from trading floors. In
 particular, the existing Oil reserve seed is FTH$24/lot even though the trading
-floor is FTH$30/bbl; insufficiently priced reserves cannot produce a sell quote.
+base is FTH$30/bbl; the shop can pay FTH$30 only while its existing funds cover it.
 Deployment preflight refuses changes to the live reserve manifest before cutover.
 
 Buy orders escrow FTH$ and sell orders escrow owned assets. Partial fills retain unfilled escrow; cancellation returns it. Item bids and asks reserve inventory slots. The limit is 50 open orders per session; orders expire with the seven-day session. Raw quantities are 1–10,000 accounting lots with the physical increments below. Items use whole pieces; collectibles use one. Limit prices are FTH$0.0001–1,000,000 per accounting lot with four decimals, converted to physical-unit display prices. Charts show the latest 120 real executions, never fabricated history. Quotes refresh every five seconds. SQLite persists both accounts, escrow, reserves, trades and idempotent receipts atomically.
@@ -234,19 +258,19 @@ Recruitment still costs **FTH$50 per arriving resident**. Exploration still cost
 
 Commercial buildings retain ownership, placement and costs but generate no income: Market stall (Camp; 4,000 kg timber + 0.4 t Metal + FTH$200), Commercial workshop (Neighborhood; 10,000 kg timber + 1 t Metal + FTH$600), Trade hub (Town; 25,000 kg timber + 3 t Metal + FTH$1,800). The bank still unlocks Oil collection and resource trading. FTH$ is simulated game currency, not USD or an on-chain token; cash withdrawals are disabled.
 
-**Settlement → Sell resources** is available immediately after founding, without a bank or commercial building. Review the live spot quote to sell `floor(owned / 2)` of every raw resource in one confirmation. Pending stock and sell-order escrow are excluded; zero quantities are skipped. Exact halves above 10,000 units are supported. Each resource retains the conservative 2% minimum-proceeds protection and existing market spread. One atomic transaction sells everything or nothing, including player orders, pool movements and fills; retries cannot sell twice. Selling Water can reduce upkeep reserves, so review the Water warning before confirming.
+**Settlement → Sell resources** is available immediately after founding, without a bank or commercial building. Review the current funded quote to sell `floor(owned / 2)` of every raw resource in one confirmation. Pending stock and sell-order escrow are excluded; zero quantities are skipped. Exact halves above 10,000 units are supported. Each resource uses static base pricing (or better player bids) and retains conservative 2% minimum-proceeds protection. One atomic transaction sells everything or nothing, including player orders, pool movements and fills; retries cannot sell twice. Selling Water can reduce upkeep reserves, so review the Water warning before confirming.
 
 Authenticated Dollar routes include `GET /api/dollar/game/market?asset=metal&quantity=1`, `POST /api/dollar/game/market/actions` and `GET /api/dollar/game/market/half`. Submit `{type:'sell-half', sales:[{asset,quantity,limitDollars}]}` with the existing UUID, revision, Origin and CSRF protections. Snapshot `income` remains `{weekly:0,readyAt:0}` for compatibility; `game.dollars` stays integer subunits. FTHG conversion belongs to Gold's `/conversion/`, not a World bank.
 
 ### Permanent monetary policy, version 1
 
-FTH$ issuance is closed, including new bridge conversion and staking rewards. Gameplay payments transfer to the **system treasury** without changing supply. Historical burns remain unchanged on replay. Trades only transfer existing wallet, escrow and pool balances; pool spreads stay in the reserves. Pools require voluntary donations of owned assets and existing FTH$; no opening-rate estimate creates funds. Demand raises marginal buy prices on the existing constant-product curve. A zero-supply journal cannot bootstrap liquidity under this policy.
+FTH$ issuance is closed, including new bridge conversion and staking rewards. Gameplay payments transfer to the **system treasury** without changing supply. Historical burns remain unchanged on replay. Trades only transfer existing wallet, escrow and pool balances; non-resource pool spreads stay in the reserves. Pools require voluntary donations of owned assets and existing FTH$; no opening-rate estimate creates funds. Demand raises non-resource marginal buy prices on the existing constant-product curve. Resource shop prices remain static. A zero-supply journal cannot bootstrap liquidity under this policy.
 
 **Isolated finite-reserve exception:** the opt-in test deployment uses Gold-authorized initial allocations capped by verified finalized origin holdings, at 1 FTHG = 1,000 FTH$. Dollar uses treasury funds first and issues only the exact reserve-backed deficit for one-time market bootstrap. No repeat refills, staking rewards or personal grants occur. Unsynced backing cannot redeem; redeemed FTH$ remains locked until confirmed returned FTHG is reconverted without increasing supply. Gold shows actual holdings separately from pending obligations and offers a prominently warned sync preview, not Mainnet submission. The live ledger remains unchanged. See the root README for isolation settings and production prerequisites.
 
 **Authorized live activation:** `GOLD_RESERVE_MODE=live` enables the same finite funding model on an unused zero-supply Dollar ledger after backup. A signed `GOLD_POLICY` block preserves the original genesis and existing settlements. Market funding becomes available on first use after founding; sell owned resources to obtain FTH$. No Ethereum transfer is submitted, and unconfirmed backing still cannot redeem. Previously issued ledgers require a separate migration and are refused.
 
-Resource and item pools share one integer constant-product rule. With currency reserve R, asset reserve S and quantity q: buys pay `ceil(R*q*101 / (100*(S-q)))`; sells receive `floor(R*q*99 / (100*(S+q)))`. R is in 10,000 FTH$ subunits; assets use accounting lots or pieces. Orders retain 2% quote protection. Gold's fixed reserve conversion rate is separate from these dynamic market prices.
+Non-resource item pools use one integer constant-product rule. With currency reserve R, asset reserve S and quantity q: buys pay `ceil(R*q*101 / (100*(S-q)))`; sells receive `floor(R*q*99 / (100*(S+q)))`. Resource shops instead pay/charge `q * resourceBasePrice` in exact FTH$ subunits, capped by real funds/stock. Orders retain 2% quote protection. Gold's reserve conversion rate is separate from gameplay resource base prices.
 
 The game policy fingerprint and measured opening supply are persisted. Startup refuses changed policy constants; the authoritative Dollar journal, not that SQLite snapshot, enforces monetary conservation and the finite Gold cap. New markets outside the genesis-pinned bootstrap catalog start empty; player orders remain available. These are operational safeguards, not immutability against future administrators.
 
@@ -271,7 +295,7 @@ API resource access exposes `dollarsPerWorker` and new paid crews expose `weekly
 
 Other buildings and visibility equipment without an existing FTH$ price add their material reference value: timber FTH$0.08/kg, Water FTH$0.20/L, Metal FTH$200/t and Oil FTH$24/bbl. These equal the preserved 4/2/2/24 FTH$ per-accounting-lot references. Existing FTH$ fees, ownership and completed work are unchanged.
 
-Construct a market stall, trade hub or city bank to unlock **Sell resources for FTH$** in Settlement → Buildings and Production. Choose a resource, quantity or Max, check the live spot total, then review and confirm. Only owned resources can be sold there, up to 10,000 per order. Settlement sales use the same marketplace endpoint, player-order/pool matching, 1% pool spread and conservative 2% price protection; banks never invent a fixed sale price. Pending output and market escrow are excluded. The resource-header **Collect and sell** action separately funds pickup from its sale proceeds. The full marketplace remains accessible before constructing these buildings.
+Construct a market stall, trade hub or city bank to unlock **Sell resources for FTH$** in Settlement → Buildings and Production. Choose a resource, quantity or Max, check the funded total, then review and confirm. Only owned resources can be sold there, up to 10,000 per order. Settlement sales use the same marketplace endpoint, static base price or better player bids, actual market funds and conservative 2% price protection. Pending output and market escrow are excluded. The resource-header **Collect and sell** action separately funds pickup from its sale proceeds. The full marketplace remains accessible before constructing these buildings.
 
 Pricing and collection migrations invalidate stale gameplay revisions once while preserving existing balances, buildings, paid crews and deadlines. Previously paid transport is not refunded or charged again; those deliveries complete normally. Every worker on a new gathering job pays FTH$ transport at pickup, including basic Wood and Water crews.
 

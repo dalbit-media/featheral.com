@@ -1,11 +1,60 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, resourceUnits } from './resource-units.ts';
+import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceBasePrice, resourceEconomy, resourceUnits } from './resource-units.ts';
 import { dailyClimate, expeditionFindPlan, productionClimate, recruitmentClimate, temperatureEfficiency, waterDemandClimate, weeklyClimate } from './climate.ts';
 import { climateCycleDays, environmentAt, seasonMs, worldDayMs, worldEpoch, worldWeekMs } from './environment.ts';
-import { recruitmentAmount } from './engine.ts';
-import { waterConsumptionForDays, waterUpkeep } from './upkeep.ts';
+import { newGame, recruitmentAmount } from './engine.ts';
+import { dailyUpkeepPerResident, dailyWaterPerResident, waterConsumptionForDays, waterUpkeep } from './upkeep.ts';
 import { dollarsUnits } from './dollars.ts';
+import { marketBasePrice, marketPriceFloor } from './market.ts';
+import { translate } from './i18n.ts';
+import { balancedAllocation, emptyAllocation } from './workforce.ts';
+
+test('automatic crews value physical output at static prices and prioritize needed Water even below transport cost', () => {
+  const game = newGame(1000000);
+  game.stage = 0; game.population = 4; game.bank = true;
+  game.stock = { wood: 3000, water: 100000, metal: 3000, oil: 3000 };
+  const site = (perWorker: number) => ({ available: true, distance: 0, efficiency: 1, perWorker, dollarsPerWorker: 1 });
+  const access = { wood: site(100), water: site(600), metal: site(100), oil: site(14) };
+  const plan = balancedAllocation(game, emptyAllocation(), 6000, 99, access, 0, 0, true);
+  assert.equal(plan.crews.oil, 2, 'Oil yields 420 FTH$ per worker versus Wood 250 FTH$');
+  assert.equal(plan.crews.wood, 0);
+  game.stock.water = 0;
+  access.water.perWorker = 1;
+  const supplies = balancedAllocation(game, emptyAllocation(), 6000, 99, access, 0, 0, true);
+  assert.equal(supplies.crews.water, 2, 'needed drinking Water is not skipped for its low resale value');
+  game.stock = { wood: 6000, water: 100000, metal: 5999, oil: 6000 };
+  const repairs = balancedAllocation(game, emptyAllocation(), 6000, 99, access, 0, 0, true);
+  assert.equal(repairs.crews.metal, 1, 'a break-even Metal lot can restore repair stock without a negative-value trip');
+});
+
+test('static low-end prices value physical production and upkeep without changing reserve seeds', () => {
+  const gross = { wood: 250, water: 6, metal: 100, oil: 420 };
+  const upkeep = { wood: .7, water: .35, metal: .14, oil: 0 };
+  const seeds = { wood: 4, water: 2, metal: 2, oil: 24 };
+  for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {
+    const reference = resourceEconomy[resource], price = resourceBasePrice(resource);
+    assert.equal(displayPrice(resource, price), reference.pricePerUnit);
+    assert.equal(marketPriceFloor(resource), price);
+    assert.equal(marketBasePrice(resource), seeds[resource]);
+    assert.equal(reference.weeklyProduction * dollarsUnits(price), dollarsUnits(gross[resource]));
+    assert.equal(Math.round(reference.dailyConsumption * 7 * dollarsUnits(price)), dollarsUnits(upkeep[resource]));
+  }
+  assert.equal(dailyWaterPerResident, resourceEconomy.water.dailyConsumption);
+  assert.deepEqual(dailyUpkeepPerResident, { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption });
+  assert.equal(formatResourcePrice('water', .01, 'en-US'), '0.001');
+  assert.equal(formatResourcePrice('wood', 2.5, 'ko-KR'), '0.05');
+  assert.equal(formatResourcePrice('wood', .0001, 'en-US'), '0.000002');
+});
+test('static resource pricing and liquidity explanations are available in Korean', () => {
+  for (const text of [
+    'Static base price', 'Production and upkeep value', 'Baseline output per worker/week', 'Baseline upkeep per resident/week',
+    'Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.',
+    'Resources trade at a static base price without spread. Better player bids may pay more. Sales use existing market funds; no currency is created.',
+    'Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.',
+    'Not enough resources in the market. Buy less or try again after players sell.',
+  ]) assert.notEqual(translate(text, 'ko'), text);
+});
 
 test('familiar trading units use exact accounting lots without changing price times quantity', () => {
   for (const asset of ['wood', 'water', 'metal', 'oil'] as const) {

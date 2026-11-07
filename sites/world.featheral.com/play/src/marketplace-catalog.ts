@@ -4,11 +4,10 @@ import { itemArt } from './item-art.ts';
 import { isDecorationItem, isVisibilityItem } from './items.ts';
 import { isMarketResource, marketAssetName, marketPriceAvailable } from './market.ts';
 import type { MarketAsset, MarketSnapshot } from './market.ts';
-import { formatDollars } from './dollars.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { isAutomationItem } from './automation.ts';
-import { displayPrice, displayQuantity, formatResourceAmount, tradingUnit } from './resource-units.ts';
+import { displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, tradingUnit } from './resource-units.ts';
 
 export type CatalogView = 'grid' | 'table';
 export type CatalogSort = 'name' | 'buy-low' | 'sell-high' | 'owned';
@@ -33,7 +32,6 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
 }
 export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected: MarketAsset, view: CatalogView, language: Language, pending: boolean): string {
   const text = (label: string) => translate(label, language);
-  const money = (value: number) => formatDollars(value, locale(language));
   const rows = tickers.map(ticker => {
     const name = text(marketAssetName(ticker.asset)), owned = formatResourceAmount(ticker.asset, marketOwned(state, ticker.asset), locale(language));
     const unit = tradingUnit(ticker.asset, locale(language));
@@ -41,10 +39,10 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
     const identity = `<button type="button" class="catalog-identity" data-market-asset="${ticker.asset}" aria-pressed="${ticker.asset === selected}" ${pending ? 'disabled' : ''}>${art}<span><strong>${name}</strong><small class="catalog-owned-inline">${text('Owned')} ${owned}</small></span></button>`;
     const trade = (side: 'buy' | 'sell') => {
       const value = side === 'buy' ? ticker.ask : ticker.bid, available = marketPriceAvailable(value);
-      const price = available ? money(displayPrice(ticker.asset, value)) : text('No offers yet.');
+      const price = available ? formatResourcePrice(ticker.asset, value, locale(language)) : text('No offers yet.');
       return `<button type="button" class="catalog-price catalog-${side}" data-market-asset="${ticker.asset}" data-market-quick-side="${side}" data-quoted="${available}" aria-label="${text(side === 'buy' ? 'Buy' : 'Sell')} ${name}, ${price}${available ? ` FTH$/${unit}` : ''}" ${pending || (side === 'sell' && marketOwned(state, ticker.asset) === 0) ? 'disabled' : ''}><small>${text(side === 'buy' ? 'Buy' : 'Sell')}</small><strong>${available || view === 'table' ? price : text('No quote')}</strong>${available ? `<span class="catalog-currency">FTH$/${unit}</span>` : ''}</button>`;
     };
-    const last = ticker.last === null ? '—' : money(displayPrice(ticker.asset, ticker.last));
+    const last = ticker.last === null ? '—' : formatResourcePrice(ticker.asset, ticker.last, locale(language));
     const category = isMarketResource(ticker.asset) ? 'Resources' : isAutomationItem(ticker.asset) ? 'Automation'
       : isVisibilityItem(ticker.asset) ? 'Equipment' : isDecorationItem(ticker.asset) ? 'Decorations' : 'Collectibles';
     return view === 'grid'

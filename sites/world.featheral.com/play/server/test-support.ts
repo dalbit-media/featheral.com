@@ -4,6 +4,7 @@ import type { Account } from './economy.ts';
 import { createAccount } from './economy.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { isLiquidAsset, isMarketResource, marketAssets, marketBasePrice, marketPriceFloor } from '../src/market.ts';
+import type { MarketAsset } from '../src/market.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import { inventory } from './inventory.ts';
 import type { SqliteStore } from './store.ts';
@@ -17,10 +18,10 @@ export function fundFixtureResources(account: Account): void {
   account.game.stock = { wood: 180, water: 2560, metal: 80, oil: 0 };
 }
 
-export function seedFixturePools(store: SqliteStore): void {
+export function seedFixturePools(store: SqliteStore, excluded: readonly MarketAsset[] = []): void {
   const treasury = store.create();
   store.transaction(treasury.token, (session, _time, _realTime, exchange) => {
-    for (const asset of marketAssets.filter(isLiquidAsset)) {
+    for (const asset of marketAssets.filter(asset => isLiquidAsset(asset) && !excluded.includes(asset))) {
       const quantity = isMarketResource(asset) ? monetaryPolicy.rawInitialUnits : monetaryPolicy.itemInitialUnits;
       const dollars = dollarsUnits(quantity * Math.max(marketBasePrice(asset), marketPriceFloor(asset)));
       session.account.game.dollars = dollars;

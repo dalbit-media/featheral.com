@@ -1,4 +1,4 @@
-import { build, diplomacy, discover, invite, newGame, note, pay, prices, radius, recruitmentAmount, recruitmentDollars, stages, survey, terrainAt, terrainDetails, terrainResources, upgrade } from '../src/engine.ts';
+import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruitmentAmount, recruitmentDollars, stages, survey, terrainAt, terrainDetails, terrainResources, upgrade } from '../src/engine.ts';
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
@@ -13,6 +13,7 @@ import { isWaterFacility } from '../src/water-facilities.ts';
 import { isIncomeFacility, weeklyIncome } from '../src/income.ts';
 import { maximumUpgradeLevel, warehouseCost } from '../src/costs.ts';
 import { dollarsScale } from '../src/dollars.ts';
+import { resourceBasePrice } from '../src/resource-units.ts';
 import { constructionCost, constructionLevel, constructions, isConstruction } from '../src/constructions.ts';
 import { collectionItemDetails, isCollectionItem } from '../src/collection.ts';
 import { activityItemDetails, activityKinds, isActivityItem, isActivityKind } from '../src/automation.ts';
@@ -467,7 +468,7 @@ function skipSuppliedCycles(account: Account, now: number, event: number): void 
     const maximum = maximumSettlementWeeklyConsumption(resource, account.game.population);
     const minimumOutput = Math.floor(site.perWorker * (resource === 'wood' ? .65 * .55 * .55 : .85 * .6 * .55));
     if (!site.available || maximum >= Math.min(cap, minimumOutput)
-      || site.dollarsPerWorker >= prices[resource] * 2 || account.pending[resource] !== 0 || account.pickupFees?.[resource]
+      || site.dollarsPerWorker > resourceBasePrice(resource) || account.pending[resource] !== 0 || account.pickupFees?.[resource]
       || (crew && (!crew.payOnPickup || crew.workers !== 1 || crew.readyAt !== work.cycleAt))
       || account.game.stock[resource] + (crew?.weeklyYield ?? 0) !== cap) return;
     weeks = Math.min(weeks, Math.floor(((account.automationUntil?.[resource] ?? 0) - event) / worldWeekMs));

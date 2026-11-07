@@ -1,4 +1,4 @@
-import { prices, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
+import { radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import { dollarsScale } from './dollars.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
@@ -9,10 +9,12 @@ import { constructionLevel, productionMultiplier } from './constructions.ts';
 import { monetaryPolicy } from './monetary-policy.ts';
 import { productionClimate, weeklyClimate } from './climate.ts';
 import { worldDayMs } from './environment.ts';
+import { resourceBasePrice, resourceEconomy } from './resource-units.ts';
 
 export const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
 export const emptyAllocation = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
-const base: Stock = { wood: 100, water: 600, metal: 100, oil: 14 };
+const base: Stock = { wood: resourceEconomy.wood.weeklyProduction, water: resourceEconomy.water.weeklyProduction,
+  metal: resourceEconomy.metal.weeklyProduction, oil: resourceEconomy.oil.weeklyProduction };
 const legacyBase: Stock = { wood: 30, water: 300, metal: 10, oil: 6 };
 const fundingOrder: Resource[] = ['metal', 'wood', 'water', 'oil'];
 export function resourceCapacity(capacity: number, resource: Resource, game?: Game): number {
@@ -102,8 +104,8 @@ export function resourceAccess(game: Game, time?: number, legacy = false): Recor
     const dollarsPerWorker = monetaryPolicy.transportPerWorker
       + Math.max(0, Math.ceil((effectiveDistance - monetaryPolicy.transportFreeDistance) / monetaryPolicy.transportDistanceBand));
     const previous = result[resource];
-    const value = perWorker * prices[resource] * 2 - dollarsPerWorker;
-    const previousValue = previous.perWorker * prices[resource] * 2 - previous.dollarsPerWorker;
+    const value = perWorker * resourceBasePrice(resource) - dollarsPerWorker;
+    const previousValue = previous.perWorker * resourceBasePrice(resource) - previous.dollarsPerWorker;
     if (!previous.available || value > previousValue
       || (value === previousValue && distance < previous.distance)) {
       result[resource] = { available: true, distance, efficiency, perWorker, dollarsPerWorker };
@@ -132,7 +134,7 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
   if (game.stage >= 4 && !game.townhall) { goals.wood += 300; goals.metal += 150; }
   for (const resource of resourceKeys) {
     const site = access[resource];
-    if (!site.available || site.perWorker * prices[resource] * 2 <= site.dollarsPerWorker) continue;
+    if (!site.available || (resource !== 'water' && site.perWorker * resourceBasePrice(resource) <= site.dollarsPerWorker)) continue;
     const cap = resourceCapacity(capacity, resource, game);
     const deficit = Math.max(resource === 'water' ? site.weeklyConsumption ?? Math.ceil(waterRequirement(game.population) * 1.5) : 0,
       Math.max(goals[resource], cap / 2) - game.stock[resource] - pending[resource]);
@@ -164,8 +166,8 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
       if (!site.available || site.perWorker <= 0) continue;
       const room = Math.max(0, resourceWorkRoom(capacity, resource, game, pending[resource], site) - plan.crews[resource] * site.perWorker);
       const cost = transportCost(resource, plan.crews[resource] + 1, site.dollarsPerWorker) - transportCost(resource, plan.crews[resource], site.dollarsPerWorker);
-      const value = Math.min(room, site.perWorker) * prices[resource] * 2 - cost;
-      if (room <= 0 || value <= 0 || (game.stock.water < game.population * dailyWaterPerResident && resource !== 'water')
+      const value = Math.min(room, site.perWorker) * resourceBasePrice(resource) - cost;
+      if (room <= 0 || value < 0 || (game.stock.water < game.population * dailyWaterPerResident && resource !== 'water')
         || (!payOnPickup && cost * dollarsScale > Math.max(0, plan.dollars - reserve * dollarsScale))) continue;
       if (value > bestValue || (value === bestValue && cost < bestCost)) {
         best = resource; bestValue = value; bestCost = cost;

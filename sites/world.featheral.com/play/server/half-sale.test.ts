@@ -11,16 +11,16 @@ import { claim, trade } from '../src/engine.ts';
 import { dollarsScale, dollarsSlippage, dollarsUnits } from '../src/dollars.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { marketResources } from '../src/market.ts';
-import type { HalfSaleQuote, MarketCommand } from '../src/market.ts';
+import type { HalfSaleQuote, MarketAsset, MarketCommand } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
 import { seedFixturePools } from './test-support.ts';
 
 const command = (quote: HalfSaleQuote): MarketCommand => ({ type: 'sell-half', sales: quote.sales.map(sale =>
   ({ asset: sale.asset, quantity: sale.quantity, limitDollars: dollarsSlippage(sale.dollars, 'sell') })) });
-function setup() {
+function setup(excluded: readonly MarketAsset[] = []) {
   let now = 1000000;
   const store = new SqliteStore(':memory:', () => now), identity = store.create();
-  seedFixturePools(store);
+  seedFixturePools(store, excluded);
   store.transaction(identity.token, session => {
     session.account.game.stage = 0; session.account.game.home = { x: 0, y: 0 };
     session.account.game.population = 0; session.account.game.stock = { wood: 5, water: 7, metal: 1, oil: 4 };
@@ -132,7 +132,7 @@ test('half-sale rejects missing, duplicate and forged quantities, and sells exac
   } finally { h.store.close(); }
 });
 test('half-sales transfer player buy escrow and accept large payment limits', () => {
-  const h = setup();
+  const h = setup(['wood']);
   try {
     h.store.transaction(h.identity.token, session => { session.account.game.stock.wood = 50001; });
     const buyers = Array.from({ length: 3 }, () => h.store.create());

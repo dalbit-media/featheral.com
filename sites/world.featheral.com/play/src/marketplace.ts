@@ -13,7 +13,7 @@ import { marketConsumption } from './consumption.ts';
 import { confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
-import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, tradingUnit } from './resource-units.ts';
+import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceBasePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
@@ -25,7 +25,7 @@ export function priceHistoryChart(history: MarketFill[], language: Language): st
     const fraction = history.length === 1 ? .5 : last > first ? (fill.time - first) / (last - first) : index / (history.length - 1);
     return `${(40 + fraction * 720).toFixed(2)},${(175 - (fill.price - min + span * .1) / (span * 1.2) * 145).toFixed(2)}`;
   });
-  const fmt = (value: number) => `${formatDollars(displayPrice(history[0].asset, value), locale(language))} FTH$/${tradingUnit(history[0].asset, locale(language))}`;
+  const fmt = (value: number) => `${formatResourcePrice(history[0].asset, value, locale(language))} FTH$/${tradingUnit(history[0].asset, locale(language))}`;
   const date = (time: number) => new Date(time).toLocaleString(locale(language), { timeZone: 'UTC', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   return `<svg class="market-chart" viewBox="0 0 800 215" role="img" aria-label="Past sale prices"><title>Past sale prices</title><path d="M40 20V185H760" class="chart-axis"/><polyline points="${points.join(' ')}" class="chart-line"/><circle cx="${points.at(-1)!.split(',')[0]}" cy="${points.at(-1)!.split(',')[1]}" r="4" class="chart-last"/><text x="40" y="15">${fmt(max)}</text><text x="40" y="180">${fmt(min)}</text><text x="40" y="207">${date(first)}</text><text x="760" y="207" text-anchor="end">${date(last)}</text></svg>
     <details class="market-chart-data"><summary>See past sales</summary><div class="market-table-scroll"><table><thead><tr><th>Server time</th><th>Price each</th><th>Amount</th></tr></thead><tbody>${history.map(fill => `<tr><td>${date(fill.time)}</td><td>${fmt(fill.price)}</td><td>${formatResourceAmount(fill.asset, fill.quantity, locale(language))}</td></tr>`).join('')}</tbody></table></div></details>`;
@@ -162,7 +162,7 @@ export class Marketplace {
   }
   private fmt(value: number, asset = this.asset): string { return formatResourceAmount(asset, value, locale(this.language)); }
   private money(value: number): string { return formatDollars(value, locale(this.language)); }
-  private price(value: number, asset = this.asset): string { return `${this.money(displayPrice(asset, value))} FTH$/${tradingUnit(asset, locale(this.language))}`; }
+  private price(value: number, asset = this.asset): string { return `${formatResourcePrice(asset, value, locale(this.language))} FTH$/${tradingUnit(asset, locale(this.language))}`; }
   private name(asset: MarketAsset): string { return translate(marketAssetName(asset), this.language); }
   private art(asset: MarketAsset): string { return isMarketResource(asset) ? icon(asset) : itemArt(asset); }
   private quantity(): number { return accountingQuantity(this.asset, Number(this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!.value)); }
@@ -208,12 +208,19 @@ export class Marketplace {
     return translate(`Enter an amount from ${input.min} to ${input.max} ${tradingUnit(this.asset, locale(this.language))} in steps of ${input.step}.`, this.language);
   }
   private instrument(): void {
+    const economyOpen = this.root.querySelector<HTMLDetailsElement>('[data-resource-economy]')?.open ?? false;
     const ticker = this.data?.market.tickers.find(ticker => ticker.asset === this.asset);
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
-    const price = ticker ? this.side === 'buy' ? ticker.ask : ticker.bid : 0;
+    const price = isMarketResource(this.asset) ? resourceBasePrice(this.asset) : ticker ? this.side === 'buy' ? ticker.ask : ticker.bid : 0;
     this.root.querySelector('[data-market-selected-price]')!.textContent = ticker
       ? marketPriceAvailable(price) ? this.price(price) : translate('No offers yet.', this.language) : '';
-    this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2><p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p></div><span class="exchange-venue">Players + game shop</span>`;
+    const economy = isMarketResource(this.asset) ? resourceEconomy[this.asset] : null;
+    const reference = economy ? `<p>${translate('Static base price', this.language)} <strong>${this.price(price)}</strong></p>
+      <details data-resource-economy ${economyOpen ? 'open' : ''}><summary>${translate('Production and upkeep value', this.language)}</summary>
+      <p>${translate('Baseline output per worker/week', this.language)}: ${this.fmt(economy.weeklyProduction)} · ${this.money(economy.weeklyProduction * price)} FTH$</p>
+      <p>${translate('Baseline upkeep per resident/week', this.language)}: ${this.fmt(economy.dailyConsumption * 7)} · ${this.money(economy.dailyConsumption * 7 * price)} FTH$</p>
+      <small>${translate('Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.', this.language)}</small></details>` : '';
+    this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2>${reference}<p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p></div><span class="exchange-venue">Players + game shop</span>`;
     if (!this.priceEdited && ticker) {
       const value = marketPriceAvailable(price) ? price : Math.max(marketBasePrice(this.asset), marketPriceFloor(this.asset));
       if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = displayPrice(this.asset, value).toFixed(4);
@@ -272,7 +279,10 @@ export class Marketplace {
     }
     if (this.side === 'sell' && owned < quantity) reason = isMarketResource(this.asset) ? 'Not enough owned resources for this order.' : 'This item is not in your inventory.';
     if (this.side === 'buy' && dollars !== undefined && dollars > this.state().dollars) reason = 'Not enough FTH$ for this order.';
-    if (this.fresh && this.mode === 'spot' && quote && (!quote.available || !quote.dollars)) reason = 'The price changed or not enough items are available. Please try again.';
+    if (this.fresh && this.mode === 'spot' && quote && (!quote.available || !quote.dollars)) reason = isMarketResource(this.asset)
+      ? this.side === 'sell' ? 'Not enough market funds to buy this amount at the base price. Sell less or try again after buyers replenish the market.'
+        : 'Not enough resources in the market. Buy less or try again after players sell.'
+      : 'The price changed or not enough items are available. Please try again.';
     this.root.querySelector('[data-market-requirement]')!.textContent = translate(reason, this.language);
     this.root.querySelector('[data-market-preview]')!.innerHTML = `<span class="ticket-total-label">${this.side === 'buy' ? 'You pay · FTH$' : 'You get · FTH$'}</span><strong class="ticket-total">${dollars === undefined || !this.fresh ? '—' : this.money(dollars)}</strong><span>${this.mode === 'spot' ? 'Average price' : 'Price each'}</span><strong>${dollars === undefined || !this.fresh || quantity < 1 ? '—' : this.price(dollars / quantity)}</strong><span>You own</span><strong>${this.fmt(owned)}</strong>${isMarketResource(this.asset) ? '' : `<span>Bag space used</span><strong>${inventoryUsed(bag)} / ${itemStorage[bag.storage].capacity}</strong>`}`;
     const button = this.root.querySelector<HTMLButtonElement>('[data-market-submit]')!;
@@ -305,7 +315,10 @@ export class Marketplace {
     if (historyDetails) historyDetails.open = historyOpen;
     const levels = (side: 'bids' | 'asks') => `<div class="${side}"><h3>${side === 'bids' ? 'Buying' : 'Selling'}</h3><table><thead><tr><th>Price each</th><th>Amount</th></tr></thead><tbody>${market[side].map(level => `<tr><td><button type="button" class="book-price" data-market-level="${side === 'bids' ? 'sell' : 'buy'}" data-market-level-price="${level.price}" ${this.pending ? 'disabled' : ''}>${this.price(level.price)}</button></td><td>${this.fmt(level.quantity)}</td></tr>`).join('') || '<tr><td colspan="2">No offers yet.</td></tr>'}</tbody></table></div>`;
     const quotedAmount = this.fresh && market.quantity === this.quantity();
-    this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span>Prices for this amount</span><strong><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.</small></div>`;
+    const pricing = isMarketResource(this.asset)
+      ? 'Resources trade at a static base price without spread. Better player bids may pay more. Sales use existing market funds; no currency is created.'
+      : 'Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.';
+    this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span>Prices for this amount</span><strong><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>${translate(pricing, this.language)}</small></div>`;
     this.root.querySelector('[data-market-orders]')!.innerHTML = this.table(['Item', 'Type', 'Price each', 'Completed / total', 'Status', 'Action'], market.orders.map(order =>
       `<tr><td>${this.name(order.asset)}</td><td>${translate(order.side === 'buy' ? 'Buy' : 'Sell', this.language)}</td><td>${this.price(order.price, order.asset)}</td><td>${this.fmt(order.quantity - order.remaining, order.asset)} / ${this.fmt(order.quantity, order.asset)}</td><td>${translate(order.status === 'open' && order.price < marketPriceFloor(order.asset) ? 'Below floor — cancel for refund' : ({ open: 'Waiting', filled: 'Done', cancelled: 'Cancelled' })[order.status], this.language)}</td><td>${order.status === 'open' ? `<button class="button" data-market-cancel="${order.id}" ${this.pending ? 'disabled' : ''}>Cancel</button>` : '—'}</td></tr>`).join(''), 'No offers yet.');
     this.root.querySelector('[data-market-trades]')!.innerHTML = this.table(['Item', 'Type', 'Amount', 'FTH$', 'With'], market.trades.map(fill =>

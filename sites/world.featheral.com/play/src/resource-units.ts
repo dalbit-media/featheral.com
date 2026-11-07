@@ -8,6 +8,16 @@ export const resourceUnits = {
   metal: { unit: 't', lotsPerUnit: 100, kilogramsPerLot: 10 },
   oil: { unit: 'bbl', lotsPerUnit: 1, litresPerLot: 158.987294928 },
 } as const;
+// Rounded low-end bulk references, not live quotes or reserve genesis prices.
+export const resourceEconomy = {
+  wood: { pricePerUnit: .05, weeklyProduction: 100, dailyConsumption: .04 },
+  water: { pricePerUnit: .001, weeklyProduction: 600, dailyConsumption: 5 },
+  metal: { pricePerUnit: 100, weeklyProduction: 100, dailyConsumption: .02 },
+  oil: { pricePerUnit: 30, weeklyProduction: 14, dailyConsumption: 0 },
+} as const;
+export function resourceBasePrice(resource: Resource): number {
+  return accountingPrice(resource, resourceEconomy[resource].pricePerUnit);
+}
 
 export function isResource(asset: string): asset is Resource {
   return Object.hasOwn(resourceUnits, asset);
@@ -25,6 +35,10 @@ export function accountingQuantity(asset: string, amount: number): number {
 }
 export function displayPrice(asset: string, pricePerLot: number): number {
   return pricePerLot / displayQuantity(asset, 1);
+}
+export function formatResourcePrice(asset: string, pricePerLot: number, locale: string): string {
+  const precision = Math.max(2, 4 + Math.ceil(Math.log10(displayQuantity(asset, 1))));
+  return displayPrice(asset, pricePerLot).toLocaleString(locale, { maximumFractionDigits: precision });
 }
 export function accountingPrice(asset: string, pricePerUnit: number): number {
   const value = pricePerUnit * displayQuantity(asset, 1);

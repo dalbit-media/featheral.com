@@ -7,6 +7,7 @@ import { monetaryPolicy } from './monetary-policy.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, automationItems, isActivityItem } from './automation.ts';
 import { dollarsScale } from './dollars.ts';
+import { resourceBasePrice } from './resource-units.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -16,7 +17,9 @@ export function marketPriceAvailable(price: number): boolean {
 }
 export const marketResources: MarketResource[] = ['wood', 'water', 'metal', 'oil'];
 // Fixed game-policy references per accounting lot, not live commodity quotes.
-export const resourcePriceFloors: Readonly<Record<Resource, number>> = { wood: 2.5, water: .01, metal: 1, oil: 30 };
+export const resourcePriceFloors: Readonly<Record<Resource, number>> = {
+  wood: resourceBasePrice('wood'), water: resourceBasePrice('water'), metal: resourceBasePrice('metal'), oil: resourceBasePrice('oil'),
+};
 export function marketPriceFloor(asset: MarketAsset): number {
   return isMarketResource(asset) ? resourcePriceFloors[asset] : .0001;
 }
