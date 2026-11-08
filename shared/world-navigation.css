@@ -6,7 +6,11 @@
 .world-submenu[open] summary::after{content:" -"}
 .world-submenu-links{position:absolute;top:100%;left:0;z-index:30;min-width:170px;display:flex;flex-direction:column;gap:2px;background:#fff;color:#233d35;border:1px solid #dfe6dc;border-radius:9px;padding:7px;box-shadow:0 10px 30px #10251c20}
 .world-submenu-links a{display:block!important;padding:7px 10px;white-space:nowrap;border-radius:5px;text-decoration:none}
+.world-navigation>.world-submenu:not([open])>.world-submenu-links{display:none}
+.world-navigation>.world-submenu>summary,.world-navigation>a{min-height:40px}
+.world-submenu-links a{min-height:40px}
+.world-submenu:last-of-type .world-submenu-links{left:auto;right:0}
 .world-submenu-links a:hover,.world-submenu-links a[aria-current="page"]{background:#edf2e9}
 .world-submenu summary:focus-visible{outline:3px solid #548b65;outline-offset:3px}
 .world-submenu:has(a[aria-current="page"]) summary{color:#548b65}
-@media(max-width:640px){.world-navigation{gap:10px!important}.world-submenu-links{min-width:145px}.world-submenu:last-of-type .world-submenu-links{left:auto;right:0}}
+@media(max-width:640px){.world-navigation{gap:10px!important}.world-submenu-links{min-width:145px}.world-submenu:not(:first-of-type) .world-submenu-links{left:auto;right:0}}

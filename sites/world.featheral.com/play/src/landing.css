@@ -5,6 +5,11 @@
 .world-about #main>section{border-top:0}
 .world-about .top{font:15px/1.6 system-ui,"Segoe UI",sans-serif}
 .world-about .top .brand{font-size:15px;letter-spacing:normal}
+.world-about header.world-header{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:24px}
+.world-header .world-navigation{justify-content:flex-end;min-width:0}
+.world-header .world-wallet-controls{display:flex;align-items:center}
+@media(max-width:1000px){.world-about header.world-header{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.world-header .brand{grid-column:1;grid-row:1}.world-header .world-wallet-controls{grid-column:2;grid-row:1}.world-header .world-navigation{grid-column:1/-1;grid-row:2;justify-content:flex-start;flex-wrap:wrap!important;gap:12px!important}}
+@media(max-width:380px){.world-header .world-navigation{font-size:12px;gap:9px!important}.world-header .brand{font-size:14px!important}}
 .world-about .eco-bar a{color:var(--mut)}
 .world-about .eco-bar a[aria-current="page"]{color:var(--on-accent)}
 .world-about .site-footer{max-width:1280px;text-align:left}

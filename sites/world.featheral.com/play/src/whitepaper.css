@@ -1,3 +1,6 @@
+.paper-page{--ink:var(--txt)}
+.paper-page .skip-link{position:fixed;left:16px;top:-100px;padding:10px 16px;background:#fff;z-index:100}
+.paper-page .skip-link:focus{top:10px}
 .paper-header{gap:12px}
 .paper-tools{display:flex;align-items:center;gap:12px}
 .paper-tools select{font:inherit;font-size:14px;color:var(--ink);background:#fffef8;border:1px solid var(--line);border-radius:10px;min-height:44px;padding:8px;max-width:96px}

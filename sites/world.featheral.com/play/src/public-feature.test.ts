@@ -36,6 +36,8 @@ test('all six public routes have unique, bilingual content and do not replace ga
     assert.ok(html.includes(page.headline[0]));
     assert.ok(html.includes(`href="${page.gamePath}"`));
     assert.match(html, /aria-current="page"/);
+    assert.match(html, /<\/nav><div class="world-wallet-controls" data-wallet-controls><\/div>\s*<\/div><\/header>/);
+    assert.match(html, /data-public-map=/);
     assert.doesNotMatch(html, /src="\/src\/main.ts"|WORLD_ACCOUNT|id="walletButton"/);
   }
   for (const path of ['/explore/', '/settlement/', '/market/', '/federation/', '/help/', '/', '/account/']) {
@@ -115,6 +117,48 @@ test('dedicated registration transform inserts the shared form exactly once and 
   assert.equal((result.match(/id="profile-editor"/g) ?? []).length, 1);
   assert.doesNotMatch(result, /<!-- WORLD_ACCOUNT -->/);
   assert.equal(await transform(readFileSync(new URL('../index.html', import.meta.url), 'utf8'), { path: '/', filename: 'index.html' }), undefined);
+});
+test('account pages and whitepaper retain the shared World navigation with an explicit wallet slot', () => {
+  for (const route of ['login', 'register', 'account', 'whitepaper']) {
+    const html = readFileSync(new URL(`../${route}/index.html`, import.meta.url), 'utf8');
+    assert.match(html, /class="world-navigation"/);
+    assert.match(html, /data-wallet-controls/);
+    assert.match(html, /logo-world\.svg/);
+    assert.match(html, /<!-- WORLD_PUBLIC_NAV -->/);
+  }
+  const css = readFileSync(new URL('./public-feature.css', import.meta.url), 'utf8');
+  assert.match(css, /grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
+  assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+});
+test('World submenus stay within viewport edges and close when layout width changes', () => {
+  const source = readFileSync(new URL('../../../../shared/world-navigation.js', import.meta.url), 'utf8');
+  type Handler = (event: { target?: object }) => void;
+  const handlers = new Map<string, Handler>();
+  const resized = new Map<string, () => void>();
+  class Menu {
+    open = true;
+    links = { style: { transform: '' }, getBoundingClientRect: () => this.rect };
+    parentElement = { querySelectorAll: () => [] };
+    rect: { left: number; right: number };
+    constructor(rect: { left: number; right: number }) { this.rect = rect; }
+    matches() { return true; }
+    querySelector() { return this.links; }
+  }
+  const menus = [new Menu({ left: -30, right: 115 }), new Menu({ left: 180, right: 325 })];
+  runInNewContext(source, {
+    HTMLDetailsElement: Menu,
+    document: {
+      documentElement: { clientWidth: 320 },
+      addEventListener: (name: string, handler: Handler) => handlers.set(name, handler),
+      querySelectorAll: () => menus,
+    },
+    window: { addEventListener: (name: string, handler: () => void) => resized.set(name, handler) },
+  });
+  menus.forEach(menu => handlers.get('toggle')!({ target: menu }));
+  assert.equal(menus[0].links.style.transform, 'translateX(38px)');
+  assert.equal(menus[1].links.style.transform, 'translateX(-13px)');
+  resized.get('resize')!();
+  assert.ok(menus.every(menu => !menu.open));
 });
 
 test('public copy reuses the selected language and preserves account hashes on navigation', () => {

@@ -298,7 +298,8 @@
     if (!header || site === "wallet" || site === "admin" || header.hasAttribute("data-no-central-wallet")) return;
     let buttons = [...header.querySelectorAll("[data-central-wallet], .wallet-icon, #wallet")];
     if (!buttons.length) {
-      const button = document.createElement("button"); button.type = "button"; button.dataset.centralWallet = "true"; header.append(button); buttons = [button];
+      const button = document.createElement("button"); button.type = "button"; button.dataset.centralWallet = "true";
+      (header.querySelector("[data-wallet-controls]") || header).append(button); buttons = [button];
     }
     for (const button of buttons) {
       const primary = button.dataset.walletPrimary || defaultPrimary;

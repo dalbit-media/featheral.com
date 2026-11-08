@@ -38,9 +38,9 @@ export function renderPublicFeatureHead(page: PublicFeature): string {
 
 export function renderPublicFeatureBody(page: PublicFeature): string {
   const isMap = page.visual === 'exploration' || page.visual === 'settlements';
-  const visual = isMap
-    ? `<canvas data-public-map="${page.visual}" width="720" height="420" role="img" aria-label="Sample isometric terrain rendered with World game artwork" data-public-aria-en="Sample isometric terrain rendered with World game artwork" data-public-aria-ko="World 게임 그림 코드로 렌더링한 등각 지형 예시">Sample terrain preview. The feature descriptions below are available without JavaScript.</canvas>`
-    : `<ol class="public-flow">${page.steps.map((step, index) => `<li><span class="flow-number" aria-hidden="true">0${index + 1}</span>${text('strong', step)}</li>`).join('')}</ol>`;
+  const visual = `<div class="public-visual-header">${text('span', page.label)}${text('span', ['World preview', '월드 미리보기'])}</div>
+    <canvas data-public-map="${isMap ? page.visual : 'settlements'}" width="720" height="420" role="img" aria-label="Sample isometric terrain rendered with World game artwork" data-public-aria-en="Sample isometric terrain rendered with World game artwork" data-public-aria-ko="World 게임 그림 코드로 렌더링한 등각 지형 예시">Sample terrain preview. The feature descriptions below are available without JavaScript.</canvas>
+    <ol class="public-flow">${page.steps.map((step, index) => `<li><span class="flow-number" aria-hidden="true">0${index + 1}</span>${text('strong', step)}</li>`).join('')}</ol>`;
   return `<div class="public-breadcrumb"><a href="/" data-public-en="Home" data-public-ko="홈">Home</a><span aria-hidden="true">/</span>${text('span', page.label)}</div>
     <section class="public-hero" aria-labelledby="feature-title">
       <div><p class="public-eyebrow">FEATHERAL WORLD · ${escape(page.label[0].toUpperCase())}</p>
@@ -51,7 +51,7 @@ export function renderPublicFeatureBody(page: PublicFeature): string {
         ${text('p', ['Browser simulation · early prototype · English / 한국어', '브라우저 시뮬레이션 · 초기 프로토타입 · English / 한국어'], 'class="public-caption"')}
       </div>
       <figure class="public-visual" data-visual="${page.visual}">${visual}
-        ${text('figcaption', isMap ? ['Sample scene · actual game drawing code · not live player data', '예시 장면 · 실제 게임 그림 코드 · 실시간 플레이어 데이터 아님'] : ['How this feature works · not a game screenshot', '기능 흐름 안내 · 게임 스크린샷 아님'])}
+        ${text('figcaption', ['Sample scene · actual game drawing code · not live player data', '예시 장면 · 실제 게임 그림 코드 · 실시간 플레이어 데이터 아님'])}
       </figure>
     </section>
     <section class="public-details" aria-labelledby="details-title">

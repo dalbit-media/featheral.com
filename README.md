@@ -95,6 +95,11 @@ everyone. Sign in or register on World, complete the shared username/avatar/bio,
 then continue to App with a short-lived, one-use, origin-bound sign-in handoff.
 App uses that same wallet and public profile; profile edits stay on World.
 
+World public feature, guide and roadmap pages use a responsive game-art preview
+and bounded two-column layout. Public, account and whitepaper headers keep wallet
+controls in an explicit `data-wallet-controls` slot so dynamic wallet loading
+cannot append a second row outside the navigation shell.
+
 World, Community and game signatures use the shared web-wallet approval panel.
 Locked built-in accounts enter their password within the exact-request review;
 wrong passwords remain retryable there. Closing the wallet panel cancels pending

@@ -16,7 +16,8 @@ export function publicFeaturePagesPlugin(): Plugin {
       handler(html, context) {
         if (html.includes('<!-- WORLD_PUBLIC_NAV -->'))
           html = html.replace('</head>', '<link rel="stylesheet" href="/shared/world-navigation.css" vite-ignore></head>')
-            .replace('<nav aria-label="World site"', '<nav class="world-navigation" aria-label="World site"');
+            .replace('<nav aria-label="World site"', '<nav class="world-navigation" aria-label="World site"')
+            .replace(/<\/nav>(\s*<\/div><\/header>)/, '</nav><div class="world-wallet-controls" data-wallet-controls></div>$1');
         const page = publicFeatureAt(context.path);
         if (!page) return html.includes('<!-- WORLD_PUBLIC_NAV -->') ? html.replace('<!-- WORLD_PUBLIC_NAV -->', renderPublicWorldNav(context.path)) : undefined;
         return html

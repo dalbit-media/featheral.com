@@ -76,7 +76,7 @@ test('wallet accepts the real open-membership App challenge and rejects changed 
     }
   } finally { notes.close(); }
 });
-function fixture({ hostname = 'notes.featheral.com', fail = false, store = new Map(), width = 1000, height = 800, buttonCount = 1 } = {}) {
+function fixture({ hostname = 'notes.featheral.com', fail = false, store = new Map(), width = 1000, height = 800, buttonCount = 1, walletSlot = false } = {}) {
   const elements = [], instances = [], requests = [], timers = new Set(), errors = [];
   class Element {
     constructor(tag) {
@@ -107,9 +107,11 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
     focus() {}
     getBoundingClientRect() { return { bottom: 52, right: 984 }; }
   }
-  const header = new Element('header'), button = new Element('button'); header.append(button); header.querySelector = () => button;
+  const header = new Element('header'), button = new Element('button'), slot = new Element('div');
+  header.append(walletSlot ? slot : button);
+  header.querySelector = selector => selector === '[data-wallet-controls]' ? walletSlot ? slot : null : button;
   const buttons = [button, ...Array.from({ length: buttonCount - 1 }, () => new Element('button'))];
-  header.querySelectorAll = selector => selector.includes('.wallet-icon') ? buttons : [];
+  header.querySelectorAll = selector => selector.includes('.wallet-icon') ? walletSlot ? [] : buttons : [];
   const document = { currentScript: { src: 'https://wallet.featheral.com/embed.js' }, readyState: 'complete',
     addEventListener() {},
     body: new Element('body'), head: new Element('head'), createElement: tag => new Element(tag),
@@ -137,10 +139,16 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
       return { ok: !fail, status: 503, text: async () => '', json: async () => ({ profile: null }) };
     },
     setTimeout: fn => { timers.add(fn); return fn; }, clearTimeout: fn => timers.delete(fn) });
-  return { wallet: window.FeatheralWallet, instances, store, timers, requests, errors, elements, button, buttons,
+  return { wallet: window.FeatheralWallet, instances, store, timers, requests, errors, elements, button, buttons, slot,
     dialog: () => document.getElementById('featheral-central-wallet'),
     async emit(data, instance = instances.at(-1)) { instance.context.onMessage(data); await tick(); } };
 }
+test('public World wallet control stays inside the explicit header layout slot', () => {
+  const ui = fixture({ hostname: 'world.featheral.com', walletSlot: true });
+  assert.equal(ui.slot.children.length, 1);
+  assert.equal(ui.slot.children[0].dataset.centralWallet, 'true');
+  assert.equal(ui.slot.children[0].tag, 'button');
+});
 test('signature approval stays in the same web-wallet instance across views and close rejects pending work', async () => {
   const ui = fixture({ hostname: 'world.featheral.com' });
   ui.wallet.open({ view: 'assets' }); await tick();
