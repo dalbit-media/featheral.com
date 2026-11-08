@@ -3,7 +3,7 @@ import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
 import type { CollectionItem } from '../src/collection.ts';
 import type { ActivityItem } from '../src/automation.ts';
-import { craftingCost, craftingFits, craftingIngredients, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
+import { craftingCost, craftingFits, craftingIngredients, craftingStage, craftingStageName, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
 import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
 import { arrangementError, cellKey, legacySpaceCells, positionEntries, settlementEntityName, settlementPositions } from '../src/settlement-layout.ts';
@@ -30,6 +30,7 @@ export function craft(account: Account, item: CraftableItem, quantity = 1): stri
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) throw new GameError('Invalid crafting quantity.');
   const bag = inventory(account), game = account.game;
   if (game.stage < 0) throw new GameError('Establish a settlement before crafting.');
+  if (game.stage < craftingStage(item)) throw new GameError(`Requires ${craftingStageName(item)} civilization level.`);
   const ingredients = craftingIngredients(item, quantity);
   if (Object.entries(ingredients).some(([id, count]) => bag.items.filter(owned => owned === id).length < count))
     throw new GameError('Not enough collector items to craft this bundle.');

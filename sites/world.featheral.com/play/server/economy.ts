@@ -23,6 +23,8 @@ import { findActivityItem, findCustomizationItem, useCustomization } from './inv
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from '../src/customization.ts';
 import type { Customization } from '../src/customization.ts';
 import { expeditionFindPlan } from '../src/climate.ts';
+import { actionRemaining, actionThrottleMs } from '../src/action-timing.ts';
+import type { TimedAction } from '../src/action-timing.ts';
 
 interface LegacyWorkforce {
   crews: Partial<Record<Resource, { workers: number; readyAt: number; weeklyYield: number;
@@ -38,6 +40,7 @@ export class ApiError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 export interface Account {
+  actionReadyAt?: Snapshot['actionReadyAt'];
   customization?: Customization;
   physicalVersion?: 1;
   physicalStartedAt?: number;
@@ -530,6 +533,7 @@ export function snapshot(account: Account): Snapshot {
     } } : {}),
     warehouse: account.warehouse, warehouseCost: account.warehouse >= maximumUpgradeLevel ? null : warehouseCost(account.warehouse + 1),
     revision: account.revision, serverTime: account.updatedAt, environment: environmentAt(account.updatedAt),
+    actionReadyAt: { ...account.actionReadyAt },
     inviteReadyAt: account.inviteReadyAt, recruitment: structuredClone(account.recruitment ?? null),
     waterUpkeep: account.waterUpkeep ? { ...account.waterUpkeep, paused: water.shortage > 0, dailyConsumption: water.required, weeklyConsumption: waterRequirement(account.game.population, climateTime(account, waterTime), !physicalAt(account, waterTime)),
       shortage: water.shortage, populationLoss: water.populationLoss } : null,
@@ -590,6 +594,10 @@ export function parseCommand(value: unknown): Command {
     || (resourceClaim && !oneOf(c.resource, resources))) throw new ApiError(400, 'Invalid command values.');
   return c as Command;
 }
+function enforceActionThrottle(account: Account, action: TimedAction, realTime: number): void {
+  const remaining = actionRemaining(account.actionReadyAt, action, realTime);
+  if (remaining) throw new ApiError(429, `Action cooling down. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
+}
 export function execute(account: Account, command: Command, realTime = account.updatedAt,
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
   contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
@@ -645,6 +653,7 @@ export function execute(account: Account, command: Command, realTime = account.u
       if (work.expeditions.some(expedition => expedition.x === command.x && expedition.y === command.y))
         throw new ApiError(409, 'An expedition is already exploring this destination. Choose another location.');
       if (availableWorkers(account) < 2) throw new ApiError(409, 'Investigation requires two available residents.');
+      enforceActionThrottle(account, 'investigate', realTime);
       const quote = investigationQuote(game, command.x, command.y, explorationCount(work.expeditions));
       pay(game, { dollars: quote.dollars });
       const itemFind = investigationItem(terrainAt(command.x, command.y, game.seed), randomInt(100), randomInt(100), randomInt(100));
@@ -652,6 +661,7 @@ export function execute(account: Account, command: Command, realTime = account.u
         readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
+      (account.actionReadyAt ??= {}).investigate = realTime + actionThrottleMs;
       return note(game, 'Two residents departed to investigate known terrain for one game week.');
     }
     case 'assign': {
@@ -686,7 +696,12 @@ export function execute(account: Account, command: Command, realTime = account.u
         ...game.incomeFacilities, [command.kind === 'workshop' ? 'workshop' : 'trade-hub']: true };
       return note(game, `${facility.name} upgraded to level ${level}. Benefits apply to new activity.`);
     }
-    case 'craft': return craft(account, command.item, command.quantity);
+    case 'craft': {
+      enforceActionThrottle(account, 'craft', realTime);
+      const message = craft(account, command.item, command.quantity);
+      (account.actionReadyAt ??= {}).craft = realTime + actionThrottleMs;
+      return message;
+    }
     case 'equip': return equip(account, command.item);
     case 'decorate': return decorate(account, command.slot, command.item);
     case 'arrange': return arrange(account, command.entity, command.position);

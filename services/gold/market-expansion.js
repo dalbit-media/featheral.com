@@ -2,11 +2,19 @@
 const { canonical } = require("../fth-ledger/codec");
 
 // Additions are pinned independently of gameplay tuning; existing genesis targets never change.
+const decorationPrices = Object.freeze({
+  logseat: 19, flowerbed: 32, fence: 60, birdhouse: 33, trellis: 83, barrel: 118,
+  picnic: 140, arch: 131, swing: 144, gazebo: 358, clocktower: 358, monument: 155,
+  streetlamp: 264, kiosk: 224, pavilion: 544, greenhouse: 470, sculpture: 361,
+  tramstop: 678, solar: 864, verticalgarden: 448, observatory: 1344, lightspire: 1568,
+  biodome: 2272, skybeacon: 2528,
+});
 const approvedMarkets = Object.fromEntries([
   ...Object.entries({
     "permit-settlement-name": 112, "permit-region-name": 184,
     "title-pioneer": 72, "title-explorer": 86, "title-steward": 96,
     "title-artisan": 120, "title-trader": 89, "title-naturalist": 128,
+    ...decorationPrices,
   }),
   ...["wood", "water", "metal", "oil", "all"].flatMap(resource =>
     Object.entries({ 4: 180, 12: 420, 26: 840, 52: 1620 }).map(([weeks, price]) =>
@@ -29,4 +37,4 @@ function approvedMarketExpansion(previous, next) {
   return additions.length > 0 && additions.every(asset =>
     Object.hasOwn(approvedMarkets, asset) && canonical(next[asset]) === canonical(approvedMarkets[asset]));
 }
-module.exports = { approvedMarkets, approvedMarketExpansion };
+module.exports = { approvedMarkets, approvedMarketExpansion, decorationPrices };

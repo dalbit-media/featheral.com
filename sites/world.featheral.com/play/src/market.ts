@@ -31,9 +31,20 @@ export function marketSaleQuantityLimit(asset: MarketAsset): number { return isM
 export function marketAssetName(asset: MarketAsset): string {
   return isMarketResource(asset) ? ({ wood: 'Wood', water: 'Water', metal: 'Metal', oil: 'Oil' })[asset] : itemName(asset);
 }
+// Live reserve seeds must not change when gameplay recipes are rebalanced.
+const craftedSeedPrices: Partial<Record<ItemId, number>> = Object.freeze({
+  fire: 112, torch: 192, lamp: 512, lantern: 412,
+  planter: 80, bench: 96, banner: 80, fountain: 208, boardwalk: 144, canopy: 184,
+  logseat: 19, flowerbed: 32, fence: 60, birdhouse: 33, trellis: 83, barrel: 118,
+  picnic: 140, arch: 131, swing: 144, gazebo: 358, clocktower: 358, monument: 155,
+  streetlamp: 264, kiosk: 224, pavilion: 544, greenhouse: 470, sculpture: 361,
+  tramstop: 678, solar: 864, verticalgarden: 448, observatory: 1344, lightspire: 1568,
+  biodome: 2272, skybeacon: 2528,
+});
 export function marketBasePrice(asset: MarketAsset): number {
   // Reserve genesis pins this seed price; trading floors must not change it.
   if (isMarketResource(asset)) return prices[asset] * 2;
+  if (craftedSeedPrices[asset] !== undefined) return craftedSeedPrices[asset]!;
   if (isCollectionItem(asset)) {
     const { resource, weeks } = collectionItemDetails(asset);
     return (resource === 'all' ? 4 : 1) * (monetaryPolicy.collectibleBase + weeks * monetaryPolicy.collectiblePerWeek);

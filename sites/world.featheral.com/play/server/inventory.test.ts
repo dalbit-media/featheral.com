@@ -42,7 +42,7 @@ test('batch crafting is atomic, totals confirmation costs and counts reserved sl
 });
 const request = (account: Account, command: Command) => ({ id: randomUUID(), revision: account.revision, command });
 function act(account: Account, command: Command) {
-  return apply(account, request(account, command), account.updatedAt + 1000);
+  return apply(account, request(account, command), account.updatedAt + 2000);
 }
 function settled(): Account {
   const account = createAccount(start);
@@ -186,7 +186,9 @@ test('decorations spend recipe resources but never change visibility, exploratio
   for (const [item, recipe] of Object.entries(decorationItems)) {
     const cost: Cost = recipe.cost;
     const account = settled();
-    account.game.stock = { wood: 1000, water: 1000, metal: 1000, oil: 0 };
+    account.game.stage = recipe.stage;
+    account.game.stock = { wood: 1000, water: 1000, metal: 2000, oil: 1000 };
+    for (let x = -20; x <= 20; x++) for (let y = -20; y <= 20; y++) account.game.explored.push(`${x},${y}`);
     const before = snapshot(account);
     const after = act(account, { type: 'craft', item: item as keyof typeof decorationItems });
     for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {
@@ -273,7 +275,7 @@ test('crafting spends exact owned ingredients, improves gear automatically and n
   const account = settled(), before = snapshot(account);
   const fire = act(account, { type: 'craft', item: 'fire' });
   assert.equal(fire.game.stock.wood, before.game.stock.wood - 15);
-  assert.equal(fire.game.stock.water, before.game.stock.water - 5);
+  assert.equal(fire.game.stock.water, before.game.stock.water);
   assert.equal(fire.inventory.equipped, 'fire');
   assert.equal(radius(fire.game), 5);
   assert.deepEqual(fire.game.explored, before.game.explored);
@@ -283,7 +285,7 @@ test('crafting spends exact owned ingredients, improves gear automatically and n
   assert.deepEqual(torch.inventory.items, ['fire', 'torch']);
   const stock = { ...account.game.stock };
   act(account, { type: 'craft', item: 'torch' });
-  assert.deepEqual(account.game.stock, { ...stock, wood: stock.wood - 30 });
+  assert.deepEqual(account.game.stock, { ...stock, wood: stock.wood - 8 });
   const bag = inventory(account);
   act(account, { type: 'equip', item: 'fire' });
   assert.equal(radius(account.game), 5);
@@ -305,7 +307,7 @@ test('owned market materials cannot bypass exploration discovery and unaffordabl
   for (let x = -30; x <= 30; x++) for (let y = -30; y <= 30; y++) account.game.explored.push(`${x},${y}`);
   const result = act(account, { type: 'craft', item: 'lantern' });
   assert.equal(radius(result.game), 10);
-  assert.equal(result.game.stock.oil, 492);
+  assert.equal(result.game.stock.oil, 495);
   assert.equal(result.dollars, 496);
   act(account, { type: 'craft', item: 'fire' });
   assert.equal(inventory(account).equipped, 'lantern');

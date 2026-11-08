@@ -175,7 +175,7 @@ test('mixed field teams charge shared 1x, 2x, 4x, 8x fees identically in preview
     assert.equal(destination.dollars, base * 2 ** active);
     const confirmation = gameConsumption(before, command)!;
     assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: destination.dollars }]);
-    execute(account, command);
+    execute(account, command, start + active * 2000);
     assert.equal(before.game.dollars - account.game.dollars, destination.dollars * 10000);
     assert.equal(explorationCount(account.workforce.expeditions), active + 1);
   }

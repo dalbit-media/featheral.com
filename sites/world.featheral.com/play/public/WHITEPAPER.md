@@ -134,7 +134,7 @@ Existing workshops and trade hubs count as level 1 without repurchase. Facilitie
 
 Every settlement upgrade after founding requires materials and FTH$. The fees are Camp FTH$200, Neighborhood FTH$300, Village FTH$400, Town FTH$500, District FTH$600, City FTH$700, Metropolis FTH$800 and Capital FTH$800 (its existing fee is retained). Founding has no FTH$ fee. Resource warehouses add FTH$50 × new level; item storage adds FTH$100 × new level, alongside existing materials.
 
-Other buildings and visibility equipment without an existing FTH$ price add their material reference value: timber FTH$0.08/kg, Water FTH$0.20/L, Metal FTH$200/t and Oil FTH$24/bbl (equivalent to the preserved 4/2/2/24 FTH$ accounting-lot references). Thus banks cost an additional FTH$3,200; town halls FTH$1,500; wells FTH$280; rain collectors FTH$570; pumping stations FTH$1,140; campfire kits FTH$70; torches FTH$120; lamps FTH$320. Existing income-building FTH$ costs and the lantern's FTH$4 remain unchanged. Already-owned upgrades are preserved, and moving or equipping owned items is free.
+Other buildings and visibility equipment without an existing FTH$ price add their material reference value: timber FTH$0.08/kg, Water FTH$0.20/L, Metal FTH$200/t and Oil FTH$24/bbl (equivalent to the preserved 4/2/2/24 FTH$ accounting-lot references). Thus banks cost an additional FTH$3,200; town halls FTH$1,500; wells FTH$280; rain collectors FTH$570; pumping stations FTH$1,140; campfire kits FTH$60; torches FTH$32; lamps FTH$96. Existing income-building FTH$ costs and the lantern's FTH$4 remain unchanged. Live reserve seed prices stay pinned independently of these crafting budgets. Already-owned upgrades are preserved, and moving or equipping owned items is free.
 
 Construct a market stall, trade hub or city bank to unlock **Sell resources for FTH$** in Settlement → Buildings and Production. Choose a physical quantity or Max, check the live spot total, then review and confirm. Only owned, claimed resources can be sold, up to 10,000 accounting lots per order. Settlement sales use the same marketplace endpoint, player-order/pool matching, 1% pool spread and conservative 2% price protection; banks never invent a fixed sale price. New gathering waits for paid pickup unless funded automatic collection is active. The full marketplace remains accessible before constructing these buildings.
 
@@ -237,10 +237,10 @@ Only permanent utility equipment, cosmetic decorations, and collectibles occupy 
 
 | Item | Recipe | Visibility radius |
 |---|---|---|
-| Campfire kit | 750 kg timber + 50 L Water | 5 |
-| Torch | 1,500 kg timber | 6 |
-| Lamp | 3,000 kg timber + 0.4 t Metal | 8 |
-| Explorer lantern | 4,000 kg timber + 8 bbl Oil + FTH$4 | 10 |
+| Campfire kit | 750 kg timber | 5 |
+| Torch | 400 kg timber (including resin) | 6 |
+| Lamp | 0.12 t Metal + 3 bbl Oil | 8 |
+| Explorer lantern | 0.2 t Metal + 5 bbl Oil + FTH$4 | 10 |
 
 Equip one visibility item; unequipped visibility radius is 4. Equipment never expires and expands the visible map and reachable destinations; new expeditions still survey at most 13 tiles. Equipment never reveals terrain instantly or changes locked teams. Better newly crafted equipment auto-equips. Legacy torch/lantern upgrades migrate free to torch/lamp items with their existing 6/8-radius view.
 
@@ -248,7 +248,9 @@ Material-and-FTH$ item storage tiers are Bag (20 slots), Carrier (40; 0.5 t Meta
 
 Expeditions that reveal new tiles use the climate-dependent discovery plan above. No new tiles means no find; duplicate and overlapping surveys cannot duplicate unique keepsakes. Permits can be owned in multiple copies. Finds enter free slots automatically. Overflow remains pending without loss; expand item storage and collect as many as fit, leaving the rest pending. Weekly raw-resource output waits for paid pickup unless that resource has an active, funded auto-collection permit; already-paid legacy jobs still deliver normally.
 
-Decorations can occupy any empty land cell in the settlement parcel, not just six designated spaces. Craft flower planters (1,000 kg timber, 100 L Water), benches (1,500 kg timber), pioneer banners (1,000 kg timber, 0.1 t Metal), fountains (1,500 kg timber, 400 L Water, 0.3 t Metal), boardwalks (2,250 kg timber), and market canopies (2,500 kg timber, 0.15 t Metal), using discovered ingredients and owned resources. Equipment and decoration recipes represent settlement supply bundles, not literal material bills for individual handheld objects.
+Decorations can occupy any empty land cell in the settlement parcel, not just six designated spaces. Craft flower planters (12 Wood, 6 Water), benches (24 Wood, 2 Metal), pioneer banners (12 Wood, 4 Metal), fountains (60 Metal, 40 Water), boardwalks (45 Wood, 6 Metal), and market canopies (36 Wood, 8 Metal), using discovered ingredients and owned resources. The catalog adds 24 decorations across nine civilization tiers: simple log seats and wildflower beds, village gazebos and clock towers, town lighting and pavilions, city solar pergolas and living walls, and capital biodomes and sky beacons. Each has distinct artwork and variable resource budgets. Metal includes mineral construction supplies, Water includes planting/filling, and Oil includes fuel/polymer processing. These are simplified settlement supply bundles.
+
+Compact crafting cards disclose **Recipe available/required ingredient types** on click, with owned/required counts and missing-resource states for the selected batch. Higher-tier decorations require the matching settlement civilization level to craft; trading and cosmetic placement remain available for owned items. Investigate and Craft each require at least two real seconds between successful actions, enforced by persisted server deadlines independently of game-clock acceleration. Requests show an activity indicator and cooldown animation. Cancellation or failed validation spends nothing and starts no cooldown; idempotent retries never duplicate an accepted action. Existing reserve prices and ledger history are preserved; new markets use signed additive authorization.
 
 Placement is free after founding and uses owned items only. Each building or decoration occupies one cell; occupied cells, water and positions outside the parcel are rejected. Move or return a decoration to inventory before reusing its cell. Returning decorations never destroys items, and placed decorations still occupy one inventory slot. These cosmetics never change production, workforce, exploration visibility or rewards. Positions persist with transactional saves and exact-once retry receipts. Existing six-space layouts migrate onto the grid without losing items or ongoing work. New tier buildings find empty cells without moving existing custom layouts.
 

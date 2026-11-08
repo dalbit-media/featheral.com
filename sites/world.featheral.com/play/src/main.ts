@@ -53,6 +53,8 @@ import { collectionClaimReason, collectionDurations, collectionItemDetails, coll
 import { formatResourceAmount, isResource } from './resource-units.ts';
 import { chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from './customization.ts';
+import { actionRemaining, isTimedAction, renderActionControls } from './action-timing.ts';
+import type { TimedAction } from './action-timing.ts';
 
 const navigationPage = gamePage(location.pathname);
 const settlementPage = navigationPage === 'home', marketPage = navigationPage === 'market';
@@ -111,6 +113,7 @@ let game: Game = state.game;
 let synchronizedAt = performance.now();
 let environment = state.environment;
 let busy = false;
+let pendingTimedAction: TimedAction | null = null;
 let journalQuery = '';
 let management: Resource | 'population' | 'funds' | null = null;
 let lastResourceManagement: Resource | 'funds' = 'wood';
@@ -337,6 +340,9 @@ function toast(message: string, error = false): void {
 }
 async function act(command: Command, recenter = false): Promise<boolean> {
   if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return false; }
+  if (isTimedAction(command.type) && actionRemaining(state.actionReadyAt, command.type, Date.now())) {
+    toast('Action cooling down. Please wait.', true); return false;
+  }
   const assignmentDraft = command.type === 'assign' ? crewDrafts.get(`crew-${command.resource}`) : undefined;
   const submittedDraft = command.type === 'assign' && assignmentDraft !== undefined && Number(assignmentDraft) === command.workers ? assignmentDraft : undefined;
   busy = true;
@@ -352,6 +358,7 @@ async function act(command: Command, recenter = false): Promise<boolean> {
       }
     }
     app.classList.add('action-pending');
+    if (isTimedAction(command.type)) { pendingTimedAction = command.type; renderActionTiming(); }
     synchronize(await send(state, command));
     if (command.type === 'assign' && submittedDraft !== undefined && crewDrafts.get(`crew-${command.resource}`) === submittedDraft) crewDrafts.delete(`crew-${command.resource}`);
     if (command.type === 'automatic') {
@@ -370,7 +377,9 @@ async function act(command: Command, recenter = false): Promise<boolean> {
     return false;
   } finally {
     busy = false;
+    pendingTimedAction = null;
     app.classList.remove('action-pending');
+    renderActionTiming();
     void saveCrewAssignments();
   }
 }
@@ -414,6 +423,10 @@ function render(): void {
   renderRecruitment();
   renderWorkTimers();
   localize(app);
+  renderActionTiming();
+}
+function renderActionTiming(): void {
+  renderActionControls(app, state.actionReadyAt, pendingTimedAction, Date.now(), translate('Working…', language));
 }
 function synchronize(next: ApiState): void {
   state = next;
@@ -772,7 +785,7 @@ function investigationButton(compact = false): string {
   const details = compact
     ? `<span class="quick-action-heading">${icon('search')}<span>Investigate</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span>${fieldDuration(1)}` : ''}`
     : `${icon('search')} <span>Investigate</span> · 2 ${translate('residents', language)} · ${translate('1 game week', language)} ${quote ? costChips({ dollars: quote.dollars }) : ''}`;
-  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" title="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" aria-description="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" ${reason ? 'disabled' : ''}>${details}</button>`;
+  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" data-action-eligible="${!reason}" title="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" aria-description="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" ${reason ? 'disabled' : ''}>${details}<span class="action-feedback" role="status"></span></button>`;
 }
 function renderCommunityPage(): void {
   const root = document.querySelector<HTMLElement>('#community-content')!;
@@ -922,7 +935,7 @@ function renderSettlement(): void {
   else if (settlementTask === 'production') content = storagePanel();
   else if (settlementTask === 'sell') content = '<div data-settlement-resource-sale></div>';
   else if (settlementTask === 'inventory') content = inventoryPanel(state, costChips, inventoryFilter, language, 'settlement', inventoryPage, inventorySelection);
-  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', craftingQuantity);
+  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', craftingQuantity, language);
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
   if (settlementTask === 'buildings' || settlementTask === 'production') content += '<div data-settlement-sale></div>';
@@ -1468,6 +1481,9 @@ window.addEventListener('storage', event => {
 window.addEventListener('featheral:wallet-updated', () => void syncProduction());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncProduction(); });
 setInterval(() => void syncProduction(), serverSyncIntervalMs + Math.random() * 5000);
+setInterval(() => {
+  if (!document.hidden && (pendingTimedAction || Object.values(state.actionReadyAt ?? {}).some(time => time > Date.now()) || app.querySelector('.action-cooling,.action-working'))) renderActionTiming();
+}, 100);
 let nextDeadlineSyncAt = 0;
 setInterval(() => {
   if (document.hidden) return;

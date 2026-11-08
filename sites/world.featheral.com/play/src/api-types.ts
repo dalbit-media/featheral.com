@@ -8,6 +8,7 @@ import type { Construction } from './constructions.ts';
 import type { CollectionItem } from './collection.ts';
 import type { ActivityItem, ActivityKind } from './automation.ts';
 import type { Customization, CustomizationItem } from './customization.ts';
+import type { ActionReadyAt } from './action-timing.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
@@ -64,6 +65,7 @@ export interface Workforce {
   expeditions: Expedition[];
 }
 export interface Snapshot {
+  actionReadyAt?: ActionReadyAt;
   customization?: Customization;
   physicalVersion?: 1;
   collection?: { fees: Stock; automationUntil: Stock };

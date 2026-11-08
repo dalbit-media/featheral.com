@@ -19,6 +19,12 @@ function authorizedLiquidityTargets() {
 }
 
 function reserveLiquidityTargets() {
+  // Preserve the running relic release's pre-installer compatibility check.
+  const { decorationPrices } = require("../gold/market-expansion");
+  return Object.fromEntries(Object.entries(craftingLiquidityTargets()).filter(([asset]) => !Object.hasOwn(decorationPrices, asset)));
+}
+
+function craftingLiquidityTargets() {
   const { marketAssets, isLiquidAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
@@ -85,4 +91,4 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
   };
 }
 
-module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets };
+module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets };

@@ -5,7 +5,7 @@ const fs = require("node:fs"), path = require("node:path"), os = require("node:o
 const { spawnSync, execFileSync } = require("node:child_process");
 const vm = require("node:vm");
 const { readPolicy, verifyCompatibility } = require("../../../scripts/deployment-preflight");
-const { liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets } = require("../../notes/game-funds");
+const { liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets } = require("../../notes/game-funds");
 const { approvedMarkets, approvedMarketExpansion } = require("../../gold/market-expansion");
 const root = path.resolve(__dirname, "../../..");
 const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";
@@ -18,11 +18,23 @@ test("live reserve seed prices stay genesis-compatible when market floors change
     assert.equal(marketBasePrice(asset), price);
   }
   assert.equal(marketPriceFloor("oil"), .0001, "only accounting precision limits prices; reserve seeds stay unchanged");
+  for (const [asset, price] of Object.entries({
+    fire: 112, torch: 192, lamp: 512, lantern: 412,
+    planter: 80, bench: 96, banner: 80, fountain: 208, boardwalk: 144, canopy: 184,
+  })) assert.equal(marketBasePrice(asset), price);
+});
+test("relic-release self-sync retains all 81 targets while crafting expansion only adds 24 decorations", () => {
+  const previous = reserveLiquidityTargets(), next = craftingLiquidityTargets();
+  assert.equal(Object.keys(previous).length, 81);
+  assert.equal(Object.keys(next).length, 105);
+  for (const [asset, target] of Object.entries(previous)) assert.deepEqual(next[asset], target);
+  assert.equal(approvedMarketExpansion(previous, next), true);
+  assert.equal(Object.keys(next).filter(asset => !Object.hasOwn(previous, asset)).length, 24);
 });
 test("legacy running self-sync accepts the original catalog while the new installer verifies all approved additions", t => {
-  const original = liquidityTargets(), expanded = reserveLiquidityTargets();
+  const original = liquidityTargets(), expanded = craftingLiquidityTargets();
   assert.equal(Object.keys(original).length, 32);
-  assert.equal(Object.keys(expanded).length, 81);
+  assert.equal(Object.keys(expanded).length, 105);
   for (const asset of Object.keys(approvedMarkets)) assert.equal(Object.hasOwn(original, asset), false);
   assert.deepEqual(Object.fromEntries(Object.entries(expanded).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset))), original);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-bootstrap-"));
@@ -53,8 +65,8 @@ test("preflight permits only explicitly approved additive markets without changi
   const original = { monetaryPolicy: { scale: 10000 }, collectionPolicy: { version: 1 }, markets };
   const candidate = { ...original, markets: { ...markets, ...approvedMarkets } };
   const verify = next => verifyCompatibility("new", "old", { policy: name => name === "new" ? next : original });
-  assert.equal(Object.keys(approvedMarkets).length, 49);
-  const actual = reserveLiquidityTargets();
+  assert.equal(Object.keys(approvedMarkets).length, 73);
+  const actual = craftingLiquidityTargets();
   for (const [asset, target] of Object.entries(approvedMarkets)) assert.deepEqual(actual[asset], target, asset);
   assert.doesNotThrow(() => verify(candidate));
   for (const next of [
@@ -70,9 +82,9 @@ test("preflight permits only explicitly approved additive markets without changi
   assert.equal(approvedMarketExpansion(markets, { ...markets, "title-pioneer": { ...approvedMarkets["title-pioneer"], extra: true } }), false);
 });
 test("identity/collector self-sync sees its unchanged catalog while the installer validates relic authorization", t => {
-  const original = authorizedLiquidityTargets(), full = reserveLiquidityTargets();
+  const original = authorizedLiquidityTargets(), full = craftingLiquidityTargets();
   assert.equal(Object.keys(original).length, 60);
-  assert.equal(Object.keys(full).length, 81);
+  assert.equal(Object.keys(full).length, 105);
   assert.equal(approvedMarketExpansion(original, full), true);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-relic-bootstrap-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

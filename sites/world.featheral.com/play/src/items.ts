@@ -1,4 +1,4 @@
-import { terrainAt, terrainDetails, terrainResources } from './engine.ts';
+import { stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource, Terrain } from './engine.ts';
 import type { SettlementLayout } from './settlement-layout.ts';
 import { withDollarFee } from './costs.ts';
@@ -13,20 +13,44 @@ import { collectorRecipes } from './collector-recipes.ts';
 import type { CollectorBundle } from './collector-recipes.ts';
 
 export const visibilityItems = {
-  fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15, water: 5 }), symbol: 'sun' },
-  torch: { name: 'Torch', radius: 6, cost: withDollarFee({ wood: 30 }), symbol: 'sun' },
-  lamp: { name: 'Lamp', radius: 8, cost: withDollarFee({ wood: 60, metal: 40 }), symbol: 'sun' },
-  lantern: { name: 'Explorer lantern', radius: 10, cost: { wood: 80, oil: 8, dollars: 4 }, symbol: 'spark' },
+  fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
+  torch: { name: 'Torch', radius: 6, cost: withDollarFee({ wood: 8 }), symbol: 'sun' },
+  lamp: { name: 'Lamp', radius: 8, cost: withDollarFee({ metal: 12, oil: 3 }), symbol: 'sun' },
+  lantern: { name: 'Explorer lantern', radius: 10, cost: { metal: 20, oil: 5, dollars: 4 }, symbol: 'spark' },
 } satisfies Record<string, { name: string; radius: number; cost: Cost; symbol: string }>;
 export type VisibilityItem = keyof typeof visibilityItems;
 export const decorationItems = {
-  planter: { name: 'Flower planter', cost: { wood: 20, water: 10 } },
-  bench: { name: 'Wooden bench', cost: { wood: 30 } },
-  banner: { name: 'Pioneer banner', cost: { wood: 20, metal: 10 } },
-  fountain: { name: 'Courtyard fountain', cost: { wood: 30, water: 40, metal: 30 } },
-  boardwalk: { name: 'Garden boardwalk', cost: { wood: 45 } },
-  canopy: { name: 'Market canopy', cost: { wood: 50, metal: 15 } },
-} satisfies Record<string, { name: string; cost: Cost }>;
+  planter: { name: 'Flower planter', stage: 0, cost: { wood: 12, water: 6 } },
+  bench: { name: 'Wooden bench', stage: 0, cost: { wood: 24, metal: 2 } },
+  banner: { name: 'Pioneer banner', stage: 0, cost: { wood: 12, metal: 4 } },
+  fountain: { name: 'Courtyard fountain', stage: 0, cost: { metal: 60, water: 40 } },
+  boardwalk: { name: 'Garden boardwalk', stage: 0, cost: { wood: 45, metal: 6 } },
+  canopy: { name: 'Market canopy', stage: 0, cost: { wood: 36, metal: 8 } },
+  logseat: { name: 'Log seat', stage: 0, cost: { wood: 6 } },
+  flowerbed: { name: 'Wildflower bed', stage: 0, cost: { wood: 4, water: 12 } },
+  fence: { name: 'Picket fence', stage: 1, cost: { wood: 18, metal: 2 } },
+  birdhouse: { name: 'Birdhouse', stage: 1, cost: { wood: 10, metal: 1 } },
+  trellis: { name: 'Vine trellis', stage: 1, cost: { wood: 22, water: 8 } },
+  barrel: { name: 'Rain barrel', stage: 1, cost: { wood: 26, metal: 6, water: 16 } },
+  picnic: { name: 'Picnic table', stage: 2, cost: { wood: 40, metal: 8 } },
+  arch: { name: 'Garden arch', stage: 2, cost: { wood: 32, metal: 10, water: 8 } },
+  swing: { name: 'Garden swing', stage: 2, cost: { wood: 36, metal: 18 } },
+  gazebo: { name: 'Village gazebo', stage: 3, cost: { wood: 100, metal: 24 } },
+  clocktower: { name: 'Village clock tower', stage: 3, cost: { wood: 70, metal: 60, oil: 2 } },
+  monument: { name: 'Founders monument', stage: 3, cost: { metal: 85, water: 12 } },
+  streetlamp: { name: 'Town streetlamp', stage: 4, cost: { metal: 45, oil: 10 } },
+  kiosk: { name: 'Town information kiosk', stage: 4, cost: { wood: 55, metal: 30 } },
+  pavilion: { name: 'Civic pavilion', stage: 4, cost: { wood: 140, metal: 60 } },
+  greenhouse: { name: 'Glass garden', stage: 5, cost: { metal: 95, water: 55, oil: 12 } },
+  sculpture: { name: 'Modern sculpture', stage: 5, cost: { metal: 130, oil: 8 } },
+  tramstop: { name: 'Decorative tram shelter', stage: 6, cost: { metal: 160, wood: 24, oil: 18 } },
+  solar: { name: 'Solar pergola', stage: 6, cost: { metal: 180, oil: 30 } },
+  verticalgarden: { name: 'Living wall', stage: 6, cost: { metal: 100, wood: 45, water: 90 } },
+  observatory: { name: 'Sky observatory', stage: 7, cost: { metal: 300, oil: 45 } },
+  lightspire: { name: 'Metropolis light spire', stage: 7, cost: { metal: 260, oil: 60 } },
+  biodome: { name: 'Capital biodome', stage: 8, cost: { metal: 420, water: 160, oil: 70 } },
+  skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
+} satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
 export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes };
 export type CraftableItem = keyof typeof craftableItems;
@@ -110,6 +134,12 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   }));
   return resources.every(resource => found.has(resource as Resource));
 }
+export function craftingStage(item: CraftableItem): number {
+  return isDecorationItem(item) ? decorationItems[item].stage : 0;
+}
+export function craftingStageName(item: CraftableItem): string {
+  return stages[craftingStage(item)].name;
+}
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
   return Object.fromEntries(Object.entries(craftableItems[item].cost).map(([resource, amount]) => [resource, amount * quantity]));
 }
@@ -118,6 +148,7 @@ export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<
   return Object.fromEntries(Object.entries(collectorRecipes[item as CollectorBundle].ingredients).map(([id, count]) => [id, count * quantity]));
 }
 export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableItem): number {
+  if (game.stage < craftingStage(item) || !recipeDiscovered(game, item)) return 0;
   const ingredients = craftingIngredients(item);
   const count = Object.values(ingredients).reduce((sum, amount) => sum + amount, 0);
   const room = itemStorage[bag.storage].capacity - inventoryUsed(bag);

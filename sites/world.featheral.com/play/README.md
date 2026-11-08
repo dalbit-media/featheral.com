@@ -426,16 +426,24 @@ Item inventory contains utility equipment, cosmetic decorations, collectibles an
 
 | Permanent item | Recipe | View |
 |---|---|---|
-| Campfire kit | 750 kg timber, 50 L Water | 5 tiles |
-| Torch | 1,500 kg timber | 6 tiles |
-| Lamp | 3,000 kg timber, 0.4 t Metal | 8 tiles |
-| Explorer lantern | 4,000 kg timber, 8 bbl Oil, FTH$4 | 10 tiles |
+| Campfire kit | 750 kg timber | 5 tiles |
+| Torch | 400 kg timber (including resin) | 6 tiles |
+| Lamp | 0.12 t Metal, 3 bbl Oil | 8 tiles |
+| Explorer lantern | 0.2 t Metal, 5 bbl Oil, FTH$4 | 10 tiles |
+
+Investigate and Craft each have a separate **2-real-second minimum interval** between successful requests, regardless of game clock speed. The authoritative API persists per-account `actionReadyAt` deadlines; new request IDs, another tab, reloads and server restarts do not bypass them. A failed or cancelled action starts no cooldown; retries of an already accepted idempotency key return the original receipt without spending twice. Buttons show request activity and a remaining-time progress strip. Batch crafting remains one atomic action, not one delay per copy.
+
+Crafting uses compact cards. Click **Recipe 4/8** (four sufficient ingredient types out of eight required types, for example) to see every raw resource, FTH$ fee and collector permit with owned/required quantities and available/missing states. Counts reflect the selected batch and update with authoritative balances; market reservations, pending finds and active permits are not usable ingredients. Civilization requirements restrict crafting, not trading or placing owned cosmetic items.
 
 Item storage progresses **Bag (20 slots) → Carrier (40, 0.5 t Metal + FTH$100) → Crate (60, 1.5 t Metal + FTH$200) → Container (80, 4 t Metal + FTH$300) → Item warehouse (100, 10 t Metal + FTH$400)**. Each price buys the next tier once; there is no upkeep. Each upgrade adds one **20-slot page**. Inventory uses a compact five-column/four-row grid of square, unnumbered slots, including empty and market-reserved slots. Existing saves retain their purchased tier and contents. Storage and recipes spend owned balances only; equipment recipes are settlement supply bundles, not literal handheld-object material bills.
 
 A returned expedition that reveals new terrain uses a deterministic, locked departure plan: 1–2 resource collection permits, 0–2 activity permits and a climate-adjusted 20–85% keepsake chance, with at most one unique keepsake per biome. Season, all eight daily weather windows and temperature contribute across the trip. Old expeditions without a plan retain their promised three finds. Destination difficulty selects 1/4/12-week permits. Fully overlapping surveys award nothing. Overflow remains pending; partial collection and retries preserve every copy.
 
-Craft **Flower planter** (1,000 kg timber, 100 L Water), **Wooden bench** (1,500 kg timber), **Pioneer banner** (1,000 kg timber, 0.1 t Metal), **Courtyard fountain** (1,500 kg timber, 400 L Water, 0.3 t Metal), **Garden boardwalk** (2,250 kg timber), or **Market canopy** (2,500 kg timber, 0.15 t Metal). Recipes use the same discovery, ownership and inventory-capacity checks as equipment. Place decorations on empty parcel land. Moving/replacing/removing them never destroys items or frees inventory slots. Placement is free and cosmetic-only.
+The decoration catalog has **30 items**, each with distinct shared SVG artwork for crafting, inventory, marketplace and parcel placement. Existing decorations use more material-appropriate budgets: Flower planter (12 Wood, 6 Water), Wooden bench (24 Wood, 2 Metal), Pioneer banner (12 Wood, 4 Metal), Courtyard fountain (60 Metal, 40 Water), Garden boardwalk (45 Wood, 6 Metal), and Market canopy (36 Wood, 8 Metal). Metal stands in for mineral construction supplies; Water includes planting/filling needs, and Oil represents fuel/polymer processing. These are simplified construction supply budgets, not literal engineering bills.
+
+New crafting tiers: **Settlement** — Log seat, Wildflower bed; **Camp** — Picket fence, Birdhouse, Vine trellis, Rain barrel; **Neighborhood** — Picnic table, Garden arch, Garden swing; **Village** — Village gazebo, Village clock tower, Founders monument; **Town** — Town streetlamp, Town information kiosk, Civic pavilion; **District** — Glass garden, Modern sculpture; **City** — Decorative tram shelter, Solar pergola, Living wall; **Metropolis** — Sky observatory, Metropolis light spire; **Capital** — Capital biodome, Capital sky beacon. Exact variable resource budgets are displayed in each recipe. All remain cosmetic: no free power, transport, production or research is granted.
+
+Live reserve seed prices for existing items remain pinned even when crafting budgets change. New assets use explicitly approved additive market targets and the existing signed expansion process; no ledger reset, key replacement or genesis rewrite is required. Place decorations on empty parcel land. Moving/replacing/removing them never destroys items or frees inventory slots. Placement is free and cosmetic-only.
 
 The strictly validated `decorate` command takes `slot` and an owned cosmetic `item` (or `null` to remove). For example: `{"type":"decorate","slot":"garden","item":"planter"}`. Inventory snapshots include `placements`; legacy inventories and retry receipts gain empty placements without resetting equipment or paid work.
 

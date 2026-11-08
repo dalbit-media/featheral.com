@@ -4,13 +4,14 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
-import { craftingCost, craftingFits, craftingIngredients, craftingMaximum, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, visibilityItems } from './items.ts';
+import { craftingCost, craftingFits, craftingIngredients, craftingMaximum, craftingStage, craftingStageName, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, visibilityItems } from './items.ts';
 import { settlementPositions } from './settlement-layout.ts';
 import type { ItemId } from './items.ts';
 import { itemArt } from './item-art.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, activityName, isActivityItem, isAutomationItem } from './automation.ts';
 import { isCustomizationItem, isTitleItem, titleItems } from './customization.ts';
+import { formatResourceAmount } from './resource-units.ts';
 
 export type InventoryFilter = 'all' | 'utility' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
@@ -47,7 +48,7 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
     <details class="disclosure" data-detail="inventory-help"><summary>Inventory rules ${icon('chevron')}</summary><p>Identical items share a displayed stack with a quantity. Each copy still uses one storage slot, including equipped, placed and market-reserved copies.</p><p>Pages show up to 20 item stacks. Storage upgrades add capacity for 20 copies, not unlimited stacks.</p><p>Equipment, decorations and collectibles use item slots. Raw resources stay separate. Equipped and placed items still use one slot each.</p><p><span>Equipped visibility item</span>: <span>${bag.equipped ? name(bag.equipped) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></p><p>Permanent equipment never burns out. Equip one item. Better gear affects new expeditions only; teams already exploring keep their launch visibility.</p></details>
     </section>`;
 }
-export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string, filter: CraftingFilter, _context: 'settlement' | 'explore' = 'settlement', quantity = 1): string {
+export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string, filter: CraftingFilter, _context: 'settlement' | 'explore' = 'settlement', quantity = 1, language: Language = 'en'): string {
   const { game, inventory: bag } = state, tier = itemStorage[bag.storage];
   const keys = craftableKeys.filter(id => filter === 'all' || (filter === 'affordable'
     ? game.stage >= 0 && recipeDiscovered(game, id) && craftingFits(bag, id, quantity) && quantity <= craftingMaximum(game, bag, id) && canAfford(game, craftingCost(id, quantity))
@@ -57,13 +58,28 @@ export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string
     <label class="crafting-quantity">Quantity <input type="number" min="1" max="100" step="1" value="${quantity}" data-crafting-quantity></label>
     <p class="fineprint">Total batch cost shown below. Nothing is spent until you confirm.</p>
     ${inventoryUsed(bag) >= tier.capacity ? '<div class="notice"><span>Item inventory full</span><span>Combining collectors can free item slots.</span><button class="button" data-settlement-panel="inventory">Expand item storage</button></div>' : ''}
-    <div class="item-grid">${keys.map(id => {
+    <div class="item-grid craft-grid">${keys.map(id => {
       const recipe = craftableItems[id], discovered = recipeDiscovered(game, id), cost = craftingCost(id, quantity);
       const maximum = craftingMaximum(game, bag, id), ingredients = craftingIngredients(id, quantity);
-      const reason = game.stage < 0 ? 'Settlement required.' : !discovered ? 'Discover ingredients first' : !craftingFits(bag, id, quantity) ? 'Item inventory full'
+      const reason = game.stage < 0 ? 'Settlement required.' : game.stage < craftingStage(id) ? `Requires ${craftingStageName(id)} civilization level.` : !discovered ? 'Discover ingredients first' : !craftingFits(bag, id, quantity) ? 'Item inventory full'
         : !canAfford(game, cost) ? 'Not enough resources' : quantity > maximum ? 'Not enough collector items' : 'Craft';
-      return `<article class="item-card recipe-card">${itemArt(id)}<h3>${recipe.name}</h3><p>${isCollectionItem(id) ? 'Combines collector permits without increasing total collection time.' : isCustomizationItem(id) ? 'Consumes one permit. Cosmetic only.' : isVisibilityItem(id) ? `${visibilityItems[id].radius}-tile view` : 'Cosmetic decoration'}</p><small><span>Batch</span>: ${quantity} · <span>Maximum craftable</span>: ${maximum}</small><div class="upgrade-cost">${costChips(cost)}</div>
-      ${Object.keys(ingredients).length ? '<p class="fineprint">Collector ingredients: owned / needed</p>' : ''}<ul class="collector-ingredients">${Object.entries(ingredients).map(([item, count]) => `<li>${itemName(item as ItemId)} <strong>${bag.items.filter(owned => owned === item).length} / ${count}</strong></li>`).join('')}</ul>
-      <button class="button wide ${reason === 'Craft' ? 'primary' : ''}" data-action="craft" data-item="${id}" ${reason !== 'Craft' ? 'disabled' : ''}>${reason} ${icon(reason === 'Craft' ? 'plus' : 'lock')}</button></article>`;
+      const requirements = [
+        ...Object.entries(cost).filter(([, needed]) => needed > 0).map(([resource, needed]) => ({
+          name: resource === 'dollars' ? 'FTH$' : resource[0].toUpperCase() + resource.slice(1),
+          asset: resource,
+          owned: resource === 'dollars' ? state.dollars : game.stock[resource as keyof typeof game.stock], needed,
+        })),
+        ...Object.entries(ingredients).map(([item, needed]) => ({ name: itemName(item as ItemId), asset: item, owned: bag.items.filter(owned => owned === item).length, needed })),
+      ];
+      const ready = requirements.filter(row => row.owned >= row.needed).length;
+      const amount = (asset: string, value: number) => asset === 'dollars' || Object.hasOwn(ingredients, asset)
+        ? value.toLocaleString(locale(language), { maximumFractionDigits: 4 }) : formatResourceAmount(asset, value, locale(language));
+      return `<article class="item-card recipe-card">${itemArt(id)}<h3>${recipe.name}</h3><small class="recipe-level">${craftingStageName(id)}</small>
+      <details class="recipe-details" data-detail="recipe-${id}"><summary><span>Recipe</span> <strong>${ready}/${requirements.length}</strong>${icon('chevron')}</summary>
+      ${reason !== 'Craft' ? `<p class="notice">${reason}</p>` : ''}
+      <p>${isCollectionItem(id) ? 'Combines collector permits without increasing total collection time.' : isCustomizationItem(id) ? 'Consumes one permit. Cosmetic only.' : isVisibilityItem(id) ? `${visibilityItems[id].radius}-tile view` : 'Cosmetic decoration'}</p><small><span>Batch</span>: ${quantity} · <span>Maximum craftable</span>: ${maximum}</small>
+      <p class="fineprint">Ingredients: owned / required</p><ul class="recipe-resources">${requirements.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>
+      <div class="upgrade-cost">${costChips(cost)}</div></details>
+      <button class="button wide ${reason === 'Craft' ? 'primary' : ''}" data-action="craft" data-item="${id}" data-action-eligible="${reason === 'Craft'}" title="${reason}" ${reason !== 'Craft' ? 'disabled' : ''}><span>${reason === 'Craft' ? 'Craft' : 'Locked'}</span>${icon(reason === 'Craft' ? 'plus' : 'lock')}<span class="action-feedback" role="status"></span></button></article>`;
     }).join('')}</div>${!keys.length ? '<p class="notice">No affordable recipes for this quantity.</p>' : ''}<details class="disclosure" data-detail="crafting-help"><summary>Crafting rules ${icon('chevron')}</summary><p>Discover each ingredient resource through exploration before crafting. Recipes spend owned raw resources. Newly crafted gear equips automatically only when it improves your view.</p></details></section>`;
 }

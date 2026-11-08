@@ -189,9 +189,9 @@ test('collector recipes and identity controls disclose inputs, safe text entry a
   bag.items.push('collection-wood-12', 'collection-wood-12', 'collection-wood-12', 'collection-wood-12', 'collection-wood-4');
   let state: ApiState = { ...snapshot(account), csrf: 'test', population: { global: 0, federation: null }, clockSpeed: 1 };
   const html = craftingPanel(state, () => '', 'collectors');
-  assert.match(html, /Wood auto-collection · 12 game weeks <strong>4 \/ 4<\/strong>/);
-  assert.match(html, /data-item="collector-wood-52"\s*>Craft/);
-  assert.match(html, /data-item="collector-all-52" disabled/);
+  assert.match(html, /Wood auto-collection · 12 game weeks<\/span><strong>4 \/ 4<\/strong>/);
+  assert.match(html, /data-item="collector-wood-52" data-action-eligible="true"/);
+  assert.match(html, /data-item="collector-all-52" data-action-eligible="false"[^>]*disabled/);
   bag.items.push('permit-settlement-name', 'title-naturalist');
   state = { ...snapshot(account), csrf: 'test', population: { global: 0, federation: null }, clockSpeed: 1 };
   const permit = inventoryPanel(state, () => '', 'customization', 'en', 'settlement', 0, 'permit-settlement-name');
