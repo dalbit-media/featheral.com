@@ -263,7 +263,7 @@ class SiteSync {
   }
   // Receiver updates travel with the snapshot; application code and site setup still require deployment.
   receiverBundle() {
-    const names = ["scripts/restore-site-sync.js", "scripts/setup-site-https.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js"];
+    const names = ["scripts/restore-site-sync.js", "scripts/setup-site-https.js", "services/operations/site-sync-snapshot.js", "services/operations/replica.js", "services/operations/storage-cleanup.js"];
     const files = names.map(name => {
       const file = path.join(__dirname, "..", "..", "..", ...name.split("/"));
       return { name, path: file, bytes: fs.statSync(file).size, hash: hash(file) };

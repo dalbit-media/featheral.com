@@ -8,7 +8,10 @@ const uuid = new RegExp(`^${UUID}$`);
 const archive = new RegExp(`^${UUID}\\.zip(?:\\.sh)?$`);
 
 function read(file) {
-  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+  if (!fs.existsSync(file)) return null;
+  const info = fs.lstatSync(file);
+  if (!info.isFile() || info.nlink !== 1) throw new Error(`Refusing linked or unsupported cleanup receipt: ${file}`);
+  return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
 function measure(file) {
@@ -61,19 +64,27 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
   const syncState = read(path.join(syncBase, "status.json"));
   for (const state of [deploymentState, syncState])
     if (state !== null && typeof state.running !== "boolean") throw new Error("Invalid saved operation status; cleanup refused");
+  for (const base of [deploymentBase, syncBase]) {
+    const file = path.join(base, "status.json");
+    if (fs.existsSync(file)) report.skipped.push({ path: file, bytes: fs.statSync(file).size, kind: "operation receipt", reason: "Persistent operation status; not disposable staging" });
+  }
   const protectedSync = new Set(siteSync?.plans?.keys() || []);
   const syncUnconfirmed = syncState && !["idle", "complete", "not-applied", "review-ready", "rolled-back"].includes(syncState.phase);
   if (syncUnconfirmed && syncState.id) protectedSync.add(syncState.id);
 
-  const scan = (base, eligible) => {
+  const scan = (base, eligible, kind = "staging", retentionMs = minAgeMs) => {
     if (!fs.existsSync(base)) return;
     if (fs.lstatSync(base).isSymbolicLink()) throw new Error(`Refusing linked staging directory: ${base}`);
     for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
-      if (!eligible(entry)) continue;
+      const eligibility = eligible(entry);
+      if (!eligibility) continue;
       const file = path.join(base, entry.name);
       const size = measure(file);
-      if (minAgeMs > 0 && now - size.modified < minAgeMs) continue;
-      report.candidates.push({ path: file, bytes: size.bytes });
+      if (typeof eligibility === "string" || retentionMs > 0 && now - size.modified < retentionMs) {
+        report.skipped.push({ path: file, bytes: size.bytes, kind, reason: typeof eligibility === "string" ? eligibility : "Recent staging; waiting for retention deadline" });
+        continue;
+      }
+      report.candidates.push({ path: file, bytes: size.bytes, kind });
       if (apply) {
         fs.rmSync(file, { recursive: entry.isDirectory(), force: false });
         report.removedBytes += size.bytes;
@@ -82,9 +93,10 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
   };
   if (deploymentState?.running) report.skipped.push({ path: deploymentBase, reason: "Saved deployment is still running" });
   else scan(deploymentBase, entry => entry.isDirectory() && uuid.test(entry.name) || entry.isFile() && archive.test(entry.name));
-  if (syncState?.running || syncUnconfirmed && !syncState.id)
+  if (syncState?.running || syncUnconfirmed && !syncState.id || syncState?.phase === "review-ready" && !siteSync)
     report.skipped.push({ path: syncBase, reason: "Sync state requires review" });
-  else scan(syncBase, entry => entry.isDirectory() && uuid.test(entry.name) && !protectedSync.has(entry.name));
+  else scan(syncBase, entry => entry.isDirectory() && uuid.test(entry.name)
+    && (protectedSync.has(entry.name) ? "Reviewed, paused or unconfirmed sync snapshot" : true), "sync snapshot");
 
   const shared = managedShared(root);
   if (shared) {
@@ -93,10 +105,12 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
       return report;
     }
     scan(path.join(shared, "deployment"), entry => entry.isDirectory() && /^[a-f0-9]{64}$/.test(entry.name)
-      && read(path.join(shared, "deployment", entry.name, "cleanup-complete.json"))?.complete === true);
-    scan(path.join(shared, "deployment"), entry => entry.isDirectory() && /^provision-release-\d+-[a-f0-9]{12}$/.test(entry.name));
+      && (read(path.join(shared, "deployment", entry.name, "cleanup-complete.json"))?.complete === true
+        ? true : "Deployment outcome is unconfirmed; retain transfer for review"), "deployment transfer", 0);
+    scan(path.join(shared, "deployment"), entry => entry.isDirectory() && /^provision-release-\d+-[a-f0-9]{12}$/.test(entry.name), "provisioning work", 0);
     scan(path.join(shared, "site-sync"), entry => entry.isDirectory() && uuid.test(entry.name)
-      && read(path.join(shared, "sync-backups", entry.name, "state.json"))?.phase === "complete");
+      && (read(path.join(shared, "sync-backups", entry.name, "state.json"))?.phase === "complete"
+        ? true : "Target sync outcome is unconfirmed; retain recovery staging"), "sync transfer", 0);
     if (discardCompletedBackups) {
       const backups = path.join(shared, "sync-backups");
       if (fs.existsSync(backups)) {
@@ -106,7 +120,11 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
           const directory = path.join(backups, id);
           if (fs.lstatSync(directory).isSymbolicLink()) throw new Error("Refusing linked backup entry");
           const state = read(path.join(directory, "state.json"));
-          if (!["complete", "rolled-back"].includes(state?.phase)) continue;
+          if (!["complete", "rolled-back"].includes(state?.phase)) {
+            report.skipped.push({ path: directory, kind: "recovery backup", reason: "Backup protects an unconfirmed sync or recovery" });
+            continue;
+          }
+          report.skipped.push({ path: path.join(directory, "state.json"), kind: "sync receipt", reason: "Compact completion/recovery receipt is retained" });
           // Backup files can be hard links to live data: unlink only the backup names.
           const inspect = file => {
             const info = fs.lstatSync(file);
@@ -118,7 +136,7 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
           for (const name of fs.readdirSync(directory)) {
             if (name === "state.json") continue;
             const file = path.join(directory, name), bytes = inspect(file);
-            report.candidates.push({ path: file, bytes });
+            report.candidates.push({ path: file, bytes, kind: "completed backup payload" });
             if (apply) {
               fs.rmSync(file, { recursive: fs.lstatSync(file).isDirectory(), force: false });
               report.removedBytes += bytes;
@@ -128,8 +146,12 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
       }
     }
     const self = path.join(shared, "self-deployment"), state = read(path.join(self, "status.json"));
+    if (state !== null && typeof state.running !== "boolean") throw new Error("Invalid saved self-deployment status; cleanup refused");
+    if (state) report.skipped.push({ path: path.join(self, "status.json"), kind: "self-sync receipt", reason: "Persistent self-sync result and logs" });
     if (state?.running || state?.phase === "running") report.skipped.push({ path: self, reason: "Self deployment is active" });
-    else scan(self, entry => entry.isDirectory() && uuid.test(entry.name));
+    else scan(self, entry => entry.isDirectory() && uuid.test(entry.name), "self-sync preparation", 0);
+    if (fs.existsSync(path.join(self, "checkout")))
+      report.skipped.push({ path: path.join(self, "checkout"), kind: "Git checkout", reason: "Reusable self-sync source checkout; not disposable staging" });
     if (discardOldReleases && !state?.running && state?.phase !== "running") {
       const releases = path.dirname(root);
       if (fs.lstatSync(releases).isSymbolicLink()) throw new Error("Refusing linked release directory");
@@ -146,7 +168,10 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
         if (!/^release-\d+-[a-f0-9]{12}$/.test(name)) continue;
         const file = path.join(releases, name);
         if (fs.realpathSync(root) === file || fs.lstatSync(file).isSymbolicLink()) continue;
-        if (referenced.some(entry => entry === file || entry.startsWith(file + path.sep))) continue;
+        if (referenced.some(entry => entry === file || entry.startsWith(file + path.sep))) {
+          report.skipped.push({ path: file, kind: "release", reason: "Release is referenced by PM2" });
+          continue;
+        }
         if (!fs.existsSync(path.join(file, ".deployment-hosts.json"))) continue;
         const assignment = read(path.join(file, ".deployment-hosts.json"));
         if (!Array.isArray(assignment?.hosts) || typeof assignment.primary !== "boolean")
@@ -161,7 +186,7 @@ function cleanupStorage({ root, apply = false, now = Date.now(), minAgeMs = DAY,
           return info.nlink === 1 ? info.size : 0;
         };
         const bytes = size(file);
-        report.candidates.push({ path: file, bytes });
+        report.candidates.push({ path: file, bytes, kind: "inactive release" });
         if (apply) {
           fs.rmSync(file, { recursive: true, force: false });
           report.removedBytes += bytes;
@@ -188,9 +213,10 @@ function remoteCleanupCode(directory, discardOldReleases = false) {
 const current=path.join(${JSON.stringify(directory)},'current');
 if(fs.existsSync(current)){
   const root=fs.realpathSync(current),before=fs.statfsSync(root);
-  const report=cleanupStorage({root,apply:true,minAgeMs:0,discardCompletedBackups:true,discardOldReleases:${discardOldReleases}});
+  const report=cleanupStorage({root,apply:true,discardCompletedBackups:true,discardOldReleases:${discardOldReleases}});
   const after=fs.statfsSync(root);
   console.log(JSON.stringify({cleanup:report,freeBefore:before.bavail*before.bsize,freeAfter:after.bavail*after.bsize}));
+  if(report.blocked)throw new Error('Temporary cleanup blocked by an active operation; no cleanup success is assumed.');
 }`;
 }
 

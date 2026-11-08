@@ -102,7 +102,21 @@ async function run(root, id) {
     log(`Self-sync failed: ${error.message}`); throw error;
   } finally {
     receipt.finishedAt = new Date().toISOString(); persist();
-    if (fs.existsSync(prepared)) fs.rmSync(prepared, { recursive: true });
+    try {
+      if (fs.existsSync(prepared)) fs.rmSync(prepared, { recursive: true });
+    } catch (error) {
+      receipt.message += " Local preparation cleanup failed; retained files need operator review.";
+      log(`Self-sync preparation cleanup failed: ${error.message}`);
+    }
+    if (receipt.phase === "complete") {
+      try {
+        const active = fs.realpathSync(path.join(root, "current"));
+        await command(process.execPath, ["-e", 'const report=require("./services/operations/storage-cleanup").cleanupStorage({root:process.cwd(),apply:true,minAgeMs:0,discardCompletedBackups:true,discardOldReleases:true,operationCleanup:true});console.log("Post self-sync cleanup:",JSON.stringify(report));'], active);
+      } catch (error) {
+        receipt.message += " Temporary storage cleanup failed; review Server profile before retrying cleanup.";
+        log(`Verified self-sync cleanup failed: ${error.message}`);
+      }
+    }
   }
 }
 if (require.main === module) run(...process.argv.slice(2)).catch(error => { console.error(error.message); process.exitCode = 1; });

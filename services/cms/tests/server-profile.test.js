@@ -31,9 +31,9 @@ test("storage inventory classifies databases, ledgers, uploads, trash and code w
   const first = profile.snapshot().storage;
   assert.equal(first.complete, true);
   assert.deepEqual(Object.fromEntries(Object.entries(first.categories).map(([key, value]) => [key, value.bytes])), {
-    databases: 16, ledgers: 24, uploads: 36, trash: 29, temporary: 0, backups: 0, releases: 0, codebase: 37, otherData: 31,
+    databases: 16, ledgers: 24, uploads: 36, trash: 29, temporary: 0, backups: 0, releases: 0, codebase: 37, generated: 84, logs: 0, otherData: 31,
   });
-  assert.equal(first.totalBytes, 173);
+  assert.equal(first.totalBytes, 257);
   fs.writeFileSync(path.join(root, "services", "cms", "server.js"), Buffer.alloc(100));
   assert.equal(profile.snapshot().storage.categories.codebase.bytes, 37);
   await profile.refreshStorage();
@@ -80,7 +80,7 @@ test("managed release inventory resolves live data links and measures staging, a
   await firstScan;
   assert.equal(profile.storage.complete, true);
   assert.deepEqual(Object.fromEntries(Object.entries(profile.storage.categories).map(([key, value]) => [key, value.bytes])), {
-    databases: 29, ledgers: 7, uploads: 17, trash: 42, temporary: 181, backups: 100, releases: 3, codebase: 2, otherData: 0,
+    databases: 29, ledgers: 7, uploads: 17, trash: 42, temporary: 181, backups: 100, releases: 3, codebase: 2, generated: 0, logs: 0, otherData: 0,
   });
   assert.equal(profile.storage.totalBytes, 381);
   fs.unlinkSync(path.join(shared, "deployment", "digest", "release.zip"));
@@ -116,6 +116,34 @@ test("HTTP instrumentation bounds history and measures declared ingress, respons
     profile.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("profile cleanup inventory uses the same eligibility as removal and reports preview failures explicitly", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-profile-cleanup-"));
+  const { cleanupStorage } = require("../../operations/storage-cleanup");
+  const id = "11111111-1111-4111-8111-111111111111";
+  const staging = path.join(root, "data", "deployment", id);
+  fs.mkdirSync(staging, { recursive: true });
+  fs.writeFileSync(path.join(staging, "release.zip"), Buffer.alloc(23));
+  fs.writeFileSync(path.join(root, "data", "deployment", "status.json"), JSON.stringify({ running: false }));
+  const profile = new ServerProfile({ root, autoStart: false,
+    cleanupPreview: () => cleanupStorage({ root, minAgeMs: 0, discardCompletedBackups: true, discardOldReleases: true }) });
+  t.after(() => { profile.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  await profile.refreshStorage();
+  const preview = profile.storage.cleanup;
+  assert.equal(preview.candidateCount, 1);
+  assert.equal(preview.reclaimableBytes, 23);
+  assert.equal(profile.storage.categories.temporary.bytes, 23);
+  assert.equal(preview.candidates[0].path, staging);
+  const applied = cleanupStorage({ root, minAgeMs: 0, apply: true, discardCompletedBackups: true, discardOldReleases: true });
+  assert.equal(applied.removedBytes, preview.reclaimableBytes);
+  await profile.refreshStorage();
+  assert.equal(profile.storage.cleanup.candidateCount, 0);
+  profile.cleanupPreview = () => { throw new Error("Invalid saved operation status"); };
+  await profile.refreshStorage();
+  assert.equal(profile.storage.cleanup.blocked, true);
+  assert.match(profile.storage.cleanup.error, /could not be verified/);
+  assert.equal(profile.storage.cleanup.reclaimableBytes, undefined);
 });
 
 test("disk samples expose capacity, net growth and time to full through the profile API payload", async t => {

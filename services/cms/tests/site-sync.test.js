@@ -266,7 +266,7 @@ for (const fails of [false, true, "rollback-health"]) test(`receiver ${fails ===
   for (const name of ["services/operations/replica.js", "services/database/sqlite.js", "services/database/journal.js"])
     f.write(f.target, name, "// replica support");
   snapshot(f.root, output, {});
-  const commands = [], probes = [], logs = [];
+  const commands = [], probes = [], logs = [], cleanups = [];
   let restarted = false, restarts = 0;
   const response = (callback, status, body = "") => {
     const stream = new PassThrough(); stream.statusCode = status;
@@ -301,6 +301,12 @@ for (const fails of [false, true, "rollback-health"]) test(`receiver ${fails ===
       }) };
       if (name === path.join(f.target, "services", "operations", "settings"))
         return { OperationsSettings: class { environment() { return {}; } } };
+      if (name === "../services/operations/storage-cleanup") return { cleanupStorage(options) {
+        assert.equal(fs.existsSync(path.join(root, "shared", "site-sync.lock")), false);
+        assert(["complete", "rolled-back"].includes(JSON.parse(fs.readFileSync(path.join(backup, "state.json"), "utf8")).phase));
+        cleanups.push(options);
+        return { blocked: false, candidates: [], removedBytes: 0 };
+      } };
       return actualRequire(name);
     },
   }, { filename: script });
@@ -314,9 +320,23 @@ for (const fails of [false, true, "rollback-health"]) test(`receiver ${fails ===
   assert.equal(fs.readFileSync(path.join(f.target, "services", "cms", "data", "site", "uploads", "photo.txt"), "utf8"),
     fails ? "target overlapping upload" : "source upload");
   assert.equal(Boolean(readReplica(f.target)), !fails);
+  assert.equal(cleanups.length, fails === "rollback-health" ? 0 : 1);
+  if (cleanups.length) assert.deepEqual(JSON.parse(JSON.stringify(cleanups[0])), {
+    root: f.target, apply: true, minAgeMs: 0, discardCompletedBackups: true, operationCleanup: true,
+  });
   assert.ok(probes.some(probe => probe.restarted && probe.method === "POST"));
   if (fails === "rollback-health") assert(!logs.some(line => line.includes("Previous target state restored") || line === "FEATHERAL_SYNC:rollback-complete"));
   else assert.ok(logs.some(line => line.includes(fails ? "Previous target state restored" : "Snapshot installed")));
+});
+
+test("reviewed sync receiver bundles the exact cleanup helper with the restore implementation", () => {
+  const { SiteSync } = require("../lib/site-sync");
+  const bundle = SiteSync.prototype.receiverBundle();
+  const helper = bundle.files.find(file => file.name === "services/operations/storage-cleanup.js");
+  assert(helper);
+  assert.equal(helper.bytes, fs.statSync(helper.path).size);
+  assert.equal(helper.hash, require("../../operations/site-sync-snapshot").hash(helper.path));
+  assert(bundle.files.some(file => file.name === "scripts/restore-site-sync.js"));
 });
 test("promoted CMS storage retains its source identity without retaining the replica role", t => {
   const f = fixture(t), marker = path.join(f.root, "data", MARKER), origin = path.join(f.root, "data", CMS_ORIGIN);

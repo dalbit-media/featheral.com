@@ -71,7 +71,7 @@ test('concurrent expedition previews and confirmation costs match authoritative 
     const command = { type: 'move', x: destination.x, y: destination.y } as const;
     const base = explorationQuote(before.game, command.x, command.y);
     const confirmation = gameConsumption(before, command)!;
-    assert.equal(destination.dollars, base.dollars * (concurrent + 1));
+    assert.equal(destination.dollars, base.dollars * 2 ** concurrent);
     assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: destination.dollars }]);
     const after = apply(account, { id: randomUUID(), revision: account.revision, command }, account.updatedAt + 1000);
     assert.equal(before.dollars - after.dollars, destination.dollars);
@@ -133,9 +133,9 @@ test('all common confirmation labels and game-week durations are bilingual', () 
     assert.equal(translate(label, 'en'), label);
   }
 });
-test('investigation confirmation explains the exact day, probability and fees in both languages', () => {
+test('investigation confirmation explains the exact week, population, probability and fees in both languages', () => {
   const quote = gameConsumption(snapshot(fixture()), { type: 'investigate', x: 0, y: 0 })!;
-  assert.equal(quote.days, 1); assert.equal(quote.weeks, 0); assert.equal(quote.residents, 1);
+  assert.equal(quote.days, undefined); assert.equal(quote.weeks, 1); assert.equal(quote.residents, 2);
   for (const label of [quote.title, ...quote.notes]) {
     assert.notEqual(translate(label, 'ko'), label, label);
     assert.equal(translate(label, 'en'), label, label);

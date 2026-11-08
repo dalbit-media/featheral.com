@@ -30,11 +30,19 @@
 }
 #app.explore-page #sidebar-content>.sidebar-primary-actions{display:grid;gap:8px;margin:0}
 #app.explore-page .sidebar-action-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-#app.explore-page .sidebar-action-row>.button{min-height:76px;padding:8px;gap:4px;font-size:12px}
+#app.explore-page .sidebar-action-row>.button{min-height:112px;padding:10px 6px;gap:6px;font-size:12px;justify-content:flex-start;text-align:center}
+#app.explore-page .sidebar-investigation{border-color:#78c9b6}
+#app.explore-page .sidebar-action-row>.button:focus-visible{outline:2px solid #a8d9ec;outline-offset:3px}
+#app.explore-page .quick-action-duration{font-size:10px;line-height:1.4;white-space:normal}
+#app.explore-page .quick-action-status{font-size:10px;line-height:1.4;white-space:normal;margin-top:auto}
+#app.explore-page .field-fee-note{grid-column:1/-1;text-align:center;font-size:10px;line-height:1.4}
 #app.explore-page .quick-action-heading{font-size:13px}
 .quick-action-compact-label{display:none}
 #app.explore-page .quick-action-cost,#app.explore-page [data-invite-cost]{padding:0;gap:4px}
 #app.explore-page .quick-action-cost>small,#app.explore-page [data-invite-cost]>small{display:none}
+#app.explore-page .sidebar-action-row .cost>.icon{display:none}
+#app.explore-page .sidebar-action-row .cost{justify-content:center;gap:4px}
+#app.explore-page .sidebar-action-row .cost>strong{margin-left:0}
 #app.explore-page #sidebar-content>.sidebar-secondary-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:0}
 #app.explore-page .sidebar-secondary-actions>.button{min-width:0;padding:8px 4px;gap:4px;font-size:11px}
 #app.explore-page .sidebar-upgrade{grid-column:1/-1}
@@ -67,7 +75,7 @@
   #app.explore-page .sidebar-status small{display:none}
 }
 @media(max-width:650px){
-  #app.explore-page .sidebar{top:calc(var(--scene-top) + 72px);width:calc(100% - var(--layout-gap)*2);gap:8px;padding:12px}
+  #app.explore-page .sidebar{top:calc(var(--scene-top) + 72px);width:calc(100vw - var(--layout-gap)*2);gap:8px;padding:12px}
   #app.explore-page #sidebar-content{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   #app.explore-page .sidebar-primary-actions,#app.explore-page .sidebar-secondary-actions{grid-column:1/-1}
   #app.explore-page .explore-upkeep,#app.explore-page #sidebar-content>.sidebar-status,#app.explore-page #sidebar-content>.sidebar-expeditions{display:none}
@@ -97,13 +105,13 @@
 @media(max-width:650px) and (max-height:740px),(min-width:651px) and (max-height:740px){
   #app.explore-page #sidebar-content>.sidebar-primary-actions{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
   #app.explore-page .sidebar-action-row{display:contents}
-  #app.explore-page .sidebar-primary-actions>.button,#app.explore-page .sidebar-action-row>.button{min-height:44px;padding:6px;font-size:11px}
+  #app.explore-page .sidebar-primary-actions>.button,#app.explore-page .sidebar-action-row>.button{min-height:88px;padding:6px;font-size:11px}
   #app.explore-page .sidebar-primary-actions>.button:only-child{grid-column:1/-1}
   #app.explore-page .quick-action-heading{font-size:11px;gap:4px;line-height:1.2}
   #app.explore-page .quick-action-heading>.icon{width:16px;height:16px}
-  #app.explore-page [data-invite-label]{display:none}
-  #app.explore-page .quick-action-compact-label{display:inline}
-  #app.explore-page .quick-action-cost,#app.explore-page [data-invite-cost],#app.explore-page [data-invite-duration],#app.explore-page .quick-action-duration,#app.explore-page .quick-action-batch,#app.explore-page .sidebar-primary-actions progress,#app.explore-page .sidebar-primary-actions .fineprint{display:none}
+  #app.explore-page .quick-action-cost,#app.explore-page [data-invite-cost]{display:flex;font-size:10px}
+  #app.explore-page .quick-action-duration,#app.explore-page [data-invite-duration],#app.explore-page .quick-action-status{font-size:9px}
+  #app.explore-page .quick-action-batch,#app.explore-page .sidebar-primary-actions progress,#app.explore-page .sidebar-primary-actions .fineprint{display:none}
   #app.explore-page #sidebar-content>.sidebar-secondary-actions{grid-template-columns:repeat(4,minmax(0,1fr))}
   #app.explore-page .sidebar-upgrade{grid-column:auto}
   #app.explore-page .sidebar-upgrade .cost{display:none}

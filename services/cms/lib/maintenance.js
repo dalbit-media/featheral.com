@@ -23,14 +23,25 @@ class Maintenance {
     fs.renameSync(this.file + ".tmp", this.file);
     this.state = state;
   }
-  runNow() {
+  temporaryOptions() {
+    return { root: this.root, now: this.now(), minAgeMs: 0, deployment: this.deployment, siteSync: this.siteSync,
+      busy: this.busy, discardCompletedBackups: true, discardOldReleases: true };
+  }
+  preview() {
+    return this.cleanup(this.temporaryOptions());
+  }
+  runNow({ temporaryOnly = false } = {}) {
     if (this.busy() || this.deployment?.running || this.siteSync?.running)
       throw Object.assign(new Error("A server operation is active. Wait before cleaning storage."), { status: 409 });
     const now = this.now();
-    const temporary = this.cleanup({ root: this.root, apply: true, now, deployment: this.deployment, siteSync: this.siteSync });
+    const temporary = this.cleanup({ ...this.temporaryOptions(), apply: true });
     if (temporary.blocked) throw Object.assign(new Error("Storage cleanup is blocked by an active server operation."), { status: 409 });
     this.logger.info(`Manual storage cleanup removed ${temporary.candidates.length} temporary entries (${temporary.removedBytes} bytes).`);
     const result = { temporary, sites: [], errors: [], trashSkipped: null };
+    if (temporaryOnly) {
+      result.trashSkipped = "Temporary-only cleanup: CMS trash and live data were not changed.";
+      return result;
+    }
     if (this.replica()) {
       result.trashSkipped = "This server is a read-only replica. Trash must be emptied on the writable source and synced normally.";
       return result;
@@ -57,7 +68,7 @@ class Maintenance {
     try {
       if (this.busy() || this.deployment?.running || this.siteSync?.running) return;
       const now = this.now();
-      const report = this.cleanup({ root: this.root, apply: true, now, deployment: this.deployment, siteSync: this.siteSync });
+      const report = this.cleanup({ ...this.temporaryOptions(), apply: true });
       if (report.blocked) return;
       if (report.candidates.length) this.logger.info(`Storage maintenance removed ${report.candidates.length} temporary entries (${report.removedBytes} bytes).`);
       // Staging is disposable on replicas, but their published data must never be purged.

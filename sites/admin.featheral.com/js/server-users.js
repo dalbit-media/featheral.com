@@ -12,9 +12,10 @@ VIEWS["server-profile"] = async (q, token) => {
     </section>
     <section class="card server-storage-card"><div class="card-head"><div><h2>Application storage</h2><p class="muted small">All CMS sites and deployment data on this server</p></div><button id="server-storage-refresh" type="button" class="btn sm">Rescan storage</button></div>
     <div id="server-profile-storage" class="server-profile-storage"></div><p id="server-storage-status" class="muted small">Waiting for inventory...</p>
-    <div class="server-storage-cleanup"><div><h3>Temporary files &amp; trash</h3><p class="muted small">Cleanup removes eligible staging older than 24 hours and permanently empties trash across all CMS sites. Active transfers, backups and rollback releases stay protected. Replica trash requires cleanup on the writable source.</p></div><button id="server-storage-cleanup" class="btn" type="button">Clean temporary files &amp; empty trash</button></div>
+    <div class="server-storage-cleanup"><div><h3>Temporary files</h3><p class="muted small">Remove finished staging, completed backup payloads and verified inactive releases. Active jobs, reviewed snapshots, uncertain recovery data, reusable Git checkouts and live data are preserved. No 24-hour wait for disposable staging.</p></div><div class="row"><button id="server-storage-cleanup" class="btn" type="button">Clean temporary files</button><button id="server-storage-trash-cleanup" class="btn" type="button">Also empty all CMS trash</button></div></div>
+    <details class="server-info"><summary>Tracked operation files &amp; cleanup eligibility</summary><div id="server-cleanup-inventory"></div></details>
     <p id="server-cleanup-result" class="server-cleanup-result" role="status" aria-live="polite" hidden></p>
-    <details class="server-info"><summary>What is included?</summary><p>Logical file sizes from live CMS data, shared server data, deployment/sync staging and retained backups/releases. Known managed data links are resolved; arbitrary symlinks are not followed and hard-linked files count once. Temporary totals include protected or recent staging and are not a promise of reclaimable space. Trash is physical files across sites, not database row estimates. Dependencies/build outputs outside managed data, operating-system files and other applications are excluded, so inventory is not total filesystem usage. Cached scans run every five minutes.</p></details></section>
+    <details class="server-info"><summary>What is included?</summary><p>Logical file sizes from live CMS data, shared server data, dependencies/build outputs, logs, deployment/sync staging and retained backups/releases. Known managed data links are resolved; arbitrary symlinks are not followed and hard-linked files count once. Temporary totals include protected staging and are not a promise of reclaimable space. Trash is physical files across sites, not database row estimates. Git metadata, operating-system files and other applications are excluded, so inventory is not total filesystem usage. Cached scans run every five minutes.</p></details></section>
     <section class="card server-profile-chart-card"><div class="card-head"><h2>Live metrics <span class="muted small">Last minute</span></h2>
     <details class="server-info"><summary>Chart info</summary><p>Each row has its own scale. Process CPU is per core and can exceed 100%. Ingress uses declared Content-Length; response bytes exclude headers.</p></details></div>
     <div id="server-profile-chart" class="server-profile-chart" role="img" aria-label="Recent CPU, memory, event-loop, request, and network metrics"></div></section>
@@ -54,27 +55,30 @@ VIEWS["server-profile"] = async (q, token) => {
       ["Databases", categories.databases], ["Currency & other ledgers", categories.ledgers], ["Uploads", categories.uploads],
       ["Temporary & deployment files", categories.temporary], ["Trashed files · all sites", categories.trash],
       ["Retained backups", categories.backups], ["Rollback releases", categories.releases], ["Current codebase", categories.codebase], ["Other data", categories.otherData],
+      ["Dependencies & build outputs", categories.generated], ["Operational logs", categories.logs],
     ].map(([label, item]) => `<div class="server-storage-item${label.startsWith("Temporary") || label.startsWith("Trashed") ? " cleanup" : ""}"><span>${esc(label)}</span><b>${!data.storage.updatedAt ? "Calculating..." : item ? fmtBytes(item.bytes) : "Unavailable"}</b><small>${!data.storage.updatedAt ? "Waiting for inventory" : item ? `${fmtNum(item.files)} files` : "Update the server to report this category"}</small></div>`).join("");
     const stored = data.storage.updatedAt ? `Inventory ${new Date(data.storage.updatedAt).toLocaleTimeString()}; ${fmtNum(data.storage.totalFiles)} files; ${fmtBytes(data.storage.totalBytes)}` : "Inventory has not completed yet.";
     $("#server-storage-status").textContent = stored + (data.storage.scanning ? "; scanning" : data.storage.scanError ? `; ${data.storage.scanError}` : "");
+    $("#server-cleanup-inventory").innerHTML = ServerProfileCharts.renderCleanupInventory(data.storage.cleanup);
     $("#server-profile-status").textContent = `Sampled ${new Date(data.sampledAt).toLocaleTimeString()}; ${fmtNum(m.uptimeSeconds)} sec uptime`;
     $("#server-profile-chart").innerHTML = ServerProfileCharts.renderServerProfileChart(history);
   }
-  $("#server-storage-cleanup").addEventListener("click", async () => {
+  const cleanStorage = async event => {
     if (!active() || cleaning) return;
-    if (!confirm("Permanently delete ALL trashed posts, readings and their unused files across ALL CMS sites on this server? This cannot be undone. Safe temporary files older than 24 hours will also be removed. Backups and active transfers are preserved. Replicas clean temporary files only.")) return;
+    const emptyTrash = event.currentTarget.id === "server-storage-trash-cleanup";
+    if (!confirm(emptyTrash ? "Permanently empty ALL CMS trash and remove disposable operation files? Trash deletion cannot be undone. Active jobs and unconfirmed recovery data are preserved." : "Remove disposable operation files, completed backup payloads and verified inactive releases? CMS trash, active jobs, reviewed snapshots and unconfirmed recovery data will not be deleted.")) return;
     cleaning = true;
     const control = $("#server-storage-cleanup"), output = $("#server-cleanup-result");
-    control.disabled = true;
+    control.disabled = $("#server-storage-trash-cleanup").disabled = true;
     output.hidden = false;
     output.textContent = "Cleaning server storage and refreshing sizes. Keep this page open...";
     try {
-      const result = await api("/api/settings/cleanup", { json: { confirmation: "EMPTY ALL CMS TRASH" } });
+      const result = await api("/api/settings/cleanup", { json: { confirmation: emptyTrash ? "EMPTY ALL CMS TRASH" : "CLEAN TEMPORARY FILES" } });
       const totals = result.sites.reduce((sum, site) => ({ posts: sum.posts + site.posts, files: sum.files + site.files, bytes: sum.bytes + site.bytes }), { posts: 0, files: 0, bytes: 0 });
       const gib = bytes => (bytes / 1024 ** 3).toFixed(2);
       const text = [
         `Removed ${result.temporary.candidates.length} temporary entries (${gib(result.temporary.removedBytes)} GiB).`,
-        `Emptied ${totals.posts} trashed items and ${totals.files} files (${gib(totals.bytes)} GiB) across ${result.sites.length} sites.`,
+        emptyTrash ? `Emptied ${totals.posts} trashed items and ${totals.files} files (${gib(totals.bytes)} GiB) across ${result.sites.length} sites.` : "",
         result.trashSkipped || "",
         ...result.temporary.skipped.map(item => `Preserved: ${item.reason}.`),
         ...result.errors.map(error => `Cleanup failed for ${error.key}: ${error.message}`),
@@ -84,8 +88,10 @@ VIEWS["server-profile"] = async (q, token) => {
     } catch (error) {
       const text = `Cleanup was not confirmed; some files may already have been removed. Rescan storage before retrying. ${error.message}`;
       if (active()) { output.textContent = text; await loadProfile(); } else toast(text);
-    } finally { cleaning = false; if (active()) control.disabled = false; }
-  });
+    } finally { cleaning = false; if (active()) control.disabled = $("#server-storage-trash-cleanup").disabled = false; }
+  };
+  $("#server-storage-cleanup").addEventListener("click", cleanStorage);
+  $("#server-storage-trash-cleanup").addEventListener("click", cleanStorage);
   async function loadProfile() {
     if (profileLoading || !active()) return;
     profileLoading = true;

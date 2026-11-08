@@ -342,6 +342,15 @@ rollback() {
     done
     "$pm2" save
     echo "Rollback confirmed: previous gateway and assigned HTTPS sites are healthy."
+    if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]]; then
+      if ! (printf '%s\n' '{"version":1,"complete":true,"outcome":"rolled-back"}' > "${archive%/*}/cleanup-complete.json.tmp" &&
+            mv "${archive%/*}/cleanup-complete.json.tmp" "${archive%/*}/cleanup-complete.json"); then
+        echo "Rollback staging cleanup receipt could not be saved; retained for review." >&2
+      fi
+    fi
+    if ! node -e 'const path=require("node:path");const report=require(process.argv[1]).cleanupStorage({root:process.argv[2],apply:true,minAgeMs:0,discardCompletedBackups:true,discardOldReleases:true,operationCleanup:true});console.log("Verified rollback storage cleanup:",JSON.stringify(report))' "$release/services/operations/storage-cleanup.js" "$previous"; then
+      echo "Rollback verified, but temporary storage cleanup failed; operator review is required." >&2
+    fi
   fi
   exit "$code"
 }
@@ -493,6 +502,9 @@ if [[ -f "$release/.deployment-market-authorization.pending" ]]; then
   echo "Approved additive markets authorized; original ledger history and reserve obligations preserved."
 fi
 echo "Deployment complete: $release_id"
+if [[ -f "$nginx_backup" ]] && ! as_root rm -f "$nginx_backup"; then
+  echo "Installation verified, but obsolete Nginx rollback configuration could not be removed." >&2
+fi
 if [[ -n "$archive" && "${archive%/*}" == "$shared/deployment/$archive_hash" ]]; then
   if ! (printf '%s\n' '{"version":1,"complete":true}' > "${archive%/*}/cleanup-complete.json.tmp" &&
         mv "${archive%/*}/cleanup-complete.json.tmp" "${archive%/*}/cleanup-complete.json"); then

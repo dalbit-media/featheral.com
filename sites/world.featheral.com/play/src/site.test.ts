@@ -878,7 +878,9 @@ test('Explore menu uses compact responsive action grids rather than scrolling or
   assert.match(css, /#app\.explore-page #sidebar-content\{display:grid;gap:12px;overflow:visible/);
   assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css, /#app\.explore-page \.sidebar-action-row\{display:contents\}/);
-  assert.match(css, /\.quick-action-compact-label\{display:inline\}/);
+  assert.match(css, /\.quick-action-cost,#app\.explore-page \[data-invite-cost\]\{display:flex/);
+  assert.doesNotMatch(css, /\[data-invite-label\]\{display:none\}/);
+  assert.match(css, /\.quick-action-status\{font-size:10px/);
   assert.doesNotMatch(css, /overflow:(auto|scroll|hidden)/);
 });
 test('Chat uses a speech bubble and reports unread messages while collapsed without counting history or own messages', () => {
@@ -1084,8 +1086,7 @@ test('shared recruitment controls show a one-week queue and wait for server-conf
 test('sidebar spending is labeled with resource names and remains readable on disabled actions', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
-  assert.match(main, /<span class="quick-action-cost"><small>You spend<\/small>\$\{costChips\(\{ dollars: quote\.dollars \}, true\)\}/);
-  assert.match(main, /primary \? '<small>You spend<\/small>' : ''/);
+  assert.match(main, /<span class="quick-action-cost">\$\{costChips\(\{ dollars: quote\.dollars \}, true\)\}/);
   assert.match(main, /costChips\(\{ dollars: state\.recruitmentDollars \}, primary\)/);
   assert.match(main, /function costChips\(cost: Cost, showNames = false\)/);
   assert.match(main, /<span>\$\{name\}<\/span><strong>\$\{amount\}<\/strong>/);
@@ -1093,6 +1094,26 @@ test('sidebar spending is labeled with resource names and remains readable on di
   assert.match(css, /\.sidebar-action-row>\.button:disabled:not\(:has\(\.completion-meter\)\)\{opacity:1/);
   assert.match(css, /\.sidebar-action-row \.cost\.insufficient\{color:#ffb7a7\}/);
   assert.match(css, /\.sidebar-action-row \[data-invite-cost\]\[hidden\]\{display:none\}/);
+});
+
+test('Investigate, Explore and Invite cards disclose duration, price, requirements and blocked reasons on small screens', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
+  assert.match(main, /state\.availableWorkers < 2 \? 'Needs 2 idle residents'/);
+  assert.match(main, /fieldActionReason\(quote, 'No known destination available'\)/);
+  assert.match(main, /fieldActionReason\(quote, 'No nearby destination'\)/);
+  assert.match(main, /Next field team fee multiplier/);
+  assert.match(main, /2 \*\* explorationCount\(state\.workforce\.expeditions\)/);
+  assert.match(main, /data-invite-status/);
+  assert.match(main, /expedition\.startedAt \?\? expedition\.readyAt/);
+  assert.match(main, /icon\('search'\)/);
+  assert.notEqual(icon('search'), icon('compass'));
+  const compact = css.slice(css.indexOf('@media(max-width:650px) and (max-height:740px),'));
+  assert.doesNotMatch(compact, /quick-action-cost[^}]*display:none/);
+  assert.doesNotMatch(compact, /quick-action-duration[^}]*display:none/);
+  assert.match(compact, /min-height:88px/);
+  for (const label of ['Needs 2 idle residents', 'Discover new land', 'Grow population', 'Next field team fee multiplier'])
+    assert.notEqual(translate(label, 'ko'), label);
 });
 
 test('four live counters lead the hero without duplicate statistics in the World header', () => {

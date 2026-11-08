@@ -44,9 +44,9 @@ function settingsApi({ settings, siteSync, selfDeployment, cleanup, cmsAuth, adm
   router.post("/challenge", run((input, ctx) => settings.challenge(input, ctx)));
   router.post("/", run((input, ctx) => settings.save(input, ctx)));
   if (cleanup) router.post("/cleanup", run(input => {
-    if (input?.confirmation !== "EMPTY ALL CMS TRASH")
-      throw Object.assign(new Error("Confirm permanent deletion of trash across all CMS sites."), { status: 400 });
-    return cleanup();
+    if (!["CLEAN TEMPORARY FILES", "EMPTY ALL CMS TRASH"].includes(input?.confirmation))
+      throw Object.assign(new Error("Confirm temporary cleanup or permanent deletion of trash across all CMS sites."), { status: 400 });
+    return cleanup({ temporaryOnly: input.confirmation === "CLEAN TEMPORARY FILES" });
   }));
   if (selfDeployment) {
     router.post("/self-sync/challenge", run((_input, ctx) => selfDeployment.challenge(ctx)));

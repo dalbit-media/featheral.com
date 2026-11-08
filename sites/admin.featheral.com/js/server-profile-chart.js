@@ -68,7 +68,18 @@
       </div></div>`;
   }
 
-  const api = { renderServerProfileChart, renderServerDiskChart, startServerProfilePolling };
+  function renderCleanupInventory(cleanup) {
+    if (!cleanup) return '<p class="muted">Cleanup eligibility has not been scanned yet.</p>';
+    if (cleanup.error) return `<p role="alert">${escapeHtml(cleanup.error)}</p>`;
+    const entries = [
+      ...(cleanup.candidates || []).map(entry => ({ ...entry, reason: "Eligible for removal" })),
+      ...(cleanup.protected || []),
+    ];
+    const rows = entries.map(entry => `<tr><td class="mono">${escapeHtml(entry.path || "Server operations")}</td><td>${escapeHtml(entry.kind || "Protection")}</td><td>${entry.bytes === undefined ? "Not measured" : `${(entry.bytes / 1024 ** 2).toFixed(2)} MiB`}</td><td>${escapeHtml(entry.reason)}</td></tr>`).join("");
+    return `<p>${cleanup.blocked ? "Cleanup blocked by an active operation." : `${cleanup.candidateCount} eligible entries; ${(cleanup.reclaimableBytes / 1024 ** 2).toFixed(2)} MiB reclaimable.`} ${cleanup.protectedCount} protected entries. Up to 100 entries per group shown; cleanup rechecks eligibility.</p><div class="table-wrap"><table><thead><tr><th>Path</th><th>Type</th><th>File size estimate</th><th>Status / reason</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No operation files awaiting cleanup.</td></tr>'}</tbody></table></div>`;
+  }
+
+  const api = { renderServerProfileChart, renderServerDiskChart, startServerProfilePolling, renderCleanupInventory };
   if (typeof module === "object" && module.exports) module.exports = api;
   if (typeof window === "object") window.ServerProfileCharts = api;
 })();

@@ -14,7 +14,7 @@ const DISK_HISTORY_MS = 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "artifacts", "cache", "coverage", "dist", "out"]);
 const DATABASE_FILE = /\.(?:sqlite|sqlite3|db)(?:-(?:wal|shm|journal))?$/i;
-const CATEGORY_NAMES = ["databases", "ledgers", "uploads", "trash", "temporary", "backups", "releases", "codebase", "otherData"];
+const CATEGORY_NAMES = ["databases", "ledgers", "uploads", "trash", "temporary", "backups", "releases", "codebase", "generated", "logs", "otherData"];
 const emptyCategories = () => Object.fromEntries(CATEGORY_NAMES.map(name => [name, { bytes: 0, files: 0 }]));
 const percentile = (values, fraction) => {
   if (!values.length) return 0;
@@ -23,7 +23,7 @@ const percentile = (values, fraction) => {
 };
 
 class ServerProfile {
-  constructor({ root, dataDirectory, externalDirectories = [], networkLimitBytesPerSecond = null, now = Date.now, statfs = fs.promises.statfs, autoStart = true } = {}) {
+  constructor({ root, dataDirectory, externalDirectories = [], networkLimitBytesPerSecond = null, cleanupPreview, now = Date.now, statfs = fs.promises.statfs, autoStart = true } = {}) {
     if (!root) throw new TypeError("A repository root is required.");
     this.root = path.resolve(root);
     this.dataDirectory = dataDirectory ? path.resolve(dataDirectory) : null;
@@ -34,6 +34,7 @@ class ServerProfile {
       ? networkLimitBytesPerSecond : null;
     this.now = now;
     this.statfs = statfs;
+    this.cleanupPreview = cleanupPreview;
     this.diskSamples = [];
     this.loopDelay = monitorEventLoopDelay({ resolution: 20 });
     this.loopDelay.enable();
@@ -185,7 +186,7 @@ class ServerProfile {
         if (entry.isDirectory()) {
           const name = entry.name.toLowerCase();
           const managedData = dataRoot || ["data", "cms-data"].includes(name) || relativeParts.some(part => ["uploads", "trash"].includes(part.toLowerCase()));
-          if (EXCLUDED_DIRECTORIES.has(name) && !managedData) continue;
+          if (name === ".git" && !managedData) continue;
           const parts = [...relativeParts, entry.name];
           const childDirectory = path.join(directory, entry.name);
           const hint = hints.find(configured => configured.category && inside(configured.directory, childDirectory));
@@ -217,12 +218,16 @@ class ServerProfile {
             dataRelative !== ".." && !dataRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(dataRelative);
           let category = "codebase";
           if (lower.some(part => ["backups", "sync-backups"].includes(part))) category = "backups";
+          else if (lower.includes("self-deployment") && lower.includes("checkout")) category = "codebase";
+          else if (lower.some(part => ["deployment", "site-sync", "self-deployment"].includes(part)) && /^status\.json(?:\.tmp)?$/.test(name)) category = "otherData";
           else if (lower.some(part => ["deployment", "site-sync", "self-deployment"].includes(part))) category = "temporary";
           else if (shared && inside(path.dirname(this.root), filePath) && !inside(this.root, filePath)) category = "releases";
           else if (lower.includes("trash")) category = "trash";
           else if (lower.includes("uploads")) category = "uploads";
           else if (DATABASE_FILE.test(name)) category = "databases";
           else if (lower.some(part => part.includes("ledger") || ["journals", "blocks"].includes(part))) category = "ledgers";
+          else if (lower.includes("logs")) category = "logs";
+          else if (!dataRoot && !inDataDirectory && lower.some(part => EXCLUDED_DIRECTORIES.has(part))) category = "generated";
           else if (categoryHint) category = categoryHint;
           else if (dataRoot || inDataDirectory) category = "otherData";
           categories[category].bytes += info.size;
@@ -252,6 +257,18 @@ class ServerProfile {
       this.storage = { updatedAt: this.now(), scanning: false, complete, scanError,
         categories, totalBytes: values.reduce((sum, item) => sum + item.bytes, 0),
         totalFiles: values.reduce((sum, item) => sum + item.files, 0) };
+      if (this.cleanupPreview) {
+        try {
+          const preview = this.cleanupPreview();
+          this.storage.cleanup = { updatedAt: this.now(), blocked: preview.blocked,
+            reclaimableBytes: preview.candidates.reduce((sum, item) => sum + item.bytes, 0),
+            candidateCount: preview.candidates.length, protectedCount: preview.skipped.length,
+            candidates: preview.candidates.slice(0, 100), protected: preview.skipped.slice(0, 100), error: null };
+        } catch (error) {
+          console.error("Server profile cleanup preview failed:", error.code || error.name);
+          this.storage.cleanup = { updatedAt: this.now(), blocked: true, error: "Cleanup eligibility could not be verified. Check the private server log before deleting files." };
+        }
+      }
     } catch (error) {
       console.error("Server profile storage scan failed:", error.code || error.name || "Error");
       this.storage = { ...this.storage, scanning: false, complete: false, scanError: "Storage inventory scan failed." };
@@ -347,7 +364,7 @@ class ServerProfile {
       history: this.history, risks: this.risks(metrics),
       notes: { cpu: "Process CPU is normalized to one logical core; values can exceed 100%.",
         network: "Request bytes use declared Content-Length; response body bytes are measured by the gateway, excluding headers. Network-interface capacity is unavailable unless configured.",
-        storage: "Repository code inventory excludes .git, node_modules, artifacts, cache, coverage, dist and out. Those names are still counted inside data, upload and trash trees. Symlinks are not followed." } };
+        storage: "Inventory includes dependencies and build outputs, operation staging, logs and inactive releases; repository .git metadata is excluded. Symlinks are not followed. Eligibility is separate from file size; active and unconfirmed recovery data is protected." } };
   }
 
   close() {

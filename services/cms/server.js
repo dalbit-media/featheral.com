@@ -195,9 +195,9 @@ app.use('/api/server-users', require('./lib/server-users-api').serverUsersApi({
 app.use('/api/settings', require('../operations/api').settingsApi({
   settings: operationsSettings, siteSync, selfDeployment, cmsAuth, adminHost: String(CONFIG.cmsHost).toLowerCase(),
   sites: () => [...sitePages.catalog(), ...(siteManager?.list() || [])],
-  cleanup: async () => {
+  cleanup: async options => {
     if (serverProfile.storage.scanning) await serverProfile.refreshStorage();
-    const result = getMaintenance().runNow();
+    const result = getMaintenance().runNow(options);
     await serverProfile.refreshStorage();
     return { ...result, disk: serverProfile.disk, storage: serverProfile.storage };
   },
@@ -213,6 +213,7 @@ const serverProfile = new ServerProfile({
     { directory: env.DOLLAR_GAME_DIR, category: 'otherData' },
   ].filter(entry => entry.directory),
   networkLimitBytesPerSecond: operationsSettings.value.networkLimitBytesPerSecond,
+  cleanupPreview: () => getMaintenance().preview(),
 });
 operationsSettings.listeners.add(() => {
   serverProfile.networkLimitBytesPerSecond = operationsSettings.value.networkLimitBytesPerSecond || null;

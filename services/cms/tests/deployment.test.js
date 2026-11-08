@@ -296,6 +296,48 @@ test('site health probes simulate HTTPS on loopback and identify failing hosts w
     assert.match(connection.stdout, /health failed: featheral.com/);
   }
 });
+
+test('installer cleans failed transfer staging only after previous gateway and HTTPS rollback are confirmed', t => {
+  const { spawnSync } = require('node:child_process');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'rollback-cleanup-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const script = fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').replace(/\r\n/g, '\n');
+  const rollback = script.slice(script.indexOf('rollback() {'), script.indexOf('trap rollback ERR'));
+  const run = healthy => spawnSync(process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash', ['-c', `
+set -Eeuo pipefail
+exec 3>&1
+root="$(cd "$FIXTURE_DIR" && pwd)"
+shared="$root/shared"; archive_hash="$(printf 'a%.0s' {1..64})"
+archive="$shared/deployment/$archive_hash/release.zip"
+mkdir -p "\${archive%/*}"
+release="$root/candidate"; previous="$root/previous"; nginx_file="$root/nginx"
+step=health; market_authorization_started=false; had_nginx=false; activated=true
+pm2=fixture_pm2
+fixture_pm2(){ :; }
+as_root(){ :; }
+start_release(){ :; }
+phase(){ :; }
+ln(){ :; }
+mv(){ if [[ "$*" == *current.next* ]]; then return; fi; command mv "$@"; }
+gateway_healthy(){ ${healthy ? 'return 0' : 'return 1'}; }
+sleep(){ :; }
+curl(){ printf 200; }
+node(){ if [[ "$3" == *.deployment-hosts.json ]]; then echo featheral.com; else echo CLEANUP_CALLED; fi; }
+${rollback}
+rollback 1
+`], { env: { ...process.env, FIXTURE_DIR: directory }, encoding: 'utf8', timeout: 10000 });
+  const unconfirmed = run(false);
+  assert.equal(unconfirmed.status, 1, unconfirmed.stderr);
+  assert.match(unconfirmed.stdout, /ROLLBACK UNCONFIRMED/);
+  assert.doesNotMatch(unconfirmed.stdout, /CLEANUP_CALLED/);
+  const receipt = path.join(directory, 'shared', 'deployment', 'a'.repeat(64), 'cleanup-complete.json');
+  assert(!fs.existsSync(receipt));
+  const confirmed = run(true);
+  assert.equal(confirmed.status, 1, confirmed.stderr);
+  assert.match(confirmed.stdout, /Rollback confirmed/);
+  assert.match(confirmed.stdout, /CLEANUP_CALLED/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(receipt, 'utf8')), { version: 1, complete: true, outcome: 'rolled-back' });
+});
 test('deployment requires a valid server-side target and pinned host key without exposing credentials', () => {
   assert.throws(() => configuration({}), { status: 400 });
   for (const target of ['root@host:/', 'user@host:/opt/../home', 'user@host:/opt/x;id']) assert.throws(() => configuration({ ...env, DEPLOY_TARGET: target }), { status: 400 });

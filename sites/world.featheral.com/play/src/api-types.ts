@@ -46,6 +46,7 @@ export interface Expedition {
   x: number;
   y: number;
   workers: number;
+  startedAt?: number;
   readyAt: number;
   surveyRadius: number;
   dollarReward?: number;

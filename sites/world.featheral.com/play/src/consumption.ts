@@ -69,15 +69,16 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const cost = explorationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Explore', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Assigned residents return when the expedition finishes.',
-          'Concurrent expedition fees use 1x, 2x, 3x... of the route cost. The multiplier is based on expeditions still travelling at departure.']), weeks: cost.weeks, residents: 2 };
+          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']), weeks: cost.weeks, residents: 2 };
     }
     case 'investigate': {
-      const cost = investigationQuote(game, command.x, command.y);
+      const cost = investigationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Investigate', `${command.x}, ${command.y}`, { dollars: cost.dollars },
-        ['One idle resident returns after one game day. Known terrain is not expanded.',
+        ['Two idle residents return after one game week. Known terrain is not expanded.',
           '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.',
-          'Costs 10% of the normal route fee, minimum FTH$0.10. Investigation does not raise expedition fees.']),
-        weeks: 0, days: cost.days, residents: 1 };
+          'Costs 10% of the concurrent Explore route fee, minimum FTH$0.10.',
+          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']),
+        weeks: cost.weeks, residents: 2 };
     }
     case 'invite':
       return { ...quote('Recruit residents', 'Residents', { dollars: state.recruitmentDollars },

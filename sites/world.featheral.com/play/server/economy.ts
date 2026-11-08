@@ -304,7 +304,7 @@ function activityReason(account: Account, activity: ActivityKind): string | null
   if (supplyReason) return supplyReason;
   if (activity === 'exploration') {
     const work = workforce(account);
-    if (explorationCount(work.expeditions)) return 'Waiting for expedition return';
+    if (work.expeditions.some(expedition => expedition.kind !== 'investigate')) return 'Waiting for expedition return';
     if (availableWorkers(account) < 2) return 'Waiting for idle residents';
     const next = nextExploration(account.game, work.expeditions);
     if (!next) return 'No reachable unexplored terrain';
@@ -326,7 +326,7 @@ function runActivityAutomation(account: Account, event: number): void {
     account.updatedAt = event;
     const reason = activityReason(account, activity);
     if (reason) {
-      automation.nextAt = activity === 'exploration' && explorationCount(workforce(account).expeditions)
+      automation.nextAt = activity === 'exploration' && workforce(account).expeditions.some(expedition => expedition.kind !== 'investigate')
         ? Math.max(...workforce(account).expeditions.filter(expedition => expedition.kind !== 'investigate').map(expedition => expedition.readyAt))
         : activity === 'attraction' && account.recruitment ? account.recruitment.readyAt : event + worldDayMs;
       continue;
@@ -358,7 +358,9 @@ export function accrue(account: Account, time: number): void {
       if (expedition.kind === 'investigate') {
         if (expedition.itemFind) addPermitFind(account, expedition.itemFind);
         exploringWorkers -= expedition.workers;
-        note(account.game, expedition.itemFind ? 'Investigation returned with a permit. One resident is available.' : 'Investigation returned without an item. One resident is available.');
+        note(account.game, expedition.workers === 1
+          ? expedition.itemFind ? 'Investigation returned with a permit. One resident is available.' : 'Investigation returned without an item. One resident is available.'
+          : expedition.itemFind ? 'Investigation returned with a permit. 2 residents are available.' : 'Investigation returned without an item. 2 residents are available.');
         continue;
       }
       const before = account.game.explored.length;
@@ -635,15 +637,15 @@ export function execute(account: Account, command: Command, realTime = account.u
       const work = workforce(account);
       if (work.expeditions.some(expedition => expedition.x === command.x && expedition.y === command.y))
         throw new ApiError(409, 'An expedition is already exploring this destination. Choose another location.');
-      if (availableWorkers(account) < 1) throw new ApiError(409, 'Investigation requires one available resident.');
-      const quote = investigationQuote(game, command.x, command.y);
+      if (availableWorkers(account) < 2) throw new ApiError(409, 'Investigation requires two available residents.');
+      const quote = investigationQuote(game, command.x, command.y, explorationCount(work.expeditions));
       pay(game, { dollars: quote.dollars });
       const itemFind = investigationItem(terrainAt(command.x, command.y, game.seed), randomInt(100), randomInt(100), randomInt(100));
-      const expedition: Expedition = { kind: 'investigate', x: command.x, y: command.y, workers: 1,
-        readyAt: account.updatedAt + worldDayMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
+      const expedition: Expedition = { kind: 'investigate', x: command.x, y: command.y, workers: 2, startedAt: account.updatedAt,
+        readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
-      return note(game, 'One resident departed to investigate known terrain for one game day.');
+      return note(game, 'Two residents departed to investigate known terrain for one game week.');
     }
     case 'assign': {
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');

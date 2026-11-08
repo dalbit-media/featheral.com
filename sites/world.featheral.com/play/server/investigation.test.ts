@@ -30,25 +30,27 @@ function fixture() {
   account.workforce.crews = {};
   return account;
 }
-test('investigation locks one resident for exactly one day, charges one tenth route price and never charts land', () => {
+test('investigation locks two residents for exactly one week, charges one tenth route price and never charts land', () => {
   const account = fixture(), before = snapshot(account);
   const command = { type: 'investigate', x: 0, y: 0 } as const;
   const quote = investigationQuote(account.game, 0, 0);
   const confirmation = gameConsumption(before, command)!;
   assert.equal(quote.dollars, explorationQuote(account.game, 0, 0).dollars / 10);
   assert.ok(quote.dollars >= .1);
-  assert.equal(confirmation.residents, 1); assert.equal(confirmation.days, 1);
+  assert.equal(confirmation.residents, 2); assert.equal(confirmation.weeks, 1);
+  assert.equal(confirmation.days, undefined);
   assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: quote.dollars }]);
   execute(account, command);
   const team = account.workforce.expeditions[0];
-  assert.equal(team.kind, 'investigate'); assert.equal(team.workers, 1);
-  assert.equal(team.readyAt, start + worldDayMs);
+  assert.equal(team.kind, 'investigate'); assert.equal(team.workers, 2);
+  assert.equal(team.startedAt, start);
+  assert.equal(team.readyAt, start + worldWeekMs);
   assert.equal(team.surveyRadius, 0);
-  assert.equal(snapshot(account).availableWorkers, 11);
+  assert.equal(snapshot(account).availableWorkers, 10);
   assert.equal(account.game.dollars, before.game.dollars - quote.dollars * 10000);
-  assert.equal(explorationCount(account.workforce.expeditions), 0);
+  assert.equal(explorationCount(account.workforce.expeditions), 1);
   const next = nextExploration(account.game, account.workforce.expeditions)!;
-  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars);
+  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars * 2);
   const savedFind = team.itemFind;
   accrue(account, team.readyAt - 1);
   assert.equal(account.workforce.expeditions.length, 1);
@@ -73,11 +75,13 @@ test('investigation uses only idle workers and known reachable unoccupied destin
   account.workforce.crews.wood = { workers: 11, readyAt: start + worldWeekMs, weeklyYield: 0, weeklyMetalCost: 0 };
   const destination = nextInvestigation(account.game)!;
   assert.ok(account.game.explored.includes(`${destination.x},${destination.y}`));
+  assert.throws(() => execute(account, { type: 'investigate', x: destination.x, y: destination.y }), /two available residents/);
+  account.workforce.crews.wood.workers = 10;
   execute(account, { type: 'investigate', x: destination.x, y: destination.y });
   assert.equal(workforceCounts(account.game.population, account.workforce).available, 0);
   const alternative = nextInvestigation(account.game, account.workforce.expeditions)!;
   assert.notDeepEqual([alternative.x, alternative.y], [destination.x, destination.y]);
-  assert.throws(() => execute(account, { type: 'investigate', x: alternative.x, y: alternative.y }), /one available resident/);
+  assert.throws(() => execute(account, { type: 'investigate', x: alternative.x, y: alternative.y }), /two available residents/);
   assert.throws(() => execute(account, { type: 'investigate', x: destination.x, y: destination.y }), /already exploring/);
   assert.throws(() => execute(account, { type: 'investigate', x: 3, y: 0 }), /discovered terrain/);
   account.game.explored.push('100,100');
@@ -129,19 +133,19 @@ test('investigation validates commands, founding, shortages and affordability wi
   assert.throws(() => execute(account, valid), /FTH\$/);
   assert.deepEqual(account.workforce.expeditions, []);
 });
-test('investigation and normal exploration finish independently with unchanged normal fees', () => {
+test('investigation and normal exploration share exponential fees and finish at their own deadlines', () => {
   const account = fixture();
   execute(account, { type: 'investigate', x: 0, y: 0 });
   const destination = nextExploration(account.game, account.workforce.expeditions)!;
   const before = account.game.dollars;
   execute(account, { type: 'move', x: destination.x, y: destination.y });
-  assert.equal(before - account.game.dollars, explorationQuote(account.game, destination.x, destination.y).dollars * 10000);
-  assert.equal(snapshot(account).availableWorkers, 9);
+  assert.equal(before - account.game.dollars, explorationQuote(account.game, destination.x, destination.y, 1).dollars * 10000);
+  assert.equal(snapshot(account).availableWorkers, 8);
   const normal = account.workforce.expeditions.find(team => team.kind !== 'investigate')!;
   assert.equal(normal.readyAt, start + terrainDetails[terrainAt(destination.x, destination.y, account.game.seed)].weeks * worldWeekMs);
   accrue(account, start + worldDayMs);
-  assert.equal(account.workforce.expeditions.length, 1);
-  assert.equal(snapshot(account).availableWorkers, 10);
+  assert.equal(account.workforce.expeditions.length, 2);
+  assert.equal(snapshot(account).availableWorkers, 8);
   accrue(account, normal.readyAt);
   assert.equal(account.workforce.expeditions.length, 0);
   assert.ok(account.game.explored.length > 4);
@@ -156,8 +160,42 @@ test('investigations do not block automated exploration or take over its return 
   const normal = account.workforce.expeditions.find(team => team.kind !== 'investigate')!;
   assert.equal(account.activityAutomation!.exploration.nextAt, normal.readyAt);
   accrue(account, start + worldDayMs);
-  assert.equal(account.workforce.expeditions.length, 1);
+  assert.equal(account.workforce.expeditions.length, 2);
   assert.equal(account.activityAutomation!.exploration.nextAt, normal.readyAt);
+});
+test('mixed field teams charge shared 1x, 2x, 4x, 8x fees identically in previews and execution', () => {
+  const account = fixture();
+  for (let active = 0; active < 4; active++) {
+    const before = snapshot(account);
+    const destination = active % 2 ? nextExploration(account.game, account.workforce.expeditions)!
+      : nextInvestigation(account.game, account.workforce.expeditions)!;
+    const command = { type: active % 2 ? 'move' : 'investigate', x: destination.x, y: destination.y } as const;
+    const base = command.type === 'move' ? explorationQuote(account.game, command.x, command.y).dollars
+      : investigationQuote(account.game, command.x, command.y).dollars;
+    assert.equal(destination.dollars, base * 2 ** active);
+    const confirmation = gameConsumption(before, command)!;
+    assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: destination.dollars }]);
+    execute(account, command);
+    assert.equal(before.game.dollars - account.game.dollars, destination.dollars * 10000);
+    assert.equal(explorationCount(account.workforce.expeditions), active + 1);
+  }
+  const firstReturn = account.workforce.expeditions[0].readyAt;
+  accrue(account, firstReturn);
+  const remaining = account.workforce.expeditions.length;
+  const next = nextInvestigation(account.game, account.workforce.expeditions)!;
+  assert.equal(next.dollars, investigationQuote(account.game, next.x, next.y).dollars * 2 ** remaining);
+});
+test('already-paid legacy investigations keep their one resident and one-day deadline', () => {
+  const account = fixture();
+  account.workforce.expeditions.push({ kind: 'investigate', x: 0, y: 0, workers: 1,
+    readyAt: start + worldDayMs, surveyRadius: 0, itemFind: 'collection-wood-1' });
+  assert.equal(snapshot(account).availableWorkers, 11);
+  accrue(account, start + worldDayMs - 1);
+  assert.equal(account.workforce.expeditions[0].readyAt, start + worldDayMs);
+  assert.equal(account.workforce.expeditions[0].workers, 1);
+  accrue(account, start + worldDayMs);
+  assert.equal(snapshot(account).availableWorkers, 12);
+  assert.deepEqual(inventory(account).items, ['collection-wood-1']);
 });
 test('investigation departure, fee and locked finds survive database reopen and exact-once retries', () => {
   const directory = mkdtempSync(join(tmpdir(), 'featheral-investigation-')), path = join(directory, 'test.sqlite');

@@ -412,13 +412,20 @@ unverified restore or deleting files. Do not remove locks while a job is active.
 
 The production gateway, standalone CMS server and DB-only deployment start an
 hourly staging-cleanup check (first check one minute after startup). Inactive
-local deployment ZIPs/preparation folders and abandoned source snapshots expire
-after **24 hours**, using the newest timestamp anywhere in each folder. Active
+local deployment ZIPs/preparation folders and abandoned source snapshots are removed
+as soon as the owning CMS operation is idle. Independent gateway/DB checks retain
+local staging for 24 hours because another service can hold reviewed plans in memory.
+Confirmed target transfers and idle self-sync preparation do not have an age delay. Active
 operations, reviewed snapshot plans, paused/resumable transfers and uncertain
 syncs remain protected. Completed operations still use their immediate cleanup.
 On managed targets, only health-confirmed deployment archives and completed sync
-staging are eligible; rollback/recovery staging, backup receipts, backups, logs,
-Git checkouts, installed releases and live databases/uploads are not removed.
+staging are eligible. Confirmed rollback deployment transfers and completed/rolled-back
+sync backup payloads are disposable; compact receipts remain. Unconfirmed recovery
+payloads, reviewed source snapshots, rollback sync staging, logs, reusable Git
+checkouts, the current/PM2-referenced releases and live databases/uploads are protected.
+Verified inactive managed releases are removed, including their dependencies/builds.
+The target sync receiver cleans confirmed payloads even if the source SSH connection
+is lost; self-sync runs a final cleanup after its running receipt is cleared.
 Links and invalid operation receipts cause an explicit cleanup error, never a
 best-effort recursive sweep. Cleanup totals and failures appear in server logs.
 
@@ -429,18 +436,23 @@ use `--min-age-hours=0` to remove verified inactive staging immediately. The sam
 command runs locally on each server; it does not remotely erase other servers.
 Unknown/unconfirmed target artifacts are intentionally retained for review.
 
-**Admin > Server profile > Application storage** provides one **Clean temporary files & empty trash**
-button for the server running Admin, not its remote deployment target. After an
-irreversible-deletion confirmation, it removes eligible temporary entries older
-than 24 hours and empties trash across **all CMS sites**, including sites that
-have not enabled weekly cleanup. It preserves backups, releases, active transfers
-and shared media still used by kept posts. Read-only replicas clean temporary
+**Admin > Server profile > Application storage** provides **Clean temporary files**
+for the server running Admin, not its remote deployment target. It removes verified
+disposable staging immediately, completed backup payloads and inactive managed releases,
+without touching CMS trash. **Tracked operation files & cleanup eligibility** lists
+eligible paths, reclaimable bytes and protected paths/reasons (up to 100 per group).
+The inventory is a cached preview; cleanup rechecks protections before removal.
+**Also empty all CMS trash** separately requires irreversible-deletion confirmation
+and empties trash across **all CMS sites**, including those without weekly cleanup.
+Both controls preserve active jobs, unconfirmed recovery data and live shared media.
+Read-only replicas clean temporary
 files only and explicitly report that source-side trash deletion is required.
 Per-site failures are reported without hiding successful cleanup on other sites;
 busy server operations block cleanup. The result includes removed item/file/byte
 totals and a fresh filesystem free-space measurement; Server profile's storage
 breakdown is rescanned before the cleanup response, and the card refreshes automatically. The authenticated, same-origin
-`POST /api/settings/cleanup` requires `confirmation: "EMPTY ALL CMS TRASH"`.
+`POST /api/settings/cleanup` requires `confirmation: "CLEAN TEMPORARY FILES"` for
+temporary-only cleanup, or `confirmation: "EMPTY ALL CMS TRASH"` to also purge trash.
 Successful manual purges reset enabled weekly schedules to seven days later
 without changing any site's opt-in setting.
 
@@ -489,13 +501,15 @@ including managed releases' `data` and `services/cms/data` links into shared sto
 Managed servers also scan shared deployment/sync staging, backups and retained releases.
 Overlapping roots and hard-linked files count once; arbitrary symlinks are not followed.
 Categories distinguish databases, ledgers, uploads, all-site physical trash files,
-temporary/deployment files, retained backups, rollback releases, current code and other data.
+temporary/deployment files, retained backups, rollback releases, current code, generated
+dependencies/build outputs, operational logs and other data. Reusable self-sync checkouts
+are code, and persistent operation status files are data, not disposable staging.
 Staged snapshot databases/uploads count as temporary files, not live data; backup
 contents remain in backups, even when they contain uploads or databases.
 Temporary size includes recent/protected staging, not just space reclaimable now.
 Totals are logical file lengths, not allocated filesystem blocks or database trash-row estimates.
-The inventory skips `.git`, `node_modules`, `artifacts`, `cache`, `coverage`, `dist` and `out`;
-those names are still counted inside data, upload and trash trees.
+The inventory excludes repository `.git` metadata but counts `node_modules`,
+`artifacts`, `cache`, `coverage`, `dist` and `out`, including in staging and inactive releases.
 The full-width storage card groups sizes with rescan and confirmed cleanup controls;
 missing/unfinished measurements show unavailable/calculating rather than misleading zeros.
 Set network capacity in **Settings** to a positive bytes-per-

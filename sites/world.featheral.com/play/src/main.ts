@@ -485,6 +485,9 @@ function renderRecruitment(): void {
     button.querySelector<HTMLElement>('[data-invite-duration]')!.hidden = !!recruitment;
     if (!recruitment) button.querySelector<HTMLElement>('[data-invite-duration]')!.textContent = remaining
       ? completionProgress(state.inviteReadyAt - worldWeekMs, state.inviteReadyAt, displayServerTime(state.serverTime, elapsed, state.clockSpeed)).countdown : '1 game week';
+    const status = button.querySelector<HTMLElement>('[data-invite-status]');
+    if (status) status.textContent = stale ? 'Sync paused' : upkeepPauseReason() || (recruitment ? 'Recruiting'
+      : remaining ? 'Recruitment cooldown' : state.dollars < state.recruitmentDollars ? 'Not enough FTH$' : 'Grow population');
     localize(button);
   });
 }
@@ -713,6 +716,7 @@ function gearCard(): string {
 }
 function renderSidebar(): void {
   const next = stages[game.stage + 1], quote = nextExploration(game, state.workforce.expeditions);
+  const exploreReason = fieldActionReason(quote, 'No nearby destination');
   const root = document.querySelector('#sidebar-content')!;
   const bag = state.inventory;
   const nextReturn = state.workforce.expeditions.reduce<Expedition | null>((next, team) => !next || team.readyAt < next.readyAt ? team : next, null);
@@ -729,9 +733,10 @@ function renderSidebar(): void {
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
       ${investigationButton(true)}
-      <button class="button primary wide sidebar-expedition" data-action="explore" ${upkeepPauseReason() || !quote || state.availableWorkers < 2 || state.dollars < quote.dollars ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost"><small>You spend</small>${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}</small>` : '<small>No nearby destination</small>'}</button>
+      <button class="button primary wide sidebar-expedition" data-action="explore" title="${escape(translate(exploreReason || 'Discover new land', language))}" ${exploreReason ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">2 ${translate('residents', language)} · ${translate(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`, language)}</small>` : ''}<small class="quick-action-status">${translate(exploreReason || 'Discover new land', language)}</small></button>
       ${recruitmentButton(true)}
       </div>
+      <small class="field-fee-note">${translate('Next field team fee multiplier', language)}: <b>${2 ** explorationCount(state.workforce.expeditions)}x</b> · ${translate('Investigate + Explore', language)}</small>
       ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
       ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
     </div>
@@ -746,13 +751,17 @@ function renderSidebar(): void {
     ${gearCard()}`);
   renderRecruitment(); renderWorkTimers(); localize(root);
 }
+function fieldActionReason(quote: { dollars: number } | null, noDestination: string): string | null {
+  return game.stage < 0 ? 'Establish a settlement first' : upkeepPauseReason() || (!quote ? noDestination
+    : state.availableWorkers < 2 ? 'Needs 2 idle residents' : state.dollars < quote.dollars ? 'Not enough FTH$' : null);
+}
 function investigationButton(compact = false): string {
   const quote = nextInvestigation(game, state.workforce.expeditions);
-  const disabled = game.stage < 0 || upkeepPauseReason() || !quote || state.availableWorkers < 1 || state.dollars < quote.dollars;
+  const reason = fieldActionReason(quote, 'No known destination available');
   const details = compact
-    ? `<span class="quick-action-heading">${icon('compass')}<span>Investigate</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">1 game day</small>` : '<small>No known destination available</small>'}`
-    : `${icon('compass')} <span>Investigate</span> · 1 ${translate('residents', language)} ${quote ? costChips({ dollars: quote.dollars }) : ''}`;
-  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" title="Investigate known land: one resident, one game day, 10% item chance." ${disabled ? 'disabled' : ''}>${details}</button>`;
+    ? `<span class="quick-action-heading">${icon('search')}<span>Investigate</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">2 ${translate('residents', language)} · ${translate('1 game week', language)}</small>` : ''}<small class="quick-action-status">${translate(reason || 'Known land · 10% item chance', language)}</small>`
+    : `${icon('search')} <span>Investigate</span> · 2 ${translate('residents', language)} · ${translate('1 game week', language)} ${quote ? costChips({ dollars: quote.dollars }) : ''}`;
+  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" title="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" ${reason ? 'disabled' : ''}>${details}</button>`;
 }
 function renderCommunityPage(): void {
   const root = document.querySelector<HTMLElement>('#community-content')!;
@@ -1006,12 +1015,12 @@ function workforcePanel(): string {
     </details></details>
     <p class="fineprint"><span>Transport on next pickup</span>: ${costChips({ dollars: transport })} · <span>Next allocation</span>: <span data-ready-at="${work.cycleAt}"></span></p>
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
-    <div class="panel-actions">${investigationButton()}<button class="button" data-action="explore" ${exploreReason ? 'disabled' : ''}>${icon('compass')} Send expedition · 2 ${translate('residents', language)}</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${explorationCount(work.expeditions) + 1}x</span></small>` : ''}</div>
+    <div class="panel-actions">${investigationButton()}<button class="button" data-action="explore" ${exploreReason ? 'disabled' : ''}>${icon('compass')} Send expedition · 2 ${translate('residents', language)}</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${2 ** explorationCount(work.expeditions)}x</span></small>` : ''}</div>
     ${exploreReason ? `<p class="fineprint" role="status">${escape(translate(exploreReason, language))}</p>` : ''}
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
-    <p class="fineprint">Each expedition needs two idle residents. Route fees scale by concurrent expedition count: 1x, 2x, 3x... Pay FTH$ upfront; teams return independently after 1–3 game weeks. Known-terrain travel remains free.</p>
-    <p class="fineprint">Investigations use one idle resident for one game day on known land. They cost 10% of the route fee and have a 10% chance of a low-tier permit.</p>
-    <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon('compass')}<div><strong>${expedition.kind === 'investigate' ? `<span>Investigating</span> · 1 ${translate('residents', language)} (${expedition.x}, ${expedition.y})` : `2 residents exploring (${expedition.x}, ${expedition.y})`}</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>
+    <p class="fineprint">Each field team needs two idle residents. Investigate and Explore share exponential route fees: 1x, 2x, 4x, 8x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.</p>
+    <p class="fineprint">Investigations use two idle residents for one game week on known land. They cost 10% of the concurrent Explore route fee and have a 10% chance of a low-tier permit.</p>
+    <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon(expedition.kind === 'investigate' ? 'search' : 'compass')}<div><strong>${expedition.kind === 'investigate' ? `<span>Investigating</span> · ${expedition.workers} ${translate('residents', language)} (${expedition.x}, ${expedition.y})` : `${expedition.workers} residents exploring (${expedition.x}, ${expedition.y})`}</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>
     <section class="population-crews"><div class="crew-list resource-crews">${resources.map(resource => crewManagementCard(resource)).join('')}</div></section></div>`;
 }
 function activityAutomationPanel(activity: ActivityKind): string {
@@ -1025,7 +1034,7 @@ function activityAutomationPanel(activity: ActivityKind): string {
     </section>`;
 }
 function expeditionStartedAt(expedition: Expedition): number {
-  return expedition.readyAt - (expedition.kind === 'investigate' ? worldDayMs : terrainDetails[terrainAt(expedition.x, expedition.y, game.seed)].weeks * worldWeekMs);
+  return expedition.startedAt ?? expedition.readyAt - (expedition.kind === 'investigate' ? worldDayMs : terrainDetails[terrainAt(expedition.x, expedition.y, game.seed)].weeks * worldWeekMs);
 }
 function completionMeter(startedAt: number, readyAt: number, label: string, compact = false): string {
   return `<span class="completion-meter${compact ? ' compact' : ''}" data-completion-start="${startedAt}" data-completion-end="${readyAt}">
@@ -1034,7 +1043,7 @@ function completionMeter(startedAt: number, readyAt: number, label: string, comp
 }
 function recruitmentButton(primary = false): string {
   const recruitment = state.recruitment;
-  return `<button class="button${primary ? ' primary wide' : ''}" data-action="invite" ${game.stage < 0 ? 'disabled' : ''}><span class="quick-action-heading">${icon('people')}<span data-invite-label>Invite</span><span class="quick-action-compact-label" aria-hidden="true">Invite</span></span><span data-invite-cost>${primary ? '<small>You spend</small>' : ''}${costChips({ dollars: state.recruitmentDollars }, primary)}</span><small data-invite-duration>1 game week</small>${recruitment ? `<span class="quick-action-batch">+${fmt(recruitment.population)} ${icon('people')}</span>${completionMeter(recruitment.startedAt, recruitment.readyAt, 'Recruitment progress', true)}` : ''}</button>`;
+  return `<button class="button${primary ? ' primary wide sidebar-recruitment' : ''}" data-action="invite" ${game.stage < 0 ? 'disabled' : ''}><span class="quick-action-heading">${icon('people')}<span data-invite-label>Invite</span></span><span data-invite-cost>${costChips({ dollars: state.recruitmentDollars }, primary)}</span><small data-invite-duration>1 game week</small>${recruitment ? `<span class="quick-action-batch">+${fmt(recruitment.population)} ${icon('people')}</span>${completionMeter(recruitment.startedAt, recruitment.readyAt, 'Recruitment progress', true)}` : ''}${primary ? '<small class="quick-action-status" data-invite-status>Grow population</small>' : ''}</button>`;
 }
 function progressionPanel(): string {
   const next = stages[game.stage + 1];

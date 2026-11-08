@@ -72,6 +72,25 @@ test('manual cleanup empties every CMS site regardless of weekly opt-in and repo
   assert.equal(task.state.sites.x.nextTrashAt, task.state.sites.x.lastTrashAt + WEEK);
 });
 
+test('temporary-only cleanup uses immediate verified cleanup without purging trash or altering schedules', t => {
+  const f = fixture(t), task = new Maintenance(f.options), options = [];
+  task.cleanup = input => {
+    options.push(input);
+    return { candidates: [{ path: 'disposable', bytes: 42 }], removedBytes: input.apply ? 42 : 0, skipped: [], blocked: false };
+  };
+  assert.equal(task.preview().removedBytes, 0);
+  assert.equal(task.runNow({ temporaryOnly: true }).temporary.removedBytes, 42);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(task.state.sites, {});
+  assert(!fs.existsSync(task.file));
+  for (const input of options) {
+    assert.equal(input.minAgeMs, 0);
+    assert.equal(input.discardCompletedBackups, true);
+    assert.equal(input.discardOldReleases, true);
+    assert.equal(input.busy, f.options.busy);
+  }
+});
+
 test('manual cleanup protects replicas, active operations and blocked staging before trash deletion', t => {
   const f = fixture(t), task = new Maintenance(f.options);
   f.setBusy(true);

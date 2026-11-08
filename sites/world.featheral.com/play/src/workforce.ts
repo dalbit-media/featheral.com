@@ -91,21 +91,21 @@ export function explorationQuote(game: Game, x: number, y: number, concurrent = 
   const weeks = terrainDetails[terrainAt(x, y, game.seed)].weeks;
   const dollars = monetaryPolicy.explorationBase + Math.ceil(Math.hypot(x - home.x, y - home.y)) * monetaryPolicy.explorationPerTile
     + (weeks - 1) * monetaryPolicy.explorationPerExtraWeek;
-  return { dollars: dollars * (concurrent + 1), weeks, reward: 0 };
+  return { dollars: dollars * 2 ** concurrent, weeks, reward: 0 };
 }
 export function explorationCount(expeditions: readonly Expedition[]): number {
-  return expeditions.filter(expedition => expedition.kind !== 'investigate').length;
+  return expeditions.length;
 }
-export function investigationQuote(game: Game, x: number, y: number): { dollars: number; days: 1 } {
-  return { dollars: Math.max(.1, Math.ceil(explorationQuote(game, x, y).dollars * dollarsScale / 10) / dollarsScale), days: 1 };
+export function investigationQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: 1 } {
+  return { dollars: Math.max(.1, Math.ceil(explorationQuote(game, x, y, concurrent).dollars * dollarsScale / 10) / dollarsScale), weeks: 1 };
 }
-export function nextInvestigation(game: Game, expeditions: readonly Expedition[] = []): { x: number; y: number; dollars: number; days: 1 } | null {
+export function nextInvestigation(game: Game, expeditions: readonly Expedition[] = []): { x: number; y: number; dollars: number; weeks: 1 } | null {
   const active = new Set(expeditions.map(expedition => `${expedition.x},${expedition.y}`));
   let best: ReturnType<typeof nextInvestigation> = null;
   for (const key of game.explored) {
     const [x, y] = key.split(',').map(Number);
     if (active.has(key) || Math.hypot(x - game.position.x, y - game.position.y) > radius(game) + 1) continue;
-    const quote = { x, y, ...investigationQuote(game, x, y) };
+    const quote = { x, y, ...investigationQuote(game, x, y, explorationCount(expeditions)) };
     if (!best || quote.dollars < best.dollars) best = quote;
   }
   return best;

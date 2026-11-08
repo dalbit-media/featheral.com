@@ -399,6 +399,17 @@ async function run(root, snapshotDirectory, backupDirectory, sourceId, hosts) {
     throw error;
   } finally {
     if (!stopped || prepared?.state.phase === "complete" || rollbackConfirmed) fs.unlinkSync(lock);
+    if (prepared?.state.phase === "complete" || rollbackConfirmed) {
+      try {
+        const { cleanupStorage } = require("../services/operations/storage-cleanup");
+        const report = cleanupStorage({ root: release, apply: true, minAgeMs: 0,
+          discardCompletedBackups: true, operationCleanup: true });
+        console.log("Verified target sync cleanup:", JSON.stringify(report));
+        if (report.blocked) throw new Error("Target cleanup was blocked by another operation.");
+      } catch (error) {
+        console.error("Verified sync cleanup failed; installation/recovery remains confirmed:", error.message);
+      }
+    }
   }
 }
 async function recover(root, backupDirectory) {

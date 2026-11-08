@@ -39,6 +39,7 @@ test('cleanup previews without writes, removes only old named staging, and prese
   const preview = cleanupStorage({ root: f.root });
   assert.equal(preview.candidates.length, 3);
   assert.equal(preview.removedBytes, 0);
+  assert(preview.skipped.some(entry => entry.path === path.dirname(fresh) && /Recent staging/.test(entry.reason)));
   assert(fs.existsSync(old));
   const applied = cleanupStorage({ root: f.root, apply: true });
   assert.equal(applied.removedBytes, 3 * Buffer.byteLength('temporary content'));
@@ -82,6 +83,7 @@ test('cleanup protects active operations, reviewed plans and paused or uncertain
   const options = { root: f.root, minAgeMs: 0, apply: true, siteSync: { plans: new Map([[ids[1], {}]]) } };
   const result = cleanupStorage(options);
   assert.equal(result.candidates.length, 1);
+  assert.equal(result.skipped.filter(entry => /snapshot/.test(entry.kind || '')).length, 2);
   assert(!fs.existsSync(path.join(f.root, 'data/site-sync', ids[2])));
   for (const id of ids.slice(0, 2)) assert(fs.existsSync(path.join(f.root, 'data/site-sync', id)));
   for (const state of [{ running: true }, { running: false, phase: 'uncertain' }]) {
@@ -160,5 +162,41 @@ test('managed targets clean only confirmed completed transfers and preserve back
   assert.throws(() => cleanupStorage({ root, command: () => ({ status: 1, stdout: '' }) }), /Cannot verify/);
   f.write('shared/site-sync.lock', 'recovery needed');
   assert.equal(cleanupStorage({ root, apply: true, minAgeMs: 0, command }).candidates.length, 0);
+  fs.unlinkSync(path.join(f.root, 'current'));
+});
+
+test('independent maintenance preserves review-ready snapshots until the source service can check its plans', t => {
+  const f = fixture(t), file = f.write(`data/site-sync/${ids[0]}/snapshot/manifest.json`);
+  f.write('data/site-sync/status.json', { running: false, phase: 'review-ready' });
+  const options = { root: f.root, minAgeMs: 0, apply: true };
+  assert.equal(cleanupStorage(options).candidates.length, 0);
+  assert(fs.existsSync(file));
+  assert.equal(cleanupStorage({ ...options, siteSync: { plans: new Map([[ids[0], {}]]) } }).candidates.length, 0);
+  assert.equal(cleanupStorage({ ...options, siteSync: { plans: new Map() } }).candidates.length, 1);
+  assert(!fs.existsSync(file));
+});
+
+test('recent confirmed rollback transfers are disposable while unknown target work and compact receipts stay protected', t => {
+  const f = fixture(t), root = path.join(f.root, 'releases', 'release-123456-aaaaaaaaaaaa');
+  fs.mkdirSync(root, { recursive: true });
+  fs.symlinkSync(root, path.join(f.root, 'current'), 'junction');
+  const hash = 'a'.repeat(64), other = 'b'.repeat(64);
+  const transfer = f.write(`shared/deployment/${hash}/release.zip`, 'zip');
+  f.write(`shared/deployment/${hash}/cleanup-complete.json`, { complete: true, outcome: 'rolled-back' });
+  const unknown = f.write(`shared/deployment/${other}/release.zip`, 'unknown');
+  const backup = f.write(`shared/sync-backups/${ids[0]}/payload/old.sqlite`, 'old');
+  const receipt = f.write(`shared/sync-backups/${ids[0]}/state.json`, { phase: 'rolled-back' });
+  const sourcePlan = path.join(root, 'data', 'site-sync', ids[1], 'snapshot', 'manifest.json');
+  fs.mkdirSync(path.dirname(sourcePlan), { recursive: true });
+  fs.writeFileSync(sourcePlan, 'fresh reviewed source');
+  const options = { root, discardCompletedBackups: true, operationCleanup: true };
+  const preview = cleanupStorage(options);
+  assert.deepEqual(preview.candidates.map(entry => entry.kind), ['deployment transfer', 'completed backup payload']);
+  assert(preview.skipped.some(entry => entry.path === path.dirname(unknown) && /unconfirmed/.test(entry.reason)));
+  const result = cleanupStorage({ ...options, apply: true });
+  assert.equal(result.removedBytes, preview.candidates.reduce((sum, entry) => sum + entry.bytes, 0));
+  for (const file of [transfer, backup]) assert(!fs.existsSync(file));
+  for (const file of [unknown, receipt, sourcePlan]) assert(fs.existsSync(file));
+  assert.equal(cleanupStorage({ ...options, apply: true }).candidates.length, 0);
   fs.unlinkSync(path.join(f.root, 'current'));
 });
