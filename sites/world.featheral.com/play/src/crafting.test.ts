@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { createAccount, parseCommand, snapshot } from '../server/economy.ts';
 import { craft, inventory } from '../server/inventory.ts';
-import { craftingPanel } from './inventory-view.ts';
+import { craftingEstimate, craftingPanel } from './inventory-view.ts';
 import { craftableKeys, craftableItems, craftingCost, craftingIngredients, craftingMaximum, decorationItems, craftingStage, craftingStageName, isCraftableItem, isDecorationItem, itemName } from './items.ts';
 import type { DecorationItem } from './items.ts';
 import type { ApiState } from './api-types.ts';
@@ -193,4 +193,42 @@ test('crafting loads one shared market catalog, throttles requests and surfaces 
   assert.equal(renders, 3);
   assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers\)/);
   assert.match(source, /data-action="crafting-prices"/);
+});
+test('profit estimates include raw resources, item inputs, fees and batch permits without changing craft charges', () => {
+  const tickers: MarketSnapshot['tickers'] = [
+    { asset: 'bench', bid: 160, ask: 170, last: null },
+    { asset: 'wood', bid: 2, ask: 3, last: null },
+    { asset: 'metal', bid: 1, ask: 2, last: null },
+    { asset: 'craft-batch-10', bid: 25, ask: 30, last: null },
+  ];
+  assert.deepEqual(craftingEstimate('bench', 1, tickers), { revenue: 160, cost: 150, net: 10 });
+  assert.deepEqual(craftingEstimate('bench', 10, tickers), { revenue: 1600, cost: 1525, net: 75 });
+  assert.equal(craftingCost('bench').dollars, 100);
+  assert.equal(craftingEstimate('bench', 1, tickers.filter(ticker => ticker.asset !== 'wood')), null);
+  assert.equal(craftingEstimate('bench', 10, tickers.filter(ticker => ticker.asset !== 'craft-batch-10')), null);
+  assert.equal(craftingEstimate('bench', 1, tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'metal' ? 0 : ticker.bid }))), null);
+  assert.equal(craftingEstimate('bench', 1, []), null);
+  const collector: MarketSnapshot['tickers'] = [
+    { asset: 'collector-wood-4', bid: 30, ask: 40, last: null },
+    { asset: 'collection-wood-1', bid: 10, ask: 12, last: null },
+  ];
+  assert.deepEqual(craftingEstimate('collector-wood-4', 1, collector), { revenue: 30, cost: 41, net: -11 });
+  for (const [bid, direction, label, amount] of [[160, 'profit', 'Estimated profit', '+10'], [140, 'loss', 'Estimated loss', '−10'], [150, 'even', 'Estimated break-even', '0']] as const) {
+    const html = craftingPanel(fixture(), () => '<span class="cost">fees</span>', 'decoration', 'settlement', 1, 'en',
+      tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'bench' ? bid : ticker.bid })));
+    const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+    assert.ok(bench.includes(`data-profit="${direction}"`));
+    assert.ok(bench.includes(label));
+    assert.ok(bench.includes(`${amount} FTH$`));
+    assert.match(bench, /Estimated input value and fees: 150 FTH\$/);
+    assert.match(bench, /liquidity and execution are not guaranteed/);
+  }
+  const absent = craftingPanel(fixture(), () => '', 'decoration');
+  assert.match(absent, /data-profit="unavailable"/);
+  assert.match(absent, /Estimate unavailable/);
+  const ko = craftingPanel(fixture(), () => '', 'decoration', 'settlement', 1, 'ko', tickers);
+  assert.match(ko, /예상 이익/);
+  assert.match(ko, /재료의 판매 시세가 필요/);
+  const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
+  assert.match(css, /#crafting \.consumption-costs \.cost\{font-size:9px;font-weight:400/);
 });

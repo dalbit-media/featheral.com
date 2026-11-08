@@ -432,6 +432,15 @@ See the [English whitepaper](./public/WHITEPAPER.md) and [Korean whitepaper](./p
 
 #### Consumable bulk crafting permits
 
+Crafting cost labels use a compact 9 px treatment; actual resource/FTH$ charges
+are unchanged. Each card highlights estimated profit, loss or break-even for the
+displayed batch: current output sell quote minus FTH$ fees and the current sell
+value of every consumed raw resource/item, including a bulk permit when applicable.
+This measures opportunity cost, not replacement purchase cost or guaranteed income.
+Recipe details disclose revenue, input valuation and fees. Missing input/output
+sell quotes show an unavailable estimate; liquidity, slippage and execution are
+not guaranteed. Estimates use accounting-unit quotes, not physical display units.
+
 | Permit | Crafting civilization | Decoration inputs | Unused collector inputs | Additional raw materials |
 |---|---|---|---|---|
 | 10 copies | Settlement | Wooden bench, Pioneer banner | Wood 1-week ×1 | 8 Wood, 2 Metal |

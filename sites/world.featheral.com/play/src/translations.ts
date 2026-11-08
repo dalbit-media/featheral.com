@@ -1,4 +1,12 @@
 export const korean: Record<string, string> = {
+  'Estimated profit': '예상 이익',
+  'Estimated loss': '예상 손실',
+  'Estimated break-even': '예상 손익분기',
+  'Estimate unavailable': '추정 불가',
+  'Estimated revenue': '예상 판매액',
+  'Estimated input value and fees': '예상 재료 가치 및 수수료',
+  'A sell quote is required for the output and every consumed input.': '완성품과 모든 소모 재료의 판매 시세가 필요합니다.',
+  'Uses current sell quotes for output and all consumed resources/items, plus FTH$ fees. Includes any batch permit. Prices can change; liquidity and execution are not guaranteed.': '완성품과 소모되는 모든 자원·아이템의 현재 판매 시세 및 FTH$ 수수료를 사용합니다. 묶음 제작권도 포함합니다. 가격은 변할 수 있으며 유동성이나 거래 체결은 보장하지 않습니다.',
   'No item ingredients required.': '아이템 재료가 필요하지 않습니다.',
   'Resource costs: owned / required': '자원 비용: 보유 / 필요',
   'Prices unavailable': '시세를 불러올 수 없습니다',

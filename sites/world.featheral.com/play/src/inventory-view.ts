@@ -4,9 +4,9 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
-import { craftingCost, craftingFits, craftingIngredients, craftingMaximum, craftingStage, craftingStageName, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, sellableItemCount, visibilityItems } from './items.ts';
+import { craftingCost, craftingFits, craftingIngredients, craftingInputs, craftingMaximum, craftingStage, craftingStageName, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, sellableItemCount, visibilityItems } from './items.ts';
 import { settlementPositions } from './settlement-layout.ts';
-import type { ItemId } from './items.ts';
+import type { CraftableItem, ItemId } from './items.ts';
 import { itemArt } from './item-art.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, activityName, isActivityItem, isAutomationItem } from './automation.ts';
@@ -18,6 +18,22 @@ import { marketPriceAvailable } from './market.ts';
 import type { MarketSnapshot } from './market.ts';
 import { renderPriceChange } from './marketplace-catalog.ts';
 import { formatResourcePrice } from './resource-units.ts';
+
+export function craftingEstimate(item: CraftableItem, quantity: number, tickers: MarketSnapshot['tickers']): { revenue: number; cost: number; net: number } | null {
+  const output = tickers.find(ticker => ticker.asset === item);
+  if (!output || !marketPriceAvailable(output.bid)) return null;
+  const cost = craftingCost(item, quantity);
+  let inputs = cost.dollars ?? 0;
+  for (const [asset, amount] of [...Object.entries(cost).filter(([asset, amount]) => asset !== 'dollars' && amount > 0), ...Object.entries(craftingInputs(item, quantity))]) {
+    const ticker = tickers.find(ticker => ticker.asset === asset);
+    if (!ticker || !marketPriceAvailable(ticker.bid)) return null;
+    inputs += ticker.bid * amount;
+  }
+  const revenue = Math.round(output.bid * quantity * 10000) / 10000;
+  const total = Math.round(inputs * 10000) / 10000;
+  if (!Number.isFinite(revenue) || !Number.isFinite(total)) return null;
+  return { revenue, cost: total, net: Math.round((revenue - total) * 10000) / 10000 };
+}
 
 export type InventoryFilter = 'all' | 'utility' | 'efficiency' | 'bulk' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
@@ -87,13 +103,19 @@ export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string
       const requirements = Object.entries(ingredients).map(([item, needed]) => ({ name: itemName(item as ItemId), asset: item, owned: sellableItemCount(bag, item as ItemId), needed }));
       const ready = requirements.filter(row => row.owned >= row.needed).length;
       const ticker = tickers.find(ticker => ticker.asset === id);
+      const estimate = craftingEstimate(id, quantity, tickers);
+      const money = (value: number) => Math.abs(value).toLocaleString(locale(language), { maximumFractionDigits: 4 });
+      const estimateLabel = estimate ? estimate.net > 0 ? 'Estimated profit' : estimate.net < 0 ? 'Estimated loss' : 'Estimated break-even' : 'Estimate unavailable';
+      const estimateExplanation = translate('Uses current sell quotes for output and all consumed resources/items, plus FTH$ fees. Includes any batch permit. Prices can change; liquidity and execution are not guaranteed.', language);
       const amount = (asset: string, value: number) => asset === 'dollars' || Object.hasOwn(ingredients, asset)
         ? value.toLocaleString(locale(language), { maximumFractionDigits: 4 }) : formatResourceAmount(asset, value, locale(language));
       return `<article class="item-card recipe-card"><div class="recipe-heading">${itemArt(id)}<div><h3>${recipe.name}</h3><small class="recipe-level">${craftingStageName(id)}</small></div></div>
       <div class="recipe-market" aria-label="${translate('Market price', language)}"><span>${translate('Sell price', language)} <strong>${ticker && marketPriceAvailable(ticker.bid) ? `${formatResourcePrice(id, ticker.bid, locale(language))} FTH$` : '—'}</strong></span>${ticker ? renderPriceChange(ticker, '7d', language, true) : `<small>${translate('Prices unavailable', language)}</small>`}</div>
+      <div class="recipe-estimate" data-profit="${estimate ? estimate.net > 0 ? 'profit' : estimate.net < 0 ? 'loss' : 'even' : 'unavailable'}" title="${estimateExplanation}"><span>${translate(estimateLabel, language)}</span><strong>${estimate ? `${estimate.net > 0 ? '+' : estimate.net < 0 ? '−' : ''}${money(estimate.net)} FTH$` : '—'}</strong></div>
       <div class="consumption-costs" aria-label="${translate('Batch cost', language)}">${costChips(cost)}${!Object.keys(cost).length ? `<small>${translate('Collector ingredients', language)} · ${Object.values(ingredients).reduce((sum, count) => sum + count, 0)}</small>` : ''}</div>
       ${availableBatch > 1 ? `<small class="recipe-bulk-hint">${translate('Maximum available batch', language)}: ${availableBatch}</small>` : ''}
       <details class="recipe-details" data-detail="recipe-${id}"><summary><span>Recipe</span>${requirements.length ? ` <strong>${ready}/${requirements.length}</strong>` : ''}${icon('chevron')}</summary>
+      <p class="fineprint recipe-estimate-details">${estimateExplanation}${estimate ? ` ${translate('Estimated revenue', language)}: ${money(estimate.revenue)} FTH$ · ${translate('Estimated input value and fees', language)}: ${money(estimate.cost)} FTH$ · ${translate('Batch', language)}: ${quantity}` : ` ${translate('A sell quote is required for the output and every consumed input.', language)}`}</p>
       ${reason !== 'Craft' ? `<p class="notice">${reason}</p>` : ''}
       <p>${isBulkCraftingItem(id) ? translate(`Allows one exact batch of ${bulkCraftingItems[id].quantity} copies. Select a recipe and click Craft to use it.`, language) : isActivityEquipment(id) ? translate(activityEquipmentBenefit(id), language) : isCollectionItem(id) ? 'Combines collector permits without increasing total collection time.' : isCustomizationItem(id) ? 'Consumes one permit. Cosmetic only.' : isVisibilityItem(id) ? `${visibilityItems[id].radius}-tile view` : 'Cosmetic decoration'}</p>${isActivityEquipment(id) || isBulkCraftingItem(id) ? '<p class="fineprint">Consumes unused decorations and collector permits. Return placed decorations to inventory first.</p>' : ''}<small><span>Batch</span>: ${quantity} · <span>Maximum available batch</span>: ${availableBatch}</small>
       ${requirements.length ? '<p class="fineprint">Ingredients: owned / required</p>' : `<p class="fineprint">${translate('No item ingredients required.', language)}</p>`}<ul class="recipe-resources">${requirements.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>
