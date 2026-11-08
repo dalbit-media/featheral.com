@@ -14,8 +14,8 @@ async function request<T = ApiState>(path: string, init?: RequestInit): Promise<
   const response = await fetch(`${world ? '/api/' : '/api/dollar/game/'}${path}`, { ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('API returned a non-JSON response. Start the backend and restart Vite to load its API proxy.');
   const body = await response.json();
-  if (!response.ok) throw new HttpError(response.status, body.error ?? `API failed (${response.status}).`);
-  if (typeof body.fundAccountId === 'string') publishWorldAccount(body.fundAccountId);
+  if (!response.ok) throw new HttpError(response.status, body?.error ?? `API failed (${response.status}).`);
+  if (typeof body?.fundAccountId === 'string') publishWorldAccount(body.fundAccountId);
   return body;
 }
 export async function connect(): Promise<ApiState> {

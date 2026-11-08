@@ -418,6 +418,8 @@ The repository site server configures `WORLD_PROFILE_API_ORIGIN` automatically. 
 | `POST /api/chat/messages?room=<id>` | Session, Origin, CSRF; `{id,text,createdAt}` | Room-bound message or identical UUID-v4 retry; mismatched active room rejected |
 | `POST /api/chat/ping` | Session, Origin, CSRF; `{}` | Renewed connection lease and current presence |
 
+The client preserves `null` profile responses as an unlinked profile, including after unlinking or reconnecting. Only responses carrying a `fundAccountId` publish World wallet context; profile reads never create or replace a gameplay fund.
+
 ## API and security boundary
 
 ### Signed World funds
