@@ -6,7 +6,8 @@ import './pages.css';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
-import { connect, refresh, send } from './api.ts';
+import { connect, readMarket, refresh, send } from './api.ts';
+import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
 import { ScreenPreview } from './screen-preview.ts';
 import { World } from './world.ts';
@@ -75,6 +76,10 @@ let inventorySelection: ItemId | null = null;
 let selectedBuilding: SettlementEntity = 'centre';
 let settlementTask = settlementTaskFromHash(location.hash);
 let craftingFilter: CraftingFilter = 'all';
+let craftingTickers: MarketSnapshot['tickers'] = [];
+let craftingPricesLoading = false;
+let craftingPricesAttemptAt = -Infinity;
+let craftingPricesError = '';
 let pendingPlacement: { entity: SettlementEntity; origin: SettlementTask } | null = null;
 let settlementMap: SettlementMap | null = null;
 const crewDrafts = new Map<string, string>();
@@ -925,6 +930,24 @@ function selectSettlementCell(entity: SettlementEntity | null, position: GridPos
   const building = settlementBuildings(game).find(building => building.id === entity);
   showSettlementTask(settlementTask === 'decorate' || !building ? 'decorate' : building.task);
 }
+async function refreshCraftingPrices(force = false): Promise<void> {
+  if (craftingPricesLoading || document.hidden || settlementTask !== 'crafting'
+    || !force && performance.now() - craftingPricesAttemptAt < serverSyncIntervalMs) return;
+  craftingPricesLoading = true;
+  craftingPricesAttemptAt = performance.now();
+  try {
+    const response = await readMarket('torch', 1);
+    craftingTickers = response.market.tickers;
+    craftingPricesError = '';
+  } catch (error) {
+    craftingTickers = [];
+    craftingPricesError = error instanceof Error ? error.message : 'Connection failed.';
+    console.error('Crafting market prices unavailable:', error);
+  } finally {
+    craftingPricesLoading = false;
+    if (settlementTask === 'crafting' && !busy && !confirmationOpen() && !document.hidden) renderSettlement();
+  }
+}
 function renderSettlement(): void {
   const root = document.querySelector('#settlement-content')!;
   if (visitingSettlement) {
@@ -945,7 +968,11 @@ function renderSettlement(): void {
   else if (settlementTask === 'production') content = storagePanel();
   else if (settlementTask === 'sell') content = '<div data-settlement-resource-sale></div>';
   else if (settlementTask === 'inventory') content = inventoryPanel(state, costChips, inventoryFilter, language, 'settlement', inventoryPage, inventorySelection);
-  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language);
+  else if (settlementTask === 'crafting') {
+    void refreshCraftingPrices();
+    content = `<p class="fineprint crafting-market-status" role="status">${translate(craftingPricesError ? 'Prices unavailable' : craftingPricesLoading ? 'Loading prices...' : 'Live market prices', language)}${craftingPricesError ? `: ${escape(craftingPricesError)} <button class="button" data-action="crafting-prices">${translate('Retry', language)}</button>` : ''}</p>`
+      + craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers);
+  }
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
   if (settlementTask === 'buildings' || settlementTask === 'production') content += '<div data-settlement-sale></div>';
@@ -1243,6 +1270,9 @@ app.addEventListener('click', event => {
   }
   const action = target.dataset.action;
   switch (action) {
+    case 'crafting-prices':
+      void refreshCraftingPrices(true);
+      break;
     case 'crew-step': {
       const input = target.closest('.crew-controls')!.querySelector<HTMLInputElement>('input[type="number"]')!;
       if (target instanceof HTMLButtonElement && !target.disabled && input.checkValidity()) {

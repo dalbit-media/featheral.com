@@ -1,4 +1,11 @@
 export const korean: Record<string, string> = {
+  'No item ingredients required.': '아이템 재료가 필요하지 않습니다.',
+  'Resource costs: owned / required': '자원 비용: 보유 / 필요',
+  'Prices unavailable': '시세를 불러올 수 없습니다',
+  'Market price': '시장 시세',
+  'Sell price': '판매 시세',
+  'Live market prices': '실시간 거래소 시세',
+  'Every crafted copy costs FTH$. Raw resources and FTH$ are costs, not counted item ingredients. Market sell prices are per item; seven-day changes use the same sales history as Marketplace.': '제작하는 아이템마다 FTH$가 필요합니다. 기본 자원과 FTH$는 비용이며 아이템 재료 수에 포함되지 않습니다. 판매 시세는 아이템 1개 기준이며 7일 변동률은 거래소와 같은 거래 기록을 사용합니다.',
   'Consumes unused decorations and collector permits. Return placed decorations to inventory first.': '미사용 장식과 수거권을 소모합니다. 배치한 장식은 먼저 가방으로 돌려놓으세요.',
   'Bulk crafting': '묶음 제작',
   'Crafting permit · 10 copies': '제작권 · 10개',

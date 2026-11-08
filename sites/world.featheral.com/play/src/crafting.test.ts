@@ -3,12 +3,18 @@ import { test } from 'node:test';
 import { createAccount, parseCommand, snapshot } from '../server/economy.ts';
 import { craft, inventory } from '../server/inventory.ts';
 import { craftingPanel } from './inventory-view.ts';
-import { craftingMaximum, decorationItems, craftingStage, craftingStageName, isCraftableItem, isDecorationItem, itemName } from './items.ts';
+import { craftableKeys, craftableItems, craftingCost, craftingIngredients, craftingMaximum, decorationItems, craftingStage, craftingStageName, isCraftableItem, isDecorationItem, itemName } from './items.ts';
 import type { DecorationItem } from './items.ts';
 import type { ApiState } from './api-types.ts';
 import { decorationDrawing, itemArt } from './item-art.ts';
 import { isMarketAsset, marketBasePrice } from './market.ts';
+import type { MarketSnapshot } from './market.ts';
+import { renderPriceChange } from './marketplace-catalog.ts';
+import { gameConsumption } from './consumption.ts';
 import { translate } from './i18n.ts';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { runInNewContext } from 'node:vm';
 
 function fixture(): ApiState {
   const account = createAccount(1000000);
@@ -57,13 +63,14 @@ test('recipe disclosure counts sufficient ingredient types and shows physical ow
   state.game.stock.wood = 10;
   const html = craftingPanel(state, () => '', 'decoration', 'settlement', 2);
   const bench = html.split('data-detail="recipe-bench"')[1].split('</article>')[0];
-  assert.match(bench, /<span>Recipe<\/span> <strong>0\/2<\/strong>/);
+  assert.doesNotMatch(bench, /<span>Recipe<\/span> <strong>/);
+  assert.match(bench, /No item ingredients required/);
   assert.match(bench, /500 kg \/ 2,400 kg/);
   assert.match(bench, /0.02 t \/ 0.04 t/);
   assert.equal((bench.match(/class="missing"/g) ?? []).length, 2);
   assert.match(bench, /data-action-eligible="false"/);
   const logseat = html.split('data-detail="recipe-logseat"')[1].split('</article>')[0];
-  assert.match(logseat, /0\/1/);
+  assert.doesNotMatch(logseat, /<span>Recipe<\/span> <strong>/);
   state.game.stock.wood = 100;
   const affordable = craftingPanel(state, () => '', 'affordable');
   assert.match(affordable, /recipe-bench/);
@@ -78,10 +85,72 @@ test('collector recipe 4/8 discloses usable copies only, excluding market escrow
   const html = craftingPanel(state, () => '', 'collectors');
   const recipe = html.split('data-detail="recipe-collector-all-52"')[1].split('</article>')[0];
   assert.match(recipe, /<span>Recipe<\/span> <strong>4\/8<\/strong>/);
-  assert.equal((recipe.match(/class="available"/g) ?? []).length, 4);
+  assert.equal((recipe.match(/class="available"/g) ?? []).length, 5);
   assert.equal((recipe.match(/class="missing"/g) ?? []).length, 4);
   assert.match(recipe, /Metal auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
   assert.match(recipe, /Oil auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
+});
+test('every crafting recipe charges FTH$ per copy without mutating recipes or reserve seed prices', () => {
+  const recipes = structuredClone(craftableItems);
+  const prices = craftableKeys.map(marketBasePrice);
+  const state = fixture();
+  for (const item of craftableKeys) {
+    const cost = craftingCost(item);
+    assert.ok(cost.dollars! >= 1, item);
+    for (const quantity of [1, 10, 20, 50, 100]) {
+      assert.equal(craftingCost(item, quantity).dollars, cost.dollars! * quantity);
+      const quote = gameConsumption(state, { type: 'craft', item, quantity })!;
+      assert.ok(quote.costs.some(row => row.asset === 'dollars' && row.amount === cost.dollars! * quantity));
+    }
+    for (const [resource, amount] of Object.entries(craftableItems[item].cost))
+      if (resource !== 'dollars') assert.equal(cost[resource as keyof typeof cost], amount);
+  }
+  assert.equal(craftingCost('logseat').dollars, 24);
+  assert.equal(craftingCost('bench').dollars, 100);
+  assert.equal(craftingCost('collector-wood-4').dollars, 1);
+  assert.equal(craftingCost('lantern').dollars, 4);
+  assert.deepEqual(craftableItems, recipes);
+  assert.deepEqual(craftableKeys.map(marketBasePrice), prices);
+});
+test('server requires the shared crafting fee for every recipe and spends nothing on insufficient funds', () => {
+  for (const item of craftableKeys) {
+    const account = createAccount(1000000);
+    account.game.stage = 8;
+    account.game.stock = { wood: 10000, water: 10000, metal: 10000, oil: 10000 };
+    account.game.explored = fixture().game.explored;
+    const bag = inventory(account);
+    bag.storage = 4;
+    bag.items = Object.entries(craftingIngredients(item)).flatMap(([id, count]) => Array.from({ length: count }, () => id as typeof bag.items[number]));
+    inventory(account);
+    const fee = craftingCost(item).dollars!;
+    account.game.dollars = fee * 10000 - 1;
+    assert.equal(craftingMaximum(account.game, bag, item), 0, item);
+    const before = structuredClone(account);
+    assert.throws(() => craft(account, item), /Not enough resources/, item);
+    assert.deepEqual(account, before, item);
+    account.game.dollars++;
+    craft(account, item);
+    assert.equal(account.game.dollars, 0, item);
+    assert.deepEqual(bag.items, [item]);
+  }
+});
+test('craft cards reuse Marketplace sell quotes and seven-day trends, without synthetic prices or trends', () => {
+  const state = fixture();
+  for (const change7d of [12.34, -4.56, 0, null]) {
+    const ticker: MarketSnapshot['tickers'][number] = { asset: 'bench', bid: 123.4567, ask: 125, last: null, change7d };
+    const html = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [ticker]);
+    const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+    assert.ok(bench.includes(renderPriceChange(ticker, '7d', 'en', true)));
+    assert.match(bench, /Sell price <strong>123.4567 FTH\$/);
+    assert.doesNotMatch(bench, /data-change-window="24h"/);
+  }
+  const absent = craftingPanel(state, () => '', 'decoration');
+  assert.match(absent, /Sell price <strong>—<\/strong>/);
+  assert.match(absent, /Prices unavailable/);
+  const korean = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'ko',
+    [{ asset: 'bench', bid: 123, ask: 125, last: null, change7d: -5 }]);
+  assert.match(korean, /▼ 5.0%/);
+  assert.match(korean, /data-direction="down"/);
 });
 test('compact craft cards show batch consumption before collapsed recipe details and name their icon action', () => {
   const html = craftingPanel(fixture(), () => '<span class="cost">batch resources</span>', 'decoration', 'settlement', 2);
@@ -91,4 +160,37 @@ test('compact craft cards show batch consumption before collapsed recipe details
   assert.doesNotMatch(bench, /<details[^>]* open/);
   assert.match(bench, /compact-item-action[^>]*data-item="bench"[^>]*aria-label="Craft: Wooden bench × 2"/);
   assert.doesNotMatch(bench, /<span>Craft<\/span>/);
+});
+test('crafting loads one shared market catalog, throttles requests and surfaces failures without stale prices', async () => {
+  const source = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const code = stripTypeScriptTypes(source.slice(source.indexOf('async function refreshCraftingPrices'), source.indexOf('function renderSettlement')));
+  let calls = 0, renders = 0, errors = 0, now = 0, fail = false;
+  const tickers = [{ asset: 'bench', bid: 100, ask: 101, last: null, change7d: 5 }];
+  const context = {
+    Error,
+    craftingPricesLoading: false, craftingPricesAttemptAt: -Infinity, craftingPricesError: '', craftingTickers: [],
+    document: { hidden: false }, settlementTask: 'crafting', busy: false, confirmationOpen: () => false,
+    performance: { now: () => now }, serverSyncIntervalMs: 30000,
+    readMarket: async (asset: string, quantity: number) => {
+      calls++; assert.equal(asset, 'torch'); assert.equal(quantity, 1);
+      if (fail) throw new Error('Market connection unavailable.');
+      return { market: { tickers } };
+    },
+    renderSettlement: () => { renders++; }, console: { error: () => { errors++; } },
+  };
+  const refreshPrices = runInNewContext(`${code}; refreshCraftingPrices;`, context);
+  await refreshPrices();
+  assert.equal(calls, 1); assert.equal(context.craftingTickers, tickers);
+  await refreshPrices(); assert.equal(calls, 1);
+  context.document.hidden = true; now = 30000; await refreshPrices(); assert.equal(calls, 1);
+  context.document.hidden = false; context.settlementTask = 'inventory'; await refreshPrices(); assert.equal(calls, 1);
+  context.settlementTask = 'crafting'; fail = true; await refreshPrices();
+  assert.equal(calls, 2); assert.equal(context.craftingTickers.length, 0);
+  assert.equal(context.craftingPricesError, 'Market connection unavailable.');
+  assert.equal(errors, 1); assert.equal(context.craftingPricesLoading, false);
+  fail = false; await refreshPrices(true); assert.equal(calls, 3); assert.equal(context.craftingPricesError, '');
+  context.craftingPricesLoading = true; await refreshPrices(true); assert.equal(calls, 3);
+  assert.equal(renders, 3);
+  assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers\)/);
+  assert.match(source, /data-action="crafting-prices"/);
 });

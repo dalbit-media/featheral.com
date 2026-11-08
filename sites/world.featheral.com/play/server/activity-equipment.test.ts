@@ -45,7 +45,7 @@ test('nine staged equipment recipes consume decorations and unused permits atomi
     assert.ok(Object.keys(recipe.ingredients).some(input => Object.hasOwn(decorationItems, input)));
     assert.ok(Object.keys(recipe.ingredients).some(input => input.startsWith('collection-')));
     assert.equal(craftingMaximum(account.game, bag, item), 2);
-    const cost = craftingCost(item, 2), stock = { ...account.game.stock };
+    const cost = craftingCost(item, 2), stock = { ...account.game.stock }, dollars = account.game.dollars;
     const quote = gameConsumption(snapshot(account), { type: 'craft', item })!;
     assert.deepEqual(quote.costs, [...Object.entries(craftingCost(item)), ...Object.entries(craftingIngredients(item))]
       .map(([asset, amount]) => ({ asset, amount })));
@@ -54,8 +54,9 @@ test('nine staged equipment recipes consume decorations and unused permits atomi
     craft(account, item);
     assert.deepEqual(bag.items, [item, item]);
     assert.equal(activityEquipmentDiscount(account.game, recipe.activity), 0, 'crafting does not auto-equip');
-    for (const [resource, amount] of Object.entries(cost))
-      assert.equal(account.game.stock[resource as keyof typeof stock], stock[resource as keyof typeof stock] - amount);
+    for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
+      assert.equal(account.game.stock[resource], stock[resource] - (cost[resource] ?? 0));
+    assert.equal(account.game.dollars, dollars - cost.dollars! * dollarsScale);
     const saved = structuredClone(account);
     assert.throws(() => craft(account, item), /unused decoration or collector/);
     assert.deepEqual(account, saved);

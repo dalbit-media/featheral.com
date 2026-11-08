@@ -145,7 +145,8 @@ export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;
 }
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
-  return Object.fromEntries(Object.entries(craftableItems[item].cost).map(([resource, amount]) => [resource, amount * quantity]));
+  const cost = withDollarFee(craftableItems[item].cost);
+  return Object.fromEntries(Object.entries({ ...cost, dollars: Math.max(1, cost.dollars) }).map(([resource, amount]) => [resource, amount * quantity]));
 }
 export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
   const ingredients = isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
@@ -163,7 +164,7 @@ export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableI
   const count = Object.values(ingredients).reduce((sum, amount) => sum + amount, 0);
   const room = itemStorage[bag.storage].capacity - inventoryUsed(bag);
   return Math.max(0, Math.min(100, ...(count ? [] : [room]),
-    ...Object.entries(craftableItems[item].cost).filter(([, amount]) => amount > 0).map(([resource, amount]) =>
+    ...Object.entries(craftingCost(item)).filter(([, amount]) => amount > 0).map(([resource, amount]) =>
       Math.floor((resource === 'dollars' ? game.dollars / 10000 : game.stock[resource as Resource]) / amount)),
     ...Object.entries(ingredients).map(([id, amount]) => Math.floor(sellableItemCount(bag, id as ItemId) / amount))));
 }

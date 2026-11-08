@@ -188,10 +188,11 @@ test('starter bags have 20 slots and every existing storage tier gains one addit
 });
 test('decorations spend recipe resources but never change visibility, exploration or production', () => {
   for (const [item, recipe] of Object.entries(decorationItems)) {
-    const cost: Cost = recipe.cost;
+    const cost: Cost = craftingCost(item as keyof typeof decorationItems);
     const account = settled();
     account.game.stage = recipe.stage;
     account.game.stock = { wood: 1000, water: 1000, metal: 2000, oil: 1000 };
+    account.game.dollars = 10000 * 10000;
     for (let x = -20; x <= 20; x++) for (let y = -20; y <= 20; y++) account.game.explored.push(`${x},${y}`);
     const before = snapshot(account);
     const after = act(account, { type: 'craft', item: item as keyof typeof decorationItems });
@@ -199,6 +200,7 @@ test('decorations spend recipe resources but never change visibility, exploratio
       assert.equal(after.game.stock[resource], before.game.stock[resource] - (cost[resource] ?? 0));
     }
     assert.ok(after.inventory.items.includes(item as keyof typeof decorationItems));
+    assert.equal(after.game.dollars, before.game.dollars - cost.dollars! * 10000);
     assert.equal(after.inventory.equipped, null);
     assert.equal(radius(after.game), radius(before.game));
     assert.deepEqual(after.game.explored, before.game.explored);

@@ -14,6 +14,10 @@ import { isCustomizationItem, isTitleItem, titleItems } from './customization.ts
 import { formatResourceAmount } from './resource-units.ts';
 import { activityEquipmentBenefit, activityEquipmentItems, equipmentActivities, isActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, craftBatchOptions, isBulkCraftingItem } from './bulk-crafting.ts';
+import { marketPriceAvailable } from './market.ts';
+import type { MarketSnapshot } from './market.ts';
+import { renderPriceChange } from './marketplace-catalog.ts';
+import { formatResourcePrice } from './resource-units.ts';
 
 export type InventoryFilter = 'all' | 'utility' | 'efficiency' | 'bulk' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
@@ -59,7 +63,7 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
     <details class="disclosure" data-detail="inventory-help"><summary>Inventory rules ${icon('chevron')}</summary><p>Identical items share a displayed stack with a quantity. Each copy still uses one storage slot, including equipped, placed and market-reserved copies.</p><p>Pages show up to 20 item stacks. Storage upgrades add capacity for 20 copies, not unlimited stacks.</p><p>Equipment, decorations and collectibles use item slots. Raw resources stay separate. Equipped and placed items still use one slot each.</p><p><span>Equipped visibility item</span>: <span>${bag.equipped ? name(bag.equipped) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></p><p>Permanent equipment never burns out. Equip one item. Better gear affects new expeditions only; teams already exploring keep their launch visibility.</p></details>
     </section>`;
 }
-export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string, filter: CraftingFilter, _context: 'settlement' | 'explore' = 'settlement', quantity = 1, language: Language = 'en'): string {
+export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string, filter: CraftingFilter, _context: 'settlement' | 'explore' = 'settlement', quantity = 1, language: Language = 'en', tickers: MarketSnapshot['tickers'] = []): string {
   const { game, inventory: bag } = state, tier = itemStorage[bag.storage];
   const keys = craftableKeys.filter(id => filter === 'all' || (filter === 'affordable'
     ? game.stage >= 0 && recipeDiscovered(game, id) && craftingFits(bag, id, quantity) && quantity <= craftingMaximum(game, bag, id) && canAfford(game, craftingCost(id, quantity))
@@ -75,25 +79,26 @@ export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string
       const options = craftBatchOptions(game, bag, id), availableBatch = Math.max(0, ...options.filter(option => !option.reason).map(option => option.quantity));
       const reason = game.stage < 0 ? 'Settlement required.' : game.stage < craftingStage(id) ? `Requires ${craftingStageName(id)} civilization level.` : !discovered ? 'Discover ingredients first' : !craftingFits(bag, id, quantity) ? 'Item inventory full'
         : !canAfford(game, cost) ? 'Not enough resources' : quantity > maximum ? isActivityEquipment(id) || isBulkCraftingItem(id) ? 'Not enough unused ingredients' : 'Not enough collector items' : 'Craft';
-      const requirements = [
-        ...Object.entries(cost).filter(([, needed]) => needed > 0).map(([resource, needed]) => ({
+      const costs = Object.entries(cost).filter(([, needed]) => needed > 0).map(([resource, needed]) => ({
           name: resource === 'dollars' ? 'FTH$' : resource[0].toUpperCase() + resource.slice(1),
           asset: resource,
           owned: resource === 'dollars' ? state.dollars : game.stock[resource as keyof typeof game.stock], needed,
-        })),
-        ...Object.entries(ingredients).map(([item, needed]) => ({ name: itemName(item as ItemId), asset: item, owned: sellableItemCount(bag, item as ItemId), needed })),
-      ];
+        }));
+      const requirements = Object.entries(ingredients).map(([item, needed]) => ({ name: itemName(item as ItemId), asset: item, owned: sellableItemCount(bag, item as ItemId), needed }));
       const ready = requirements.filter(row => row.owned >= row.needed).length;
+      const ticker = tickers.find(ticker => ticker.asset === id);
       const amount = (asset: string, value: number) => asset === 'dollars' || Object.hasOwn(ingredients, asset)
         ? value.toLocaleString(locale(language), { maximumFractionDigits: 4 }) : formatResourceAmount(asset, value, locale(language));
       return `<article class="item-card recipe-card"><div class="recipe-heading">${itemArt(id)}<div><h3>${recipe.name}</h3><small class="recipe-level">${craftingStageName(id)}</small></div></div>
+      <div class="recipe-market" aria-label="${translate('Market price', language)}"><span>${translate('Sell price', language)} <strong>${ticker && marketPriceAvailable(ticker.bid) ? `${formatResourcePrice(id, ticker.bid, locale(language))} FTH$` : '—'}</strong></span>${ticker ? renderPriceChange(ticker, '7d', language, true) : `<small>${translate('Prices unavailable', language)}</small>`}</div>
       <div class="consumption-costs" aria-label="${translate('Batch cost', language)}">${costChips(cost)}${!Object.keys(cost).length ? `<small>${translate('Collector ingredients', language)} · ${Object.values(ingredients).reduce((sum, count) => sum + count, 0)}</small>` : ''}</div>
       ${availableBatch > 1 ? `<small class="recipe-bulk-hint">${translate('Maximum available batch', language)}: ${availableBatch}</small>` : ''}
-      <details class="recipe-details" data-detail="recipe-${id}"><summary><span>Recipe</span> <strong>${ready}/${requirements.length}</strong>${icon('chevron')}</summary>
+      <details class="recipe-details" data-detail="recipe-${id}"><summary><span>Recipe</span>${requirements.length ? ` <strong>${ready}/${requirements.length}</strong>` : ''}${icon('chevron')}</summary>
       ${reason !== 'Craft' ? `<p class="notice">${reason}</p>` : ''}
       <p>${isBulkCraftingItem(id) ? translate(`Allows one exact batch of ${bulkCraftingItems[id].quantity} copies. Select a recipe and click Craft to use it.`, language) : isActivityEquipment(id) ? translate(activityEquipmentBenefit(id), language) : isCollectionItem(id) ? 'Combines collector permits without increasing total collection time.' : isCustomizationItem(id) ? 'Consumes one permit. Cosmetic only.' : isVisibilityItem(id) ? `${visibilityItems[id].radius}-tile view` : 'Cosmetic decoration'}</p>${isActivityEquipment(id) || isBulkCraftingItem(id) ? '<p class="fineprint">Consumes unused decorations and collector permits. Return placed decorations to inventory first.</p>' : ''}<small><span>Batch</span>: ${quantity} · <span>Maximum available batch</span>: ${availableBatch}</small>
-      <p class="fineprint">Ingredients: owned / required</p><ul class="recipe-resources">${requirements.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>
+      ${requirements.length ? '<p class="fineprint">Ingredients: owned / required</p>' : `<p class="fineprint">${translate('No item ingredients required.', language)}</p>`}<ul class="recipe-resources">${requirements.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>
+      <p class="fineprint">${translate('Resource costs: owned / required', language)}</p><ul class="recipe-resources recipe-cost-resources">${costs.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>
       </details>
       <button class="button compact-item-action ${reason === 'Craft' ? 'primary' : ''}" data-action="craft" data-item="${id}" data-action-eligible="${reason === 'Craft'}" aria-label="${translate('Craft', language)}: ${translate(recipe.name, language)} × ${quantity}${reason !== 'Craft' ? ` · ${translate(reason, language)}` : ''}" title="${reason === 'Craft' ? `${translate('Craft', language)}: ${translate(recipe.name, language)} × ${quantity}` : translate(reason, language)}" ${reason !== 'Craft' ? 'disabled' : ''}>${icon(reason === 'Craft' ? 'plus' : 'lock')}<span class="action-feedback" role="status"></span></button></article>`;
-    }).join('')}</div>${!keys.length ? '<p class="notice">No affordable recipes for this quantity.</p>' : ''}<details class="disclosure" data-detail="crafting-help"><summary>Crafting rules ${icon('chevron')}</summary><p>Discover each ingredient resource through exploration before crafting. Recipes spend owned raw resources. Newly crafted visibility gear equips automatically only when it improves your view. Cost-saving equipment must be equipped in inventory.</p></details></section>`;
+    }).join('')}</div>${!keys.length ? '<p class="notice">No affordable recipes for this quantity.</p>' : ''}<details class="disclosure" data-detail="crafting-help"><summary>Crafting rules ${icon('chevron')}</summary><p>Discover each ingredient resource through exploration before crafting. Recipes spend owned raw resources. Newly crafted visibility gear equips automatically only when it improves your view. Cost-saving equipment must be equipped in inventory.</p><p>${translate('Every crafted copy costs FTH$. Raw resources and FTH$ are costs, not counted item ingredients. Market sell prices are per item; seven-day changes use the same sales history as Marketplace.', language)}</p></details></section>`;
 }

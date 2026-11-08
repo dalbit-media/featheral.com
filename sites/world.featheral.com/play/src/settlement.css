@@ -389,3 +389,10 @@
 @media(max-width:650px){.activity-equipment-slot>.button{min-height:44px}}
 @media(max-width:400px){#app .inventory-panel .inventory-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.inventory-panel .inventory-filters .button{overflow-wrap:anywhere}}
 .bulk-crafting-art{position:relative}.bulk-crafting-art>b{position:absolute;right:-2px;bottom:-2px;font-size:9px;background:#153c31;color:#d5edd0;border-radius:4px;padding:1px 3px}.recipe-bulk-hint{grid-column:1/-1;color:#c5e7b4;font-size:10px}
+#crafting .recipe-market{grid-column:1 / -1;display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;font-size:10px;color:var(--muted)}
+#crafting .recipe-market>span>strong{color:var(--ink);font-variant-numeric:tabular-nums}
+#crafting .recipe-market .catalog-change{display:inline-flex;gap:4px;align-items:center;white-space:nowrap;font-size:10px}
+#crafting .recipe-market [data-direction=up]{color:#218352}
+#crafting .recipe-market [data-direction=down]{color:#bf4a44}
+#crafting .recipe-market [data-direction=none],#crafting .recipe-market [data-direction=flat]{color:var(--muted)}
+.crafting-market-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

@@ -9,7 +9,7 @@ import { collectorRecipes } from '../src/collector-recipes.ts';
 import type { CollectorBundle } from '../src/collector-recipes.ts';
 import { collectionItemDetails, collectionPolicy } from '../src/collection.ts';
 import { customizationKeys, titleItems } from '../src/customization.ts';
-import { craftingFits, craftingIngredients, craftingMaximum, itemName, itemStorage } from '../src/items.ts';
+import { craftingCost, craftingFits, craftingIngredients, craftingMaximum, itemName, itemStorage } from '../src/items.ts';
 import { marketAssets, marketBasePrice, marketResources } from '../src/market.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { gameConsumption } from '../src/consumption.ts';
@@ -21,6 +21,7 @@ import type { ApiState } from '../src/api-types.ts';
 function settled() {
   const account = createAccount(1000000);
   account.game.stage = 0; account.game.home = { x: 0, y: 0 }; account.game.population = 0;
+  account.game.dollars = 10000 * 10000;
   return account;
 }
 test('all twenty collector recipes preserve exact time per resource, including annual all-resource bundles', () => {
@@ -39,7 +40,7 @@ test('all twenty collector recipes preserve exact time per resource, including a
     const funds = account.game.dollars, stock = structuredClone(account.game.stock);
     assert.equal(craftingMaximum(account.game, bag, item), 1);
     craft(account, item);
-    assert.deepEqual(bag.items, [item]); assert.equal(account.game.dollars, funds); assert.deepEqual(account.game.stock, stock);
+    assert.deepEqual(bag.items, [item]); assert.equal(account.game.dollars, funds - craftingCost(item).dollars! * 10000); assert.deepEqual(account.game.stock, stock);
     execute(account, { type: 'activate-collection', item });
     assert.deepEqual(bag.items, []);
     for (const resource of marketResources) assert.equal(account.automationUntil![resource], totals[resource] ? account.updatedAt + totals[resource] * worldWeekMs : 0);
@@ -52,7 +53,7 @@ test('collector crafting batches free full inventory slots, reject escrow inputs
   assert.ok(craftingFits(bag, 'collector-wood-4', 10));
   assert.equal(craftingMaximum(account.game, bag, 'collector-wood-4'), 10);
   const quote = gameConsumption(snapshot(account), { type: 'craft', item: 'collector-wood-4', quantity: 10 })!;
-  assert.deepEqual(quote.costs, [{ asset: 'collection-wood-1', amount: 40 }, { asset: 'craft-batch-10', amount: 1 }]);
+  assert.deepEqual(quote.costs, [{ asset: 'dollars', amount: 10 }, { asset: 'collection-wood-1', amount: 40 }, { asset: 'craft-batch-10', amount: 1 }]);
   craft(account, 'collector-wood-4', 10);
   assert.deepEqual(bag.items, Array.from({ length: 10 }, () => 'collector-wood-4'));
   bag.items = []; bag.marketSelling = ['collection-wood-1']; bag.marketReserved = ['collection-wood-1'];
