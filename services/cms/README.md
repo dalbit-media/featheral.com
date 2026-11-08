@@ -24,6 +24,18 @@ packaging, using the current installed dependencies and Settings without startin
 writers. New preflight scripts must be included in the reviewed Git-tracked
 inventory; packaging rejects an incomplete release instead of uploading it.
 
+The running self-sync worker reads a release-compatible market catalog:
+`liquidityTargets()` retains the original 32 markets and
+`authorizedLiquidityTargets()` retains the 60 identity/collector markets.
+The fetched installer and gateway use `reserveLiquidityTargets()` for all 81
+markets, including the 21 approved relic additions. This lets older workers
+bootstrap the installer without bypassing its full policy check. Existing
+targets must remain identical; only pinned additions are accepted, with both
+original authority signatures committed after HTTPS health verification.
+If a running worker refuses the relic expansion before packaging, deploy the
+compatibility fix through the usual reviewed Git release and retry self-sync.
+Never reset ledger data, replace keys or disable preflight to resolve this.
+
 PM2 is attached to its persistent systemd service before cutover. The candidate is
 not saved as the boot process until gateway identity and every assigned HTTPS
 site pass health checks. A candidate crash/restart loop aborts immediately rather

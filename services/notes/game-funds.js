@@ -14,6 +14,11 @@ function liquidityTargets() {
 }
 
 function authorizedLiquidityTargets() {
+  // Running identity/collector releases cannot approve relic additions before loading the new installer.
+  return Object.fromEntries(Object.entries(reserveLiquidityTargets()).filter(([asset]) => !asset.startsWith("relic-")));
+}
+
+function reserveLiquidityTargets() {
   const { marketAssets, isLiquidAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
@@ -80,4 +85,4 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
   };
 }
 
-module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets };
+module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets };

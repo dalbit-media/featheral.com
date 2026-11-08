@@ -238,8 +238,10 @@ rotate keys or bypass preflight.
 During managed deployment, preflight marks approved additions as pending.
 The historical `liquidityTargets()` export remains the original 32 liquid
 markets so an already-running self-sync worker can perform its old exact-match
-bootstrap check. The fetched installer and new gateway explicitly use
-`authorizedLiquidityTargets()` (81 liquid markets). The installer's expanded
+bootstrap check. `authorizedLiquidityTargets()` retains the 60-market
+identity/collector catalog for workers from that running release; they cannot
+approve relic additions with their old allowlist. The fetched installer and new
+gateway explicitly use `reserveLiquidityTargets()` (81 liquid markets). The installer's expanded
 comparison still rejects changed original targets and unapproved additions
 before any cutover; passing the legacy check does not authorize funding.
 Startup validates both signatures without committing the expansion. The installer

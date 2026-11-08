@@ -31,7 +31,7 @@ const path = require("path");
 const { Readable, pipeline } = require("node:stream");
 const { createGoldApi } = require("../services/gold/server");
 const { createDollarApi } = require("../services/notes/dollar");
-const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets } = require("../services/notes/game-funds");
+const { gameSigningKey, ledgerFunds, reserveLiquidityTargets } = require("../services/notes/game-funds");
 const { activateLiveReserve } = require("../services/gold/activation");
 const { createWorldApi } = require("../services/media/api");
 const { SqliteStore } = require("../sites/world.featheral.com/play/server/store.ts");
@@ -114,10 +114,10 @@ const api = createDollarApi({ gold, profiles: cms.database.profiles, env: { ...e
 const marketAuthorizationFile = path.join(root, ".deployment-market-authorization.pending");
 if (reserveMode === "live") {
   const deferred = fs.existsSync(marketAuthorizationFile);
-  activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, authorizedLiquidityTargets(), goldKeys.privateKey, { deferExpansion: deferred });
+  activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, reserveLiquidityTargets(), goldKeys.privateKey, { deferExpansion: deferred });
   if (deferred) process.once("SIGUSR2", () => {
     try {
-      activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, authorizedLiquidityTargets(), goldKeys.privateKey);
+      activateLiveReserve(api.ledger, keys.privateKey, goldKeys.publicKey, reserveLiquidityTargets(), goldKeys.privateKey);
       fs.unlinkSync(marketAuthorizationFile);
       console.log("Approved market authorization persisted after deployment health verification.");
     } catch (error) {

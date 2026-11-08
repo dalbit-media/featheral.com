@@ -10,7 +10,7 @@ const { ethers } = require("ethers");
 const { FthLedger, walletAccountId } = require("../services/fth-ledger/ledger");
 const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
-const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets } = require("../services/notes/game-funds");
+const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets, reserveLiquidityTargets } = require("../services/notes/game-funds");
 const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold/reserve");
 const pricing = require("../shared/gold-pricing");
 const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
@@ -22,7 +22,7 @@ const { createApi } = require("../sites/world.featheral.com/play/server/http.ts"
 
 describe("Isolated finite Gold reserve", () => {
   let directory, ledger, engine, adapter, provider, goldKeys, gameKeys, source, reserve, store;
-  const targets = authorizedLiquidityTargets();
+  const targets = reserveLiquidityTargets();
   const total = asset => BigInt(targets[asset].pricePerLot) * BigInt(targets[asset].quantity);
   const blockHash = height => ethers.zeroPadValue(ethers.toBeHex(height + 1), 32);
   beforeEach(() => {
@@ -88,9 +88,10 @@ describe("Isolated finite Gold reserve", () => {
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
-  it("authorizes additive markets with both original keys, preserves funds and replays without rewriting genesis", async () => {
+  for (const startingCatalog of ["original", "identity-collectors"]) it(`authorizes additive markets from ${startingCatalog} with both original keys, preserves funds and replays without rewriting genesis`, async () => {
     ledger.close();
-    const originalTargets = Object.fromEntries(Object.entries(targets).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset)));
+    const originalTargets = startingCatalog === "identity-collectors" ? authorizedLiquidityTargets()
+      : Object.fromEntries(Object.entries(targets).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset)));
     const folder = path.join(directory, "market-expansion");
     ledger = new FthLedger({ directory: folder, blockIntervalMs: 0, genesis: {
       goldPublicKey: goldKeys.publicKey, gamePublicKey: gameKeys.publicKey, reserveMode: "live",
@@ -143,8 +144,8 @@ describe("Isolated finite Gold reserve", () => {
     assert.deepEqual(ledger.genesis.goldMarkets, targets);
     assert.deepEqual(ledger.goldReserve, reserveState);
     engine = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider });
-    const result = await fund("collector-all-52");
-    assert.equal(result.quantity, 10000);
+    const result = await fund(startingCatalog === "identity-collectors" ? "relic-forest" : "collector-all-52");
+    assert.equal(result.quantity, startingCatalog === "identity-collectors" ? 100 : 10000);
     assert.equal(ledger.goldReserve.cap, reserveState.cap);
     assert.deepEqual(ledger.goldReserve.pools.wood, reserveState.pools.wood);
     assert.equal(ledger.balance(REDEMPTION_ESCROW).available, "0");
