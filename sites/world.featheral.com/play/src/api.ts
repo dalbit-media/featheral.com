@@ -3,6 +3,7 @@ import type { Resource } from './engine.ts';
 import type { HalfSaleResponse, MarketAsset, MarketCommand, MarketResponse } from './market.ts';
 import type { ChatDirectory, ChatMessage, ChatProfile, ChatSettlement, ChatSubmission, RoomChatInfo } from './chat.ts';
 import type { WorldProfileLink } from './world-profile.ts';
+import { needsWalletSigner, publishWorldAccount } from './funds.ts';
 
 class HttpError extends Error {
   readonly status: number;
@@ -14,6 +15,7 @@ async function request<T = ApiState>(path: string, init?: RequestInit): Promise<
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('API returned a non-JSON response. Start the backend and restart Vite to load its API proxy.');
   const body = await response.json();
   if (!response.ok) throw new HttpError(response.status, body.error ?? `API failed (${response.status}).`);
+  if (typeof body.fundAccountId === 'string') publishWorldAccount(body.fundAccountId);
   return body;
 }
 export async function connect(): Promise<ApiState> {
@@ -27,7 +29,7 @@ export async function connect(): Promise<ApiState> {
 export const refresh = (): Promise<ApiState> => request('state');
 export const readCollection = (resource: Resource, quantity?: number): Promise<CollectionResponse> => request(`collection?asset=${resource}${quantity === undefined ? '' : `&quantity=${quantity}`}`);
 async function submit<T>(state: ApiState, command: Command | MarketCommand, path: string): Promise<T> {
-  if (state.fundWallet && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
+  if (needsWalletSigner(state) && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
   const body = JSON.stringify({ id: crypto.randomUUID(), revision: state.revision, command });
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf }, body };
   try { return await request<T>(path, init); }

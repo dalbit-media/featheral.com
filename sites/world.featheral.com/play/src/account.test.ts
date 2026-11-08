@@ -77,8 +77,17 @@ test('bank conversion lives on its dedicated route and the account FTHG card lin
   assert.ok(account.indexOf('class="account-wallet-section"') < account.indexOf('class="account-balances"'));
   assert.match(main, /if \(bankPage\) new WalletPage/);
   assert.doesNotMatch(main, /if \(marketPage\) new GoldTrading/);
-  assert.match(bank, /wallet\.featheral\.com/);
-  assert.match(bank, /parentOrigin: location\.origin, primary: 'FTH\$'/);
+  assert.match(bank, /\/shared\/wallet\/embed\.js/);
+  assert.match(bank, /data-wallet-embed data-wallet-primary="FTH\$"/);
+  assert.doesNotMatch(bank, /createElement\('iframe'\)|embedded: '1'/);
   assert.doesNotMatch(bank, /contentWindow/);
   assert.match(bank, /Ethereum Mainnet/);
+});
+test('separate World budgets do not require an extension or auto-revoke on wallet selection changes', () => {
+  const pane = readFileSync(new URL('./account.ts', import.meta.url), 'utf8');
+  const api = readFileSync(new URL('./api.ts', import.meta.url), 'utf8');
+  assert.match(pane, /needsWalletSigner\(this\.snapshot\(\)\) && linked/);
+  assert.match(pane, /needsWalletSigner\(this\.snapshot\(\)\) && event\.detail/);
+  assert.match(pane, /FeatheralWallet!\.authenticate/);
+  assert.match(api, /if \(needsWalletSigner\(state\)/);
 });

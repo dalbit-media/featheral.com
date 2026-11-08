@@ -1,4 +1,7 @@
 export const korean: Record<string, string> = {
+  'One World budget across your FTH$ wallets. Wallet balances remain separate; deposits and withdrawals require approval.': '모든 FTH$ 지갑 화면에서 하나의 월드 예산을 확인합니다. 지갑 잔액은 별도이며 입출금에는 승인이 필요합니다.',
+  'FTHG and staking principal remain on Ethereum Mainnet.': 'FTHG와 스테이킹 원금은 이더리움 메인넷에 유지됩니다.',
+  'Authorize a separate World budget? Existing funds stay where they are. Gameplay spends only World funds, not your wallet.': '별도의 월드 예산을 승인할까요? 기존 자금은 이동하지 않습니다. 게임은 지갑이 아닌 월드 자금만 사용합니다.',
   'Name Z-A': '이름 역순',
   'Highest buy price': '구매 가격 높은 순',
   'Lowest sell price': '판매 가격 낮은 순',

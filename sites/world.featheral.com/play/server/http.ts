@@ -156,7 +156,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         }
         const result = store.read(activeToken, session => ({ ...snapshot(session.account), csrf: session.csrf }));
         response.setHeader('Set-Cookie', `${cookie}=${activeToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${lifetime}${secure ? '; Secure' : ''}`);
-        reply(response, 200, { ...result, fundWallet: store.wallet(activeToken), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
+        reply(response, 200, { ...result, ...store.walletContext(activeToken), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
         return;
       }
       if (chatRoute) {
@@ -302,7 +302,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         });
       const lifetime = store.read(token, (session, _time, realTime) => session.expires - realTime);
       if (lifetime > 7 * 86400000) response.setHeader('Set-Cookie', `${cookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.min(400 * 86400, Math.floor(lifetime / 1000))}${secure ? '; Secure' : ''}`);
-      reply(response, 200, { ...result, fundWallet: store.wallet(token), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
+      reply(response, 200, { ...result, ...store.walletContext(token), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
     } catch (error) {
       const status = error instanceof ApiError ? error.status : error instanceof GameError ? 409 : 500;
       if (status === 500) console.error('API request failed', error);

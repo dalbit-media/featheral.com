@@ -153,7 +153,11 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   vm.runInNewContext(source, context);
   if (contextual) mounted = await context.window.FeatheralWalletApp.mount(localContext);
   await new Promise(resolve => setImmediate(resolve));
-  return { nodes, calls, providerCalls, document, errors, tips, store, intervals, popups, messages, clipboard, setFunded: value => { funded = value; },
+  return { nodes, calls, providerCalls, document, errors, tips, store, intervals, popups, messages, clipboard,
+    async worldBudget(account) {
+      for (const listener of windowListeners['featheral:world-account'] || []) listener({ detail: account });
+      await new Promise(resolve => setImmediate(resolve));
+    }, setFunded: value => { funded = value; },
     localContext, mounted, connectionStates, setProviderAccounts: accounts => { providerAccounts = accounts; },
     closeContext: async () => { visible = false; await mounted.suspend(); },
     reopenContext: async () => { visible = true; await mounted.resume(); },
@@ -997,6 +1001,18 @@ test('embeds ignore retired parent account handoffs and follow only central publ
   await ui.publicContext({ ...context, addresses: [address, address] });
   assert.deepEqual(ui.errors, []);
   assert.ok(!ui.calls.some(call => call.headers?.['x-creation-token']));
+});
+test('same-site World budget events refresh native wallet panels without importing spending authority', async () => {
+  const worldAccount = '0x' + 'ab'.repeat(32);
+  const ui = await fixture('dollar', { contextual: true, walletData: { world: { accountId: worldAccount, available: '1234560000000000000', duplicate: false } } });
+  const before = ui.calls.length;
+  await ui.worldBudget(worldAccount);
+  assert.ok(ui.calls.slice(before).some(call => call.url.includes('worldAccount=' + worldAccount)));
+  assert.equal(ui.nodes['world-balance'].textContent, '1.23 FTH$');
+  assert.ok(!ui.calls.slice(before).some(call => call.body));
+  const count = ui.calls.length;
+  await ui.worldBudget('invalid-account');
+  assert.equal(ui.calls.length, count);
 });
 test('wallet displays only primary and USD portfolio totals without an expanded estimates section', async () => {
   const portfolio = { assets: [], totals: {

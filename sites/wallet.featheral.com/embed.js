@@ -1,5 +1,6 @@
 "use strict";
 (() => {
+  if (window.FeatheralWallet) { window.FeatheralWallet.apply(); return; }
   const site = location.hostname.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar", "pay"].includes(site) ? "FTH$" : "FTHX";
   const selectionKey = "featheral-wallet-public-account", headerButtons = new Map(), mounts = new Map();

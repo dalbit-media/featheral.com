@@ -358,6 +358,17 @@ async function mountFeatheralWallet(context) {
     });
   }
   let worldAccount = storage.getItem("featheral-world-account") || "";
+  listen(window, "featheral:world-account", event => {
+    if (!/^0x[0-9a-f]{64}$/.test(event.detail || "")) return;
+    worldAccount = event.detail;
+    if (document.hidden) return;
+    if (busy) refreshQueued = true;
+    else refresh().catch(status);
+  });
+  listen(window, "featheral:wallet-updated", () => {
+    if (busy) refreshQueued = true;
+    else refresh().catch(status);
+  });
   const publicWalletUrl = address => `/api/wallet/accounts/${address}`
     + (worldAccount && (!config.address || config.followActive) ? `?worldAccount=${encodeURIComponent(worldAccount)}` : "");
   const handoff = new URLSearchParams(context ? "" : location.hash.slice(1));
@@ -572,8 +583,7 @@ async function mountFeatheralWallet(context) {
     $("ethereum-activity").href = `https://etherscan.io/token/0xBa658127d93B17E577E1B8e8995cAB3aE7d7C665?a=${owner}`;
     if (data.world) {
       const worldValue = data.portfolio?.worldEstimates?.[primarySymbol];
-      $("world-balance").textContent = worldValue != null && !data.world.duplicate
-        ? `≈ ${equivalent(worldValue, primarySymbol)}` : format(data.world.available, "FTH$");
+      $("world-balance").textContent = format(data.world.available, "FTH$");
       $("world-status").textContent = data.world.duplicate ? "Legacy World uses your wallet account; counted once in the portfolio."
         : "Included in the total portfolio. Gameplay funds stay separate; transfers require approval in World.";
       if (!data.world.duplicate) appendEstimates($("world-status"), worldValue, data.portfolio?.worldUsdValue, data.portfolio);
@@ -1150,16 +1160,23 @@ async function mountFeatheralWallet(context) {
         try {
           if (siteApproval.message || event.data.address?.toLowerCase() !== siteApproval.address?.toLowerCase())
             throw new Error("Sign-in account changed. Start again.");
-          window.FeatheralSignIn.validate(event.data.address, event.data.message, true, config.parentOrigin);
+          window.FeatheralSignIn.validate(event.data.address, event.data.message, true, config.parentOrigin, worldAccount);
           siteApproval.message = event.data.message;
           $("site-approve").textContent = event.data.message.startsWith("Pay Featheral Silver order.\n") ? "Approve FTHS payment"
-            : event.data.message.startsWith("Featheral profile update\n") ? "Approve profile update" : "Approve sign-in";
+            : event.data.message.startsWith("Featheral profile update\n") ? "Approve profile update"
+            : event.data.message.startsWith("Featheral World Dollar wallet session\n") ? "Authorize World budget"
+            : event.data.message.startsWith("Featheral World fund withdrawal\n") ? "Approve World withdrawal"
+            : event.data.message.startsWith("Featheral Dollar (FTH$) transfer\n") ? "Approve World deposit" : "Approve sign-in";
           $("site-approval-title").textContent = $("site-approve").textContent;
           $("site-account").textContent = siteApproval.address;
           $("site-safety").textContent = event.data.message.startsWith("Pay Featheral Silver order.\n")
             ? "This authorizes an FTHS purchase. Verify the product, receiving account and exact amount."
             : event.data.message.startsWith("Featheral profile update\n") ? "This updates your public profile. It does not transfer funds."
-              : "Sign-in does not transfer funds or cost gas. Review the exact message before approving.";
+              : event.data.message.startsWith("Featheral World Dollar wallet session\n")
+                ? "Authorize a separate gameplay budget. No funds move; your wallet balance cannot be spent by gameplay."
+                : event.data.message.startsWith("Featheral World fund withdrawal\n") || event.data.message.startsWith("Featheral Dollar (FTH$) transfer\n")
+                  ? "This moves the exact displayed FTH$ amount between your wallet and World. Check the accounts and amount. No Ethereum transaction."
+                  : "Sign-in does not transfer funds or cost gas. Review the exact message before approving.";
           $("site-message").textContent = event.data.message;
           $("site-approve").disabled = false;
           $("site-status").textContent = builtInActive ? "Approve using your unlocked built-in wallet."

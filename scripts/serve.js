@@ -162,11 +162,17 @@ cms.setWalletSources(async (owner, publicWorldAccount) => {
     } catch (error) { console.error("Wallet Ethereum FTHG unavailable:", error); ethereumError = error.message; }
   };
   const readWorld = async () => {
-    if (!store) {
-      worldError = "World gameplay balances are unavailable on this read-only server. Use the World writer to view gameplay funds.";
-      return;
-    }
     try {
+      if (!store) {
+        if (publicWorldAccount) {
+          worldFunds = { accountId: publicWorldAccount, wallet: null,
+            available: api.walletAccount(publicWorldAccount).balance.available, source: "explicit-public-account" };
+          worldFunds.duplicate = publicWorldAccount === require("../services/fth-ledger/ledger").walletAccountId(owner);
+          return;
+        }
+        worldError = "World gameplay balances are unavailable on this read-only server. Use the World writer to view gameplay funds.";
+        return;
+      }
       worldFunds = store.walletWorldView(owner);
       if (!worldFunds && publicWorldAccount) worldFunds = { accountId: publicWorldAccount, wallet: null,
         available: api.walletAccount(publicWorldAccount).balance.available, mode: "guest", source: "explicit-public-account" };

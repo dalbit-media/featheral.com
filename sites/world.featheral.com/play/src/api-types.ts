@@ -105,4 +105,7 @@ export interface ResourceAccess {
 export interface PopulationTotals { global: number; federation: number | null }
 export interface PublicTotals { settlements: number; metal: number; population: number; dollars: number }
 export interface PublicStats extends PublicTotals { updatedAt: number }
-export interface ApiState extends Snapshot { csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string; fundWallet?: string | null }
+export interface ApiState extends Snapshot {
+  csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string;
+  fundWallet?: string | null; fundMode?: 'guest' | 'legacy-direct' | 'separate'; fundAccountId?: string | null;
+}

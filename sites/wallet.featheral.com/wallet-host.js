@@ -2,6 +2,20 @@
 (() => {
   const url = new URL(location.href), root = document.querySelector("[data-wallet-embed]");
   const view = url.hash.slice(1);
+  const handoff = new URLSearchParams(view);
+  if (handoff.has("worldAccount") || handoff.has("worldSyncError")) {
+    try {
+      if (handoff.has("worldSyncError")) throw new Error(handoff.get("worldSyncError"));
+      const account = handoff.get("worldAccount");
+      if (!/^0x[0-9a-f]{64}$/.test(account || "")) throw new Error("World account sync returned an invalid account.");
+      localStorage.setItem("featheral-world-account", account);
+    } catch (error) {
+      console.error("World wallet sync:", error);
+      const status = document.createElement("p"); status.setAttribute("role", "status"); status.textContent = error.message;
+      root.before(status);
+    }
+    history.replaceState(null, "", url.pathname + url.search);
+  }
   if (["assets", "send", "receive", "swap", "tip", "activity", "account"].includes(view)) root.dataset.walletView = view;
   if (["to", "amount", "name", "currency"].some(key => url.searchParams.has(key))) {
     const payment = new URLSearchParams();

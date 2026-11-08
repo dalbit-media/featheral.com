@@ -29,6 +29,7 @@ export interface Store {
   transaction<T>(token: string, operation: (session: Session, now: number, realTime: number, exchange: Exchange, owner: string) => T): T;
   linkWallet(token: string, address: string, moveGuestFunds?: boolean, separateWorldFunds?: boolean): void;
   walletView(token: string): WalletView;
+  walletContext(token: string): { fundWallet: string | null; fundMode: FundView['mode']; fundAccountId: string | null };
   fundView(token: string): FundView;
   prepareFund(token: string, input: { id: string; direction: string; amount: string }, origin: string): FundRequest;
   completeFund(token: string, id: string, signature: string): Promise<FundView>;
@@ -280,6 +281,11 @@ export class SqliteStore implements Store {
   }
   walletView(token: string): WalletView {
     return this.configuredFunds().walletView(this.load(token).id);
+  }
+  walletContext(token: string): { fundWallet: string | null; fundMode: FundView['mode']; fundAccountId: string | null } {
+    if (!this.funds) return { fundWallet: null, fundMode: 'guest', fundAccountId: null };
+    const owner = this.load(token).id, view = this.funds.walletView(owner);
+    return { fundWallet: view.wallet, fundMode: this.funds.mode(owner), fundAccountId: view.accountId };
   }
   walletWorldView(address: string): (WalletView & { mode: FundView['mode'] }) | null {
     return this.configuredFunds().walletWorldView(address);

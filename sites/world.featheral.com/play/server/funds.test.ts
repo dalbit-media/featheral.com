@@ -4,7 +4,80 @@ import sqlite from '../../../../services/database/sqlite.js';
 import { GameFunds } from './funds.ts';
 import { formatDollars, dollarsUnits, dollarsSlippage } from '../src/dollars.ts';
 import { formatFthg } from '../src/fthg.ts';
-import { walletLinkMessage } from '../src/funds.ts';
+import { needsWalletSigner, walletLinkMessage } from '../src/funds.ts';
+import { SqliteStore } from './store.ts';
+import { gameFundAccount, walletFundAccount } from './funds.ts';
+import type { DollarFunds, FundPayment, FundTransaction } from './funds.ts';
+import { createHash } from 'node:crypto';
+import { Wallet, parseUnits, verifyMessage } from 'ethers';
+import { transferMessage } from '../../../../services/fth-ledger/transfer.js';
+
+test('only legacy direct-wallet sessions require a connected signer for gameplay', () => {
+  assert.equal(needsWalletSigner({ fundWallet: null }), false);
+  assert.equal(needsWalletSigner({ fundWallet: '0xabc', fundMode: 'separate' }), false);
+  assert.equal(needsWalletSigner({ fundWallet: '0xabc', fundMode: 'legacy-direct' }), true);
+  assert.equal(needsWalletSigner({ fundWallet: '0xabc' }), true);
+});
+
+test('separate World and wallet views reconcile deposits, withdrawals and exact-once retries without moving funds on authorization', async () => {
+  const wallet = Wallet.createRandom(), address = wallet.address.toLowerCase();
+  const balances = new Map<string, bigint>([[walletFundAccount(address), parseUnits('100', 18)]]);
+  const committed = new Set<string>(), paid = new Set<string>();
+  let nonce = 0, nextId = 0;
+  const available = (id: string) => balances.get(id) ?? 0n;
+  const ledger: DollarFunds = {
+    available: id => available(id).toString(), supply: () => parseUnits('100', 18).toString(),
+    prepare: entries => ({ i: `fixture-${++nextId}`, k: 'GAME', a: '', v: '0', d: { entries, signature: 'test' }, t: Date.now() }),
+    commit: (transaction: FundTransaction) => {
+      if (committed.has(transaction.i)) return;
+      assert.equal(transaction.d.entries.reduce((total, entry) => total + BigInt(entry.delta), 0n), 0n);
+      for (const entry of transaction.d.entries) {
+        const next = available(entry.account) + BigInt(entry.delta);
+        assert.ok(next >= 0n); balances.set(entry.account, next);
+      }
+      committed.add(transaction.i);
+    },
+    nonce: () => nonce,
+    depositMessage: (payment: FundPayment) => transferMessage(payment),
+    depositState: payment => paid.has(payment.memo) ? 'accepted' : payment.nonce <= nonce ? 'conflict' : 'missing',
+    transfer: async payment => {
+      assert.equal(verifyMessage(transferMessage(payment), payment.signature).toLowerCase(), address);
+      if (paid.has(payment.memo)) return;
+      assert.equal(payment.nonce, nonce + 1);
+      const amount = BigInt(payment.amount), source = walletFundAccount(payment.wallet);
+      assert.ok(available(source) >= amount);
+      balances.set(source, available(source) - amount); balances.set(payment.to, available(payment.to) + amount);
+      paid.add(payment.memo); nonce = payment.nonce;
+    },
+  };
+  const store = new SqliteStore(':memory:', Date.now, 1, ledger);
+  try {
+    const { token, csrf } = store.create();
+    store.linkWallet(token, address, false, true);
+    const accountId = gameFundAccount('guest', createHash('sha256').update(token).digest('hex'));
+    assert.deepEqual(store.walletContext(token), { fundWallet: address, fundMode: 'separate', fundAccountId: accountId });
+    assert.equal(store.fundView(token).available, '0');
+    assert.equal(store.fundView(token).walletAvailable, parseUnits('100', 18).toString());
+    const deposit = store.prepareFund(token, { id: 'deposit-shared-budget-1', direction: 'deposit', amount: parseUnits('25', 18).toString() }, 'https://world.featheral.com');
+    const signature = await wallet.signMessage(deposit.message);
+    await store.completeFund(token, deposit.id, signature);
+    await store.completeFund(token, deposit.id, signature);
+    assert.equal(store.walletView(token).available, parseUnits('25', 18).toString());
+    assert.equal(store.walletWorldView(address)!.available, store.fundView(token).available);
+    assert.equal(store.fundView(token).walletAvailable, parseUnits('75', 18).toString());
+    assert.equal(store.read(token, session => session.account.game.dollars), 250000);
+    const withdrawal = store.prepareFund(token, { id: 'withdraw-shared-budget-1', direction: 'withdraw', amount: parseUnits('10', 18).toString() }, 'https://world.featheral.com');
+    assert.match(withdrawal.message, new RegExp(`Session: ${csrf}`));
+    const wrong = Wallet.createRandom();
+    await assert.rejects(store.completeFund(token, withdrawal.id, await wrong.signMessage(withdrawal.message)), /authorized wallet/);
+    const approval = await wallet.signMessage(withdrawal.message);
+    await store.completeFund(token, withdrawal.id, approval);
+    await store.completeFund(token, withdrawal.id, approval);
+    assert.equal(store.walletView(token).available, parseUnits('15', 18).toString());
+    assert.equal(store.fundView(token).walletAvailable, parseUnits('85', 18).toString());
+    assert.equal([...balances.values()].reduce((sum, value) => sum + value, 0n), parseUnits('100', 18));
+  } finally { store.close(); }
+});
 
 function legacyFundDatabase() {
   const db = sqlite.open(':memory:');

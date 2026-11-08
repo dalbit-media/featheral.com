@@ -19,18 +19,20 @@
     return data;
   }
   async function sign(message, address) {
-    const provider = FeatheralProfile.getProvider();
-    if (!provider || FeatheralProfile.snapshot().account?.toLowerCase() !== address.toLowerCase()) throw new Error("Connect the authorized wallet first.");
-    const hex = "0x" + [...new TextEncoder().encode(message)].map(n => n.toString(16).padStart(2, "0")).join("");
-    const signature = await provider.request({ method: "personal_sign", params: [hex, address] });
-    if (FeatheralProfile.snapshot().account?.toLowerCase() !== address.toLowerCase()) throw new Error("Wallet changed while signing.");
-    return signature;
+    const result = await FeatheralWallet.authenticate(async selected => {
+      if (selected.toLowerCase() !== address.toLowerCase()) throw new Error("Select the authorized wallet to transfer World funds.");
+      return { message };
+    });
+    return result.signature;
   }
   async function refresh() {
     const current = ++generation;
     const nextView = await api("wallet/funds"), nextState = { csrf: nextView.csrf };
     if (current !== generation) return;
     state = nextState; view = nextView;
+    if (!/^0x[0-9a-f]{64}$/.test(view.accountId)) throw new Error("World returned an invalid account.");
+    localStorage.setItem("featheral-world-account", view.accountId);
+    window.dispatchEvent(new CustomEvent("featheral:world-account", { detail: view.accountId }));
     $("world-balance").textContent = format(view.available);
     $("wallet-balance").textContent = view.walletAvailable === null ? "Connect & authorize" : format(view.walletAvailable);
     $("fund-wallet").textContent = view.wallet || "Guest account — existing funds remain in World.";
@@ -40,6 +42,7 @@
     $("authorize").hidden = view.mode === "separate";
     $("authorize").disabled = working;
     $("review").disabled = view.mode !== "separate" || working;
+    $("max").disabled = view.mode !== "separate" || working;
     $("pending").replaceChildren(); $("activity").replaceChildren();
     for (const item of view.requests) {
       if (item.status === "complete") {
@@ -72,7 +75,15 @@
     for (const element of [$("amount"), $("direction")]) element.disabled = value;
     $("authorize").disabled = value || !view;
     $("review").disabled = value || view?.mode !== "separate";
+    $("max").disabled = value || view?.mode !== "separate";
   }
+  $("max").onclick = () => {
+    if (working || view?.mode !== "separate") return;
+    const raw = BigInt($("direction").value === "deposit" ? view.walletAvailable : view.available);
+    const fraction = (raw % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
+    $("amount").value = `${raw / 10n ** 18n}${fraction ? "." + fraction : ""}`;
+    request = null;
+  };
   async function execute(item) {
     if (working) return;
     lock(true);
@@ -81,7 +92,10 @@
       if (!confirm(`${item.parameters.direction === "deposit" ? "Deposit wallet → World" : "Withdraw World → wallet"}: ${format(item.parameters.amount)}.\nExact amount: ${item.parameters.amount} base units.\nWallet: ${view.wallet}\nNo funds are minted. Continue?`)) return;
       const signature = item.status === "paying" ? "" : await sign(item.message, view.wallet);
       await api("wallet/funds/complete", { id: item.id, signature });
-      request = null; $("status").textContent = "Transfer settled. Both balances are updated.";
+      request = null;
+      localStorage.setItem("featheral-wallet-updated", String(Date.now()));
+      window.dispatchEvent(new Event("featheral:wallet-updated"));
+      $("status").textContent = "Transfer settled. Both balances are updated.";
     } finally { lock(false); await refresh(); }
   }
   $("fund-form").oninput = () => { request = null; };
@@ -106,17 +120,20 @@
     if (working) return;
     lock(true);
     try {
-      const address = FeatheralProfile.snapshot().account;
-      if (!address) throw new Error("Connect an Ethereum wallet first.");
       if (!confirm("Enable a separate World budget for this wallet? No funds move now. Legacy direct-wallet spending stops. Deposits and withdrawals require separate approval.")) return;
-      const { issuedAt, message } = await api("wallet/funds/authorization", { address });
-      const signature = await sign(message, address);
+      let issuedAt;
+      const { address, signature } = await FeatheralWallet.authenticate(async address => {
+        const authorization = await api("wallet/funds/authorization", { address });
+        issuedAt = authorization.issuedAt;
+        return { message: authorization.message };
+      });
       await api("wallet/link", { address, issuedAt, signature, moveGuestFunds: false, separateWorldFunds: true });
       await refresh(); $("status").textContent = "Separate World budget authorized. Existing funds were not moved.";
     } catch (error) { fail(error); }
     finally { lock(false); }
   };
-  FeatheralProfile.mount($("walletButton"), { primaryCurrency: "fthDollar", walletUrl: $("dollar-link").href, ethereumProvider: true }).then(refresh).catch(fail);
+  $("walletButton").onclick = () => FeatheralWallet.open({ primary: "FTH$", view: "account", compact: true });
+  refresh().catch(fail);
   window.addEventListener("focus", () => { if (!working) refresh().catch(fail); });
   setInterval(() => { if (!working && !document.hidden) refresh().catch(fail); }, 15000);
 })();

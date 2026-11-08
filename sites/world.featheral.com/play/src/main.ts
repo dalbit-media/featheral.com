@@ -1442,6 +1442,10 @@ async function syncProduction(): Promise<void> {
   catch (error) { toast(`Could not sync server production: ${error instanceof Error ? error.message : 'Connection failed.'}`, true); }
   finally { busy = false; void saveCrewAssignments(); }
 }
+window.addEventListener('storage', event => {
+  if (event.key === 'featheral-wallet-updated' || event.key === 'featheral-world-account') void syncProduction();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncProduction(); });
 setInterval(() => void syncProduction(), serverSyncIntervalMs + Math.random() * 5000);
 let nextDeadlineSyncAt = 0;
 setInterval(() => {

@@ -10,8 +10,9 @@ import type { ApiState } from './api-types.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { downloadSnapshot, renderJournalEntries } from './journal.ts';
 import { linkFundWallet, linkWorldProfile, readChatProfile, revokeFundWallet } from './api.ts';
-import { walletLinkMessage } from './funds.ts';
-import { formatUnits, hexlify, toUtf8Bytes } from 'ethers';
+import { needsWalletSigner, walletLinkMessage } from './funds.ts';
+import { loadWorldWallet } from './wallet-view.ts';
+import { formatUnits } from 'ethers';
 import { chatProfileChangedEvent, chatProfileSettingsEvent } from './chat.ts';
 import { worldProfileLinkMessage } from './world-profile.ts';
 import type { WorldProfile } from './world-profile.ts';
@@ -77,11 +78,11 @@ export class AccountPane {
     window.addEventListener('featheral:wallet', () => {
       this.updateBalance(0, locale(language)); void this.loadProfile(false);
       const linked = this.snapshot().fundWallet;
-      if (linked && window.FeatheralProfile.snapshot().account.toLowerCase() !== linked) void this.stopFundAccess();
+      if (needsWalletSigner(this.snapshot()) && linked && window.FeatheralProfile.snapshot().account.toLowerCase() !== linked) void this.stopFundAccess();
     });
     window.addEventListener('featheral:embedded-wallet', event => {
       if (event instanceof CustomEvent && typeof event.detail === 'string'
-        && this.snapshot().fundWallet && event.detail.toLowerCase() !== this.snapshot().fundWallet) void this.stopFundAccess();
+        && needsWalletSigner(this.snapshot()) && event.detail.toLowerCase() !== this.snapshot().fundWallet) void this.stopFundAccess();
     });
     this.dialog.querySelector('[data-fund-wallet-revoke]')!.addEventListener('click', () => { void this.stopFundAccess(); });
     localize(this.dialog);
@@ -246,7 +247,7 @@ export class AccountPane {
     this.dialog.querySelector('[data-account-dollars]')!.textContent = `FTH$${formatDollars(this.snapshot().dollars, numberLocale)}`;
     const raw = window.FeatheralProfile.snapshot().balances?.fthg;
     this.dialog.querySelector('[data-account-balance]')!.textContent = typeof raw === 'bigint' ? `${formatFthg(Number(formatUnits(raw, 18)), numberLocale)} FTHG` : 'Unavailable';
-    this.dialog.querySelector<HTMLButtonElement>('[data-fund-wallet-link]')!.disabled = !window.FeatheralProfile.snapshot().account;
+    this.dialog.querySelector<HTMLButtonElement>('[data-fund-wallet-link]')!.disabled = this.revokingFunds;
     const fundWallet = this.snapshot().fundWallet;
     const walletStatus = this.dialog.querySelector<HTMLElement>('[data-wallet-status]')!;
     if (!walletStatus.classList.contains('account-error')) walletStatus.textContent = fundWallet
@@ -312,21 +313,20 @@ export class AccountPane {
     const button = this.dialog.querySelector<HTMLButtonElement>('[data-fund-wallet-link]')!;
     button.disabled = true;
     try {
-      await this.walletReady;
-      const address = window.FeatheralProfile.snapshot().account;
-      const provider = window.FeatheralProfile.getProvider();
-      if (!address || !provider) throw new Error('Connect a wallet first.');
+      await loadWorldWallet();
       const moveGuestFunds = false, separateWorldFunds = true;
-      if (!confirm(`Authorize a separate World budget for ${address}? Existing funds stay where they are. Gameplay will spend only World funds, not your wallet. Deposit or withdraw from World funds when needed.`)) return;
-      const csrf = this.snapshot().csrf, issuedAt = new Date().toISOString();
-      const signature = await provider.request({ method: 'personal_sign', params: [hexlify(toUtf8Bytes(walletLinkMessage(address, csrf, issuedAt, location.origin, moveGuestFunds, separateWorldFunds))), address] });
-      if (typeof signature !== 'string') throw new Error('Wallet returned an invalid signature.');
-      if (window.FeatheralProfile.snapshot().account !== address) throw new Error('Wallet changed. Try again.');
+      if (!confirm(this.t('Authorize a separate World budget? Existing funds stay where they are. Gameplay spends only World funds, not your wallet.'))) return;
+      const csrf = this.snapshot().csrf;
+      let issuedAt = '';
+      const { address, signature } = await window.FeatheralWallet!.authenticate(async address => {
+        issuedAt = new Date().toISOString();
+        return { message: walletLinkMessage(address, csrf, issuedAt, location.origin, moveGuestFunds, separateWorldFunds) };
+      });
       this.update(await linkFundWallet(csrf, address, issuedAt, signature, moveGuestFunds, separateWorldFunds));
       await window.FeatheralProfile.refresh();
       this.status('Separate World budget authorized. Open World funds to deposit or withdraw.');
     } catch (error) { this.status(error instanceof Error ? error.message : 'Wallet authorization failed.', true); }
-    finally { button.disabled = !window.FeatheralProfile.snapshot().account; }
+    finally { button.disabled = false; }
   }
   private status(message: string, error = false): void {
     const node = this.dialog.querySelector<HTMLElement>('[data-wallet-status]')!;

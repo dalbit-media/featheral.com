@@ -140,7 +140,7 @@ export class GameFunds {
     const row = this.db.prepare('SELECT address FROM fund_wallets WHERE owner=?').get(owner);
     return row ? String(row.address) : null;
   }
-  private mode(owner: string): FundView['mode'] {
+  mode(owner: string): FundView['mode'] {
     const row = this.db.prepare('SELECT mode FROM fund_wallets WHERE owner=?').get(owner);
     return row ? row.mode as 'legacy-direct' | 'separate' : 'guest';
   }

@@ -1,3 +1,16 @@
+import type { ApiState } from './api-types.ts';
+
+export function needsWalletSigner(state: Pick<ApiState, 'fundWallet' | 'fundMode'>): boolean {
+  return !!state.fundWallet && state.fundMode !== 'separate';
+}
+
+export function publishWorldAccount(accountId: string): void {
+  if (!/^0x[0-9a-f]{64}$/.test(accountId)) throw new Error('World returned an invalid account.');
+  try { localStorage.setItem('featheral-world-account', accountId); }
+  catch (error) { console.warn('World wallet display context could not be saved.', error); }
+  window.dispatchEvent(new CustomEvent('featheral:world-account', { detail: accountId }));
+}
+
 export function walletLinkMessage(address: string, csrf: string, issuedAt: string, origin: string, moveGuestFunds = false, separateWorldFunds = false): string {
   return [
     'Featheral World Dollar wallet session', '',
