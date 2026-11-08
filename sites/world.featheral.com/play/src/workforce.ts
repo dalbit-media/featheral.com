@@ -93,6 +93,23 @@ export function explorationQuote(game: Game, x: number, y: number, concurrent = 
     + (weeks - 1) * monetaryPolicy.explorationPerExtraWeek;
   return { dollars: dollars * (concurrent + 1), weeks, reward: 0 };
 }
+export function explorationCount(expeditions: readonly Expedition[]): number {
+  return expeditions.filter(expedition => expedition.kind !== 'investigate').length;
+}
+export function investigationQuote(game: Game, x: number, y: number): { dollars: number; days: 1 } {
+  return { dollars: Math.max(.1, Math.ceil(explorationQuote(game, x, y).dollars * dollarsScale / 10) / dollarsScale), days: 1 };
+}
+export function nextInvestigation(game: Game, expeditions: readonly Expedition[] = []): { x: number; y: number; dollars: number; days: 1 } | null {
+  const active = new Set(expeditions.map(expedition => `${expedition.x},${expedition.y}`));
+  let best: ReturnType<typeof nextInvestigation> = null;
+  for (const key of game.explored) {
+    const [x, y] = key.split(',').map(Number);
+    if (active.has(key) || Math.hypot(x - game.position.x, y - game.position.y) > radius(game) + 1) continue;
+    const quote = { x, y, ...investigationQuote(game, x, y) };
+    if (!best || quote.dollars < best.dollars) best = quote;
+  }
+  return best;
+}
 export function nextExploration(game: Game, expeditions: readonly Expedition[] = []): { x: number; y: number; dollars: number; weeks: number; reward: number } | null {
   const known = new Set(game.explored), reach = radius(game) + 1;
   for (const expedition of expeditions) known.add(`${expedition.x},${expedition.y}`);
@@ -100,7 +117,7 @@ export function nextExploration(game: Game, expeditions: readonly Expedition[] =
   for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) {
     const x = game.position.x + dx, y = game.position.y + dy;
     if (Math.hypot(dx, dy) > reach || known.has(`${x},${y}`)) continue;
-    const quote = { x, y, ...explorationQuote(game, x, y, expeditions.length) };
+    const quote = { x, y, ...explorationQuote(game, x, y, explorationCount(expeditions)) };
     if (!best || quote.dollars < best.dollars) best = quote;
   }
   return best;

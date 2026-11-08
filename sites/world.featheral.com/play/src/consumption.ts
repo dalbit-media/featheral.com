@@ -3,7 +3,7 @@ import type { Cost, Resource } from './engine.ts';
 import type { Command, Snapshot } from './api-types.ts';
 import { craftingCost, craftingIngredients, itemName, itemStorage } from './items.ts';
 import { isTitleItem } from './customization.ts';
-import { explorationQuote } from './workforce.ts';
+import { explorationCount, explorationQuote, investigationQuote } from './workforce.ts';
 import { activityItemDetails, activityName } from './automation.ts';
 import { isWaterFacility, waterFacilities } from './water-facilities.ts';
 import type { MarketAsset, MarketCommand } from './market.ts';
@@ -20,6 +20,7 @@ export interface ConsumptionQuote {
   literalSubject?: boolean;
   costs: ConsumptionAmount[];
   weeks: number | null;
+  days?: number;
   residents?: number;
   arrivals?: number;
   receives?: ConsumptionAmount[];
@@ -65,10 +66,18 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
         ['Normal FTH$ fees are paid automatically while automation time remains.']) : null;
     case 'move': {
       if (game.stage < 0 || game.explored.includes(`${command.x},${command.y}`)) return null;
-      const cost = explorationQuote(game, command.x, command.y, state.workforce.expeditions.length);
+      const cost = explorationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Explore', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Assigned residents return when the expedition finishes.',
           'Concurrent expedition fees use 1x, 2x, 3x... of the route cost. The multiplier is based on expeditions still travelling at departure.']), weeks: cost.weeks, residents: 2 };
+    }
+    case 'investigate': {
+      const cost = investigationQuote(game, command.x, command.y);
+      return { ...quote('Investigate', `${command.x}, ${command.y}`, { dollars: cost.dollars },
+        ['One idle resident returns after one game day. Known terrain is not expanded.',
+          '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.',
+          'Costs 10% of the normal route fee, minimum FTH$0.10. Investigation does not raise expedition fees.']),
+        weeks: 0, days: cost.days, residents: 1 };
     }
     case 'invite':
       return { ...quote('Recruit residents', 'Residents', { dollars: state.recruitmentDollars },

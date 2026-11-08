@@ -1,11 +1,12 @@
 import { build, diplomacy, discover, invite, newGame, note, pay, radius, recruitmentAmount, recruitmentDollars, stages, survey, terrainAt, terrainDetails, terrainResources, upgrade } from '../src/engine.ts';
+import { randomInt } from 'node:crypto';
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
-import { arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, inventory } from './inventory.ts';
+import { addPermitFind, arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
 import { isSettlementEntity } from '../src/settlement-layout.ts';
 import { fthgScale } from '../src/fthg.ts';
 import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, settlementConsumptionForDays, settlementUpkeep, suppliedWorkWeeks, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
@@ -303,7 +304,7 @@ function activityReason(account: Account, activity: ActivityKind): string | null
   if (supplyReason) return supplyReason;
   if (activity === 'exploration') {
     const work = workforce(account);
-    if (work.expeditions.length) return 'Waiting for expedition return';
+    if (explorationCount(work.expeditions)) return 'Waiting for expedition return';
     if (availableWorkers(account) < 2) return 'Waiting for idle residents';
     const next = nextExploration(account.game, work.expeditions);
     if (!next) return 'No reachable unexplored terrain';
@@ -325,15 +326,15 @@ function runActivityAutomation(account: Account, event: number): void {
     account.updatedAt = event;
     const reason = activityReason(account, activity);
     if (reason) {
-      automation.nextAt = activity === 'exploration' && workforce(account).expeditions.length
-        ? Math.max(...workforce(account).expeditions.map(expedition => expedition.readyAt))
+      automation.nextAt = activity === 'exploration' && explorationCount(workforce(account).expeditions)
+        ? Math.max(...workforce(account).expeditions.filter(expedition => expedition.kind !== 'investigate').map(expedition => expedition.readyAt))
         : activity === 'attraction' && account.recruitment ? account.recruitment.readyAt : event + worldDayMs;
       continue;
     }
     if (activity === 'exploration') {
       const next = nextExploration(account.game, workforce(account).expeditions)!;
       execute(account, { type: 'move', x: next.x, y: next.y }, event);
-      automation.nextAt = workforce(account).expeditions[0].readyAt;
+      automation.nextAt = workforce(account).expeditions.find(expedition => expedition.kind !== 'investigate')!.readyAt;
     } else {
       execute(account, { type: 'invite' }, event);
       automation.nextAt = account.recruitment!.readyAt;
@@ -354,6 +355,12 @@ export function accrue(account: Account, time: number): void {
     if (event > now) break;
     while (work.expeditions[completed] && work.expeditions[completed].readyAt <= event) {
       const expedition = work.expeditions[completed++];
+      if (expedition.kind === 'investigate') {
+        if (expedition.itemFind) addPermitFind(account, expedition.itemFind);
+        exploringWorkers -= expedition.workers;
+        note(account.game, expedition.itemFind ? 'Investigation returned with a permit. One resident is available.' : 'Investigation returned without an item. One resident is available.');
+        continue;
+      }
       const before = account.game.explored.length;
       survey(account.game, expedition, expedition.surveyRadius);
       const discovered = account.game.explored.length - before;
@@ -540,7 +547,7 @@ export function parseCommand(value: unknown): Command {
   const c = object(value);
   const resourceClaim = c.type === 'claim' && Object.hasOwn(c, 'resource');
   const fields: Record<string, string[]> = {
-    move: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: ['action'],
+    move: ['x', 'y'], investigate: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: ['action'],
     upgrade: [], invite: [], home: [], gather: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
     assign: ['resource', 'workers'], automatic: ['enabled'],
     craft: Object.hasOwn(c, 'quantity') ? ['item', 'quantity'] : ['item'], 'map-collect': ['x', 'y'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
@@ -556,7 +563,7 @@ export function parseCommand(value: unknown): Command {
     const position = object(c.position);
     if (Object.keys(position).sort().join() !== 'x,y' || ![position.x, position.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000)) throw new ApiError(400, 'Invalid command values.');
   }
-  if (((c.type === 'move' || c.type === 'map-collect') && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
+  if (((c.type === 'move' || c.type === 'map-collect' || c.type === 'investigate') && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
     || (c.type === 'trade' && (!oneOf(c.resource, resources) || !oneOf(c.direction, ['buy', 'sell']) || typeof c.amount !== 'number' || !Number.isSafeInteger(c.amount) || c.amount < 1 || c.amount > 10000))
     || (c.type === 'build' && !oneOf(c.kind, ['bank', 'townhall']) && !isWaterFacility(c.kind) && !isIncomeFacility(c.kind))
     || (c.type === 'construction' && !isConstruction(c.kind))
@@ -608,7 +615,7 @@ export function execute(account: Account, command: Command, realTime = account.u
       }
       if (availableWorkers(account) < 2) throw new ApiError(409, 'Exploration requires two available residents.');
       const terrain = terrainDetails[terrainAt(command.x, command.y, game.seed)];
-      const quote = explorationQuote(game, command.x, command.y, work.expeditions.length);
+      const quote = explorationQuote(game, command.x, command.y, explorationCount(work.expeditions));
       pay(game, { dollars: quote.dollars });
       const expedition: Expedition = { x: command.x, y: command.y, workers: 2,
         readyAt: account.updatedAt + terrain.weeks * worldWeekMs, surveyRadius: expeditionSurveyRadius(game), dollarReward: quote.reward,
@@ -616,6 +623,27 @@ export function execute(account: Account, command: Command, realTime = account.u
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
       return note(game, `Two residents departed on a ${terrain.weeks}-week expedition. Territory is revealed only on return.`);
+    }
+    case 'investigate': {
+      if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before investigating.');
+      const supplyReason = settlementSupplyReason(account);
+      if (supplyReason) throw new ApiError(409, supplyReason);
+      if (!game.explored.includes(`${command.x},${command.y}`))
+        throw new ApiError(409, 'Investigation requires discovered terrain.');
+      if (Math.hypot(command.x - game.position.x, command.y - game.position.y) > radius(game) + 1)
+        throw new ApiError(409, 'That location is beyond your reach. Explore a little closer first.');
+      const work = workforce(account);
+      if (work.expeditions.some(expedition => expedition.x === command.x && expedition.y === command.y))
+        throw new ApiError(409, 'An expedition is already exploring this destination. Choose another location.');
+      if (availableWorkers(account) < 1) throw new ApiError(409, 'Investigation requires one available resident.');
+      const quote = investigationQuote(game, command.x, command.y);
+      pay(game, { dollars: quote.dollars });
+      const itemFind = investigationItem(terrainAt(command.x, command.y, game.seed), randomInt(100), randomInt(100), randomInt(100));
+      const expedition: Expedition = { kind: 'investigate', x: command.x, y: command.y, workers: 1,
+        readyAt: account.updatedAt + worldDayMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
+      const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
+      work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
+      return note(game, 'One resident departed to investigate known terrain for one game day.');
     }
     case 'assign': {
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');

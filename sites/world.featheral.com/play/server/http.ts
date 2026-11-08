@@ -7,6 +7,8 @@ import type { Store } from './store.ts';
 import { isMarketAsset, isMarketResource, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
+import { inventory } from './inventory.ts';
+import { sellableItemCount } from '../src/items.ts';
 import { ChatHub, chatNickname, chatSubmission } from './chat.ts';
 import { chatCapacity } from '../src/chat.ts';
 import { isAddress, verifyMessage } from 'ethers';
@@ -259,7 +261,8 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       }
       if (request.method === 'GET' && (marketRead || collectionRead) && isMarketAsset(asset)) {
         const saleQuantity = isMarketResource(asset) ? store.read(token, session => collectionRead
-          ? Math.min(marketUrl.searchParams.has('quantity') ? quantity : Number.MAX_SAFE_INTEGER, Math.floor(session.account.pending[asset] / 60000)) : Math.min(quantity, session.account.game.stock[asset])) : 0;
+          ? Math.min(marketUrl.searchParams.has('quantity') ? quantity : Number.MAX_SAFE_INTEGER, Math.floor(session.account.pending[asset] / 60000)) : Math.min(quantity, session.account.game.stock[asset]))
+          : store.read(token, session => Math.min(quantity, sellableItemCount(inventory(session.account), asset)));
         await store.ensureLiquidity?.(token, asset, saleQuantity);
       }
       if (request.method === 'GET' && halfRead) {

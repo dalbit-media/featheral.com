@@ -29,7 +29,7 @@
   #app.explore-page .water-upkeep-row .completion-meter::after{transition:none}
 }
 #app.explore-page #sidebar-content>.sidebar-primary-actions{display:grid;gap:8px;margin:0}
-#app.explore-page .sidebar-action-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#app.explore-page .sidebar-action-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 #app.explore-page .sidebar-action-row>.button{min-height:76px;padding:8px;gap:4px;font-size:12px}
 #app.explore-page .quick-action-heading{font-size:13px}
 .quick-action-compact-label{display:none}

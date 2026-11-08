@@ -67,6 +67,11 @@ export const visibilityKeys = Object.keys(visibilityItems) as VisibilityItem[];
 export function inventoryUsed(bag: ItemInventory): number {
   return bag.items.length + (bag.marketReserved?.length ?? 0);
 }
+export function itemStacks(items: readonly ItemId[]): { id: ItemId; quantity: number }[] {
+  const quantities = new Map<ItemId, number>();
+  for (const id of items) quantities.set(id, (quantities.get(id) ?? 0) + 1);
+  return [...quantities].map(([id, quantity]) => ({ id, quantity }));
+}
 export function isVisibilityItem(value: unknown): value is VisibilityItem {
   return typeof value === 'string' && Object.hasOwn(visibilityItems, value);
 }

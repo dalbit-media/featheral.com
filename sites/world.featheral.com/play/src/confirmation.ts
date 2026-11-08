@@ -60,7 +60,8 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
   };
   if (quote.residents !== undefined) detail('Assigned residents', number(quote.residents));
   if (quote.arrivals !== undefined) detail('Arriving residents', number(quote.arrivals));
-  detail('Duration', quote.weeks === null ? t('Until filled or cancelled') : quote.weeks ? t(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`) : t('Immediate'));
+  detail('Duration', quote.days !== undefined ? t(`${quote.days} game day${quote.days === 1 ? '' : 's'}`)
+    : quote.weeks === null ? t('Until filled or cancelled') : quote.weeks ? t(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`) : t('Immediate'));
   dialog.append(details);
   for (const note of quote.notes) dialog.append(element('p', t(note), 'consumption-note'));
   dialog.append(element('p', t('Nothing is spent until you confirm.'), 'consumption-note'));

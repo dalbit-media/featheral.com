@@ -1,6 +1,8 @@
 import { canAfford, GameError, note, pay, radius } from '../src/engine.ts';
 import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
+import type { CollectionItem } from '../src/collection.ts';
+import type { ActivityItem } from '../src/automation.ts';
 import { craftingCost, craftingFits, craftingIngredients, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
 import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
@@ -98,18 +100,27 @@ export function findCollectible(account: Account, terrain: Terrain): void {
   else bag.pending.push(id);
 }
 export function findCollectionItem(account: Account, terrain: Terrain): void {
-  const bag = inventory(account);
   const resource = terrainResources[terrain];
   const weeks = collectionDurations[terrainDetails[terrain].weeks - 1] ?? 1;
   const item: ExplorationFind = `collection-${resource}-${weeks}`;
-  if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
-  else bag.pending.push(item);
+  addPermitFind(account, item);
 }
 export function findActivityItem(account: Account, terrain: Terrain): void {
-  const bag = inventory(account);
   const activity = activityKinds[Object.keys(terrainDetails).indexOf(terrain) % activityKinds.length];
   const weeks = collectionDurations[terrainDetails[terrain].weeks - 1]!;
   const item: ExplorationFind = `activity-${activity}-${weeks}`;
+  addPermitFind(account, item);
+}
+export function investigationItem(terrain: Terrain, chance: number, tier: number, category: number): CollectionItem | ActivityItem | undefined {
+  if (![chance, tier, category].every(value => Number.isInteger(value) && value >= 0 && value < 100))
+    throw new RangeError('Invalid investigation rolls.');
+  if (chance >= 10) return undefined;
+  const weeks = tier < 90 ? 1 : 4;
+  return category < 50 ? `collection-${terrainResources[terrain]}-${weeks}`
+    : `activity-${activityKinds[Object.keys(terrainDetails).indexOf(terrain) % activityKinds.length]}-${weeks}`;
+}
+export function addPermitFind(account: Account, item: CollectionItem | ActivityItem): void {
+  const bag = inventory(account);
   if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
   else bag.pending.push(item);
 }

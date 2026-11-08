@@ -11,6 +11,7 @@ import type { Customization, CustomizationItem } from './customization.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
+  | { type: 'investigate'; x: number; y: number }
   | { type: 'assign'; resource: Resource; workers: number }
   | { type: 'automatic'; enabled: boolean }
   | { type: 'trade'; resource: Resource; direction: 'buy' | 'sell'; amount: number }
@@ -40,6 +41,8 @@ export interface ResourceCrew {
   payOnPickup?: true;
 }
 export interface Expedition {
+  kind?: 'investigate';
+  itemFind?: CollectionItem | ActivityItem;
   x: number;
   y: number;
   workers: number;

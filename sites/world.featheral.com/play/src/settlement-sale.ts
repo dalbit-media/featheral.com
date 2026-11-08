@@ -97,7 +97,7 @@ export class SettlementSale {
       : t('Only owned resources are sold. Pending resources and escrow are excluded.');
     const reason = message || this.error || (!this.controls.valid
       ? t(this.available() < 1 ? 'No resources available to sell.' : 'Enter a whole trading lot within the available amount.')
-      : this.quote && !this.quote.available ? t('Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.') : '');
+      : this.quote && !this.quote.available ? t('Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.') : '');
     this.root.querySelector('[data-sale-total]')!.textContent = this.quote?.available ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-sale-status]')!.textContent = reason;
     const submit = this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!;

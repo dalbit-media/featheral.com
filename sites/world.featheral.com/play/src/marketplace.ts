@@ -345,7 +345,7 @@ export class Marketplace {
     if (this.side === 'sell' && owned < quantity) reason = isMarketResource(this.asset) ? 'Not enough owned resources for this order.' : 'This item is not in your inventory.';
     if (this.side === 'buy' && dollars !== undefined && dollars > this.state().dollars) reason = 'Not enough FTH$ for this order.';
     if (this.fresh && this.mode === 'spot' && quote && (!quote.available || !quote.dollars)) reason = isMarketResource(this.asset)
-      ? this.side === 'sell' ? 'Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.'
+      ? this.side === 'sell' ? 'Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.'
         : 'Not enough resources in the market. Buy less or try again after players sell.'
       : 'The price changed or not enough items are available. Please try again.';
     this.root.querySelector('[data-market-requirement]')!.textContent = translate(reason, this.language);
@@ -380,9 +380,7 @@ export class Marketplace {
     if (historyDetails) historyDetails.open = historyOpen;
     const levels = (side: 'bids' | 'asks') => `<div class="${side}"><h3>${side === 'bids' ? 'Buying' : 'Selling'}</h3><table><thead><tr><th>Price each</th><th>Amount</th></tr></thead><tbody>${market[side].map(level => `<tr><td><button type="button" class="book-price" data-market-level="${side === 'bids' ? 'sell' : 'buy'}" data-market-level-price="${level.price}" ${this.pending ? 'disabled' : ''}>${this.price(level.price)}</button></td><td>${this.fmt(level.quantity)}</td></tr>`).join('') || '<tr><td colspan="2">No offers yet.</td></tr>'}</tbody></table></div>`;
     const quotedAmount = this.fresh && market.quantity === this.quantity();
-    const pricing = isMarketResource(this.asset)
-      ? 'Resource prices move gently with trades and a 1% spread. Insufficient sale liquidity converts origin FTHG at the active Gold rate. Dollar treasury funds are used only after confirmed origin exhaustion and Ethereum settlement.'
-      : 'Pool prices include a 1% spread. FTH$ displays two decimals and retains four-place game accounting.';
+    const pricing = 'All assets use cost/effect-based starting prices, scarcity-sized pools and a 1% spread. Sale liquidity converts available origin FTHG at the active Gold rate. After origin exhaustion, only remaining pool funds and player bids pay for sales.';
     const separateSale = isMarketResource(this.asset) && this.side === 'sell' && this.mode === 'spot';
     this.root.querySelector('[data-market-book]')!.innerHTML = `<div class="exchange-book">${levels('bids')}${levels('asks')}</div><div class="exchange-pool"><span ${separateSale ? 'hidden' : ''}>Prices for this amount</span><strong ${separateSale ? 'hidden' : ''}><span>Buy</span> ${quotedAmount && market.quotes.buy.available ? this.money(market.quotes.buy.dollars) : '—'} / <span>Sell</span> ${quotedAmount && market.quotes.sell.available ? this.money(market.quotes.sell.dollars) : '—'} FTH$</strong><small>${translate(pricing, this.language)}</small></div>`;
     this.root.querySelector('[data-market-orders]')!.innerHTML = this.table(['Item', 'Type', 'Price each', 'Completed / total', 'Status', 'Action'], market.orders.map(order =>

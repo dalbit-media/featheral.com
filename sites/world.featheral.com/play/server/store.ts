@@ -13,7 +13,7 @@ import { GameFunds } from './funds.ts';
 import type { DollarFunds, FundRequest, FundView, WalletView } from './funds.ts';
 import type { ClockSpeed } from '../src/environment.ts';
 import { enforceMonetaryPolicy } from './monetary-policy.ts';
-import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit } from '../src/market.ts';
+import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit, marketStartingQuantity } from '../src/market.ts';
 import { isTitleItem } from '../src/customization.ts';
 import type { MarketAsset } from '../src/market.ts';
 
@@ -205,16 +205,15 @@ export class SqliteStore implements Store {
     if (!settled) return;
     if (!Number.isSafeInteger(saleQuantity) || saleQuantity < 0) throw new ApiError(400, 'Invalid resource funding quantity.');
     let required = 0n;
-    if (isMarketResource(asset) && saleQuantity > 0) {
+    if (saleQuantity > 0) {
       let target = this.exchange.resourceFundingRequired(asset, saleQuantity);
       if (target === null) {
-        await this.funds.ensureLiquidity(asset, marketQuantityLimit(asset), dollarsUnits(marketBasePrice(asset)));
+        await this.funds.ensureLiquidity(asset, marketStartingQuantity(asset), dollarsUnits(marketBasePrice(asset)));
         target = this.exchange.resourceFundingRequired(asset, saleQuantity);
       }
-      if (target === null) throw new ApiError(503, 'Resource pricing requires funded inventory.');
-      required = target;
+      required = target ?? 0n;
     }
-    await this.funds.ensureLiquidity(asset, marketQuantityLimit(asset), dollarsUnits(marketBasePrice(asset)), required);
+    await this.funds.ensureLiquidity(asset, marketStartingQuantity(asset), dollarsUnits(marketBasePrice(asset)), required);
   }
   get liquidityEnabled(): boolean { return Boolean(this.funds?.liquidityEnabled); }
   read<T>(token: string, operation: (session: Session, now: number, realTime: number) => T): T {

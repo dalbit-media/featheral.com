@@ -93,10 +93,10 @@ function compareMarginal(pool: Pool, side: MarketSide, quantity: number, price: 
   const boundary = BigInt(price) * 100n * units ** 2n;
   return numerator < boundary ? -1 : numerator > boundary ? 1 : 0;
 }
-function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: number, resource = false): void {
+function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: number): void {
   pool.units += side === 'buy' ? -quantity : quantity;
   pool.dollars += side === 'buy' ? dollars : -dollars;
-  if (![pool.units, pool.dollars].every(value => Number.isSafeInteger(value) && (resource ? value >= 0 : value > 0)))
+  if (![pool.units, pool.dollars].every(value => Number.isSafeInteger(value) && value >= 0))
     throw new ApiError(409, 'Market pool limit reached.');
 }
 export class Exchange {
@@ -124,8 +124,8 @@ export class Exchange {
   private pool(asset: MarketAsset): Pool {
     const row = this.db.prepare('SELECT units, dollars FROM market_pools WHERE asset = ?').get(asset)!;
     const pool: Pool = { units: Number(row.units), dollars: Number(row.dollars) };
-    if (isMarketResource(asset)) {
-      // Pricing depth is not spendable inventory or money. Pin once, never grow on trades/top-ups.
+    if (isLiquidAsset(asset)) {
+      // Retain the historical table name. Depth is not spendable; pin once for every asset.
       if (pool.units > 0 && pool.dollars > 0)
         this.db.prepare('INSERT OR IGNORE INTO market_resource_depth VALUES(?,?,?)')
           .run(asset, (BigInt(pool.units) * 9n).toString(), (BigInt(pool.dollars) * 9n).toString());
@@ -141,7 +141,7 @@ export class Exchange {
       .filter(order => order.price >= dollarsUnits(marketPriceFloor(asset)));
   }
   resourceFundingRequired(asset: MarketAsset, quantity: number): bigint | null {
-    if (!isMarketResource(asset) || quantity === 0) return 0n;
+    if (!isLiquidAsset(asset) || quantity === 0) return 0n;
     const pool = this.pool(asset);
     if (pool.depthUnits === undefined || pool.depthDollars === undefined) return null;
     const q = BigInt(quantity), spread = BigInt(monetaryPolicy.poolSpreadPercent);
@@ -186,7 +186,7 @@ export class Exchange {
       if (low) {
         const dollars = poolCost(pool, side, low);
         if (BigInt(dollars) < BigInt(low) * BigInt(floor)) break;
-        steps.push({ quantity: low, dollars, maker: null }); movePool(pool, side, low, dollars, isMarketResource(asset)); remaining -= low;
+        steps.push({ quantity: low, dollars, maker: null }); movePool(pool, side, low, dollars); remaining -= low;
       } else if (maker) {
         const quantity = Math.min(remaining, maker.remaining);
         steps.push({ quantity, dollars: quantity * maker.price, maker }); remaining -= quantity;
@@ -339,10 +339,10 @@ export class Exchange {
       if (command.type === 'limit' && Number(this.db.prepare("SELECT COUNT(*) AS count FROM market_orders WHERE owner = ? AND status = 'open'").get(owner)!.count) >= 50) throw new ApiError(409, 'Cancel an open order before placing more. Maximum 50.');
       const steps = this.plan(owner, asset, command.side, command.quantity, realTime, command.type === 'limit' ? command.price : undefined);
       const filled = steps.reduce((sum, step) => sum + step.quantity, 0), total = steps.reduce((sum, step) => sum + step.dollars, 0);
-      if (command.type === 'spot' && filled !== command.quantity && isMarketResource(asset))
+      if (command.type === 'spot' && filled !== command.quantity)
         throw new ApiError(409, command.side === 'sell'
-          ? 'Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.'
-          : 'Not enough resources in the market. Buy less or try again after players sell.');
+          ? 'Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.'
+          : 'Not enough assets in the market. Buy less or try again after players sell.');
       if (command.type === 'spot' && (filled !== command.quantity || (command.side === 'buy' ? total > command.limitDollars : total < command.limitDollars))) throw new ApiError(409, 'Quote changed or liquidity is insufficient. Refresh the quote.');
       const reservedDollars = command.side === 'buy' ? command.type === 'limit' ? command.price * command.quantity : total : 0;
       this.reserve(account, command, reservedDollars);
@@ -362,7 +362,7 @@ export class Exchange {
           this.db.prepare("UPDATE market_orders SET remaining = remaining - ?, status = CASE WHEN remaining = ? THEN 'filled' ELSE 'open' END WHERE id = ?").run(step.quantity, step.quantity, step.maker.id);
           maker.revision++;
           note(maker.game, 'Marketplace trade completed.');
-        } else movePool(pool, command.side, step.quantity, step.dollars, isMarketResource(asset));
+        } else movePool(pool, command.side, step.quantity, step.dollars);
         if (command.side === 'buy') this.credit(account, asset, step.quantity); else account.game.dollars += step.dollars;
         this.release(account, asset, step.quantity, command.side);
         this.db.prepare('INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,?,?,?,?,?,?,?)')

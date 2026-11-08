@@ -13,7 +13,7 @@ import { dayPhaseIcon, environmentDetails, environmentEffects, overallWeatherImp
 import { environmentAt, seasonMs, worldEpoch } from './environment.ts';
 import { icon } from './icons.ts';
 import type { ItemInventory } from './items.ts';
-import { craftableKeys, itemStorage } from './items.ts';
+import { craftableKeys, inventoryUsed, itemStacks, itemStorage } from './items.ts';
 import { inventoryPanel, craftingPanel } from './inventory-view.ts';
 import { isSettlementTask, settlementDockTasks, settlementTaskFromHash } from './settlement-ui.ts';
 import { createAccount, snapshot } from '../server/economy.ts';
@@ -263,6 +263,24 @@ test('language selection is available only in the landing footer, not the header
   assert.doesNotMatch(simulator, /languageControl|language-picker|data-language|wireLanguageControls/);
   assert.match(simulator, /import \{ language, languageLocale, localize \}/);
   assert.doesNotMatch(readFileSync(new URL('../explore/index.html', import.meta.url), 'utf8'), /data-language|language-picker/);
+});
+test('World roadmap identifies the active phase and keeps revenue, synergy and governance planned in both languages', () => {
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const roadmap = landing.match(/<section id="roadmap"[\s\S]*?<\/section>/)?.[0];
+  assert.ok(roadmap);
+  for (const text of [
+    'Current phase: World building', 'World roadmap', 'Full ecosystem roadmap',
+    'Now: Perfect the world', 'Next: A sustainable standalone business',
+    'Then: Connected business synergy', 'Future: Web3 governance for future innovators',
+  ]) {
+    assert.ok(roadmap.includes(text), text);
+    assert.notEqual(translate(text, 'ko'), text);
+    assert.equal(translate(translate(text, 'ko'), 'en'), text);
+  }
+  assert.match(roadmap, /data-site="foundation" data-path="\/#roadmap"/);
+  assert.match(roadmap, /relic pools start with 100 units, other assets with 10,000/);
+  assert.match(roadmap, /not Foundation governance/);
+  assert.match(roadmap, /World building is active; revenue experiments, deeper integrations and decentralized governance are planned/);
 });
 test('settlement has a dedicated production entry and the header has individual resource controls without aggregate claim', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -573,17 +591,18 @@ test('inventory and crafting are independent tasks with actionable owned equipme
   assert.match(inventoryPanel(state, () => '', 'all', 'en', 'explore', 0, 'lamp'), /data-action="equip" data-item="lamp"/);
   assert.match(sidebarCrafting, /data-action="craft" data-item="lamp"/);
 });
-test('inventory renders exactly 20 compact slots per purchased page, including empty and reserved slots', () => {
+test('inventory renders 20 compact stack slots per distinct-item page, including empty and reserved slots', () => {
   const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'ui-test', population: { global: 0, federation: null }, clockSpeed: 1 };
   const items = [...craftableKeys, ...(Object.keys(terrainDetails) as (keyof typeof terrainDetails)[]).map(terrain => `relic-${terrain}` as const)];
   for (let tier = 0; tier < itemStorage.length; tier++) {
     state.inventory.storage = tier;
     state.inventory.items = items.slice(0, Math.min(21, itemStorage[tier].capacity));
     const before = structuredClone(state);
-    for (let page = 0; page <= tier; page++) {
+    const pages = Math.ceil(state.inventory.items.length / 20);
+    for (let page = 0; page < pages; page++) {
       const html = inventoryPanel(state, () => '', 'all', 'en', 'settlement', page);
       assert.equal((html.match(/class="inventory-slot(?: empty| reserved)?"/g) ?? []).length, 20);
-      assert.equal((html.match(/data-action="inventory-page"/g) ?? []).length, tier + 1);
+      assert.equal((html.match(/data-action="inventory-page"/g) ?? []).length, pages);
       assert.match(html, new RegExp(`data-page="${page}"[^>]+aria-current="page"`));
       const rendered = [...html.matchAll(/data-action="inventory-select" data-item="([^"]+)"/g)].map(match => match[1]);
       assert.deepEqual(rendered, state.inventory.items.slice(page * 20, (page + 1) * 20));
@@ -595,14 +614,52 @@ test('inventory renders exactly 20 compact slots per purchased page, including e
   const reserved = inventoryPanel(state, () => '', 'all', 'en');
   assert.match(reserved, /inventory-slot reserved[^>]+data-item="bench"[^>]+disabled/);
   assert.equal((reserved.match(/inventory-slot empty/g) ?? []).length, 18);
-  assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', 999), /data-page="1"[^>]+aria-current="page"/);
+  assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', 999), /data-page="0"[^>]+aria-current="page"/);
   assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', -1), /data-page="0"[^>]+aria-current="page"/);
   const filtered = inventoryPanel(state, () => '', 'decoration', 'en');
   assert.doesNotMatch(filtered, /data-action="inventory-select" data-item="torch"/);
   assert.equal((filtered.match(/inventory-slot empty/g) ?? []).length, 19);
   assert.doesNotMatch(filtered, /No items on this page yet/);
   state.inventory.equipped = 'torch';
-  assert.match(inventoryPanel(state, () => '', 'all', 'en'), /aria-label="Torch · Equipped"/);
+  assert.match(inventoryPanel(state, () => '', 'all', 'en'), /aria-label="Torch · Quantity: 1 · Equipped"/);
+});
+test('inventory stacks owned and reserved copies without changing capacity, one-copy actions or pending finds', () => {
+  const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'ui-test', population: { global: 0, federation: null }, clockSpeed: 1 };
+  state.inventory.items = ['torch', 'torch', 'bench', 'collection-wood-1', 'collection-wood-1'];
+  state.inventory.marketReserved = ['torch', 'bench', 'bench', 'lamp'];
+  state.inventory.equipped = 'torch';
+  state.inventory.pending = ['collection-water-1', 'collection-water-1', 'activity-exploration-1'];
+  const before = structuredClone(state), html = inventoryPanel(state, () => '', 'all', 'en', 'settlement', 0, 'torch');
+  assert.deepEqual(itemStacks(state.inventory.items), [
+    { id: 'torch', quantity: 2 }, { id: 'bench', quantity: 1 }, { id: 'collection-wood-1', quantity: 2 },
+  ]);
+  assert.equal((html.match(/data-action="inventory-select"/g) ?? []).length, 4);
+  assert.match(html, /aria-label="Torch · Quantity: 3 · Reserved in market: 1 · Equipped"/);
+  assert.match(html, /data-item="torch"[^>]+aria-pressed="true"[^>]*>/);
+  assert.doesNotMatch(html, /data-action="inventory-select" data-item="torch"[^>]+disabled/);
+  assert.match(html, /inventory-slot reserved[^>]+data-item="lamp"[^>]+disabled/);
+  assert.match(html, /<span>Owned<\/span>: 2 · <span>Reserved in market<\/span>: 1/);
+  const pending = html.slice(html.indexOf('class="pending-finds"'), html.indexOf('data-detail="inventory-help"'));
+  assert.equal((pending.match(/<li>/g) ?? []).length, 2);
+  assert.match(pending, /<span>Quantity<\/span>: 2/);
+  assert.equal(inventoryUsed(state.inventory), 9);
+  assert.deepEqual(state, before);
+  const automation = inventoryPanel(state, () => '', 'collectors', 'en');
+  assert.equal((automation.match(/data-action="inventory-select"/g) ?? []).length, 1);
+  assert.match(automation, /data-action="activate-collection" data-item="collection-wood-1"/);
+  assert.match(automation, /class="inventory-quantity" aria-hidden="true">2/);
+  assert.match(inventoryPanel(state, () => '', 'all', 'ko'), /수량: 3 · 거래 주문 예약 중: 1/);
+  for (const storage of [0, 4]) {
+    const full = structuredClone(state);
+    full.inventory.storage = storage;
+    full.inventory.items = Array.from({ length: itemStorage[storage].capacity }, () => 'torch');
+    full.inventory.marketReserved = [];
+    const panel = inventoryPanel(full, () => '', 'all', 'en');
+    assert.equal((panel.match(/data-action="inventory-select"/g) ?? []).length, 1);
+    assert.equal((panel.match(/data-action="inventory-page"/g) ?? []).length, 1);
+    assert.equal(inventoryUsed(full.inventory), itemStorage[storage].capacity);
+    assert.match(panel, new RegExp(`<strong aria-label="Inventory capacity">${itemStorage[storage].capacity} / ${itemStorage[storage].capacity}</strong>`));
+  }
 });
 test('Explore sidebar prioritizes recurring actions and links to detailed settlement management', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -610,9 +667,11 @@ test('Explore sidebar prioritizes recurring actions and links to detailed settle
   for (const action of ['explore', 'collect-items']) assert.match(sidebar, new RegExp(`class="button primary wide[^"]*" data-action="${action}"`));
   assert.doesNotMatch(sidebar, /data-action="claim"/);
   assert.match(sidebar, /class="sidebar-action-row"/);
+  assert.match(sidebar, /investigationButton\(true\)[\s\S]*data-action="explore"/);
   assert.match(sidebar, /completionMeter\(expeditionStartedAt\(nextReturn\), nextReturn\.readyAt, 'Next return'\)/);
   const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
   assert.match(css, /\.sidebar-action-row\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8'), /\.sidebar-action-row\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(sidebar, /recruitmentButton\(true\)/);
   assert.match(sidebar, /class="button sidebar-upgrade"/);
   for (const task of ['residents', 'production', 'crafting']) assert.match(sidebar, new RegExp(`href="/settlement/#${task}"`));

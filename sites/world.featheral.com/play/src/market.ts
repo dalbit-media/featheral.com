@@ -24,8 +24,9 @@ export function isMarketAsset(value: unknown): value is MarketAsset {
 export function isMarketResource(asset: MarketAsset): asset is MarketResource {
   return marketResources.some(resource => resource === asset);
 }
-export function isLiquidAsset(asset: MarketAsset): boolean { return !isCollectible(asset); }
-export function marketQuantityLimit(asset: MarketAsset): number { return isLiquidAsset(asset) ? 10000 : 1; }
+export function isLiquidAsset(_asset: MarketAsset): boolean { return true; }
+export function marketQuantityLimit(asset: MarketAsset): number { return isCollectible(asset) ? 1 : 10000; }
+export function marketStartingQuantity(asset: MarketAsset): number { return isCollectible(asset) ? 100 : 10000; }
 export function marketSaleQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : marketQuantityLimit(asset); }
 export function marketAssetName(asset: MarketAsset): string {
   return isMarketResource(asset) ? ({ wood: 'Wood', water: 'Water', metal: 'Metal', oil: 'Oil' })[asset] : itemName(asset);

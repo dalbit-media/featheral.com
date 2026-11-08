@@ -41,7 +41,7 @@ test('paid pickup, protected collect-and-sell and automation activation have exa
 });
 test('every one-shot gameplay payment matches the authoritative resource deduction', () => {
   const commands: Command[] = [
-    { type: 'move', x: 5, y: 0 }, { type: 'invite' }, { type: 'upgrade' },
+    { type: 'move', x: 5, y: 0 }, { type: 'investigate', x: 0, y: 0 }, { type: 'invite' }, { type: 'upgrade' },
     { type: 'build', kind: 'bank' }, { type: 'build', kind: 'townhall' },
     { type: 'build', kind: 'well' }, { type: 'build', kind: 'rainCollector' }, { type: 'build', kind: 'pumpingStation' },
     { type: 'warehouse' }, { type: 'item-storage' }, { type: 'craft', item: 'bench' },
@@ -59,7 +59,7 @@ test('every one-shot gameplay payment matches the authoritative resource deducti
     }
     assert.equal(before.dollars - after.dollars, quote.costs.find(cost => cost.asset === 'dollars')?.amount ?? 0);
     for (const label of [quote.title, quote.subject, ...quote.notes]) {
-      if (command.type === 'move' && label === quote.subject) continue;
+      if ((command.type === 'move' || command.type === 'investigate') && label === quote.subject) continue;
       assert.notEqual(translate(label, 'ko'), label, label);
     }
   }
@@ -128,8 +128,16 @@ test('market confirmations retain exact FTH$ limits, quantities and held-order s
 test('all common confirmation labels and game-week durations are bilingual', () => {
   for (const label of ['Confirm action', 'Confirm', 'Cancel', 'You spend', 'You receive', 'Assigned residents',
     'Arriving residents', 'Duration', 'Immediate', 'Until filled or cancelled', 'Nothing is spent until you confirm.',
-    'Requirements changed. Review the updated costs and try again.', '1 game weeks', '2 game weeks', '3 game weeks']) {
+    'Requirements changed. Review the updated costs and try again.', '1 game day', '1 game weeks', '2 game weeks', '3 game weeks']) {
     assert.notEqual(translate(label, 'ko'), label, label);
     assert.equal(translate(label, 'en'), label);
+  }
+});
+test('investigation confirmation explains the exact day, probability and fees in both languages', () => {
+  const quote = gameConsumption(snapshot(fixture()), { type: 'investigate', x: 0, y: 0 })!;
+  assert.equal(quote.days, 1); assert.equal(quote.weeks, 0); assert.equal(quote.residents, 1);
+  for (const label of [quote.title, ...quote.notes]) {
+    assert.notEqual(translate(label, 'ko'), label, label);
+    assert.equal(translate(label, 'en'), label, label);
   }
 });

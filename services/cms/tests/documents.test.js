@@ -243,6 +243,31 @@ test('Foundation default upgrades preserve custom body, metadata and draft edits
     assert.equal(current.revision, page.revision);
   }
 });
+test('Foundation roadmap refreshes exact defaults on every page without overwriting custom content', t => {
+  const { pages } = fixture(t);
+  for (const [file, marker] of [
+    ['index.html', 'roadmap'], ['docs/index.html', 'business-roadmap'], ['governance/index.html', 'governance-roadmap'],
+  ]) {
+    const template = pages.documents.template('featheral.com', file);
+    const oldBody = template.body.slice(0, template.body.indexOf(`\n<section id="${marker}">`));
+    const old = { title: template.title, excerpt: template.description,
+      body: validateBody(oldBody.replace(/ data-cms-copy="[^"]*"/g, ''), template.widgets, template.layout) };
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(old)).digest('hex');
+    assert.ok(template.replaces.includes(fingerprint), file);
+    const store = pages.store('featheral.com');
+    const existing = store.publishedPage(template.slug);
+    const original = store.save({ ...old, slug: template.slug, type: 'page', status: 'publish',
+      ...(existing ? { revision: existing.revision } : {}) }, existing?.id);
+    const upgraded = pages.pages('featheral.com').find(page => page.slug === template.slug);
+    assert.equal(upgraded.revision, original.revision + 1);
+    assert.match(upgraded.body, /Current phase: World building/);
+    assert.match(upgraded.body, /future innovators/);
+    assert.match(pages.render('featheral.com', file), /href="\/#roadmap">Roadmap/);
+    const custom = store.save({ ...upgraded, body: upgraded.body + '<p>Custom roadmap decision</p>' }, upgraded.id);
+    assert.equal(pages.pages('featheral.com').find(page => page.id === custom.id).body, custom.body);
+    assert.equal(store.get(custom.id).revision, custom.revision);
+  }
+});
 async function foundationStats(fetch) {
   const nodes = { goldStat: {}, dollarStat: {} }, errors = [];
   vm.runInNewContext(fs.readFileSync(path.join(root, 'shared', 'foundation.js'), 'utf8'), {

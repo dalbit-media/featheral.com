@@ -14,10 +14,10 @@ function liquidityTargets() {
 }
 
 function authorizedLiquidityTargets() {
-  const { marketAssets, isLiquidAsset, marketBasePrice, marketQuantityLimit } = require("../../sites/world.featheral.com/play/src/market.ts");
+  const { marketAssets, isLiquidAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
-    quantity: marketQuantityLimit(asset), pricePerLot: (BigInt(dollarsUnits(marketBasePrice(asset))) * 10n ** 14n).toString(),
+    quantity: marketStartingQuantity(asset), pricePerLot: (BigInt(dollarsUnits(marketBasePrice(asset))) * 10n ** 14n).toString(),
   }]));
 }
 
@@ -60,9 +60,7 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
     },
     supply: () => ledger.summary().supply,
     ...(reserveEngine ? {
-      ensureLiquidity: (asset, quantity, dollars, required = "0") => ["wood", "water", "metal", "oil"].includes(asset)
-        ? reserveEngine.resourceLiquidity(asset, BigInt(required))
-        : reserveEngine.fundMarket(asset, quantity, BigInt(dollars)),
+      ensureLiquidity: (asset, quantity, dollars, required = "0") => reserveEngine.marketLiquidity(asset, BigInt(required)),
       poolSeed: asset => ledger.goldReserve?.pools[asset] || null,
     } : {}),
     prepare(entries) {

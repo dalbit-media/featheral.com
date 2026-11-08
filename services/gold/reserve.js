@@ -38,7 +38,7 @@ function conversionMessage({ amount, nonce, issuedAt, pricing: authorization }, 
     "This reserves an off-chain obligation. It does not transfer Ethereum tokens."].join("\n");
 }
 function goldEntries(ledger, data) {
-  if (data.op === "resource-liquidity") return [
+  if (data.op === "resource-liquidity" || data.op === "market-liquidity") return [
     { account: data.account, delta: data.dollars },
     ...(data.fthg === "0" ? [{ account: TREASURY, delta: (-BigInt(data.dollars)).toString() }] : []),
   ];
@@ -85,11 +85,12 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
     }; };
   }
   if (!state) throw fail("Finite Gold reserve is not initialized.");
-  if (data.op === "resource-liquidity") {
+  if (data.op === "resource-liquidity" || data.op === "market-liquidity") {
     const target = Object.hasOwn(ledger.genesis.goldMarkets || {}, data.asset) ? ledger.genesis.goldMarkets[data.asset] : null;
     const expected = `0x${crypto.createHash("sha256").update(`featheral:dollar:game:pool:${data.asset}`).digest("hex")}`;
-    if (!["wood", "water", "metal", "oil"].includes(data.asset) || !target || data.account !== expected)
-      throw fail("Origin liquidity requires a genesis resource market.");
+    if (data.op === "resource-liquidity" && !["wood", "water", "metal", "oil"].includes(data.asset)
+      || !target || data.account !== expected)
+      throw fail("Origin liquidity requires an authorized genesis market.");
     const seed = state.pools[data.asset], dollars = integer(data.dollars, true), fthg = integer(data.fthg);
     const origin = integer(data.origin), reserve = integer(data.reserve);
     evidence(data.evidence);
@@ -109,6 +110,8 @@ function validateGoldTransaction(ledger, tx, fresh, now) {
         throw fail("Origin cannot cover further allocations; settle pending Ethereum obligations.");
       const quoted = pricing.quote(state, "fthg-to-fthdollar", fthg);
       if (dollars !== quoted / GAME_UNIT * GAME_UNIT) throw fail("Resource conversion differs from the active Gold quote.");
+    } else if (data.op === "market-liquidity") {
+      throw fail("Market liquidity requires origin backing; treasury fallback is disabled.");
     } else if (origin !== 0n || BigInt(state.allocated) + BigInt(state.recycledIn) !== BigInt(state.settledIn)
       || dollars > BigInt(ledger.balance(TREASURY).available)) {
       throw fail("Dollar treasury fallback requires zero verified origin and sufficient existing funds.");
@@ -293,7 +296,7 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
       sourceWallet, reserveWallet, treasuryAccount: TREASURY, redemptionEscrow: REDEMPTION_ESCROW,
       lockedRedemptionDollars: ledger.balance(REDEMPTION_ESCROW).balance,
       genesisHash: ledger.headers[0].H, mode: ledger.genesis.reserveMode || "isolated", ethereumSyncEnabled: false,
-      marketFundingPolicy: "origin-first-finalized-zero-treasury-v1",
+      marketFundingPolicy: "all-assets-origin-only-v1",
       ...(state ? { ...state, ...(state.pricingPolicy ? {
         spotRateFthDollarPerFthg: pricing.spot(state).toString(),
         netAllocated: pricing.position(state).net.toString(), baseTradingRate: "10000",
@@ -340,8 +343,8 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
           continue;
         }
         const tx = ledger.rawBlock(height).x[index], data = tx.d;
-        if (tx.k === "GOLD" && ["fund-market", "refill-market", "resource-liquidity", "redeem", "convert", "sync"].includes(data.op)) {
-          const incoming = data.op === "fund-market" || data.op === "resource-liquidity" || data.op === "convert" || data.direction === "origin-to-reserve";
+        if (tx.k === "GOLD" && ["fund-market", "refill-market", "resource-liquidity", "market-liquidity", "redeem", "convert", "sync"].includes(data.op)) {
+          const incoming = data.op === "fund-market" || data.op === "resource-liquidity" || data.op === "market-liquidity" || data.op === "convert" || data.direction === "origin-to-reserve";
           const fthg = data.op === "refill-market" ? "0" : data.op === "convert" ? data.request.amount : data.fthg;
           const treasury = data.op === "refill-market" || ["fund-market", "resource-liquidity"].includes(data.op) && BigInt(fthg) === 0n;
           items.push({ id: tx.i, hash: ledger.ids.get(tx.i), height, time: new Date(tx.t).toISOString(),
@@ -370,16 +373,18 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
       }
       return status();
     }),
-    resourceLiquidity: (asset, required = null) => serialize(async () => {
-      if (!["wood", "water", "metal", "oil"].includes(asset) || required !== null && (typeof required !== "bigint" || required < 0n))
-        throw fail("Invalid resource funding request.");
+    resourceLiquidity(asset, required = null) { return this.marketLiquidity(asset, required); },
+    marketLiquidity: (asset, required = null) => serialize(async () => {
+      if (typeof asset !== "string" || !Object.hasOwn(ledger.genesis.goldMarkets || {}, asset)
+        || required !== null && (typeof required !== "bigint" || required < 0n))
+        throw fail("Invalid market funding request.");
       beforeMutation();
       const target = ledger.genesis.goldMarkets?.[asset], initial = ledger.goldReserve;
-      if (!target || !initial) throw fail("Initialize the finite resource reserve first.", 503);
+      if (!target || !initial) throw fail("Initialize the finite market reserve first.", 503);
       const account = `0x${crypto.createHash("sha256").update(`featheral:dollar:game:pool:${asset}`).digest("hex")}`;
       const base = BigInt(target.pricePerLot) * BigInt(target.quantity);
       const minimum = required ?? base, desired = minimum > base ? minimum : base;
-      if (desired > BigInt(Number.MAX_SAFE_INTEGER) * GAME_UNIT) throw fail("Resource sale exceeds supported funding.");
+      if (desired > BigInt(Number.MAX_SAFE_INTEGER) * GAME_UNIT) throw fail("Market sale exceeds supported funding.");
       if (initial.pools[asset] && BigInt(ledger.balance(account).available) >= minimum) return initial.pools[asset];
       const balance = await holdings();
       beforeMutation();
@@ -390,14 +395,13 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
       if (balance.origin < pending) throw fail("Origin holdings cannot cover pending obligations. Reconcile authorized Ethereum settlement first.");
       let dollars, fthg = 0n;
       if (balance.origin === 0n) {
-        const treasury = BigInt(ledger.balance(TREASURY).available);
-        dollars = (deficit < treasury ? deficit : treasury) / GAME_UNIT * GAME_UNIT;
+        return { funded: false, reason: "origin-exhausted" };
       } else {
         const remaining = BigInt(state.cap) - BigInt(state.allocated);
         const held = balance.origin > pending ? balance.origin - pending : 0n;
         const priced = state.pricingPolicy ? pricing.position(state).cap - pricing.position(state).net : remaining;
         let high = [remaining, held, priced].reduce((a, b) => a < b ? a : b);
-        if (!high) throw fail("Origin allocations are exhausted but the wallet is not zero. Settle pending Ethereum transfers before treasury fallback.");
+        if (!high) return { funded: false, reason: "origin-allocations-exhausted" };
         if (pricing.quote(state, "fthg-to-fthdollar", high) < deficit) fthg = high;
         else {
           let low = 1n;
@@ -410,11 +414,11 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
         }
         dollars = pricing.quote(state, "fthg-to-fthdollar", fthg) / GAME_UNIT * GAME_UNIT;
       }
-      if (!dollars) throw fail("Origin and available Dollar treasury cannot fund resource sales.");
+      if (!dollars) return { funded: false, reason: "origin-below-accounting-minimum" };
       const quantity = state.pools[asset] ? 0 : Number(dollars / BigInt(target.pricePerLot) < BigInt(target.quantity)
         ? dollars / BigInt(target.pricePerLot) : BigInt(target.quantity));
-      if (!state.pools[asset] && quantity < 2) throw fail("Available backing cannot initialize a two-lot resource market.");
-      commit(`gold:resource:${crypto.randomUUID()}`, { op: "resource-liquidity", asset, account,
+      if (!state.pools[asset] && quantity < 2) return { funded: false, reason: "insufficient-starting-backing" };
+      commit(`gold:market:${crypto.randomUUID()}`, { op: "market-liquidity", asset, account,
         quantity, dollars: dollars.toString(), fthg: fthg.toString(),
         origin: balance.origin.toString(), reserve: balance.reserve.toString(), evidence: balance.evidence });
       return ledger.goldReserve.pools[asset];

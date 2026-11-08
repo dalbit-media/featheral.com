@@ -19,10 +19,10 @@ import { terrainDetails } from '../src/engine.ts';
 import type { MarketAsset, MarketCommand, MarketResponse } from '../src/market.ts';
 import { fundFixtureFromReserves, seedFixturePools } from './test-support.ts';
 
-function setup(path = ':memory:', seeded = true) {
+function setup(path = ':memory:', seeded = true, excluded: readonly MarketAsset[] = []) {
   let time = 1000000;
   const store = new SqliteStore(path, () => time);
-  if (seeded) seedFixturePools(store);
+  if (seeded) seedFixturePools(store, excluded);
   const create = () => {
     const identity = store.create();
     store.transaction(identity.token, session => {
@@ -306,7 +306,7 @@ test('best execution prefers cheaper pools over expensive asks and better player
   } finally { h.store.close(); }
 });
 test('crafted item and collectible trading reserves unique slots, protects equipment and survives cancellation', () => {
-  const h = setup(), a = h.create(), b = h.create();
+  const h = setup(':memory:', true, ['bench', 'relic-forest']), a = h.create(), b = h.create();
   try {
     h.store.transaction(a.token, s => {
       inventory(s.account).items.push('bench', 'torch', 'relic-forest'); inventory(s.account).equipped = 'torch';
@@ -315,7 +315,7 @@ test('crafted item and collectible trading reserves unique slots, protects equip
     });
     assert.throws(() => h.act(a.token, { type: 'spot', asset: 'torch', side: 'sell', quantity: 1, limitDollars: 1 }), /Unequip/);
     h.store.transaction(a.token, s => { inventory(s.account).layout!.positions.bench = { x: 0, y: 2 }; });
-    assert.throws(() => h.act(a.token, { type: 'spot', asset: 'bench', side: 'sell', quantity: 1, limitDollars: 1 }), /return this item/);
+    assert.throws(() => h.act(a.token, { type: 'limit', asset: 'bench', side: 'sell', quantity: 1, price: 1 }), /return this item/);
     h.store.transaction(a.token, s => { delete inventory(s.account).layout!.positions.bench; });
     const ask = h.act(a.token, { type: 'limit', asset: 'bench', side: 'sell', quantity: 1, price: 1000 });
     assert.ok(!ask.inventory.items.includes('bench'));
@@ -392,19 +392,42 @@ test('liquid item quantities fill and cancel independently without losing reserv
     assert.throws(() => h.act(buyer.token, { type: 'limit', asset: 'activity-exploration-1', side: 'buy', quantity: 20, price: .0001 }), /inventory is full/);
   } finally { h.store.close(); }
 });
-test('collectibles have player-only prices while all automation and equipment have demand-driven liquidity', () => {
+test('collectibles, automation and equipment share demand-driven spot liquidity', () => {
   const h = setup(), user = h.create();
   try {
     const collective = h.read(user.token, 'relic-forest').market;
-    assert.equal(collective.quotes.buy.available, false);
-    assert.equal(collective.quotes.sell.available, false);
-    assert.equal(collective.tickers.find(ticker => ticker.asset === 'relic-forest')!.bid, 0);
+    assert.equal(collective.quotes.buy.available, true);
+    assert.equal(collective.quotes.sell.available, true);
+    assert.ok(collective.tickers.find(ticker => ticker.asset === 'relic-forest')!.bid > 0);
+    h.act(user.token, { type: 'spot', asset: 'relic-forest', side: 'buy', quantity: 1, limitDollars: collective.quotes.buy.dollars });
+    const resale = h.read(user.token, 'relic-forest').market.quotes.sell;
+    assert.ok(resale.dollars < collective.quotes.buy.dollars);
+    h.act(user.token, { type: 'spot', asset: 'relic-forest', side: 'sell', quantity: 1, limitDollars: resale.dollars });
+    assert.equal(h.read(user.token).inventory.items.includes('relic-forest'), false);
     for (const asset of ['activity-exploration-1', 'activity-attraction-4', 'collection-wood-12', 'torch'] as const) {
       const before = h.read(user.token, asset, 3).market.quotes.buy.dollars;
       h.act(user.token, { type: 'spot', asset, side: 'buy', quantity: 3, limitDollars: before });
       const after = h.read(user.token, asset, 3).market.quotes.buy.dollars;
       assert.ok(after > before, asset);
       assert.equal(h.read(user.token).inventory.items.filter(item => item === asset).length, 3);
+    }
+  } finally { h.store.close(); }
+});
+test('every catalog asset executes spot buys and sales without creating currency or profitable round trips', () => {
+  const h = setup(), user = h.create();
+  try {
+    const supply = h.store.publicTotals().dollars;
+    for (const asset of marketAssets) {
+      const before = h.read(user.token).dollars;
+      const buy = h.read(user.token, asset).market.quotes.buy;
+      assert.equal(buy.available, true, asset);
+      h.act(user.token, { type: 'spot', asset, side: 'buy', quantity: 1, limitDollars: buy.dollars });
+      const sell = h.read(user.token, asset).market.quotes.sell;
+      assert.equal(sell.available, true, asset);
+      assert.ok(sell.dollars < buy.dollars, asset);
+      h.act(user.token, { type: 'spot', asset, side: 'sell', quantity: 1, limitDollars: sell.dollars });
+      assert.ok(h.read(user.token).dollars < before, asset);
+      assert.equal(h.store.publicTotals().dollars, supply);
     }
   } finally { h.store.close(); }
 });
@@ -426,7 +449,7 @@ test('matching an offline automated maker persists recruitment arrivals and cens
   } finally { h.store.close(); }
 });
 test('reserved item bids cannot overflow inventory or discard a paid expedition find', () => {
-  const h = setup(), a = h.create(), b = h.create();
+  const h = setup(':memory:', true, ['relic-forest', 'relic-water']), a = h.create(), b = h.create();
   try {
     h.store.transaction(a.token, s => {
       inventory(s.account).items.push('torch', 'lamp', 'bench');

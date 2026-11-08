@@ -106,12 +106,12 @@ test('planning values retain physical production and upkeep without creating pri
   assert.equal(formatResourcePrice('wood', 2.5, 'ko-KR'), '0.05');
   assert.equal(formatResourcePrice('wood', .0001, 'en-US'), '0.000002');
 });
-test('dynamic resource pricing and finite treasury explanations are available in Korean', () => {
+test('unified spot pricing and origin exhaustion explanations are available in Korean', () => {
   for (const text of [
     'Current market price', 'Production and upkeep value', 'Baseline output per worker/week', 'Baseline upkeep per resident/week',
     'Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.',
-    'Resource prices move gently with trades and a 1% spread. Insufficient sale liquidity converts origin FTHG at the active Gold rate. Dollar treasury funds are used only after confirmed origin exhaustion and Ethereum settlement.',
-    'Backing is unavailable for this sale. Settle pending Gold transfers or replenish the exhausted Dollar treasury.',
+    'All assets use cost/effect-based starting prices, scarcity-sized pools and a 1% spread. Sale liquidity converts available origin FTHG at the active Gold rate. After origin exhaustion, only remaining pool funds and player bids pay for sales.',
+    'Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.',
     'Not enough resources in the market. Buy less or try again after players sell.',
   ]) assert.notEqual(translate(text, 'ko'), text);
 });
