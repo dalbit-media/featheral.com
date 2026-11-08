@@ -67,7 +67,7 @@ export interface MarketFill {
 export interface MarketQuote { quantity: number; dollars: number; available: boolean }
 export interface MarketSnapshot {
   asset: MarketAsset; quantity: number;
-  tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null }[];
+  tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null; change24h?: number | null; change7d?: number | null }[];
   bids: { price: number; quantity: number }[]; asks: { price: number; quantity: number }[];
   quotes: { buy: MarketQuote; sell: MarketQuote };
   history: MarketFill[]; trades: MarketFill[]; orders: MarketOrder[];

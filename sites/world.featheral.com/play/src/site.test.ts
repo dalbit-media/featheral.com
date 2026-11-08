@@ -970,7 +970,9 @@ test('market grid and table retain all assets, real prices, holdings and safe dr
     assert.match(html, /data-market-quick-side="buy"/);
     assert.match(html, /data-market-quick-side="sell"/);
     assert.match(html, /catalog-last/);
-    assert.doesNotMatch(html, /type="submit"|data-market-submit|>[^<]*\b(?:daily|24h)\b/);
+    const withoutChanges = html.replace(/<span class="catalog-change"[\s\S]*?<\/span>/g, '').replace(/<button[^>]*data-catalog-column="change(?:24h|7d)-low"[^>]*>[^<]*<\/button>/g, '');
+    assert.doesNotMatch(withoutChanges, /type="submit"|data-market-submit|>[^<]*\b(?:daily|24h)\b/);
+    assert.equal(html.match(/data-change-window="24h" data-direction="none"/g)?.length, marketAssets.length);
     const locked = renderMarketCatalog(tickers, state, 'wood', view, language, true);
     assert.equal(locked.match(/\bdisabled/g)?.length, marketAssets.length * 3);
   }

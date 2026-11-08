@@ -11,9 +11,31 @@ import { displayPrice, displayQuantity, formatResourceAmount, formatResourcePric
 import { isCustomizationItem } from './customization.ts';
 
 export type CatalogView = 'grid' | 'table';
-export const catalogSorts = ['name', 'name-desc', 'buy-low', 'buy-high', 'sell-high', 'sell-low', 'owned'] as const;
+export const catalogSorts = ['name', 'name-desc', 'buy-low', 'buy-high', 'sell-high', 'sell-low', 'owned', 'change24h-high', 'change24h-low', 'change7d-high', 'change7d-low'] as const;
 export type CatalogSort = typeof catalogSorts[number];
 type Ticker = MarketSnapshot['tickers'][number];
+export type ChangeWindow = '24h' | '7d';
+export type ChangeDirection = 'up' | 'down' | 'flat' | 'none';
+
+export function priceChange(ticker: Ticker, window: ChangeWindow): number | null {
+  const value = window === '24h' ? ticker.change24h : ticker.change7d;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+export function formatPriceChange(value: number | null, language: Language): { direction: ChangeDirection; text: string } {
+  if (value === null) return { direction: 'none', text: '—' };
+  const rounded = Math.round(value * 10) / 10;
+  if (rounded === 0) return { direction: 'flat', text: `${(0).toLocaleString(locale(language), { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` };
+  const amount = Math.abs(rounded).toLocaleString(locale(language), { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return rounded > 0 ? { direction: 'up', text: `▲ ${amount}%` } : { direction: 'down', text: `▼ ${amount}%` };
+}
+export function renderPriceChange(ticker: Ticker, window: ChangeWindow, language: Language, labelled = false): string {
+  const { direction, text } = formatPriceChange(priceChange(ticker, window), language);
+  const period = translate(window === '24h' ? '24 hours' : '7 days', language);
+  const spoken = direction === 'none' ? translate('No sales yet', language) : direction === 'up' ? `${translate('Up', language)} ${text.slice(2)}`
+    : direction === 'down' ? `${translate('Down', language)} ${text.slice(2)}` : translate('Unchanged', language);
+  const short = translate(window === '24h' ? '24h' : '7d', language);
+  return `<span class="catalog-change" data-change-window="${window}" data-direction="${direction}" title="${translate('Price change', language)} · ${period}" aria-label="${translate('Price change', language)} ${period}: ${spoken}">${labelled ? `<small aria-hidden="true">${short}</small>` : ''}<strong aria-hidden="true">${text}</strong></span>`;
+}
 
 export function marketOwned(state: ApiState, asset: MarketAsset): number {
   return isMarketResource(asset) ? state.game.stock[asset] : state.inventory.items.filter(item => item === asset).length;
@@ -30,6 +52,13 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
     if (priceSide) {
       const aAvailable = marketPriceAvailable(a[priceSide]), bAvailable = marketPriceAvailable(b[priceSide]);
       if (aAvailable !== bAvailable) return aAvailable ? -1 : 1;
+    }
+    const changeWindow: ChangeWindow | null = sort.startsWith('change24h-') ? '24h' : sort.startsWith('change7d-') ? '7d' : null;
+    if (changeWindow) {
+      const aChange = priceChange(a, changeWindow), bChange = priceChange(b, changeWindow);
+      if ((aChange === null) !== (bChange === null)) return aChange === null ? 1 : -1;
+      const changeDifference = aChange === null || bChange === null ? 0 : sort.endsWith('-high') ? bChange - aChange : aChange - bChange;
+      if (changeDifference) return changeDifference;
     }
     const difference = priceSide && !marketPriceAvailable(a[priceSide]) && !marketPriceAvailable(b[priceSide]) ? 0
       : sort === 'buy-low' ? displayPrice(a.asset, a.ask) - displayPrice(b.asset, b.ask)
@@ -56,17 +85,18 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
     const last = ticker.last === null ? '—' : formatResourcePrice(ticker.asset, ticker.last, locale(language));
     const category = isMarketResource(ticker.asset) ? 'Resources' : isCustomizationItem(ticker.asset) ? 'Names & titles' : isAutomationItem(ticker.asset) ? 'Automation'
       : isVisibilityItem(ticker.asset) ? 'Equipment' : isDecorationItem(ticker.asset) ? 'Decorations' : 'Collectibles';
+    const changes = `<div class="catalog-changes">${renderPriceChange(ticker, '24h', language, true)}${renderPriceChange(ticker, '7d', language, true)}</div>`;
     return view === 'grid'
-      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`
-      : `<tr class="catalog-row" data-selected="${ticker.asset === selected}"><td class="catalog-name-cell">${identity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
+      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}${changes}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`
+      : `<tr class="catalog-row" data-selected="${ticker.asset === selected}"><td class="catalog-name-cell">${identity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td><td class="catalog-change-column">${renderPriceChange(ticker, '24h', language)}</td><td class="catalog-change-column">${renderPriceChange(ticker, '7d', language)}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
   }).join('');
   if (!rows) return `<p class="fineprint">${text('No matching items.')}</p>`;
-  const heading = (label: string, ascending: CatalogSort, descending: CatalogSort, className = '') => {
+  const heading = (label: string, ascending: CatalogSort, descending: CatalogSort, className = '', initial = ascending) => {
     const active = sort === ascending || sort === descending;
     const direction = sort === ascending ? 'ascending' : 'descending';
-    const next = sort === ascending ? descending : ascending;
+    const next = active ? sort === ascending ? descending : ascending : initial;
     return `<th class="${className}" aria-sort="${active ? direction : 'none'}"><button type="button" data-catalog-column="${ascending}" data-catalog-sort="${next}" aria-label="${text('Sort by')} ${text(label)} · ${text(next === ascending ? 'Ascending' : 'Descending')}">${text(label)}${active ? sort === ascending ? ' ↑' : ' ↓' : ''}</button></th>`;
   };
   return view === 'grid' ? `<div class="market-catalog-grid">${rows}</div>`
-    : `<table class="market-catalog-table"><thead><tr>${heading('Item', 'name', 'name-desc')}${heading('Buy', 'buy-low', 'buy-high')}${heading('Sell', 'sell-low', 'sell-high')}<th class="catalog-owned-column" aria-sort="${sort === 'owned' ? 'descending' : 'none'}"><button type="button" data-catalog-column="owned" data-catalog-sort="owned" aria-label="${text('Sort by')} ${text('Most owned')}">${text('Owned')}${sort === 'owned' ? ' ↓' : ''}</button></th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    : `<table class="market-catalog-table"><thead><tr>${heading('Item', 'name', 'name-desc')}${heading('Buy', 'buy-low', 'buy-high')}${heading('Sell', 'sell-low', 'sell-high')}${heading('24h', 'change24h-low', 'change24h-high', 'catalog-change-column', 'change24h-high')}${heading('7d', 'change7d-low', 'change7d-high', 'catalog-change-column', 'change7d-high')}<th class="catalog-owned-column" aria-sort="${sort === 'owned' ? 'descending' : 'none'}"><button type="button" data-catalog-column="owned" data-catalog-sort="owned" aria-label="${text('Sort by')} ${text('Most owned')}">${text('Owned')}${sort === 'owned' ? ' ↓' : ''}</button></th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }

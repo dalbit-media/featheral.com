@@ -101,8 +101,10 @@ function movePool(pool: Pool, side: MarketSide, quantity: number, dollars: numbe
 }
 export class Exchange {
   private db: SqliteDatabase;
-  constructor(db: SqliteDatabase) {
+  private clockSpeed: number;
+  constructor(db: SqliteDatabase, clockSpeed = 1) {
     this.db = db;
+    this.clockSpeed = clockSpeed;
     db.exec(`CREATE TABLE IF NOT EXISTS market_pools (asset TEXT PRIMARY KEY, units INTEGER NOT NULL, dollars INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS market_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, asset TEXT NOT NULL,
       side TEXT NOT NULL, price INTEGER NOT NULL, quantity INTEGER NOT NULL, remaining INTEGER NOT NULL, status TEXT NOT NULL, createdAt INTEGER NOT NULL);
@@ -112,6 +114,7 @@ export class Exchange {
       CREATE TABLE IF NOT EXISTS market_fills (id INTEGER PRIMARY KEY AUTOINCREMENT, asset TEXT NOT NULL, quantity INTEGER NOT NULL,
       dollars INTEGER NOT NULL, price REAL NOT NULL, time INTEGER NOT NULL, venue TEXT NOT NULL, buyer TEXT NOT NULL, seller TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS market_history ON market_fills(asset, id);
+      CREATE INDEX IF NOT EXISTS market_fills_time ON market_fills(asset, time, id);
       CREATE INDEX IF NOT EXISTS market_fills_buyer ON market_fills(buyer, id);
       CREATE INDEX IF NOT EXISTS market_fills_seller ON market_fills(seller, id);
       CREATE TABLE IF NOT EXISTS market_receipts (owner TEXT NOT NULL, id TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,id));`);
@@ -195,7 +198,15 @@ export class Exchange {
     }
     return steps;
   }
-  read(owner: string, account: Account, _now: number, realTime: number, asset: MarketAsset, quantity: number): ExchangeResult {
+  private priceChange(asset: MarketAsset, now: number, realDays: number, last: number): number | null {
+    // Fill times use the accelerated server clock; convert the real-day window into server time.
+    const cutoff = now - realDays * 86400000 * this.clockSpeed;
+    const reference = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time <= ? ORDER BY time DESC, id DESC LIMIT 1').get(asset, cutoff)
+      ?? this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time > ? ORDER BY time ASC, id ASC LIMIT 1').get(asset, cutoff);
+    const base = Number(reference?.price);
+    return Number.isFinite(base) && base > 0 ? (last - base) / base * 100 : null;
+  }
+  read(owner: string, account: Account, now: number, realTime: number, asset: MarketAsset, quantity: number): ExchangeResult {
     const level = (side: MarketSide) => this.db.prepare(`SELECT price, SUM(remaining) AS quantity FROM market_orders o
       JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = ? AND status = 'open' AND s.expires > ? AND price >= ?
       GROUP BY price ORDER BY price ${side === 'buy' ? 'DESC' : 'ASC'} LIMIT 12`).all(asset, side, realTime, dollarsUnits(marketPriceFloor(asset)))
@@ -220,7 +231,9 @@ export class Exchange {
         const poolAsk = pooled && poolSideAvailable(pool, 'buy', floor) ? poolCost(pool, 'buy', 1) : 0;
         return { asset, bid: Math.max(poolBid >= floor ? poolBid : 0, Number(bid?.price ?? 0)) / dollarsScale,
           ask: Math.min(poolAsk >= floor ? poolAsk : Number.MAX_SAFE_INTEGER, Number(ask?.price ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
-          last: last ? Number(last.price) / dollarsScale : null };
+          last: last ? Number(last.price) / dollarsScale : null,
+          change24h: last ? this.priceChange(asset, now, 1, Number(last.price)) : null,
+          change7d: last ? this.priceChange(asset, now, 7, Number(last.price)) : null };
       }),
       history: fills(this.db.prepare('SELECT id, asset, quantity, dollars, price, time, venue FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 120').all(asset)).reverse(),
       trades: fills(this.db.prepare('SELECT * FROM market_fills WHERE buyer = ? OR seller = ? ORDER BY id DESC LIMIT 30').all(owner, owner)),

@@ -199,18 +199,31 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app .catalog-view-switch{padding:2px;gap:2px}
 #app .catalog-view-switch button{min-height:36px;padding:6px;font-size:11px}
 #app .exchange-assets{max-height:min(58dvh,640px);min-height:160px}
-#app .market-catalog-grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px}
-#app .catalog-tile{padding:8px;gap:5px;border-radius:9px;background:#14231b}
-#app .catalog-card-meta{font-size:9px;line-height:1.35;gap:3px}
+#app .market-catalog-grid{grid-template-columns:repeat(auto-fill,minmax(188px,1fr));gap:10px}
+#app .catalog-tile{padding:12px;gap:8px;border-radius:12px;background:#14231b}
+#app .catalog-card-meta{font-size:10px;line-height:1.35;gap:4px}
 #app .catalog-card-meta>span:first-child{display:none}
-#app .catalog-holdings{padding:2px 4px;max-width:100%}
-#app .catalog-tile .catalog-identity{grid-template-columns:24px minmax(0,1fr);gap:6px;padding:0;min-height:44px}
-#app .catalog-tile .catalog-identity>span>strong{font-size:11px;line-height:1.4;min-height:0}
-#app .catalog-tile .catalog-identity>.icon,#app .catalog-tile .catalog-identity>.item-art{width:24px;height:24px}
-#app .catalog-tile .catalog-price{padding:5px;min-height:54px;gap:2px}
+#app .catalog-holdings{padding:2px 6px;max-width:100%}
+#app .catalog-tile .catalog-identity{grid-template-columns:40px minmax(0,1fr);gap:10px;padding:0;min-height:48px}
+#app .catalog-tile .catalog-identity>span>strong{font-size:13px;line-height:1.4;min-height:0}
+#app .catalog-tile .catalog-identity>.icon,#app .catalog-tile .catalog-identity>.item-art{width:40px;height:40px}
+#app .catalog-tile .catalog-price{padding:7px 6px;min-height:58px;gap:2px}
 #app .catalog-price strong{font-size:11px}
+#app .catalog-tile .catalog-price strong{font-size:13px}
 #app .catalog-price small{font-size:10px}
-#app .catalog-tile .catalog-last{display:none}
+#app .catalog-tile .catalog-last{display:flex;font-size:10px;padding-top:6px}
+#app .catalog-changes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+#app .catalog-change{display:inline-flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0;padding:4px 7px;border-radius:7px;background:#ffffff08;color:#a6b49d;font-variant-numeric:tabular-nums;white-space:nowrap}
+#app .catalog-changes .catalog-change{flex-direction:column;align-items:flex-start;justify-content:center;gap:1px}
+#app .catalog-change small{font-size:10px;color:#92a586}
+#app .catalog-change strong{font-size:12px;font-weight:700}
+#app .catalog-change[data-direction=up]{background:#3ccf7a1c;color:#6ee69a}
+#app .catalog-change[data-direction=down]{background:#ff5d5d1c;color:#ff8a80}
+#app .catalog-change[data-direction=flat],#app .catalog-change[data-direction=none]{color:#a6b49d}
+#app .market-catalog-table .catalog-change{padding:3px 6px;justify-content:flex-end}
+#app .market-catalog-table .catalog-change strong{font-size:11px}
+#app .market-catalog-table .catalog-change-column{text-align:right;white-space:nowrap}
+#app .instrument-changes{max-width:260px;margin-top:6px}
 #app .market-catalog-table .catalog-identity{min-height:44px}
 #app .market-catalog-table .catalog-price{min-height:44px;padding:4px}
 #app .market-catalog-table .catalog-identity :is(.icon,.item-art){width:24px;height:24px}
@@ -343,7 +356,15 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
   #app .catalog-current>span{display:none}
   #app .catalog-current-price{font-size:10px}
   #app .exchange-assets{max-height:340px;min-height:130px}
-  #app .market-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #app .market-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #app .catalog-tile{padding:10px;gap:7px}
+  #app .catalog-tile .catalog-identity{grid-template-columns:32px minmax(0,1fr);gap:8px}
+  #app .catalog-tile .catalog-identity>.icon,#app .catalog-tile .catalog-identity>.item-art{width:32px;height:32px}
+  #app .catalog-changes{gap:4px}
+  #app .catalog-change{padding:3px 5px;gap:1px}
+  #app .catalog-change small{font-size:9px}
+  #app .catalog-change strong{font-size:11px}
+  #app .market-catalog-table .catalog-change{padding:2px 4px}
   #app .catalog-price{min-width:0}
   #app .market-catalog-table .catalog-last-column{display:none}
   #app .market-catalog-table .catalog-name-cell{min-width:90px}

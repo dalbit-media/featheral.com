@@ -70,7 +70,7 @@ export class SqliteStore implements Store {
     this.chatDirectory = new ChatDirectoryStore(this.db);
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.exchange = new Exchange(this.db);
+      this.exchange = new Exchange(this.db, clockSpeed);
       enforceMonetaryPolicy(this.db);
       this.db.exec('CREATE TABLE IF NOT EXISTS population_totals (scope TEXT PRIMARY KEY, total INTEGER NOT NULL CHECK (total >= 0))');
       if (!this.db.prepare("SELECT 1 FROM population_totals WHERE scope = 'global'").get()) {

@@ -75,6 +75,26 @@ test('resource prices have only the accounting minimum and reject zero-price ord
     }
   } finally { h.store.close(); }
 });
+test('ticker price changes use real 24-hour and 7-day windows on the accelerated server clock', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    const speed = 20, day = 86400000 * speed, now = 30 * day, exchange = new Exchange(db, speed), account = createFundedFixtureAccount(1000000);
+    db.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, expires INTEGER, data TEXT)');
+    const fill = db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,?,'system','a','b')");
+    for (const [time, price] of [[now - 8 * day, 100], [now - 6 * day, 200], [now - 2 * day, 400], [now - day / 2, 500]] as const)
+      fill.run('wood', price, price, time);
+    fill.run('lamp', 300, 300, now - day / 4);
+    const tickers = exchange.read('owner', account, now, 1000000, 'wood', 1).market.tickers;
+    const wood = tickers.find(ticker => ticker.asset === 'wood')!, lamp = tickers.find(ticker => ticker.asset === 'lamp')!;
+    assert.equal(wood.change24h, 25);
+    assert.equal(wood.change7d, 400);
+    assert.equal(lamp.change24h, 0);
+    assert.equal(lamp.change7d, 0);
+    const torch = tickers.find(ticker => ticker.asset === 'torch')!;
+    assert.equal(torch.change24h, null);
+    assert.equal(torch.change7d, null);
+  } finally { db.close(); }
+});
 test('resource pricing depth survives exchange reinitialization and never grows with reserves', () => {
   const db = sqlite.open(':memory:');
   try {
