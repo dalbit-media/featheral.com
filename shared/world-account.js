@@ -4,8 +4,21 @@
   const worldOrigin = `${local ? "http://world.localhost" : "https://world.featheral.com"}${local && location.port ? ":" + location.port : ""}`;
   const onWorld = location.hostname === "world.featheral.com" || location.hostname === "world.localhost" || location.hostname === "localhost";
   const endpoint = (onWorld ? "" : worldOrigin) + "/api/world-account";
-  let current = null, signer = null, refreshing = null;
+  let current = null, signer = null, refreshing = null, signerTimer, signerExpires = 0, signerGeneration = 0, remoteWindow, signing = false;
+  const unlockWait = 30 * 60000;
+  function lock() {
+    signer = null; signerExpires = 0; signerGeneration++; clearTimeout(signerTimer);
+  }
+  function touchSigner() {
+    if (signer && Date.now() >= signerExpires) lock();
+    clearTimeout(signerTimer);
+    if (signer) { signerExpires = Date.now() + unlockWait; signerTimer = setTimeout(lock, unlockWait); }
+  }
+  function setSigner(value) {
+    lock(); signer = value; signerExpires = Date.now() + unlockWait; touchSigner();
+  }
   async function request(path, input) {
+    if (path === "/logout") lock();
     const response = await fetch(endpoint + path, { method: input === undefined ? "GET" : "POST",
       credentials: "include", cache: "no-store", signal: AbortSignal.timeout(15000),
       ...(input === undefined ? {} : { headers: { "Content-Type": "application/json", "X-CSRF-Token": current?.csrf || "" }, body: JSON.stringify(input) }) });
@@ -39,7 +52,7 @@
         }
       }
     }
-    if (current?.account !== next.account) signer = null;
+    if (current?.account !== next.account || current?.csrf !== next.csrf) lock();
     current = next;
     if (window.FeatheralProfile) {
       window.FeatheralProfile.setWorldSession(next, next.account ? provider : null);
@@ -68,36 +81,19 @@
     if (refreshing) await refreshing;
     return refresh();
   }
-  function review(message, passwordRequired) {
-    return new Promise((resolve, reject) => {
-      const dialog = document.createElement("dialog"); dialog.className = "world-sign-dialog";
-      const heading = document.createElement("h2"); heading.textContent = "Approve World signature";
-      const explanation = document.createElement("p"); explanation.textContent = "Read the exact request. Approving signs this message; it does not send an Ethereum transaction.";
-      const pre = document.createElement("pre"); pre.textContent = message; pre.setAttribute("data-no-localize", "");
-      const form = document.createElement("form");
-      const label = document.createElement("label"); label.textContent = "World password";
-      const password = document.createElement("input"); password.type = "password"; password.autocomplete = "current-password"; password.required = passwordRequired;
-      label.append(password); label.hidden = !passwordRequired;
-      const approve = document.createElement("button"); approve.type = "submit"; approve.textContent = "Approve";
-      const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Cancel";
-      const finish = value => { dialog.close(); dialog.remove(); resolve(value); };
-      cancel.onclick = () => { dialog.close(); dialog.remove(); reject(new Error("Signature cancelled.")); };
-      dialog.addEventListener("cancel", event => { event.preventDefault(); cancel.click(); });
-      form.onsubmit = event => { event.preventDefault(); finish(password.value); };
-      form.append(label, approve, cancel); dialog.append(heading, explanation, pre, form); document.body.append(dialog); dialog.showModal();
-    });
-  }
   function remoteSign(message, account) {
     return new Promise((resolve, reject) => {
       const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(value => value.toString(16).padStart(2, "0")).join("");
       const popupUrl = new URL("/account/", worldOrigin);
       popupUrl.searchParams.set("approve", nonce); popupUrl.searchParams.set("parentOrigin", location.origin);
-      const popup = window.open(popupUrl.href, "featheral-world-sign", "popup,width=540,height=740");
+      const popup = remoteWindow && !remoteWindow.closed ? remoteWindow : window.open(popupUrl.href, "featheral-world-sign", "popup,width=480,height=760");
+      remoteWindow = popup;
       if (!popup) { reject(new Error("Allow the World sign-in popup to approve this action.")); return; }
       let timer, closedTimer, settled = false;
       const finish = (error, signature) => {
         if (settled) return; settled = true;
-        clearTimeout(timer); clearInterval(closedTimer); window.removeEventListener("message", receive); popup.close();
+        clearTimeout(timer); clearInterval(closedTimer); window.removeEventListener("message", receive);
+        if (error && !popup.closed) popup.postMessage({ type: "featheral:world-sign-cancel", nonce }, worldOrigin);
         if (error) reject(error); else resolve(signature);
       };
       const receive = event => {
@@ -114,6 +110,8 @@
         }
       };
       window.addEventListener("message", receive);
+      popup.focus();
+      popup.postMessage({ type: "featheral:world-sign-ping", nonce }, worldOrigin);
       timer = setTimeout(() => finish(new Error("World signature timed out. Retry.")), 180000);
       closedTimer = setInterval(() => { if (popup.closed) finish(new Error("World signature window was closed.")); }, 500);
     });
@@ -123,39 +121,67 @@
       if (method === "eth_chainId") return "0x1";
       if (method === "eth_accounts" || method === "eth_requestAccounts") return current?.account ? [current.account] : [];
       if (method !== "personal_sign") throw new Error("World accounts support message signing only. Use the wallet for transfers.");
+      if (signing) throw new Error("Finish the pending World signature first.");
       const [hex, account] = params;
       if (!current?.account || account.toLowerCase() !== current.account.toLowerCase()) throw new Error("World account changed. Sign in again.");
       if (!/^0x(?:[0-9a-f]{2})+$/i.test(hex) || hex.length > 128000) throw new Error("Invalid signature request.");
       const message = new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(hex.slice(2).match(/../g), byte => parseInt(byte, 16)));
-      if (!onWorld) {
-        const signature = await remoteSign(message, account);
-        if (current?.account?.toLowerCase() !== account.toLowerCase()) throw new Error("World account changed while signing.");
-        return signature;
-      }
-      const sessionAccount = current.account;
-      const password = await review(message, current.walletType === "built-in" && !signer);
-      if (current.walletType === "built-in") {
-        if (!signer) {
-          const backup = await request("/backup", {});
-          signer = await ethers.Wallet.fromEncryptedJson(backup.keystore, password);
+      signing = true;
+      try {
+        if (!onWorld) {
+          const signature = await remoteSign(message, account);
+          if (current?.account?.toLowerCase() !== account.toLowerCase()) throw new Error("World account changed while signing.");
+          return signature;
         }
-        if (signer.address.toLowerCase() !== sessionAccount.toLowerCase()) throw new Error("Wallet backup does not match your World account.");
-        const signature = await signer.signMessage(message);
-        if (current?.account !== sessionAccount) throw new Error("World account changed while signing.");
-        return signature;
-      }
-      const wallets = window.ethereum?.providers || [window.ethereum];
-      for (const external of wallets) {
-        if (!external) continue;
-        const accounts = await external.request({ method: "eth_requestAccounts" });
-        if (accounts[0]?.toLowerCase() === account.toLowerCase()) return external.request({ method, params });
-      }
-      throw new Error("Connect the external wallet used to sign in to World.");
+        if (!window.FeatheralWallet?.approveSignature) throw new Error("Web wallet is still loading. Retry shortly.");
+        const sessionAccount = current.account, sessionToken = current.csrf;
+        return await window.FeatheralWallet.approveSignature({
+          message, account, origin: location.origin,
+          cancel: () => { signerGeneration++; },
+          lock,
+          passwordRequired: () => {
+            if (signer && Date.now() >= signerExpires) lock();
+            return current?.walletType === "built-in" && !signer;
+          },
+          async sign(password) {
+            await refresh();
+            if (signer && Date.now() >= signerExpires) lock();
+            if (current?.account !== sessionAccount || current.csrf !== sessionToken) throw new Error("World account changed. Sign in again.");
+            const generation = signerGeneration;
+            if (current.walletType === "built-in") {
+              if (!signer) {
+                const backup = await request("/backup", {});
+                const unlocked = await ethers.Wallet.fromEncryptedJson(backup.keystore, password);
+                if (generation !== signerGeneration || current?.account !== sessionAccount) throw new Error("Wallet was locked or changed during unlock.");
+                if (unlocked.address.toLowerCase() !== sessionAccount.toLowerCase()) throw new Error("Wallet backup does not match your World account.");
+                signer = unlocked; signerExpires = Date.now() + unlockWait;
+              }
+              const active = signer;
+              touchSigner();
+              const signature = await active.signMessage(message);
+              if (generation !== signerGeneration || signer !== active || current?.account !== sessionAccount) throw new Error("Wallet was locked or changed while signing.");
+              return signature;
+            }
+            const wallets = window.ethereum?.providers || [window.ethereum];
+            for (const external of wallets) {
+              if (!external) continue;
+              const accounts = await external.request({ method: "eth_requestAccounts" });
+              if (accounts[0]?.toLowerCase() !== account.toLowerCase()) continue;
+              const signature = await external.request({ method, params });
+              if (generation !== signerGeneration || current?.account !== sessionAccount
+                || (await external.request({ method: "eth_accounts" }))[0]?.toLowerCase() !== account.toLowerCase())
+                throw new Error("Wallet changed while signing.");
+              return signature;
+            }
+            throw new Error("Connect the external wallet used to sign in to World.");
+          },
+        });
+      } finally { signing = false; }
     },
   };
   window.FeatheralWorldAccount = {
     refresh, request, url, provider, snapshot: () => current, signInWallet,
-    setSigner: value => { signer = value; },
+    setSigner, lock,
     async requireProfile() {
       const session = await refresh();
       if (!session.complete) { location.replace(url()); return false; }
@@ -163,4 +189,10 @@
     },
   };
   window.addEventListener("focus", () => { refresh().catch(error => console.error("World sign-in refresh:", error)); });
+  window.addEventListener("pagehide", lock);
+  window.addEventListener("featheral:wallet-lock", lock);
+  window.addEventListener("storage", event => {
+    if (["featheral-encrypted-wallet-v1", "featheral-wallet-active-account", "featheral-wallet-public-account", "featheral-wallet-reset", null].includes(event.key)) lock();
+  });
+  for (const name of ["pointerdown", "keydown"]) window.addEventListener(name, event => { if (event.isTrusted) touchSigner(); }, { passive: true });
 })();

@@ -116,6 +116,11 @@ body[data-primary]:not([data-embedded=true]) .wallet-safety{display:grid;grid-te
 #site-connection{border:1px solid var(--line);border-radius:12px;padding:14px;margin:16px 0}
 .wallet-approval{box-sizing:border-box;width:min(460px,calc(100% - 24px));max-height:calc(100dvh - 24px);margin:auto;padding:20px 20px 0;border:1px solid var(--line);border-radius:20px;background:var(--panel);color:var(--txt);overflow:auto;overscroll-behavior:contain;box-shadow:0 20px 60px #0004;font:inherit}
 .wallet-approval::backdrop{background:#0009}
+body[data-approval] > main,body[data-approval] > footer{display:none!important}
+body[data-approval] > .wallet-approval:not([data-active-approval]){display:none!important}
+body[data-approval] > .wallet-approval[open]{position:relative;inset:auto;width:100%;max-height:none;margin:0;padding:16px 16px 0;border:0;border-radius:12px;box-shadow:none}
+.wallet-approval input[type=password]{box-sizing:border-box;width:100%;min-height:48px;margin-top:8px}
+.wallet-approval label small{display:block;margin-top:8px;font-size:12px;line-height:1.5;color:var(--muted)}
 .approval-heading{display:flex;align-items:center;gap:12px;margin-bottom:18px}
 .approval-mark{display:grid;place-items:center;width:44px;height:44px;flex:none;border-radius:12px;background:var(--btn);color:var(--brand)}
 .approval-mark svg{width:26px;height:26px}

@@ -147,7 +147,12 @@ async function mountFeatheralWallet(context) {
   let builtInActive = false, vaultDraft, idleAt = Date.now(), refreshQueued = false, returnedAddress, siteApproval;
   const sendSite = data => context ? context.onMessage(data) : window.opener.postMessage(data, config.parentOrigin);
   function announceSiteAccount() {
-    if (!siteApproval || siteApproval.address || !owner || !token) return;
+    if (!siteApproval || siteApproval.address) return;
+    const record = vault?.read();
+    if (!token && builtInPreferred && record?.address.toLowerCase() === publicAddress()?.toLowerCase()) {
+      owner = record.address; builtInActive = true;
+    }
+    if (!owner || !token && !builtInActive) return;
     siteApproval.address = owner;
     sendSite({ type: "featheral:wallet-auth-ready", nonce: siteApproval.nonce, address: owner });
   }
@@ -172,8 +177,111 @@ async function mountFeatheralWallet(context) {
     const fraction = symbol === "FTH$" ? (value % scale).toString().padStart(2, "0").replace(/0+$/, "") : "";
     return `${signed < 0n ? "-" : ""}${(value / scale).toLocaleString()}${fraction ? "." + fraction : ""} ${symbol}`;
   };
-  const status = error => { console.error(error); $("status").textContent = error.message; };
+  const walletError = error => error.code === "INVALID_ARGUMENT" && error.argument === "password"
+    ? "Incorrect wallet password. Try again." : error.message;
+  const status = error => { console.error(error); $("status").textContent = walletError(error); };
+  function showApproval(id) {
+    if (context) {
+      document.body.dataset.approval = id;
+      for (const dialog of document.querySelectorAll(".wallet-approval")) {
+        if (dialog.id === id) dialog.setAttribute("data-active-approval", "");
+        else dialog.removeAttribute("data-active-approval");
+      }
+      if (!$(id).open) $(id).show();
+      context.root.host?.closest("dialog")?.scrollTo(0, 0);
+    } else if (!$(id).open) $(id).showModal();
+  }
+  function restoreApproval() {
+    if (!context) return;
+    const active = document.body.dataset.approval;
+    if (active && $(active).open) return;
+    const open = [...document.querySelectorAll(".wallet-approval")].find(dialog => dialog.open);
+    if (open) showApproval(open.id);
+    else delete document.body.dataset.approval;
+  }
+  for (const dialog of document.querySelectorAll(".wallet-approval")) listen(dialog, "close", restoreApproval);
+  let worldApproval;
+  function approveSignature(input) {
+    if (!busy) operationRejected = false;
+    requireVisible();
+    if (worldApproval) throw new Error("Finish the pending signature request first.");
+    const dialog = $("world-wallet-approval"), password = $("world-wallet-password");
+    $("world-wallet-origin").textContent = input.origin || location.origin;
+    $("world-wallet-account").textContent = input.account;
+    $("world-wallet-message").textContent = input.message;
+    $("world-wallet-status").textContent = "";
+    $("world-wallet-status").setAttribute("role", "status");
+    for (const id of ["world-wallet-password", "world-wallet-confirm", "world-wallet-reject", "world-wallet-lock"]) $(id).disabled = false;
+    const update = () => {
+      const locked = input.passwordRequired();
+      $("world-wallet-unlock").hidden = !locked; password.required = locked;
+      $("world-wallet-lock").hidden = locked || !input.lock;
+      $("world-wallet-confirm").textContent = locked ? "Unlock and approve" : "Approve signature";
+      $("world-wallet-state").textContent = locked ? "Locked wallet · password required for this approval"
+        : "Wallet ready · review this request before approving";
+    };
+    update(); password.value = "";
+    $("world-wallet-lock").onclick = () => { input.lock?.(); update(); };
+    return new Promise((resolve, reject) => {
+      const approval = { cancel() {
+        if (worldApproval !== approval) return;
+        worldApproval = null; input.cancel?.(); password.value = ""; dialog.close();
+        reject(new Error("Signature cancelled."));
+      } };
+      worldApproval = approval;
+      $("world-wallet-reject").onclick = approval.cancel;
+      $("world-wallet-form").onsubmit = event => {
+        event.preventDefault();
+        if (worldApproval !== approval || dialog.getAttribute("aria-busy") === "true") return;
+        dialog.setAttribute("aria-busy", "true"); $("world-wallet-confirm").disabled = true;
+        $("world-wallet-status").textContent = "Unlocking and approving the exact request...";
+        void (async () => {
+          try {
+            requireVisible();
+            const signature = await input.sign(password.value); password.value = "";
+            requireVisible();
+            if (worldApproval !== approval) throw new Error("Signature cancelled.");
+            worldApproval = null; dialog.close(); resolve(signature);
+          } catch (error) {
+            console.error("Wallet signature:", error); password.value = "";
+            if (worldApproval === approval) {
+              $("world-wallet-status").textContent = walletError(error); $("world-wallet-status").setAttribute("role", "alert"); update();
+            }
+          } finally { dialog.removeAttribute("aria-busy"); $("world-wallet-confirm").disabled = false; }
+        })();
+      };
+      dialog.oncancel = event => { event.preventDefault(); approval.cancel(); };
+      dialog.onkeydown = event => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); approval.cancel(); }
+      };
+      try {
+        showApproval("world-wallet-approval");
+        $("world-wallet-reject").focus({ preventScroll: true });
+      } catch (error) { worldApproval = null; password.value = ""; reject(error); }
+    });
+  }
   let reviewResult, reviewApproved = false;
+  function needsUnlock() { return builtInActive && !vault?.signer; }
+  function updateApprovalUnlock(prefix) {
+    const locked = needsUnlock();
+    $(prefix + "-unlock").hidden = !locked;
+    $(prefix === "site" ? "site-approve" : "wallet-review-confirm").textContent = locked ? "Unlock and approve"
+      : prefix === "site" ? $("site-approval-title").textContent : "Approve";
+  }
+  async function unlockForApproval(prefix) {
+    if (!needsUnlock()) return;
+    const password = $(prefix + "-password");
+    try {
+      if (!password.value) throw new Error("Enter your wallet password to unlock and approve.");
+      const expected = owner, startingContext = contextEpoch;
+      await vault.unlock(password.value);
+      if (startingContext !== contextEpoch || owner !== expected || vault.signer.address.toLowerCase() !== expected.toLowerCase()) {
+        vault.lock(); throw new Error("Wallet changed during unlock.");
+      }
+      idleAt = Date.now();
+      updateVault();
+    } finally { password.value = ""; }
+  }
   function review(message, title = "Review wallet operation") {
     requireVisible();
     if (reviewResult || $("site-approval").open) throw new Error("Finish the pending wallet approval first.");
@@ -184,12 +292,13 @@ async function mountFeatheralWallet(context) {
     $("wallet-review-status").textContent = "";
     $("wallet-review-confirm").disabled = false; $("wallet-review-confirm").textContent = "Approve";
     $("wallet-review-cancel").disabled = false;
+    $("wallet-review-password").value = ""; updateApprovalUnlock("wallet-review");
     reviewApproved = false;
     $("wallet-review").removeAttribute("aria-busy");
     if ($("wallet-review").open) $("wallet-review").close();
     return new Promise((resolve, reject) => {
       reviewResult = resolve;
-      try { $("wallet-review").showModal(); }
+      try { showApproval("wallet-review"); }
       catch (error) { reviewResult = null; reject(error); }
     });
   }
@@ -207,7 +316,15 @@ async function mountFeatheralWallet(context) {
     if (reviewApproved) { ++contextEpoch; operationRejected = true; status(new Error("Wallet operation rejected.")); }
     finishReview(false);
   }
-  $("wallet-review-confirm").addEventListener("click", () => { if (reviewResult) finishReview(true); });
+  $("wallet-review-confirm").addEventListener("click", async () => {
+    if (!reviewResult || $("wallet-review-confirm").disabled) return;
+    $("wallet-review-confirm").disabled = true;
+    try {
+      await unlockForApproval("wallet-review");
+      if (reviewResult) finishReview(true);
+    } catch (error) { status(error); $("wallet-review-status").textContent = walletError(error); }
+    finally { if (reviewResult) { $("wallet-review-confirm").disabled = false; updateApprovalUnlock("wallet-review"); } }
+  });
   $("wallet-review-cancel").addEventListener("click", rejectReview);
   $("wallet-review").addEventListener("cancel", event => {
     event.preventDefault();
@@ -226,6 +343,7 @@ async function mountFeatheralWallet(context) {
   function closeSiteApproval() {
     $("site-approval").close();
     $("site-connection").hidden = true;
+    $("site-password").value = "";
     $("site-approval").removeAttribute("aria-busy");
   }
   function cancelSiteApproval(message = "Wallet request rejected.") {
@@ -830,6 +948,8 @@ async function mountFeatheralWallet(context) {
     storage.removeItem("featheral-wallet-reset"); locallyReset = false;
     if (vault && (builtInPreferred || !providerChoices().length)) {
       if (vault.signer) { await loginWallet(vault.signer.address, true); return true; }
+      const record = vault.read();
+      if (record) { await loginWallet(record.address, true); return true; }
       tab("account"); $("local-wallet").open = true;
       $("vault-action").value = vault.read() ? "unlock" : "create"; updateVault();
       $("vault-password").focus(); return false;
@@ -851,7 +971,10 @@ async function mountFeatheralWallet(context) {
   $("connect").addEventListener("click", async () => {
     if (busy) return; lock(true);
     try {
-      if (token) { await api("/logout", {}); vault?.lock(); builtInActive = false; reset(); updateVault(); await refresh(); return; }
+      if (token) {
+        await api("/logout", {}); vault?.lock(); window.dispatchEvent(new Event("featheral:wallet-lock"));
+        builtInActive = false; reset(); updateVault(); await refresh(); return;
+      }
       if (!await ensureSession()) return;
       await refresh(); $("status").textContent = "";
     } catch (error) { status(error); }
@@ -1013,7 +1136,7 @@ async function mountFeatheralWallet(context) {
   async function vaultWork(work) {
     if (busy) return; lock(true);
     try { await work(); $("vault-status").textContent = ""; }
-    catch (error) { console.error("Built-in wallet:", error); $("vault-status").textContent = error.message; }
+    catch (error) { console.error("Built-in wallet:", error); $("vault-status").textContent = walletError(error); }
     finally { lock(false); updateVault(); }
   }
   async function loginWallet(address, local) {
@@ -1072,13 +1195,13 @@ async function mountFeatheralWallet(context) {
     if (!response.ok) throw new Error(`Wallet logout failed (HTTP ${response.status}).`);
   }
   function expireVault() {
-    if (!vault?.signer || Date.now() - idleAt < 600000) return false;
+    if (!vault?.signer || Date.now() - idleAt < 1800000) return false;
     vault.lock();
     const localSession = builtInActive && token;
     builtInActive = false;
     if (localSession) { reset(); endLocalSession(localSession).catch(status); }
     updateVault();
-    $("vault-status").textContent = "Wallet locked after ten minutes of inactivity. Unlock before spending.";
+    $("vault-status").textContent = "Wallet locked after 30 minutes of inactivity. Unlock to approve your next request.";
     return true;
   }
   if (vault) {
@@ -1136,6 +1259,7 @@ async function mountFeatheralWallet(context) {
     });
     $("vault-lock").addEventListener("click", () => vaultWork(async () => {
       vault.lock();
+      window.dispatchEvent(new Event("featheral:wallet-lock"));
       for (const id of ["vault-password", "vault-confirm", "vault-activate-password"]) $(id).value = "";
       if (builtInActive) {
         builtInActive = false;
@@ -1152,7 +1276,9 @@ async function mountFeatheralWallet(context) {
       if (!await review("Link this external wallet? Both accounts must sign. Balances stay separate and no transfers are authorized.", "Approve wallet link")) return;
       await vault.link(browserProvider); await refresh();
     }));
-    for (const name of ["pointerdown", "keydown"]) document.addEventListener(name, () => { expireVault(); idleAt = Date.now(); }, true);
+    for (const name of ["pointerdown", "keydown"]) document.addEventListener(name, event => {
+      if (event.isTrusted) { expireVault(); idleAt = Date.now(); }
+    }, true);
     setInterval(expireVault, 10000);
     document.addEventListener("visibilitychange", expireVault);
     listen(window, "pageshow", updateVault);
@@ -1302,12 +1428,13 @@ async function mountFeatheralWallet(context) {
                   : "Sign-in does not transfer funds or cost gas. Review the exact message before approving.";
           $("site-message").textContent = event.data.message;
           $("site-approve").disabled = false;
-          $("site-status").textContent = builtInActive ? "Approve using your unlocked built-in wallet."
+          $("site-status").textContent = builtInActive ? needsUnlock() ? "Enter your password below to unlock and approve this request." : "Approve using your unlocked built-in wallet."
             : "After approval, confirm the signature in your wallet extension.";
           if (reviewResult) throw new Error("Finish the pending wallet approval first.");
           reviewApproved = false; $("wallet-review").close();
           $("site-connection").hidden = true;
-          $("site-approval").showModal();
+          $("site-password").value = ""; updateApprovalUnlock("site");
+          showApproval("site-approval");
         } catch (error) {
           status(error); $("site-status").textContent = error.message;
           cancelSiteApproval(error.message);
@@ -1326,6 +1453,8 @@ async function mountFeatheralWallet(context) {
       try {
         window.FeatheralSignIn.validate(approval.address, approval.message, true, config.parentOrigin);
         if (owner?.toLowerCase() !== approval.address.toLowerCase()) throw new Error("Wallet changed. Start sign-in again.");
+        await unlockForApproval("site");
+        if (siteApproval !== approval) throw new Error("Wallet approval cancelled.");
         const signature = await sign(approval.message);
         if (siteApproval !== approval || owner?.toLowerCase() !== approval.address.toLowerCase()) throw new Error("Sign-in cancelled or wallet changed.");
         siteApproval = null; closeSiteApproval();
@@ -1335,13 +1464,14 @@ async function mountFeatheralWallet(context) {
       } catch (error) {
         status(error);
         if (siteApproval === approval) {
-          $("site-status").textContent = `${error.message}\nRetry approval or reject this request.`;
+          $("site-status").textContent = `${walletError(error)}\nRetry approval or reject this request.`;
           $("site-approve").disabled = false;
         }
       } finally {
         $("site-approval").removeAttribute("aria-busy");
         $("site-approve").textContent = $("site-approval-title").textContent;
         lock(false);
+        updateApprovalUnlock("site");
       }
     });
     $("site-cancel").addEventListener("click", () => cancelSiteApproval());
@@ -1377,7 +1507,7 @@ async function mountFeatheralWallet(context) {
   }
   try { if (context && interactive) await resume(); else await refresh(); } catch (error) { status(error); }
   return {
-    tab,
+    tab, approveSignature,
     async resume() {
       try { await resume(); } catch (error) { status(error); throw error; }
     },
@@ -1386,14 +1516,18 @@ async function mountFeatheralWallet(context) {
       cancelWorldSync();
       siteApproval = null; closeSiteApproval();
       finishReview(false);
-      vault?.lock();
-      for (const id of ["vault-password", "vault-confirm", "vault-activate-password"]) $(id).value = "";
-      const session = builtInActive && token;
-      if (session) { builtInActive = false; reset(); await endLocalSession(session); }
+      worldApproval?.cancel();
+      for (const id of ["vault-password", "vault-confirm", "vault-activate-password", "site-password", "wallet-review-password"]) $(id).value = "";
+      expireVault();
       connectionLabel();
       updateVault();
     },
-    dispose() { for (const release of cleanup.splice(0)) release(); },
+    dispose() {
+      worldApproval?.cancel(); vault?.lock();
+      const session = builtInActive && token;
+      if (session) endLocalSession(session).catch(status);
+      for (const release of cleanup.splice(0)) release();
+    },
   };
 }
 window.FeatheralWalletApp = { mount: mountFeatheralWallet };

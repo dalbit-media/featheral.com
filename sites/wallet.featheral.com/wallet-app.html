@@ -63,6 +63,7 @@
     <dl class="approval-identity"><dt>Requesting site</dt><dd id="wallet-review-origin"></dd><dt>Signing account</dt><dd id="wallet-review-account"></dd></dl>
     <p id="wallet-review-message" class="approval-message"></p>
     <p id="wallet-review-safety" class="approval-safety">Only approve requests you initiated. Verify the account, asset and exact details.</p>
+    <label id="wallet-review-unlock" hidden>Unlock to approve<input id="wallet-review-password" type="password" autocomplete="current-password"><small>Unlocked for 30 minutes of inactivity. Every request still requires approval.</small></label>
     <p id="wallet-review-status" role="status" aria-live="polite"></p>
     <div class="approval-actions"><button id="wallet-review-cancel" type="button" autofocus>Reject</button><button id="wallet-review-confirm" class="approval-confirm" type="button">Approve</button></div>
   </dialog>
@@ -71,8 +72,22 @@
     <dl class="approval-identity"><dt>Requesting site</dt><dd id="site-origin"></dd><dt>Signing account</dt><dd id="site-account"></dd></dl>
     <p id="site-safety" class="approval-safety">Sign-in does not transfer funds or cost gas. Review the exact message before approving.</p>
     <details class="approval-details" open><summary>Exact request</summary><pre id="site-message" class="approval-message"></pre></details>
+    <label id="site-unlock" hidden>Unlock to approve<input id="site-password" type="password" autocomplete="current-password"><small>Unlocked for 30 minutes of inactivity. Every request still requires approval.</small></label>
     <p id="site-status" role="status" aria-live="polite"></p>
     <div class="approval-actions"><button id="site-cancel" type="button" autofocus>Reject</button><button id="site-approve" class="approval-confirm" type="button" disabled>Approve sign-in</button></div>
+  </dialog>
+  <dialog id="world-wallet-approval" class="wallet-approval" aria-labelledby="world-wallet-title">
+    <div class="approval-heading"><span class="approval-mark" aria-hidden="true">&#9670;</span><div><p class="approval-eyebrow">Signature request</p><h2 id="world-wallet-title">Review and approve</h2></div></div>
+    <dl class="approval-identity"><dt>Requesting site</dt><dd id="world-wallet-origin"></dd><dt>Signing account</dt><dd id="world-wallet-account"></dd></dl>
+    <p class="approval-safety">Only approve a request you initiated. A signature can authorize a transfer or account action. Verify the exact request below.</p>
+    <details class="approval-details" open><summary>Exact request</summary><pre id="world-wallet-message" class="approval-message" data-no-localize></pre></details>
+    <form id="world-wallet-form">
+      <label id="world-wallet-unlock">Unlock to approve<input id="world-wallet-password" type="password" autocomplete="current-password"><small>Your key stays in memory for 30 minutes of inactivity. Every request still needs approval.</small></label>
+      <p id="world-wallet-state" class="approval-safety"></p>
+      <button id="world-wallet-lock" type="button">Lock wallet</button>
+      <p id="world-wallet-status" role="status" aria-live="polite"></p>
+      <div class="approval-actions"><button id="world-wallet-reject" type="button">Reject</button><button id="world-wallet-confirm" class="approval-confirm" type="submit">Approve signature</button></div>
+    </form>
   </dialog>
   <footer class="wallet-safety" aria-label="Wallet safety">
     <div><strong>Your keys, your wallet</strong><p>Self-custody keys stay on this device. Save your encrypted recovery backup and keep its password safe.</p></div>

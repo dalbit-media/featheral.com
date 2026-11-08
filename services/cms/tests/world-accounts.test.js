@@ -259,7 +259,7 @@ test("World wallet switching requires the selected wallet's signature and publis
   };
   const context = vm.createContext({
     window, location: { hostname: "world.localhost", origin: "http://world.localhost:8080", port: "8080", href: "http://world.localhost:8080/" },
-    URL, AbortSignal, CustomEvent, ethers, console,
+    URL, AbortSignal, CustomEvent, ethers, console, setTimeout, clearTimeout,
     fetch: async (url, options) => {
       requests.push({ url, body: options.body && JSON.parse(options.body) });
       if (url.endsWith("/challenge")) {
@@ -351,12 +351,12 @@ test("Media signing bridge binds the World popup, origin, nonce, message and sig
   const message = socialMessage("SESSION", { w: wallet.address, k: key.address, exp: Date.now() + 86400000,
     n: "ab".repeat(12), ts: new Date().toISOString() });
   const listeners = new Map(), timers = new Map(), posts = [];
-  let popupUrl = "", timerId = 0, selectedProvider = null;
-  const popup = { closed: false, close() { this.closed = true; }, postMessage: (data, origin) => posts.push({ data, origin }) };
+  let popupUrl = "", timerId = 0, selectedProvider = null, openings = 0;
+  const popup = { closed: false, focus() {}, close() { this.closed = true; }, postMessage: (data, origin) => posts.push({ data, origin }) };
   const window = {
     addEventListener: (type, callback) => listeners.set(type, callback),
     removeEventListener: type => listeners.delete(type),
-    open: url => { popupUrl = url; return popup; },
+    open: url => { popupUrl = url; openings++; return popup; },
     dispatchEvent() {},
     FeatheralProfile: { setWorldSession: (_session, provider) => { selectedProvider = provider; } },
   };
@@ -377,13 +377,22 @@ test("Media signing bridge binds the World popup, origin, nonce, message and sig
   listener({ origin: "https://evil.example", source: popup, data: reply });
   listener({ origin: "http://world.localhost:8080", source: {}, data: reply });
   listener({ origin: "http://world.localhost:8080", source: popup, data: { ...reply, nonce: "bad" } });
-  assert.equal(posts.length, 0);
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].data.type, "featheral:world-sign-ping");
   listener({ origin: "http://world.localhost:8080", source: popup, data: reply });
-  assert.equal(posts[0].origin, "http://world.localhost:8080");
-  assert.equal(posts[0].data.message, message); assert.equal(posts[0].data.account, wallet.address);
+  assert.equal(posts[1].origin, "http://world.localhost:8080");
+  assert.equal(posts[1].data.message, message); assert.equal(posts[1].data.account, wallet.address);
   const signature = await wallet.signMessage(message);
   listener({ origin: "http://world.localhost:8080", source: popup, data: { type: "featheral:world-sign-result", nonce, signature } });
   assert.equal(await pending, signature); assert.equal(timers.size, 0);
+  assert.equal(popup.closed, false);
+  const repeated = world.provider.request({ method: "personal_sign", params: [ethers.hexlify(ethers.toUtf8Bytes(message)), wallet.address] });
+  const nextNonce = posts.at(-1).data.nonce;
+  assert.notEqual(nextNonce, nonce); assert.equal(openings, 1);
+  const nextListener = listeners.get("message");
+  nextListener({ origin: "http://world.localhost:8080", source: popup, data: { ...reply, nonce: nextNonce } });
+  nextListener({ origin: "http://world.localhost:8080", source: popup, data: { type: "featheral:world-sign-result", nonce: nextNonce, signature } });
+  assert.equal(await repeated, signature); assert.equal(timers.size, 0);
   popup.closed = false;
   const closed = world.provider.request({ method: "personal_sign", params: [ethers.hexlify(ethers.toUtf8Bytes(message)), wallet.address] });
   const rejection = assert.rejects(closed, /window was closed/);

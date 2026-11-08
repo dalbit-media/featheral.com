@@ -342,7 +342,6 @@ export class AccountPane {
     try {
       await loadWorldWallet();
       const moveGuestFunds = false, separateWorldFunds = true;
-      if (!confirm(this.t('Authorize a separate World budget? Existing funds stay where they are. Gameplay spends only World funds, not your wallet.'))) return;
       const csrf = this.snapshot().csrf;
       let issuedAt = '';
       const { address, signature } = await window.FeatheralWallet!.authenticate(async address => {

@@ -36,7 +36,8 @@ test('the account pane has accessible modal controls, settings and explicitly un
   assert.match(pane, /window\.dispatchEvent\(new Event\(chatProfileChangedEvent\)\)/);
   assert.match(pane, /data-fund-wallet-link/);
   assert.match(pane, /linkFundWallet\(csrf, address, issuedAt, signature, moveGuestFunds, separateWorldFunds\)/);
-  assert.match(pane, /Authorize a separate World budget/);
+  assert.match(pane, /FeatheralWallet!\.authenticate/);
+  assert.doesNotMatch(pane, /\bconfirm\(/);
   assert.match(pane, /Guest FTH\$ stays in World/);
   assert.doesNotMatch(pane, /data-withdrawal-form|Withdrawals unavailable/);
   assert.match(pane, /personal_sign/);

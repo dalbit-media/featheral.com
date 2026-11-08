@@ -4,7 +4,7 @@
   const site = location.hostname.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar", "pay"].includes(site) ? "FTH$" : "FTHX";
   const selectionKey = "featheral-wallet-public-account", headerButtons = new Map(), mounts = new Map();
-  let assets, authorization, selectedPublicAddress, avatarUrl, avatarAccount, connectionState = "disconnected", anchorButton;
+  let assets, authorization, signaturePending = false, selectedPublicAddress, avatarUrl, avatarAccount, connectionState = "disconnected", anchorButton;
   try { selectedPublicAddress = localStorage.getItem(selectionKey); }
   catch (error) { console.error("Wallet selection unavailable:", error); }
   if (!/^0x[0-9a-f]{40}$/i.test(selectedPublicAddress || "")) selectedPublicAddress = null;
@@ -33,6 +33,8 @@
   }
   async function select(address) {
     if (!/^0x[0-9a-f]{40}$/i.test(address || "")) throw new Error("Invalid wallet account.");
+    if (selectedPublicAddress && selectedPublicAddress.toLowerCase() !== address.toLowerCase())
+      window.dispatchEvent(new Event("featheral:wallet-lock"));
     selectedPublicAddress = address;
     if (connectionState === "disconnected") connectionState = "selected";
     try { localStorage.setItem(selectionKey, address); }
@@ -149,8 +151,9 @@
     }
   }
   function mount(root, options = {}) {
-    const params = settings(options), key = params.toString(), previous = mounts.get(root);
-    if (previous?.key === key) return previous.ready;
+    const params = settings(options), identity = new URLSearchParams(params); identity.delete("view");
+    const key = identity.toString(), previous = mounts.get(root);
+    if (previous?.key === key) return previous.ready.then(app => { app.tab(options.view || "assets"); return app; });
     if (previous) {
       previous.closed = true;
       if (authorization?.entry === previous) authorization.finish(new Error("Wallet context changed. Retry connecting."));
@@ -209,11 +212,15 @@
     return entry.ready;
   }
   function open(options = {}) {
+    if (signaturePending) {
+      const current = document.getElementById("featheral-central-wallet");
+      if (current?.open) { current.focus(); return current; }
+    }
     if (authorization) {
       const dialog = authorization.entry.root.closest("dialog");
       if (dialog?.open) { dialog.focus(); return dialog; }
     }
-    options = { ...options, followActive: options.followActive !== false };
+    options = { compact: true, ...options, followActive: options.followActive !== false };
     let dialog = document.getElementById("featheral-central-wallet");
     if (!dialog) {
       dialog = document.createElement("dialog"); dialog.id = "featheral-central-wallet"; dialog.setAttribute("aria-label", "Wallet");
@@ -246,6 +253,7 @@
     return dialog;
   }
   function authorize(challenge, selectOnly) {
+    if (signaturePending) return Promise.reject(new Error("Finish the existing wallet signature first."));
     if (authorization) return Promise.reject(new Error("Finish the existing wallet connection first."));
     if (!selectOnly && typeof challenge !== "function") return Promise.reject(new Error("A site sign-in challenge is required."));
     const dialog = open({ view: "account" }), entry = mounts.get(dialog.querySelector("[data-wallet-root]"));
@@ -263,6 +271,18 @@
         if (authorization === pending) entry.context.receive({ type: "featheral:wallet-auth-start", nonce: entry.nonce });
       }).catch(error => pending.finish(error));
     });
+  }
+  async function approveSignature(input) {
+    if (signaturePending) throw new Error("Finish the existing wallet signature first.");
+    signaturePending = true;
+    try {
+      const dialog = open({ view: "account" }), entry = mounts.get(dialog.querySelector("[data-wallet-root]"));
+      const app = await entry.ready;
+      if (!dialog.open || entry.closed) throw new Error("Wallet popup closed.");
+      const signature = await app.approveSignature(input);
+      if (!authorization) dialog.close();
+      return signature;
+    } finally { signaturePending = false; }
   }
   function apply() {
     for (const [root, entry] of mounts) if (!root.isConnected) {
@@ -318,7 +338,7 @@
   window.visualViewport?.addEventListener("scroll", reposition);
   window.addEventListener("focus", apply);
   document.addEventListener("featheral:site-ready", apply);
-  window.FeatheralWallet = { mount, open, apply, authenticate: challenge => authorize(challenge, false),
+  window.FeatheralWallet = { mount, open, apply, approveSignature, authenticate: challenge => authorize(challenge, false),
     account: () => authorize(null, true), connect: options => open({ ...options, view: "account" }) };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
 })();

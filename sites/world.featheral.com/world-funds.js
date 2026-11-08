@@ -190,7 +190,7 @@
     $("back").onclick = () => { $("review").hidden = true; };
     $("refresh").onclick = () => void refresh().catch(report);
     $("authorize").onclick = () => void (async () => {
-      if (busy || !confirm("Stop direct-wallet gameplay spending and enable a separate budget? No funds move. Future deposits and withdrawals require approval.")) return;
+      if (busy) return;
       busy = true; controls();
       try {
         const authorization = await api("funds/authorization", { address: view.wallet });

@@ -16,6 +16,7 @@ class Element {
   getAttribute(name) { return this[name]; }
   removeAttribute(name) { delete this[name]; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
+  removeEventListener(name) { delete this.listeners[name]; }
   async fire(name, event = {}) { await this.listeners[name]?.({ preventDefault() {}, ...event }); }
   click() { return this.fire('click'); }
 }
@@ -32,6 +33,10 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   nodes['wallet-review'].close = () => { nodes['wallet-review'].open = false; };
   nodes['site-approval'].showModal = () => { nodes['site-approval'].open = true; };
   nodes['site-approval'].close = () => { nodes['site-approval'].open = false; };
+  nodes['wallet-review'].show = nodes['wallet-review'].showModal;
+  nodes['site-approval'].show = nodes['site-approval'].showModal;
+  nodes['world-wallet-approval'].showModal = nodes['world-wallet-approval'].show = () => { nodes['world-wallet-approval'].open = true; };
+  nodes['world-wallet-approval'].close = () => { nodes['world-wallet-approval'].open = false; };
   const panels = ['assets', 'send', 'receive', 'swap', 'activity', 'account'].map(id => nodes[id]);
   const tabs = ['assets', 'send', 'receive', 'swap', 'activity', 'account'].map(id => {
     const node = nodes['tab-' + id]; node.dataset.tab = id; node.role = 'tab'; return node;
@@ -44,6 +49,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   let providerAccounts = [address];
   const connectionStates = [];
   let funded = true, rejectSignature = false, tipReceiptLost = false, swapReceiptLost = false, completes = 0, elapsed = 0;
+  const clockStart = Date.now();
   const pendingMarkets = [];
   const pendingSignatures = [], pendingLogins = [], providerListeners = {}, providerCalls = [];
   const documentListeners = {}, windowListeners = {}, intervals = [], popups = [], messages = [];
@@ -115,7 +121,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
       : selector === '[role="tab"]' ? tabs : selector === 'form' ? ['send-form', 'swap-form', 'vault-form'].map(id => nodes[id]) : Object.values(nodes) };
   const clipboard = [];
   const context = { document, navigator: { clipboard: { writeText: async text => clipboard.push(text) } }, location: new URL(`http://${host}.localhost:8080/wallet/#${view === 'assets' ? 'swap' : view}`), localStorage: storage, sessionStorage: storage,
-    URL, URLSearchParams, TextEncoder, crypto, fetch, AbortSignal, Event: class {}, Date: class extends Date { static now() { return Date.now() + elapsed; } },
+    URL, URLSearchParams, TextEncoder, crypto, fetch, AbortSignal, Event: class {}, Date: class extends Date { static now() { return clockStart + elapsed; } },
     setInterval(callback, delay) { intervals.push({ callback, delay }); }, clearInterval() {}, setTimeout, clearTimeout, btoa: value => Buffer.from(value).toString('base64'),
     console: { error: error => errors.push(error.message) }, history: { replaceState() {} },
     window: { opener: { postMessage: (data, origin) => messages.push({ data, origin }) },
@@ -186,7 +192,8 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
       for (const listener of windowListeners.message || []) listener({ origin, source, data: { type: 'featheral:wallet-updated' } });
       await new Promise(resolve => setImmediate(resolve));
     },
-    advanceTime: ms => { elapsed += ms; }, interact: () => { for (const listener of documentListeners.pointerdown || []) listener(); },
+    now: () => clockStart + elapsed,
+    advanceTime: ms => { elapsed += ms; }, interact: () => { for (const listener of documentListeners.pointerdown || []) listener({ isTrusted: true }); },
     storageChange: async (key, value) => {
       if (value === null) store.delete(key); else store.set(key, value);
       for (const listener of windowListeners.storage || []) listener({ key });
@@ -269,27 +276,28 @@ test('without an injected provider the built-in wallet unlocks and authenticates
     async sign(message, owner) { assert.equal(message, 'mock login challenge'); assert.equal(owner, address); return 'local-owner-signature'; }
     lock() { this.signer = null; }
   }
-  const ui = await fixture('dollar', { embedded: true, noProvider: true, vaultApi: { Vault: LocalVault } });
+  const ui = await fixture('dollar', { embedded: true, noProvider: true, vaultApi: { Vault: LocalVault }, manualReview: true });
   assert.ok(ui.calls.some(call => call.url === '/api/wallet/accounts/' + address));
-  await ui.nodes.connect.fire('click');
-  assert.equal(ui.nodes.account.hidden, false);
-  assert.equal(ui.nodes['local-wallet'].open, true);
-  assert.equal(ui.nodes['vault-action'].value, 'unlock');
-  ui.nodes['vault-password'].value = 'test vault password';
-  await ui.nodes['vault-form'].fire('submit');
+  const connecting = ui.nodes.connect.fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  assert.equal(ui.nodes['wallet-review-unlock'].hidden, false);
+  ui.nodes['wallet-review-password'].value = 'test vault password';
+  await ui.nodes['wallet-review-confirm'].fire('click'); await connecting;
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(ui.errors, []);
   assert.equal(ui.nodes.connect.textContent, 'Disconnect wallet');
   assert.equal(ui.store.has('featheral-creation-token'), false);
   assert.equal(ui.nodes['vault-password'].value, '');
   assert.equal(ui.calls.find(call => call.url.endsWith('/login')).body.signature, 'local-owner-signature');
-  ui.advanceTime(600001); ui.interact();
+  ui.advanceTime(1799999); ui.interact();
+  assert.match(ui.nodes['vault-state'].textContent, /Unlocked/);
+  ui.advanceTime(1800000); ui.interact();
   assert.equal(ui.nodes.connect.textContent, 'Unlock built-in wallet');
   assert.match(ui.nodes['vault-status'].textContent, /inactivity/);
   assert.match(ui.nodes['vault-state'].textContent, /Locked/);
-  ui.nodes['vault-password'].value = 'test vault password';
-  await ui.nodes['vault-form'].fire('submit');
-  await new Promise(resolve => setImmediate(resolve));
+  const reconnecting = ui.nodes.connect.fire('click'); await new Promise(setImmediate);
+  ui.nodes['wallet-review-password'].value = 'test vault password';
+  await ui.nodes['wallet-review-confirm'].fire('click'); await reconnecting;
   await ui.nodes['vault-lock'].fire('click');
   assert.equal(ui.nodes.connect.textContent, 'Unlock built-in wallet');
   assert.ok(ui.calls.some(call => call.url.endsWith('/logout')));
@@ -440,7 +448,7 @@ async function siteRequest(ui, message) {
   const address = '0x' + '11'.repeat(20), nonce = 'ab'.repeat(16);
   ui.localContext.receive({ type: 'featheral:wallet-auth-start', nonce });
   ui.localContext.receive({ type: 'featheral:wallet-auth', nonce, address,
-    message: message || require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), Date.now()) });
+    message: message || require('../lib/wallet').signInMessage('Featheral X', address, 'cd'.repeat(16), ui.now()) });
 }
 test('site approval is a dedicated dialog with origin, account and sign-in safety, not an inline section', async () => {
   const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true });
@@ -564,7 +572,7 @@ test('a login arriving after the wallet closes is revoked instead of being saved
   assert.match(ui.nodes.status.textContent, /cancelled or changed/);
   ui.mounted.dispose();
 });
-test('built-in wallet uses the same approval dialog, signs only after approval and locks on close', async () => {
+test('built-in wallet approves every request but remains unlocked on close until inactivity or disposal', async () => {
   const address = '0x' + '11'.repeat(20), signed = [];
   let instance;
   class LocalVault {
@@ -593,14 +601,71 @@ test('built-in wallet uses the same approval dialog, signs only after approval a
   assert.equal(ui.providerCalls.length, 0);
   assert.equal(ui.store.has('featheral-context-wallet-token'), false);
   await ui.closeContext();
-  assert.equal(instance.signer, null);
+  assert.equal(instance.signer.address, address);
   assert.equal(ui.nodes['vault-password'].value, '');
-  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'authorized' });
   await ui.reopenContext();
   assert.equal(ui.nodes.address.value, address);
-  assert.equal(ui.nodes['wallet-connect'].title, 'Unlock built-in wallet');
-  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'selected' });
+  assert.equal(ui.nodes['wallet-connect'].title, 'Disconnect wallet');
+  assert.deepEqual({ ...ui.connectionStates.at(-1) }, { address, state: 'authorized' });
   assert.equal(signed.length, 2);
+  ui.mounted.dispose();
+  assert.equal(instance.signer, null);
+});
+test('a locked built-in account reviews the site request before unlocking inside approval', async () => {
+  const address = '0x' + '11'.repeat(20), signed = [];
+  class LocalVault {
+    read() { return { address, links: [] }; }
+    verifiedLinks() { return []; }
+    async unlock(password) {
+      if (password !== 'correct password') throw new Error('Incorrect password');
+      this.signer = { address };
+    }
+    async sign(message) { signed.push(message); return 'local-signature'; }
+    lock() { this.signer = null; }
+  }
+  const ui = await fixture('notes', { contextual: true, authNonce: 'ab'.repeat(16), followActive: true,
+    noSession: true, noProvider: true, vaultApi: { Vault: LocalVault }, manualReview: true });
+  await siteRequest(ui);
+  assert.equal(ui.nodes['site-unlock'].hidden, false);
+  assert.equal(ui.nodes['site-approve'].textContent, 'Unlock and approve');
+  assert.equal(signed.length, 0);
+  ui.nodes['site-password'].value = 'wrong'; await ui.nodes['site-approve'].fire('click');
+  assert.match(ui.nodes['site-status'].textContent, /Incorrect password/);
+  assert.equal(ui.nodes['site-password'].value, ''); assert.equal(signed.length, 0);
+  ui.nodes['site-password'].value = 'correct password'; await ui.nodes['site-approve'].fire('click');
+  assert.equal(signed.length, 1);
+  await ui.closeContext(); await ui.reopenContext(); await siteRequest(ui);
+  assert.equal(ui.nodes['site-unlock'].hidden, true);
+  await ui.nodes['site-approve'].fire('click'); assert.equal(signed.length, 2);
+  ui.mounted.dispose();
+});
+test('World signature approval contains unlock, errors and cancellation inside the web wallet', async () => {
+  const ui = await fixture('world', { contextual: true, manualReview: true });
+  ui.nodes['world-wallet-password'].disabled = true;
+  ui.nodes['world-wallet-confirm'].disabled = true;
+  let locked = true, calls = 0, release, cancelled = 0;
+  const input = { account: ui.address, message: 'Exact approved request', passwordRequired: () => locked,
+    cancel: () => { cancelled++; }, sign: async password => {
+      calls++;
+      if (password !== 'correct') throw new Error('Incorrect password');
+      locked = false; return new Promise(resolve => { release = resolve; });
+    } };
+  const pending = ui.mounted.approveSignature(input);
+  assert.equal(ui.nodes['world-wallet-unlock'].hidden, false);
+  assert.equal(ui.nodes['world-wallet-password'].disabled, false);
+  assert.equal(ui.nodes['world-wallet-confirm'].disabled, false);
+  ui.nodes['world-wallet-password'].value = 'wrong';
+  ui.nodes['world-wallet-form'].onsubmit({ preventDefault() {} }); await new Promise(setImmediate);
+  assert.match(ui.nodes['world-wallet-status'].textContent, /Incorrect password/);
+  assert.equal(ui.nodes['world-wallet-password'].value, '');
+  ui.nodes['world-wallet-password'].value = 'correct';
+  ui.nodes['world-wallet-form'].onsubmit({ preventDefault() {} });
+  ui.nodes['world-wallet-form'].onsubmit({ preventDefault() {} });
+  await new Promise(setImmediate); assert.equal(calls, 2);
+  const rejected = assert.rejects(pending, /cancelled/);
+  await ui.closeContext(); release('late signature'); await rejected;
+  assert.equal(cancelled, 1); assert.equal(ui.nodes['world-wallet-password'].value, '');
   ui.mounted.dispose();
 });
 test('Silver purchase approval explicitly warns of payment and shows the exact amount/recipient', async () => {

@@ -230,7 +230,7 @@
     location.assign(target.href);
   });
   function reply(value) {
-    window.opener.postMessage({ type: "featheral:world-sign-result", nonce: query.get("approve"), ...value }, query.get("parentOrigin"));
+    window.opener.postMessage({ type: "featheral:world-sign-result", nonce: approvalRequest?.nonce || query.get("approve"), ...value }, query.get("parentOrigin"));
   }
   $("reject").onclick = () => { reply({ error: "World signature rejected." }); window.close(); };
   $("approve").onclick = () => void perform(async () => {
@@ -240,8 +240,18 @@
     catch (error) { reply({ error: error.message }); throw error; }
   });
   window.addEventListener("message", event => {
+    const mediaOrigin = location.hostname === "world.featheral.com" ? "https://media.featheral.com"
+      : `http://media.localhost${location.port ? ":" + location.port : ""}`;
     if (!query.get("approve") || event.source !== window.opener || event.origin !== query.get("parentOrigin")
-      || event.data?.type !== "featheral:world-sign" || event.data.nonce !== query.get("approve")) return;
+      || event.origin !== mediaOrigin
+      || !/^[a-f0-9]{32}$/.test(event.data?.nonce || "")) return;
+    if (event.data.type === "featheral:world-sign-ping") {
+      window.opener.postMessage({ type: "featheral:world-sign-ready", nonce: event.data.nonce }, event.origin); return;
+    }
+    if (event.data.type === "featheral:world-sign-cancel" && approvalRequest?.nonce === event.data.nonce) {
+      world.lock(); document.getElementById("featheral-central-wallet")?.close(); return;
+    }
+    if (event.data.type !== "featheral:world-sign") return;
     const input = event.data;
     const pattern = /^Featheral World social action\n\nAction: SESSION\nAuthor: (0x[0-9a-fA-F]{40})\nSession key: (0x[0-9a-fA-F]{40})\nExpires: ([^\n]+)\nNonce: ([0-9a-f]{24})\nIssued at: ([^\n]+)\nLedger: Featheral World communication ledger\n\nSigning is free and only authorizes this action on the World ledger\.$/;
     const match = typeof input.message === "string" && input.message.match(pattern);
@@ -249,10 +259,19 @@
     if (!match || !ethers.isAddress(input.account) || ethers.getAddress(match[1]) !== ethers.getAddress(input.account)
       || !Number.isFinite(expires) || expires <= Date.now() || expires > Date.now() + 7 * 86400000
       || !Number.isFinite(issued) || Math.abs(Date.now() - issued) > 300000)
-      { reply({ error: "Only Media session authorization is supported here." }); return; }
+      { window.opener.postMessage({ type: "featheral:world-sign-result", nonce: input.nonce, error: "Only Media session authorization is supported here." }, event.origin); return; }
     if (approvalRequest) return;
     approvalRequest = input;
-    $("approval").hidden = false; $("approval-message").textContent = input.message;
+    void perform(async () => {
+      try {
+        await world.refresh();
+        if (!world.snapshot()?.complete || world.snapshot().account.toLowerCase() !== input.account.toLowerCase())
+          throw new Error("Sign in to the requesting World account and complete your profile before approving.");
+        reply({ signature: await sign(input.message, input.account) });
+        status("Signature approved. You can keep this wallet open for your next request.");
+      } catch (error) { reply({ error: error.message }); throw error; }
+      finally { approvalRequest = null; }
+    });
   });
   void (async () => {
     await world.refresh(); await showSession();

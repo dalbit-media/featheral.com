@@ -118,15 +118,16 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
     const instance = { context, tabs: [], suspended: 0, disposed: 0, resumed: 0 };
     context.receive = data => instance.messages.push(data); instance.messages = []; instances.push(instance);
     return { tab: value => instance.tabs.push(value), resume: async () => { instance.resumed++; },
-      suspend: async () => { instance.suspended++; }, dispose: () => { instance.disposed++; } };
+      approveSignature: input => new Promise((resolve, reject) => { instance.signature = { input, resolve, reject }; }),
+      suspend: async () => { instance.suspended++; instance.signature?.reject(new Error('Signature cancelled.')); }, dispose: () => { instance.disposed++; } };
   } };
   const window = { innerWidth: width, innerHeight: height,
     localStorage: { getItem: key => store.get(key), setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) },
     ethers: {}, FeatheralVault: {}, FeatheralPortfolio: {}, FeatheralSignIn: {}, FeatheralWalletApp: walletApp,
-    addEventListener() {}, open() { assert.fail('Context wallet must never open a wallet-site window'); } };
+    addEventListener() {}, dispatchEvent() {}, open() { assert.fail('Context wallet must never open a wallet-site window'); } };
   let counter = 0;
   vm.runInNewContext(embed, { window, document, location: new URL(hostname.endsWith('localhost') ? `http://${hostname}:8080` : `https://${hostname}`),
-    localStorage: window.localStorage, crypto: { getRandomValues: array => array.fill(++counter) }, URL, URLSearchParams, AbortSignal,
+    localStorage: window.localStorage, crypto: { getRandomValues: array => array.fill(++counter) }, URL, URLSearchParams, AbortSignal, Event,
     DOMParser: class { parseFromString() { return { body: { innerHTML: '<main></main>' }, querySelectorAll: () => [] }; } },
     getComputedStyle: () => ({ getPropertyValue: name => ({ '--brand': '#123456', '--panel': '#ffffff', '--txt': '#123123' }[name] || ''),
       color: '#123123', backgroundColor: '#ffffff', fontFamily: 'Test Font', colorScheme: 'light' }),
@@ -140,6 +141,23 @@ function fixture({ hostname = 'notes.featheral.com', fail = false, store = new M
     dialog: () => document.getElementById('featheral-central-wallet'),
     async emit(data, instance = instances.at(-1)) { instance.context.onMessage(data); await tick(); } };
 }
+test('signature approval stays in the same web-wallet instance across views and close rejects pending work', async () => {
+  const ui = fixture({ hostname: 'world.featheral.com' });
+  ui.wallet.open({ view: 'assets' }); await tick();
+  const first = ui.instances[0];
+  ui.wallet.open({ view: 'account' }); await tick();
+  assert.equal(ui.instances.length, 1);
+  const input = { message: 'Exact World signature', account: address, passwordRequired: () => true, sign: async () => signature };
+  const pending = ui.wallet.approveSignature(input); await tick();
+  assert.equal(ui.instances.length, 1); assert.equal(first.signature.input, input);
+  await assert.rejects(ui.wallet.approveSignature(input), /existing wallet signature/);
+  first.signature.resolve(signature); assert.equal(await pending, signature);
+  assert.equal(ui.dialog().open, false);
+  const next = ui.wallet.approveSignature(input); await tick();
+  const rejection = assert.rejects(next, /cancelled/);
+  ui.dialog().close(); await rejection;
+  assert.equal(ui.instances.length, 1);
+});
 test('all site wallets mount full frame-free UI with local assets, currency, view and exact payment details', async () => {
   for (const hostname of ['featheral.com', 'gold.featheral.com', 'silver.featheral.com', 'world.featheral.com', 'dollar.localhost', 'pay.featheral.com', 'ex.featheral.com', 'x.localhost']) {
     const ui = fixture({ hostname });
@@ -294,10 +312,12 @@ test('no extension defaults to builtin create/unlock and extension rejection nev
     const context = vm.createContext({ token: '', interactive: true, builtInPreferred, storage: { removeItem() {} }, locallyReset: false,
       providerChoices: () => builtInPreferred ? [{ provider: {} }] : [], browserProvider: builtInPreferred ? {} : null,
       vault: { read: () => record }, tab: view => calls.push(view), updateVault() {},
+      loginWallet: async (owner, local) => { assert.equal(owner, address); assert.equal(local, true); calls.push('review-unlock'); },
       $: id => { if (!nodes.has(id)) nodes.set(id, { focus: () => calls.push('focus') }); return nodes.get(id); } });
     vm.runInContext(app.slice(app.indexOf('  async function ensureSession()'), app.indexOf('  $("connect").addEventListener')), context);
-    assert.equal(await context.ensureSession(), false);
-    assert.equal(nodes.get('vault-action').value, record ? 'unlock' : 'create');
+    assert.equal(await context.ensureSession(), !!record);
+    if (record) assert.deepEqual(calls, ['review-unlock']);
+    else assert.equal(nodes.get('vault-action').value, 'create');
   }
   const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false, storage: { removeItem() {} }, locallyReset: false, providerChoices: () => [{}],
     vault: {}, providerChosen: false, epoch: 0, contextEpoch: 0, requireVisible() {},

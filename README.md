@@ -94,6 +94,16 @@ follow the existing read-only replica rules; never start another ledger writer.
 everyone. Sign in or register on World, complete the shared username/avatar/bio,
 then continue to App with a short-lived, one-use, origin-bound sign-in handoff.
 App uses that same wallet and public profile; profile edits stay on World.
+
+World, Community and game signatures use the shared web-wallet approval panel.
+Locked built-in accounts enter their password within the exact-request review;
+wrong passwords remain retryable there. Closing the wallet panel cancels pending
+approvals but keeps its unlocked key in memory for 30 minutes of inactivity.
+Each request still needs explicit approval. Locking, signing out, changing the
+wallet, reloading or leaving the page discards the key; passwords and decrypted
+keys are never persisted. External wallets still require their extension's
+confirmation. Media's origin-bound World approval window can stay open and be
+reused without decrypting the wallet for every request.
 Select experience and work interests through compact icon buttons.
 Pass all ecosystem orientation quizzes at 80% or more to earn membership without
 administrator approval. Sequential learning levels unlock division agendas;
