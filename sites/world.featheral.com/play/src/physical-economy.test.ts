@@ -3,13 +3,135 @@ import { test } from 'node:test';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceBasePrice, resourceEconomy, resourceUnits } from './resource-units.ts';
 import { dailyClimate, expeditionFindPlan, productionClimate, recruitmentClimate, temperatureEfficiency, waterDemandClimate, weeklyClimate } from './climate.ts';
 import { climateCycleDays, environmentAt, seasonMs, worldDayMs, worldEpoch, worldWeekMs } from './environment.ts';
-import { newGame, recruitmentAmount } from './engine.ts';
-import { dailyUpkeepPerResident, dailyWaterPerResident, waterConsumptionForDays, waterUpkeep } from './upkeep.ts';
+import { newGame, recruitmentAmount, stages } from './engine.ts';
+import { dailyUpkeepPerResident, dailyWaterPerResident, maximumSettlementWeeklyConsumption, waterConsumptionForDays, waterUpkeep } from './upkeep.ts';
 import { dollarsUnits } from './dollars.ts';
 import { marketBasePrice, marketPriceFloor } from './market.ts';
 import { translate } from './i18n.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, nextExploration, workforceCounts } from './workforce.ts';
-import { availableWorkers, createAccount, execute, snapshot } from '../server/economy.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, nextExploration, resourceAccess, resourceCapacity, warehouseCapacity, workforceCounts } from './workforce.ts';
+import { accrue, availableWorkers, collectResource, createAccount, execute, snapshot } from '../server/economy.ts';
+
+test('weekly physical output is modest per worker and does not multiply again with settlement population or tier', () => {
+  assert.deepEqual(Object.fromEntries(Object.entries(resourceEconomy).map(([resource, details]) =>
+    [resource, displayQuantity(resource, details.weeklyProduction)])), { wood: 500, water: 1500, metal: .1, oil: 2 });
+  const game = newGame();
+  game.explored = ['-3,0', '3,0', '0,3'];
+  for (let stage = 0; stage < stages.length; stage++) {
+    game.stage = stage; game.population = Math.max(12, stages[stage].population);
+    const access = resourceAccess(game);
+    assert.equal(access.wood.perWorker, 10);
+    assert.equal(access.water.perWorker, 150);
+    assert.equal(access.metal.perWorker, 10);
+  }
+  game.constructionLevels = { workshop: 2 };
+  game.waterFacilities = { well: true };
+  assert.equal(resourceAccess(game).wood.perWorker, 15);
+  assert.equal(resourceAccess(game).water.perWorker, 300);
+  assert.equal(resourceAccess(game).metal.perWorker, 15);
+});
+
+test('population storage covers construction and two peak upkeep weeks without a fixed oversized Water allowance', () => {
+  const game = newGame();
+  for (let stage = 0; stage < stages.length; stage++) {
+    game.stage = stage; game.population = Math.max(12, stages[stage].population);
+    for (const warehouse of [0, 1, 10, 99]) {
+      const cap = warehouseCapacity(game, warehouse);
+      const tier = stages[stage + 1] ?? stages[stage];
+      for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
+        assert.ok(resourceCapacity(cap, resource, game) >= (tier.cost[resource] ?? 0) * (warehouse + 1));
+      for (const resource of ['wood', 'metal'] as const)
+        assert.ok(cap >= 2 * maximumSettlementWeeklyConsumption(resource, game.population));
+      const water = resourceCapacity(cap, 'water', game);
+      assert.ok(water >= game.population * 35 * 1.5 * 2);
+      game.constructionLevels = { cistern: 1 };
+      assert.ok(resourceCapacity(cap, 'water', game) >= Math.ceil(game.population * 35 * 1.5) * 3);
+      game.constructionLevels = {};
+    }
+  }
+  game.stage = 0; game.population = 12;
+  assert.equal(warehouseCapacity(game, 0), 100);
+  assert.equal(resourceCapacity(100, 'water', game), 1260);
+  assert.equal(resourceCapacity(0, 'water', game), 0);
+});
+
+test('automatic allocation replaces weekly Water before sharing materials rather than filling the entire reserve first', () => {
+  const game = newGame();
+  game.stage = 0; game.population = 12;
+  game.explored = ['-3,0', '3,0', '0,3'];
+  game.stock = { wood: 20, water: 600, metal: 20, oil: 0 };
+  const access = resourceAccess(game, worldEpoch + seasonMs);
+  const plan = balancedAllocation(game, emptyAllocation(), warehouseCapacity(game, 0), 0, access, 0, 0, true);
+  assert.equal(plan.crews.water, Math.ceil(access.water.weeklyConsumption! / access.water.perWorker));
+  assert.ok(plan.crews.wood > 0 && plan.crews.metal > 0);
+  assert.equal(Object.values(plan.crews).reduce((sum, count) => sum + count, 0), 6);
+  for (const population of [12, 80, 1000, 100000]) {
+    game.population = population;
+    game.waterFacilities = { well: true };
+    const cap = warehouseCapacity(game, 0);
+    for (let season = 0; season < 4; season++) {
+      const sites = resourceAccess(game, worldEpoch + season * seasonMs);
+      game.stock = { wood: 0, water: sites.water.weeklyConsumption!, metal: 0, oil: 0 };
+      const funded = balancedAllocation(game, emptyAllocation(), cap, 0, sites, 0, 0, true);
+      assert.ok(funded.crews.water * sites.water.perWorker >= sites.water.weeklyConsumption!);
+      assert.ok(funded.crews.wood > 0 && funded.crews.metal > 0);
+      assert.ok(Object.values(funded.crews).reduce((sum, count) => sum + count, 0) <= Math.floor(population / 2));
+    }
+  }
+});
+
+test('rebalanced gathering produces only locked worker output after a complete seven-day week', () => {
+  const account = createAccount(worldEpoch);
+  account.game.stage = 0; account.game.population = 12;
+  account.game.explored = ['-3,0', '3,0', '0,3'];
+  account.game.stock = { wood: 20, water: 600, metal: 20, oil: 0 };
+  const work = snapshot(account).workforce;
+  work.automatic = false; work.allocation = { wood: 1, water: 1, metal: 1, oil: 0 };
+  work.crews = {}; work.cycleAt = worldEpoch;
+  account.workforce = work;
+  accrue(account, worldEpoch);
+  const access = resourceAccess(account.game, worldEpoch);
+  for (const resource of ['wood', 'water', 'metal'] as const) {
+    assert.equal(work.crews[resource]!.weeklyYield, access[resource].perWorker);
+    assert.equal(work.crews[resource]!.readyAt, worldEpoch + 7 * worldDayMs);
+  }
+  const locked = structuredClone(work.crews);
+  account.game.stage = 8; account.game.constructionLevels = { workshop: 5 };
+  work.allocation = emptyAllocation();
+  accrue(account, worldEpoch + worldWeekMs - 1);
+  assert.deepEqual(account.pending, emptyAllocation());
+  assert.deepEqual(work.crews, locked);
+  accrue(account, worldEpoch + worldWeekMs);
+  for (const resource of ['wood', 'water', 'metal'] as const)
+    assert.equal(account.pending[resource], locked[resource]!.weeklyYield * 60000);
+  assert.deepEqual(work.crews, {});
+});
+
+test('smaller storage preserves owned stock, pending fractions and full legacy deliveries while blocking new over-capacity work', () => {
+  const account = createAccount(worldEpoch);
+  account.game.stage = 0; account.game.population = 12;
+  account.game.explored = ['-3,0', '3,0', '0,3'];
+  account.game.stock = { wood: 10000, water: 10000, metal: 10000, oil: 0 };
+  account.pending.wood = 123;
+  const work = snapshot(account).workforce;
+  work.automatic = false; work.allocation = { wood: 1, water: 1, metal: 1, oil: 0 };
+  work.crews = { wood: { workers: 1, weeklyYield: 100, weeklyMetalCost: 0,
+    weeklyDollarsCost: 1, payOnPickup: true, readyAt: worldEpoch + worldWeekMs } };
+  account.workforce = work;
+  const before = structuredClone(account);
+  snapshot(account);
+  assert.deepEqual(account, before, 'reading the new limits must never rewrite balances or jobs');
+  accrue(account, worldEpoch + worldWeekMs);
+  assert.equal(account.pending.wood, 100 * 60000 + 123);
+  assert.equal(account.pickupFees!.wood, dollarsUnits(1));
+  assert.deepEqual(work.crews, {});
+  const owned = account.game.stock.wood;
+  assert.equal(collectResource(account, 'wood', true), 100);
+  assert.equal(account.game.stock.wood, owned + 100);
+  assert.equal(account.pending.wood, 123);
+  accrue(account, worldEpoch + 2 * worldWeekMs);
+  assert.deepEqual(work.crews, {});
+  assert.equal(account.pending.wood, 123);
+});
 
 test('population counts separate current gathering, explorers and waiting residents from next-week plans', () => {
   const account = createAccount(1000000);
@@ -89,7 +211,7 @@ test('automatic crews value physical output at static prices and prioritize need
 });
 
 test('planning values retain physical production and upkeep without creating price floors or changing reserve seeds', () => {
-  const gross = { wood: 250, water: 6, metal: 100, oil: 420 };
+  const gross = { wood: 25, water: 1.5, metal: 10, oil: 60 };
   const upkeep = { wood: .7, water: .35, metal: .14, oil: 0 };
   const seeds = { wood: 4, water: 2, metal: 2, oil: 24 };
   for (const resource of ['wood', 'water', 'metal', 'oil'] as const) {

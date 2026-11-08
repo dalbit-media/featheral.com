@@ -46,15 +46,19 @@ test('map selects one nearest visible marker per eligible resource, preserving t
   assert.equal(emergencyTiles(tiles, pending, home, false).length, 3);
   assert.equal(emergencyTiles(tiles, emptyAllocation(), home, true).length, 0);
 });
-test('new surveys trim the default reveal area by eight percent without fractional map coordinates', () => {
+test('new surveys reveal at most thirteen tiles without fractional map coordinates even with upgraded visibility', () => {
   const game = createAccount(1000000).game;
   game.explored = [];
   survey(game, { x: 20, y: 0 }, radius(game));
   assert.equal(game.explored.length, 49);
   game.explored = [];
   survey(game, { x: 20, y: 0 }, expeditionSurveyRadius(game));
-  assert.equal(game.explored.length, 45);
+  assert.equal(game.explored.length, 13);
   assert.ok(game.explored.every(key => key.split(',').every(value => Number.isInteger(Number(value)))));
+  game.visibilityRadius = 12;
+  game.explored = [];
+  survey(game, { x: 20, y: 0 }, expeditionSurveyRadius(game));
+  assert.equal(game.explored.length, 13);
 });
 test('dispatch locks reduced future radius while already-travelling expeditions retain their original survey', () => {
   const account = createAccount(1000000);
@@ -67,10 +71,10 @@ test('dispatch locks reduced future radius while already-travelling expeditions 
   account.workforce = work;
   execute(account, { type: 'move', x: 5, y: 0 });
   assert.equal(work.expeditions[0].surveyRadius, 4);
-  assert.equal(work.expeditions[1].surveyRadius, 3.75);
+  assert.equal(work.expeditions[1].surveyRadius, 2);
   const due = Math.max(...work.expeditions.map(expedition => expedition.readyAt));
   accrue(account, due);
   assert.ok(account.game.explored.includes('-9,0'));
-  assert.ok(account.game.explored.includes('8,0'));
-  assert.ok(!account.game.explored.includes('9,0'));
+  assert.ok(account.game.explored.includes('7,0'));
+  assert.ok(!account.game.explored.includes('8,0'));
 });

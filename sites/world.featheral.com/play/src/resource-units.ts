@@ -10,10 +10,10 @@ export const resourceUnits = {
 } as const;
 // Rounded low-end bulk references, not live quotes or reserve genesis prices.
 export const resourceEconomy = {
-  wood: { pricePerUnit: .05, weeklyProduction: 100, dailyConsumption: .04 },
-  water: { pricePerUnit: .001, weeklyProduction: 600, dailyConsumption: 5 },
-  metal: { pricePerUnit: 100, weeklyProduction: 100, dailyConsumption: .02 },
-  oil: { pricePerUnit: 30, weeklyProduction: 14, dailyConsumption: 0 },
+  wood: { pricePerUnit: .05, weeklyProduction: 10, dailyConsumption: .04 },
+  water: { pricePerUnit: .001, weeklyProduction: 150, dailyConsumption: 5 },
+  metal: { pricePerUnit: 100, weeklyProduction: 10, dailyConsumption: .02 },
+  oil: { pricePerUnit: 30, weeklyProduction: 2, dailyConsumption: 0 },
 } as const;
 export function resourceBasePrice(resource: Resource): number {
   return accountingPrice(resource, resourceEconomy[resource].pricePerUnit);

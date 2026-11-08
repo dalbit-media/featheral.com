@@ -455,11 +455,12 @@ test('automatic allocation targets half the total population, counts explorers a
     assert.equal(plan.dollars, game.dollars - Math.max(0, expected - 1) * dollarsScale);
   }
 });
-test('priority demand is funded before surplus even when higher-value Metal extras use the reserve', () => {
+test('weekly Water replacement is funded before surplus even when higher-value Metal extras use the reserve', () => {
   const { game, access } = surplusFixture({ water: { yield: 100, transport: 2 }, metal: { yield: 150, transport: 20 } });
-  game.stock.water = 1950; game.stock.metal = 100;
+  access.water.weeklyConsumption = 420;
+  game.stock.water = 600; game.stock.metal = 100;
   game.dollars = 100 * dollarsScale;
-  const pending = { ...emptyAllocation(), water: 1450, metal: 500 };
+  const pending = { ...emptyAllocation(), water: 100, metal: 500 };
   const plan = balancedAllocation(game, pending, 1000, 1, access);
   assert.equal(plan.crews.water, 5);
   assert.equal(plan.crews.metal, 1);
@@ -471,6 +472,7 @@ test('priority demand and pickup-funded crews remain within the 50% utilization 
   for (const population of [3, 11, 12, 30]) for (const exploring of [0, 2, 4, 6, 8]) {
     if (exploring > population) continue;
     game.population = population;
+    access.water.weeklyConsumption = population * 35;
     game.stock = { ...emptyAllocation(), water: population * 15 };
     game.dollars = 0;
     const plan = balancedAllocation(game, emptyAllocation(), 600, 1, access, exploring, 0, true);

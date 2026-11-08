@@ -163,16 +163,18 @@ There is **no passive resource production**. After settling, residents are autom
 
 | Resource | Production |
 |---|---|
-| Wood | 5,000 kg multiplied by tier number and site yield |
-| Water | 6,000 L multiplied by tier number and site yield |
-| Metal | 1 t multiplied by tier number and site yield |
-| Oil | 14 bbl multiplied by tier number and site yield, with a city bank |
+| Wood | 500 kg multiplied by site yield |
+| Water | 1,500 L multiplied by site yield |
+| Metal | 100 kg multiplied by site yield |
+| Oil | 2 bbl multiplied by site yield, with a city bank |
 
-Settlement is tier number 1. Terrain efficiency ranges from 80% to 180%; federation metal crews receive a further 20%. New work additionally applies season, weather and temperature factors averaged over all eight daily weather windows in seven calendar days. Output is rounded down to whole accounting lots per worker, not whole displayed units, and locked when the work week starts. Production is real-world-inspired rather than a claim about actual national industrial productivity.
+Settlement tier no longer multiplies physical output: larger populations provide more workers rather than multiplying each worker's productivity again. Terrain efficiency ranges from 80% to 180%; federation metal crews receive a further 20%. Facilities retain their production bonuses. New work additionally applies season, weather and temperature factors averaged over all eight daily weather windows in seven calendar days. Output is rounded down to whole accounting lots per worker, not whole displayed units, and locked when the work week starts. At baseline, one Water worker supplies about four residents; cold weather requires reserves, more Water workers or facilities. Production is real-world-inspired rather than a claim about actual national industrial productivity.
 
-New games start with zero resources, FTH$ and FTHG. Manually gather only the founding requirement: 3,000 kg timber and 400 L Water, using the known clearing and lake at 3, 0. Founding consumes these supplies and welcomes 12 residents; hand gathering ends. Basic Wood/Water crews complete real work before output can be collected or sold. Selling completed production transfers funded marketplace FTH$, never a registration grant. Existing saves and earned balances remain intact. Storage and transport rules are unchanged.
+New games start with zero resources, FTH$ and FTHG. Manually gather only the founding requirement: 3,000 kg timber and 400 L Water, using the known clearing and lake at 3, 0. Founding consumes these supplies and welcomes 12 residents; hand gathering ends. Basic Wood/Water crews complete real work before output can be collected or sold. Selling completed production transfers funded marketplace FTH$, never a registration grant. Existing saves, earned balances, pending resources and locked jobs remain intact. Transport rules are unchanged.
 
 Automatic allocation targets **50% total utilization**, rounded down, including residents already exploring. New gathering is limited to `max(0, min(floor(population / 2) - active explorers, population - max(2, active explorers)))` residents. Population-scaled Water storage and growth materials take priority within that budget. Explorers at or above the target pause new gathering, not paid expeditions. Gathering can start without FTH$, but completed production cannot be taken into inventory until its transport is paid. Automation of allocation is separate from item-enabled auto-collection. Workers need a whole game week; selling resources transfers existing marketplace FTH$ rather than creating money.
+
+Water priority allocates one week's replacement consumption, not the entire tank's reserve deficit, before sharing remaining workers across materials. Wood/Metal goals include two peak-climate weeks of upkeep. This avoids dedicating every worker to filling Water storage while materials run out. Winter without facilities may still require a Well or manual allocation; the 50% auto budget is never silently exceeded.
 
 After priority crews are allocated, extra gathering fills only the remaining 50% budget. Each extra worker selects the route with the highest marginal resource value after transport; value uses fixed resource reference prices, not live market quotes, and counts only output fitting in remaining storage. Full storage or supply shortages can lower utilization. Use the +/- controls, sliders or exact counts directly to switch to manual allocation; edits save on release, finishing an edit or Enter. Manual allocations may exceed 50% but must retain active explorers and two explorer slots. Existing paid work finishes unchanged. Extras still take a full game week, and finite storage bounds offline processing.
 
@@ -192,7 +194,7 @@ Water facility bonuses are additive: all three give 8x Water output per assigned
 
 Household Water starts at **50 L/person/game day**, or 350 L per week, a playable service-level target informed by [WHO domestic water guidance](https://www.who.int/publications/i/item/9789240015241), not a universal household average. Demand increases with summer, heat and sunny hot weather, up to a 1.45x multiplier before aggregate rounding up to the next 10 L lot. Daily bills average all eight weather periods. Owned Water alone pays consumption; debt is never created. Shortages pause advanced activity without removing residents or cancelling paid jobs.
 
-Water crew planning includes forecast consumption during the work week, so full tanks do not prevent replacement production. Completed deliveries still obey actual owned-plus-pending storage limits. Changing population or buying Water cannot overfill storage or replay production.
+Water crew planning includes forecast consumption during the work week, so full tanks do not prevent replacement production. New crews reserve room against owned-plus-pending storage when starting. Existing stock and locked deliveries are never discarded if storage limits shrink or stock changes during the week; new work waits for room. Production cannot be replayed.
 
 ### Seasonal and daily climate effects
 
@@ -219,7 +221,7 @@ Inbox, Federation, Journal, Contacts and Field guide retain dedicated pages. Con
 
 The seeded map includes forests, meadows, lakes, mountains, oil seeps, crystal outcrops, rainforests, pine forests, mangroves, grasslands, savannas, deserts, dunes, wetlands, rivers, coasts, hills, canyons, volcanoes, tundra, and glaciers. Elevation, climate, moisture, and river channels create varied regions. Starter wood, water, and metal sites are guaranteed nearby.
 
-Known-tile travel is instant and does not uncover new terrain. Each expedition reserves **two available residents** for one to three game weeks according to terrain difficulty. Send multiple teams concurrently, limited only by available residents and FTH$. Weekly resource allocation never reassigns residents who are still exploring. Teams reveal their survey areas and return independently; the player stays in place. Active duplicate destinations are rejected, and overlapping surveys count newly revealed tiles only once. Each team has its own countdown. Lighting affects only future teams. Existing single-team saves retain their deadlines when migrated. Open water, rivers, coasts, and glaciers are not valid founding sites.
+Known-tile travel is instant and does not uncover new terrain. Each expedition reserves **two available residents** for one to three game weeks according to terrain difficulty. Send multiple teams concurrently, limited only by available residents and FTH$. Weekly resource allocation never reassigns residents who are still exploring. New teams reveal a radius-2 circle of at most 13 tiles and return independently; the player stays in place. Active duplicate destinations are rejected, and overlapping surveys count newly revealed tiles only once. Each team has its own countdown. Equipment expands visibility and destination reach, not survey area. Already-travelling teams retain their saved radii and deadlines. Open water, rivers, coasts, and glaciers are not valid founding sites.
 
 An expedition costs `(10 + 5 * ceil(distance from settlement) + 5 * (terrain weeks - 1)) * 2 ** active field teams` FTH$ upfront: 1x, 2x, 4x, 8x, and so on. Investigate and Explore share the count taken at departure; returned teams no longer increase the next fee. Both map clicks and quick exploration confirm the same authoritative quote. Moving the player cannot reduce settlement-based costs; known-terrain travel stays free. Already-paid expeditions keep their original costs and deadlines.
 
@@ -233,14 +235,14 @@ The dedicated `/settlement/` page uses the exploration map's isometric grid, ter
 
 Only permanent utility equipment, cosmetic decorations, and collectibles occupy item slots; raw resources and their existing warehouses remain separate. Equipped and placed items each occupy one slot. Discover each recipe's resource types through exploration before spending owned ingredients:
 
-| Item | Recipe | Survey radius |
+| Item | Recipe | Visibility radius |
 |---|---|---|
 | Campfire kit | 750 kg timber + 50 L Water | 5 |
 | Torch | 1,500 kg timber | 6 |
 | Lamp | 3,000 kg timber + 0.4 t Metal | 8 |
 | Explorer lantern | 4,000 kg timber + 8 bbl Oil + FTH$4 | 10 |
 
-Equip one visibility item; unequipped radius is 4. Equipment never expires and changes only future expeditions, not ongoing teams or already explored terrain. Better newly crafted equipment auto-equips. Legacy torch/lantern upgrades migrate free to torch/lamp items with their existing 6/8-radius view.
+Equip one visibility item; unequipped visibility radius is 4. Equipment never expires and expands the visible map and reachable destinations; new expeditions still survey at most 13 tiles. Equipment never reveals terrain instantly or changes locked teams. Better newly crafted equipment auto-equips. Legacy torch/lantern upgrades migrate free to torch/lamp items with their existing 6/8-radius view.
 
 Material-and-FTH$ item storage tiers are Bag (20 slots), Carrier (40; 0.5 t Metal + FTH$100), Crate (60; 1.5 t Metal + FTH$200), Container (80; 4 t Metal + FTH$300), and Item warehouse (100; 10 t Metal + FTH$400). Identical items share one displayed stack with a quantity, including market-reserved copies; pending finds are also grouped. Pages show up to 20 distinct filtered stacks. Every individual owned or reserved copy still uses one storage slot, including equipped and placed copies. Each upgrade adds room for 20 copies, not unlimited stacks, and does not change resource storage. Existing saves keep their purchased tier and items. Using a permit consumes only one owned copy; equipped/placed copy protections remain unchanged.
 
@@ -254,7 +256,7 @@ Placement is free after founding and uses owned items only. Each building or dec
 
 Active residents complete a full game week before resources become ready for pickup. Each resource button opens its collection controls; there is no aggregate header Claim button or 50% threshold. Pickup costs `workers*(1+max(0,ceil((effectiveDistance-4)/4)))` FTH$ for every worker, including Wood and Water. No payment is taken at dispatch. Completed quantities and their transport fees remain pending until collected. Owned and pending quantities share storage room; full storage pauses new work.
 
-Capacity calculations use integer accounting lots. Raw capacity is the larger of `100 + tierIndex*100 + warehouseLevel*500` and the largest next-tier material requirement times `warehouseLevel+1`. Water uses the larger of raw capacity +2,900 and `ceil(population*35*1.5)*(2+reservoirLevel)` lots. UI converts each resource's capacity to its own physical unit. Warehouses have ten levels and cost `targetLevel*(4,000 kg timber + 0.2 t Metal + FTH$50)`; Water facility bonuses do not expand storage.
+Capacity calculations use integer accounting lots. Raw capacity is the largest of `100 + tierIndex*100 + warehouseLevel*500`, the largest next/current-tier material requirement times `warehouseLevel+1`, and two peak-climate weeks of population-scaled Wood/Metal upkeep. Water uses the larger of raw capacity and `ceil(population*35*1.5)*(2+reservoirLevel)` lots; there is no fixed extra 29,000 L allowance. A 12-resident Settlement starts with 12,600 L capacity, including a 50% hot-weather reserve. UI converts each resource's capacity to its own physical unit. Warehouses reach level 99 and cost `targetLevel*(4,000 kg timber + 0.2 t Metal + FTH$50)`; Water facility bonuses do not expand storage. Existing owned stock, pending fractions and full locked deliveries remain even above reduced limits; new gathering waits for space.
 
 Existing balances, fractional remainders, currency, escrow, receipts and deadlines are preserved. Already-paid legacy deliveries complete under their existing terms without a second transport charge. New jobs use paid pickup.
 

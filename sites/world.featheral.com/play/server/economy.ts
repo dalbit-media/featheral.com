@@ -380,9 +380,8 @@ export function accrue(account: Account, time: number): void {
     for (const resource of resources) {
       const crew = work.crews[resource];
       if (!crew || crew.readyAt > event) continue;
-      const storage = resourceCapacity(cap, resource, account.game);
-      const room = crew.automaticDelivery || crew.payOnPickup ? Math.max(0, storage - account.game.stock[resource] - account.pending[resource] / minute) : storage;
-      const delivery = Math.min(Math.floor(room), crew.weeklyYield);
+      // Storage is reserved at dispatch; smaller limits must not discard locked work.
+      const delivery = crew.weeklyYield;
       if (crew.payOnPickup && delivery > 0) {
         if (!Number.isSafeInteger(account.pending[resource] + delivery * minute)) throw new ApiError(409, 'Account limit reached.');
         account.pending[resource] += delivery * minute;
@@ -777,10 +776,10 @@ export function execute(account: Account, command: Command, realTime = account.u
       const { pending, claimThreshold, capacity: cap } = snapshot(account);
       if (claimThreshold === 0) throw new ApiError(409, 'Establish a settlement before claiming resources.');
       const selected = (command.resource ? [command.resource] : resources)
-        .filter(resource => pending[resource] >= Math.ceil(resourceCapacity(cap, resource) / 2));
+        .filter(resource => pending[resource] >= Math.ceil(resourceCapacity(cap, resource, game) / 2));
       if (!selected.length) {
         const message = command.resource
-          ? `Pending storage must be at least 50% full (${Math.ceil(resourceCapacity(cap, command.resource) / 2)} units per resource) to claim.`
+          ? `Pending storage must be at least 50% full (${Math.ceil(resourceCapacity(cap, command.resource, game) / 2)} units per resource) to claim.`
           : 'Pending storage must be at least 50% full to claim.';
         throw new ApiError(409, message);
       }

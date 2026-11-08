@@ -3,7 +3,7 @@ import { dollarsScale } from './dollars.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
 import type { Expedition, ResourceAccess, Workforce } from './api-types.ts';
-import { dailyWaterPerResident, waterRequirement } from './upkeep.ts';
+import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, waterRequirement } from './upkeep.ts';
 import { waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { constructionLevel, productionMultiplier } from './constructions.ts';
 import { monetaryPolicy } from './monetary-policy.ts';
@@ -17,9 +17,11 @@ export function warehouseCapacity(game: Game, warehouse: number): number {
   if (game.stage < 0) return 0;
   const tier = stages[game.stage + 1] ?? stages[game.stage];
   const requirement = Math.max(...resourceKeys.map(resource => tier.cost[resource] ?? 0));
-  return Math.max(100 + game.stage * 100 + warehouse * 500, requirement * (warehouse + 1));
+  const reserve = Math.max(...(['wood', 'metal'] as const).map(resource =>
+    maximumSettlementWeeklyConsumption(resource, game.population))) * 2;
+  return Math.max(100 + game.stage * 100 + warehouse * 500, requirement * (warehouse + 1), reserve);
 }
-export function expeditionSurveyRadius(game: Game): number { return Math.max(1, radius(game) - .25); }
+export function expeditionSurveyRadius(game: Game): number { return Math.min(2, radius(game)); }
 export function emergencyCollection(pending: Stock, fees: Stock, dollars: number): Stock {
   return { wood: pending.wood >= 1 && fees.wood > dollars ? pending.wood : 0,
     water: pending.water >= 1 && fees.water > dollars ? pending.water : 0,
@@ -44,7 +46,9 @@ const legacyBase: Stock = { wood: 30, water: 300, metal: 10, oil: 6 };
 const fundingOrder: Resource[] = ['metal', 'wood', 'water', 'oil'];
 export function resourceCapacity(capacity: number, resource: Resource, game?: Game): number {
   if (capacity <= 0 || resource !== 'water') return capacity;
-  return Math.max(capacity + 2900, game ? Math.ceil(waterRequirement(game.population) * 1.5) * (2 + constructionLevel(game, 'cistern')) : 0);
+  // Legacy migration has no Game context and retains its historical storage allowance.
+  if (!game) return capacity + 2900;
+  return Math.max(capacity, Math.ceil(waterRequirement(game.population) * 1.5) * (2 + constructionLevel(game, 'cistern')));
 }
 export function basicWorkers(resource: Resource): number {
   return resource === 'wood' || resource === 'water' ? monetaryPolicy.basicWorkersPerResource : 0;
@@ -138,7 +142,7 @@ export function resourceAccess(game: Game, time?: number, legacy = false): Recor
     const resource = terrainResources[terrain];
     if (game.stage < 0 || (resource === 'oil' && !game.bank)) continue;
     const efficiency = terrainDetails[terrain].yield;
-    const perWorker = Math.floor((legacy ? legacyBase : base)[resource] * (game.stage + 1) * efficiency
+    const perWorker = Math.floor((legacy ? legacyBase[resource] * (game.stage + 1) : base[resource]) * efficiency
       * (resource === 'metal' && game.federation ? 1.2 : 1)
       * (resource === 'water' ? waterProductionMultiplier(game) : productionMultiplier(game, resource))
       * (time === undefined || legacy ? 1 : weeklyClimate(time, environment => productionClimate(resource, environment))));
@@ -162,6 +166,8 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
   const goals = emptyAllocation(), desired = emptyAllocation(), allocation = emptyAllocation();
   const next = stages[game.stage + 1];
   for (const resource of resourceKeys) goals[resource] = next?.cost[resource] ?? 0;
+  for (const resource of ['wood', 'metal'] as const)
+    goals[resource] = Math.max(goals[resource], maximumSettlementWeeklyConsumption(resource, game.population) * 2);
   goals.water = Math.max(goals.water, resourceCapacity(capacity, 'water', game));
   const nextFacility = waterFacilityKeys.find(key => !game.waterFacilities?.[key]);
   if (nextFacility) {
@@ -184,7 +190,9 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
   }
   const available = Math.max(0, Math.min(Math.floor(game.population / 2) - exploringWorkers,
     game.population - Math.max(2, exploringWorkers)));
-  allocation.water = Math.min(available, desired.water);
+  const weeklyWater = access.water.weeklyConsumption ?? Math.ceil(waterRequirement(game.population) * 1.5);
+  allocation.water = Math.min(available, desired.water,
+    access.water.perWorker > 0 ? Math.ceil(weeklyWater / access.water.perWorker) : 0);
   const total = resourceKeys.reduce((sum, resource) => sum + (resource === 'water' ? 0 : desired[resource]), 0);
   const budget = Math.min(available - allocation.water, total);
   if (total && budget) {
