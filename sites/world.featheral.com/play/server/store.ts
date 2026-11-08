@@ -16,6 +16,8 @@ import { enforceMonetaryPolicy } from './monetary-policy.ts';
 import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit, marketStartingQuantity } from '../src/market.ts';
 import { isTitleItem } from '../src/customization.ts';
 import type { MarketAsset } from '../src/market.ts';
+import { FederationTreasury } from './federation.ts';
+import type { Command, FederationVault } from '../src/api-types.ts';
 
 export interface Session { csrf: string; expires: number; account: Account }
 export interface Store {
@@ -38,6 +40,8 @@ export interface Store {
   wallet(token: string): string | null;
   population(federation: string | null): PopulationTotals;
   publicTotals(): PublicTotals;
+  federationView?(token: string): FederationVault | null;
+  contributeFederation?(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string;
   ensureLiquidity?(token: string, asset: MarketAsset, saleQuantity?: number): Promise<void>;
   close(): void;
 }
@@ -46,6 +50,7 @@ export class SqliteStore implements Store {
   private readonly db: SqliteDatabase;
   private readonly exchange: Exchange;
   private readonly funds: GameFunds | null;
+  private readonly federationTreasury: FederationTreasury;
   readonly chat: ChatArchive;
   readonly chatDirectory: ChatDirectoryStore;
   private readonly clock: () => number;
@@ -62,6 +67,7 @@ export class SqliteStore implements Store {
       this.db.close();
       throw new Error('Legacy simulated fund database detected. Back it up and start the new zero-funded economy.');
     }
+    this.federationTreasury = new FederationTreasury(this.db);
     this.funds = dollarFunds ? new GameFunds(this.db, dollarFunds) : null;
     this.chat = new ChatArchive(this.db, owner => {
       const row = this.db.prepare("SELECT json_extract(data,'$.account.customization.title') AS title FROM sessions WHERE id=?").get(owner);
@@ -238,13 +244,20 @@ export class SqliteStore implements Store {
   }
   publicTotals(): PublicTotals {
     this.funds?.recover();
-    const row = this.db.prepare(`SELECT settlements, metal,
-      dollars+(SELECT COALESCE(SUM(dollars),0) FROM market_pools)+(SELECT COALESCE(SUM(price*remaining),0) FROM market_orders WHERE side='buy' AND status='open') AS supply,
+    const row = this.db.prepare(`SELECT settlements, metal+(SELECT COALESCE(SUM(metal),0) FROM federation_vaults) AS metal,
+      dollars+(SELECT COALESCE(SUM(dollars),0) FROM market_pools)+(SELECT COALESCE(SUM(dollars),0) FROM federation_vaults)+(SELECT COALESCE(SUM(price*remaining),0) FROM market_orders WHERE side='buy' AND status='open') AS supply,
       (SELECT total FROM population_totals WHERE scope = 'global') AS population
       FROM public_totals WHERE id = 1`).get()!;
     if (!Number.isSafeInteger(row.supply) || Number(row.supply) < 0) throw new Error('Public currency total exceeds the safe limit.');
     return { settlements: Number(row.settlements), metal: Number(row.metal), population: Number(row.population),
       dollars: this.funds ? this.funds.total() : Number(row.supply) / dollarsScale };
+  }
+  federationView(token: string): FederationVault | null {
+    return this.read(token, (session, now) => session.account.game.federation
+      ? this.federationTreasury.view(session.account.game.federation, this.chatSession(token).owner, now) : null);
+  }
+  contributeFederation(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string {
+    return this.federationTreasury.contribute(account, owner, command, now);
   }
   private addPopulation(scope: string, amount: number): void {
     if (!amount) return;

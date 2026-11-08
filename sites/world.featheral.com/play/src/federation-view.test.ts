@@ -53,7 +53,7 @@ test('assembly gates Town, town hall, membership and recorded votes without clai
   state.game.townhall = true; state.game.votes = ['watershed'];
   assert.equal(disabled(federationPanel(state, 'en'), 'vote'), true);
   assert.match(federationPanel(state, 'en'), /Your vote is recorded/);
-  assert.match(federationPanel(state, 'en'), /No monetary rewards or real authority/);
+  assert.match(federationPanel(state, 'en'), /Assembly is simulation only/);
   assert.doesNotMatch(federationPanel(state, 'en'), /EARNED|data-action="claim"/);
 });
 test('federation display escapes names, preserves balances and localizes actionable requirements', () => {
@@ -66,5 +66,25 @@ test('federation display escapes names, preserves balances and localizes actiona
   assert.deepEqual(state, before);
   for (const label of ['Reach Village to join.', 'Not enough supplies for goodwill.', 'Member bonus: +20% Metal output for new weekly crews.',
     'Reach Town and build a town hall to vote.', 'Your vote is recorded.', 'Ready to join. No joining fee.'])
+    assert.notEqual(translate(label, 'ko'), label);
+});
+test('common vault shows every asset, all-time and game-year shares with an explicit pending payout policy', () => {
+  const state = fixture();
+  state.game.federation = 'Evergreen Union';
+  const stock = { wood: 3, water: 4, metal: 5, oil: 6, dollars: .0001 };
+  const vault = { year: 12, stock, annualContributed: stock, totalValue: 100, annualValue: 50, taxStatus: 'pending' as const,
+    contributors: [{ id: 'member', name: '<script>test</script>', yours: true, contributed: stock, annualContributed: stock,
+      value: 50, annualValue: 25, allTimePercent: 50, annualPercent: 25 }] };
+  const complete = { ...state, federationVault: vault };
+  const html = federationPanel(complete, 'en');
+  assert.match(html, /Common resources vault/);
+  assert.match(html, /50%/); assert.match(html, /25%/);
+  assert.match(html, /0.0001 FTH\$/);
+  assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /Tax collection, payout rate and eligibility are pending/);
+  assert.match(html, /data-action="federation-contribute"/);
+  assert.equal(gameConsumption(complete, { type: 'federation-contribute', asset: 'dollars', amount: .0001 })!.preciseDollars, true);
+  for (const label of ['Common resources vault', 'Contribution share', 'This game year', 'Contribute',
+    'Contributions are permanent. No withdrawal or payout is currently available.'])
     assert.notEqual(translate(label, 'ko'), label);
 });

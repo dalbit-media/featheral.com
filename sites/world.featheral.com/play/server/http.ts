@@ -293,7 +293,11 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
           const csrf = request.headers['x-csrf-token'];
           if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
           return { ...(marketAction ? exchange.action(owner, session, body, time, realTime) : apply(session.account, body, time, realTime,
-            command => exchange.collectSell(owner, session.account, command, time, realTime))), csrf: session.csrf };
+            command => exchange.collectSell(owner, session.account, command, time, realTime),
+            command => {
+              if (!store.contributeFederation) throw new ApiError(503, 'Federation vault is unavailable.');
+              return store.contributeFederation(session.account, owner, command, time);
+            })), csrf: session.csrf };
         })
         : store.transaction(token, (session, time, realTime, exchange, owner) => {
           accrue(session.account, time);
@@ -302,7 +306,8 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         });
       const lifetime = store.read(token, (session, _time, realTime) => session.expires - realTime);
       if (lifetime > 7 * 86400000) response.setHeader('Set-Cookie', `${cookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.min(400 * 86400, Math.floor(lifetime / 1000))}${secure ? '; Secure' : ''}`);
-      reply(response, 200, { ...result, ...store.walletContext(token), clockSpeed: store.clockSpeed, population: store.population(result.game.federation) });
+      reply(response, 200, { ...result, ...store.walletContext(token), clockSpeed: store.clockSpeed, population: store.population(result.game.federation),
+        federationVault: store.federationView?.(token) ?? null });
     } catch (error) {
       const status = error instanceof ApiError ? error.status : error instanceof GameError ? 409 : 500;
       if (status === 500) console.error('API request failed', error);

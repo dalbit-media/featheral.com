@@ -822,6 +822,7 @@ function replaceContent(root: Element, content: string): void {
   });
   const drafts = new Map([...crewDrafts, ...layoutDrafts]);
   root.querySelectorAll<HTMLInputElement>('[data-customization-name]').forEach(input => drafts.set(input.id, input.value));
+  root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#federation-asset,#federation-amount').forEach(input => drafts.set(input.id, input.value));
   const scrollTop = root.scrollTop;
   const canvas = root.querySelector<HTMLCanvasElement>('#settlement-world');
   root.innerHTML = content;
@@ -841,7 +842,7 @@ function replaceContent(root: Element, content: string): void {
   if (resourceSeller) settlementResourceSale?.mount(resourceSeller);
   if (canvas) root.querySelector('#settlement-world')?.replaceWith(canvas);
   for (const [id, value] of drafts) {
-    const el = root.querySelector<HTMLInputElement>(`#${id}`);
+    const el = root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`);
     if (el && !el.disabled) el.value = value;
   }
   root.querySelectorAll<HTMLElement>('.crew-controls').forEach(syncCrewControls);
@@ -1386,6 +1387,18 @@ app.addEventListener('click', event => {
       break;
     }
     case 'automatic': void act({ type: 'automatic', enabled: !state.workforce.automatic }); break;
+    case 'federation-contribute': {
+      const asset = document.querySelector<HTMLSelectElement>('#federation-asset')?.value;
+      const amount = Number(document.querySelector<HTMLInputElement>('#federation-amount')?.value);
+      if (!asset || (!isResource(asset) && asset !== 'dollars') || !Number.isFinite(amount) || amount <= 0
+        || amount > 100000000 || (asset === 'dollars' ? !/^\d+(?:\.\d{1,4})?$/.test(String(amount)) : !Number.isSafeInteger(amount))) {
+        toast('Enter a positive whole resource quantity or FTH$ with up to four decimal places.', true); break;
+      }
+      void act({ type: 'federation-contribute', asset, amount }).then(success => {
+        const input = document.querySelector<HTMLInputElement>('#federation-amount');
+        if (success && input) input.value = '';
+      }); break;
+    }
     case 'gift': case 'join': case 'form': case 'vote': void act({ type: 'diplomacy', action }); break;
     case 'claim': void act({ type: 'claim' }); break;
     case 'export': case 'legacy-export': {

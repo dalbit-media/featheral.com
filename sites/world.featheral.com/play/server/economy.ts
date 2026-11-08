@@ -556,6 +556,7 @@ export function parseCommand(value: unknown): Command {
     'activate-collection': ['item'], 'collect-sell': ['resource', 'quantity', 'minimumDollars'],
     'use-customization': ['item', 'value'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
+    'federation-contribute': ['asset', 'amount'],
   };
   if (typeof c.type !== 'string' || !Object.hasOwn(fields, c.type)
     || Object.keys(c).sort().join() !== ['type', ...fields[c.type]].sort().join()) throw new ApiError(400, 'Invalid command fields.');
@@ -565,6 +566,9 @@ export function parseCommand(value: unknown): Command {
     if (Object.keys(position).sort().join() !== 'x,y' || ![position.x, position.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000)) throw new ApiError(400, 'Invalid command values.');
   }
   if (((c.type === 'move' || c.type === 'map-collect' || c.type === 'investigate') && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
+    || (c.type === 'federation-contribute' && (!oneOf(c.asset, [...resources, 'dollars']) || typeof c.amount !== 'number'
+      || !Number.isFinite(c.amount) || c.amount <= 0 || c.amount > 100000000
+      || (c.asset === 'dollars' ? !/^\d+(?:\.\d{1,4})?$/.test(String(c.amount)) : !Number.isSafeInteger(c.amount))))
     || (c.type === 'trade' && (!oneOf(c.resource, resources) || !oneOf(c.direction, ['buy', 'sell']) || typeof c.amount !== 'number' || !Number.isSafeInteger(c.amount) || c.amount < 1 || c.amount > 10000))
     || (c.type === 'build' && !oneOf(c.kind, ['bank', 'townhall']) && !isWaterFacility(c.kind) && !isIncomeFacility(c.kind))
     || (c.type === 'construction' && !isConstruction(c.kind))
@@ -587,9 +591,13 @@ export function parseCommand(value: unknown): Command {
   return c as Command;
 }
 export function execute(account: Account, command: Command, realTime = account.updatedAt,
-  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string): string {
+  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
+  contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
   const game = account.game;
   switch (command.type) {
+    case 'federation-contribute':
+      if (!contribute) throw new ApiError(503, 'Federation vault is unavailable.');
+      return note(game, contribute(command));
     case 'gather': {
       if (game.stage >= 0) throw new ApiError(409, 'Use resident crews after founding your settlement.');
       const terrain = terrainAt(game.position.x, game.position.y, game.seed);
@@ -816,7 +824,8 @@ export function parseActionEnvelope(value: unknown): { id: string; revision: num
   return { id: body.id, revision: body.revision, command: body.command };
 }
 export function apply(account: Account, value: unknown, time: number, realTime = time,
-  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string): Snapshot & { message: string } {
+  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
+  contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): Snapshot & { message: string } {
   const body = parseActionEnvelope(value);
   const request = JSON.stringify({ revision: body.revision, command: body.command });
   if (account.receipt?.id === body.id) {
@@ -839,7 +848,7 @@ export function apply(account: Account, value: unknown, time: number, realTime =
   accrue(account, time);
   if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
   if (realTime - account.lastActionAt < 250) throw new ApiError(429, 'Actions are limited to four per second.');
-  const message = execute(account, command, realTime, sellPickup);
+  const message = execute(account, command, realTime, sellPickup, contribute);
   if (command.type === 'activate-activity' || command.type === 'activity-automation') accrue(account, account.updatedAt);
   if (!Object.keys(workforce(account).crews).length) beginCycle(account, account.updatedAt);
   if (!resources.every(r => Number.isSafeInteger(account.game.stock[r]) && account.game.stock[r] >= 0)

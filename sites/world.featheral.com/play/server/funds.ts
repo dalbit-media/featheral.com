@@ -203,6 +203,9 @@ export class GameFunds {
       result.set(this.account(String(row.id)), Number(row.dollars));
     for (const row of this.db.prepare('SELECT asset,dollars FROM market_pools').all())
       result.set(gameFundAccount('pool', String(row.asset)), Number(row.dollars));
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='federation_vaults'").get())
+      for (const row of this.db.prepare('SELECT federation,dollars FROM federation_vaults').all())
+        result.set(gameFundAccount('escrow', `federation:${row.federation}`), Number(row.dollars));
     for (const row of this.db.prepare("SELECT owner,SUM(price*remaining) AS dollars FROM market_orders WHERE side='buy' AND status='open' GROUP BY owner").all())
       result.set(gameFundAccount('escrow', String(row.owner)), Number(row.dollars));
     return result;

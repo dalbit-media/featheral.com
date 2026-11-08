@@ -23,6 +23,7 @@ export type Command =
   | { type: 'decorate'; slot: DecorationSlot; item: DecorationItem | null }
   | { type: 'arrange'; entity: SettlementEntity; position: GridPosition | null }
   | { type: 'diplomacy'; action: 'gift' | 'join' | 'form' | 'vote' }
+  | { type: 'federation-contribute'; asset: Resource | 'dollars'; amount: number }
   | { type: 'claim'; resource?: Resource }
   | { type: 'collect-sell'; resource: Resource; quantity: number; minimumDollars: number }
   | { type: 'activate-collection'; item: CollectionItem }
@@ -106,6 +107,20 @@ export interface PopulationTotals { global: number; federation: number | null }
 export interface PublicTotals { settlements: number; metal: number; population: number; dollars: number }
 export interface PublicStats extends PublicTotals { updatedAt: number }
 export interface ApiState extends Snapshot {
+  federationVault?: FederationVault | null;
   csrf: string; population: PopulationTotals; clockSpeed: ClockSpeed; message?: string;
   fundWallet?: string | null; fundMode?: 'guest' | 'legacy-direct' | 'separate'; fundAccountId?: string | null;
+}
+export interface FederationVault {
+  year: number;
+  stock: Stock & { dollars: number };
+  annualContributed: Stock & { dollars: number };
+  totalValue: number;
+  annualValue: number;
+  contributors: {
+    id: string; name: string; yours: boolean;
+    contributed: Stock & { dollars: number }; annualContributed: Stock & { dollars: number };
+    value: number; annualValue: number; allTimePercent: number; annualPercent: number;
+  }[];
+  taxStatus: 'pending';
 }

@@ -27,6 +27,7 @@ export interface ConsumptionQuote {
   receiveLabel?: string;
   costLabel?: string;
   notes: string[];
+  preciseDollars?: boolean;
 }
 function amounts(cost: Cost): ConsumptionAmount[] {
   return Object.entries(cost).map(([asset, amount]) => ({ asset: asset as Resource | 'dollars', amount }));
@@ -39,6 +40,11 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
   const quote = (title: string, subject: string, cost: Cost, notes: string[] = []): ConsumptionQuote =>
     ({ title, subject, costs: amounts(cost), weeks: 0, notes });
   switch (command.type) {
+    case 'federation-contribute':
+      return { ...quote('Contribute to common vault', game.federation ?? 'Federation',
+        { [command.asset]: command.amount }, ['Contributions are permanent. No withdrawal or payout is currently available.',
+          'Resource contributions use fixed base FTH$ prices. Annual shares are recorded by game year.']),
+        preciseDollars: true };
     case 'use-customization':
       return { ...quote(isTitleItem(command.item) ? 'Set player title' : 'Edit settlement identity', command.value, {},
         ['Consumes one permit. Names and titles are cosmetic and do not change ownership or permissions.']),

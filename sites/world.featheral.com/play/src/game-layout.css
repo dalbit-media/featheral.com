@@ -329,6 +329,20 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app .federation-cost>span{display:flex;align-items:center;gap:4px}
 #app .federation-state{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mint)}
 #app .federation-disclaimer{display:flex;align-items:center;gap:6px;margin:12px 0 0;font-size:11px;line-height:1.5}
+#app .federation-vault{margin-top:12px;padding:12px;border:1px solid var(--surface-border);border-radius:10px}
+#app .federation-vault header,#app .federation-vault-totals,#app .federation-deposit{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+#app .federation-vault header{justify-content:space-between}
+#app .federation-vault h3{margin:0;font-size:15px}
+#app .federation-vault-totals{margin:12px 0}
+#app .federation-vault-totals>div{flex:1;min-width:200px}
+#app .federation-deposit label{display:flex;flex-direction:column;gap:4px;font-size:12px;flex:1;min-width:100px}
+#app .federation-deposit :is(input,select){width:100%;min-width:0}
+#app .federation-deposit .button{align-self:end}
+#app .federation-contributions-scroll{max-width:100%;overflow:auto}
+#app .federation-contributions{width:100%;border-collapse:collapse;font-size:12px}
+#app .federation-contributions :is(th,td){padding:8px;text-align:left;border-bottom:1px solid var(--surface-border)}
+#app .federation-contributions th{max-width:180px;overflow-wrap:anywhere}
+#app .federation-contributions .federation-cost{gap:6px}
 @media(max-width:1000px){
   #app .exchange-layout{grid-template-columns:minmax(0,1fr)}
   #app .exchange-order-entry{grid-column:1;grid-row:2;position:static}
