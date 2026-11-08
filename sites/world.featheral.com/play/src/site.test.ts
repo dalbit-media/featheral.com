@@ -447,6 +447,7 @@ test('marketplace removes banners and uses plain buying and selling labels witho
   assert.match(source, /data-market-view="table"/);
   assert.match(source, /<details class="exchange-help">/);
   assert.doesNotMatch(source, />Spot<|>Limit order<|>Bids<|>Asks<|>Order book<|System liquidity|escrow|executions/);
+  assert.doesNotMatch(source, /market-analysis-access|data-market-analysis|profit-high|craft-cost-low|Craft profit breakdown/);
 });
 test('Inbox menu is shared by game pages and retains a bounded, text-only chat view across state refreshes', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');

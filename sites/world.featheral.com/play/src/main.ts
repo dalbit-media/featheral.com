@@ -6,7 +6,7 @@ import './pages.css';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
-import { connect, readCollection, readMarket, refresh, send } from './api.ts';
+import { connect, readCollection, readMarket, refresh, send, sendMarket } from './api.ts';
 import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
 import { ScreenPreview } from './screen-preview.ts';
@@ -41,7 +41,7 @@ import { gamePage, primaryGamePageKeys, gamePages } from './game-pages.ts';
 import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
-import { claimConsumption, gameConsumption } from './consumption.ts';
+import { claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
 import { chooseCraftBatch, confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
@@ -59,6 +59,7 @@ import { chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChanged
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from './customization.ts';
 import { actionRemaining, timedActionKey, renderActionControls } from './action-timing.ts';
 import type { TimedAction } from './action-timing.ts';
+import type { MarketAnalysis } from './market-analysis.ts';
 
 const navigationPage = gamePage(location.pathname);
 const settlementPage = navigationPage === 'home', marketPage = navigationPage === 'market';
@@ -78,6 +79,7 @@ let selectedBuilding: SettlementEntity = 'centre';
 let settlementTask = settlementTaskFromHash(location.hash);
 let craftingFilter: CraftingFilter = 'all';
 let craftingTickers: MarketSnapshot['tickers'] = [];
+let craftingAnalysis: MarketAnalysis | null = null;
 let craftingPricesLoading = false;
 let craftingPricesAttemptAt = -Infinity;
 let craftingPricesError = '';
@@ -949,13 +951,14 @@ function selectSettlementCell(entity: SettlementEntity | null, position: GridPos
   showSettlementTask(settlementTask === 'decorate' || !building ? 'decorate' : building.task);
 }
 async function refreshCraftingPrices(force = false): Promise<void> {
-  if (craftingPricesLoading || document.hidden || settlementTask !== 'crafting'
+  if (busy || craftingPricesLoading || document.hidden || settlementTask !== 'crafting'
     || !force && performance.now() - craftingPricesAttemptAt < serverSyncIntervalMs) return;
   craftingPricesLoading = true;
   craftingPricesAttemptAt = performance.now();
   try {
     const response = await readMarket('torch', 1);
     craftingTickers = response.market.tickers;
+    craftingAnalysis = response.market.analysis ?? null;
     craftingPricesError = '';
   } catch (error) {
     craftingTickers = [];
@@ -964,6 +967,29 @@ async function refreshCraftingPrices(force = false): Promise<void> {
   } finally {
     craftingPricesLoading = false;
     if (settlementTask === 'crafting' && !busy && !confirmationOpen() && !document.hidden) renderSettlement();
+  }
+}
+async function purchaseCraftingAnalysis(): Promise<void> {
+  if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return; }
+  const command = { type: 'profit-analysis' } as const;
+  const quote = marketConsumption(command);
+  if (!quote) { toast('Profit analysis is unavailable.', true); return; }
+  busy = true;
+  try {
+    renderSettlement();
+    if (!await confirmConsumption(quote, language)) return;
+    const response = await sendMarket(state, command);
+    synchronize(response);
+    craftingTickers = response.market.tickers;
+    craftingAnalysis = response.market.analysis ?? null;
+    craftingPricesError = '';
+    craftingPricesAttemptAt = performance.now();
+    toast('Latest profit analysis purchased. Access expires after one game day.');
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'The analysis could not be completed.', true);
+  } finally {
+    busy = false;
+    if (settlementTask === 'crafting') renderSettlement();
   }
 }
 function renderSettlement(): void {
@@ -989,7 +1015,8 @@ function renderSettlement(): void {
   else if (settlementTask === 'crafting') {
     void refreshCraftingPrices();
     content = `<p class="fineprint crafting-market-status" role="status">${translate(craftingPricesError ? 'Prices unavailable' : craftingPricesLoading ? 'Loading prices...' : 'Live market prices', language)}${craftingPricesError ? `: ${escape(craftingPricesError)} <button class="button" data-action="crafting-prices">${translate('Retry', language)}</button>` : ''}</p>`
-      + craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers);
+      + craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers, craftingAnalysis,
+        displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed), busy, craftingPricesLoading);
   }
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
@@ -1291,6 +1318,9 @@ app.addEventListener('click', event => {
   switch (action) {
     case 'crafting-prices':
       void refreshCraftingPrices(true);
+      break;
+    case 'crafting-analysis':
+      void purchaseCraftingAnalysis();
       break;
     case 'crew-step': {
       const input = target.closest('.crew-controls')!.querySelector<HTMLInputElement>('input[type="number"]')!;

@@ -174,7 +174,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
 }
 export function marketConsumption(command: MarketCommand): ConsumptionQuote | null {
   if (command.type === 'profit-analysis') return {
-    title: 'Latest profit analysis', subject: 'Marketplace', weeks: 0, costs: [{ asset: 'dollars', amount: marketAnalysisFee }],
+    title: 'Latest profit analysis', subject: 'Crafting', weeks: 0, costs: [{ asset: 'dollars', amount: marketAnalysisFee }],
     notes: ['Purchases a full-market snapshot for one output copy of each craftable item. Access expires after one game day.',
       'Includes crafting fees and executable purchase quotes for every ingredient. The FTH$100 report fee is separate from per-item profit.',
       'Each explicit refresh costs FTH$100. Quotes are not reserved; prices and liquidity can change. No guaranteed profit.'],

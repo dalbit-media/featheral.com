@@ -13,6 +13,8 @@ import { renderPriceChange } from './marketplace-catalog.ts';
 import { gameConsumption } from './consumption.ts';
 import { withDollarFee } from './costs.ts';
 import { translate } from './i18n.ts';
+import { marketAnalysisDuration } from './market-analysis.ts';
+import type { MarketAnalysis } from './market-analysis.ts';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { runInNewContext } from 'node:vm';
@@ -198,7 +200,7 @@ test('crafting loads one shared market catalog, throttles requests and surfaces 
   fail = false; await refreshPrices(true); assert.equal(calls, 3); assert.equal(context.craftingPricesError, '');
   context.craftingPricesLoading = true; await refreshPrices(true); assert.equal(calls, 3);
   assert.equal(renders, 3);
-  assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers\)/);
+  assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers,/);
   assert.match(source, /data-action="crafting-prices"/);
 });
 test('profit estimates include raw resources, item inputs, fees and batch permits without changing craft charges', () => {
@@ -238,4 +240,29 @@ test('profit estimates include raw resources, item inputs, fees and batch permit
   assert.match(ko, /재료의 판매 시세가 필요/);
   const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
   assert.match(css, /#crafting \.consumption-costs \.cost\{font-size:9px;font-weight:400/);
+});
+test('paid market analysis is purchased in crafting and displays active per-copy profit breakdowns', () => {
+  const state = fixture();
+  const report: MarketAnalysis = {
+    generatedAt: state.serverTime,
+    expiresAt: state.serverTime + marketAnalysisDuration,
+    fee: 100,
+    items: [{ item: 'bench', craftingFee: 10, ingredients: [{ asset: 'wood', quantity: 6, dollars: 12 }],
+      cost: 22, revenue: 160, profit: 138 }],
+  };
+  const html = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, state.serverTime);
+  assert.match(html, /class="crafting-analysis-access"/);
+  assert.match(html, /data-action="crafting-analysis"/);
+  assert.match(html, /Refresh analysis · FTH\$100/);
+  assert.match(html, /Latest snapshot profit · one copy/);
+  const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+  assert.match(bench, /data-snapshot-profit="profit"/);
+  assert.match(bench, /FTH\$ 138/);
+  assert.match(bench, /Wood ×/);
+  const expired = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, report.expiresAt);
+  assert.match(expired, /Analysis expired/);
+  assert.doesNotMatch(expired, /recipe-snapshot-estimate/);
+  const locked = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], null, state.serverTime, false, true);
+  assert.match(locked, /Get profit analysis · FTH\$100/);
+  assert.match(locked, /data-action="crafting-analysis" disabled/);
 });

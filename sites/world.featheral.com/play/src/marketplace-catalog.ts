@@ -12,12 +12,11 @@ import { isCustomizationItem } from './customization.ts';
 import { isActivityEquipment } from './activity-equipment.ts';
 import { isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem } from './transport-items.ts';
-import { activeMarketAnalysis, marketRarity, rarityLabel } from './market-analysis.ts';
-import type { MarketAnalysis } from './market-analysis.ts';
+import { marketRarity, rarityLabel } from './market-analysis.ts';
 
 export type CatalogView = 'grid' | 'table';
 export const catalogSorts = ['name', 'name-desc', 'buy-low', 'buy-high', 'sell-high', 'sell-low', 'owned', 'change24h-high', 'change24h-low', 'change7d-high', 'change7d-low',
-  'profit-high', 'profit-low', 'craft-cost-low', 'craft-cost-high', 'rarity-high', 'rarity-low', 'quantity-low', 'quantity-high', 'stage-low', 'stage-high'] as const;
+  'rarity-high', 'rarity-low', 'quantity-low', 'quantity-high', 'stage-low', 'stage-high'] as const;
 export type CatalogSort = typeof catalogSorts[number];
 type Ticker = MarketSnapshot['tickers'][number];
 export type ChangeWindow = '24h' | '7d';
@@ -47,20 +46,17 @@ export function marketOwned(state: ApiState, asset: MarketAsset): number {
   return isMarketResource(asset) ? state.game.stock[asset] : state.inventory.items.filter(item => item === asset).length;
 }
 export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language: Language,
-  category: string, query: string, sort: CatalogSort, ownedOnly: boolean, report: MarketAnalysis | null = null, now = state.serverTime): Ticker[] {
+  category: string, query: string, sort: CatalogSort, ownedOnly: boolean): Ticker[] {
   const name = (asset: MarketAsset) => translate(marketAssetName(asset), language);
-  const analysis = new Map(activeMarketAnalysis(report, now)?.items.map(item => [item.item, item]));
   return tickers.filter(({ asset }) => {
     const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isAutomationItem(asset) || isBulkCraftingItem(asset) || isTransportItem(asset) ? 'automation' : isVisibilityItem(asset) || isActivityEquipment(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
     return (category === 'all' || category === group || category === 'items' && group !== 'resources') && name(asset).toLocaleLowerCase(locale(language)).includes(query.toLocaleLowerCase(locale(language)).trim())
       && (!ownedOnly || marketOwned(state, asset) > 0);
   }).sort((a, b) => {
-    const value = (ticker: Ticker): number | null => sort.startsWith('profit-') ? isCraftableItem(ticker.asset) ? analysis.get(ticker.asset)?.profit ?? null : null
-      : sort.startsWith('craft-cost-') ? isCraftableItem(ticker.asset) ? analysis.get(ticker.asset)?.cost ?? null : null
-      : sort.startsWith('rarity-') ? isMarketResource(ticker.asset) || !ticker.availableQuantity || marketRarity(ticker.availableQuantity) === 'unknown' ? null : ticker.availableQuantity
+    const value = (ticker: Ticker): number | null => sort.startsWith('rarity-') ? isMarketResource(ticker.asset) || !ticker.availableQuantity || marketRarity(ticker.availableQuantity) === 'unknown' ? null : ticker.availableQuantity
       : sort.startsWith('quantity-') ? ticker.availableQuantity ?? null
       : sort.startsWith('stage-') ? isCraftableItem(ticker.asset) ? craftingStage(ticker.asset) : null : null;
-    if (/^(profit|craft-cost|rarity|quantity|stage)-/.test(sort)) {
+    if (/^(rarity|quantity|stage)-/.test(sort)) {
       const first = value(a), second = value(b);
       if ((first === null) !== (second === null)) return first === null ? 1 : -1;
       const descending = sort.startsWith('rarity-') ? sort.endsWith('-low') : sort.endsWith('-high');
@@ -89,9 +85,8 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
     return difference || alphabetical * (sort === 'name-desc' ? -1 : 1);
   });
 }
-export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected: MarketAsset, view: CatalogView, language: Language, pending: boolean, sort: CatalogSort = 'name', report: MarketAnalysis | null = null, now = state.serverTime): string {
+export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected: MarketAsset, view: CatalogView, language: Language, pending: boolean, sort: CatalogSort = 'name'): string {
   const text = (label: string) => translate(label, language);
-  const active = activeMarketAnalysis(report, now), analyses = new Map(active?.items.map(item => [item.item, item]));
   const rows = tickers.map(ticker => {
     const name = text(marketAssetName(ticker.asset)), owned = formatResourceAmount(ticker.asset, marketOwned(state, ticker.asset), locale(language));
     const unit = tradingUnit(ticker.asset, locale(language));
@@ -109,12 +104,9 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
     const rarity = isMarketResource(ticker.asset) ? 'unknown' : marketRarity(ticker.availableQuantity);
     const supply = ticker.availableQuantity === undefined ? text('Unknown supply') : formatResourceAmount(ticker.asset, ticker.availableQuantity, locale(language));
     const scarcity = `<span class="catalog-rarity" data-rarity="${rarity}">${isMarketResource(ticker.asset) ? text('Resources') : text(rarityLabel(rarity))} · ${text('Available')} ${supply}</span>`;
-    const analysis = isCraftableItem(ticker.asset) ? analyses.get(ticker.asset) : undefined;
-    const value = (amount: number | null) => amount === null ? text('Quote unavailable') : `FTH$ ${amount.toLocaleString(locale(language), { maximumFractionDigits: 4 })}`;
-    const profit = analysis ? `<div class="catalog-analysis" data-profit="${analysis.profit === null ? 'unknown' : analysis.profit > 0 ? 'positive' : analysis.profit < 0 ? 'negative' : 'flat'}"><span>${text('Total craft cost')} <strong>${value(analysis.cost)}</strong></span><span>${text('Estimated profit')} <strong>${value(analysis.profit)}</strong></span></div>` : '';
     return view === 'grid'
-      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}${scarcity}${changes}${profit}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`
-      : `<tr class="catalog-row" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><td class="catalog-name-cell">${identity}${scarcity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td>${active ? `<td class="catalog-analysis-cell">${profit || '—'}</td>` : ''}<td class="catalog-change-column">${renderPriceChange(ticker, '24h', language)}</td><td class="catalog-change-column">${renderPriceChange(ticker, '7d', language)}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
+      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}${scarcity}${changes}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`
+      : `<tr class="catalog-row" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><td class="catalog-name-cell">${identity}${scarcity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td><td class="catalog-change-column">${renderPriceChange(ticker, '24h', language)}</td><td class="catalog-change-column">${renderPriceChange(ticker, '7d', language)}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
   }).join('');
   if (!rows) return `<p class="fineprint">${text('No matching items.')}</p>`;
   const heading = (label: string, ascending: CatalogSort, descending: CatalogSort, className = '', initial = ascending) => {
@@ -124,5 +116,5 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
     return `<th class="${className}" aria-sort="${active ? direction : 'none'}"><button type="button" data-catalog-column="${ascending}" data-catalog-sort="${next}" aria-label="${text('Sort by')} ${text(label)} · ${text(next === ascending ? 'Ascending' : 'Descending')}">${text(label)}${active ? sort === ascending ? ' ↑' : ' ↓' : ''}</button></th>`;
   };
   return view === 'grid' ? `<div class="market-catalog-grid">${rows}</div>`
-    : `<table class="market-catalog-table"><thead><tr>${heading('Item', 'name', 'name-desc')}${heading('Buy', 'buy-low', 'buy-high')}${heading('Sell', 'sell-low', 'sell-high')}${active ? heading('Estimated profit', 'profit-low', 'profit-high', 'catalog-analysis-cell', 'profit-high') : ''}${heading('24h', 'change24h-low', 'change24h-high', 'catalog-change-column', 'change24h-high')}${heading('7d', 'change7d-low', 'change7d-high', 'catalog-change-column', 'change7d-high')}<th class="catalog-owned-column" aria-sort="${sort === 'owned' ? 'descending' : 'none'}"><button type="button" data-catalog-column="owned" data-catalog-sort="owned" aria-label="${text('Sort by')} ${text('Most owned')}">${text('Owned')}${sort === 'owned' ? ' ↓' : ''}</button></th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    : `<table class="market-catalog-table"><thead><tr>${heading('Item', 'name', 'name-desc')}${heading('Buy', 'buy-low', 'buy-high')}${heading('Sell', 'sell-low', 'sell-high')}${heading('24h', 'change24h-low', 'change24h-high', 'catalog-change-column', 'change24h-high')}${heading('7d', 'change7d-low', 'change7d-high', 'catalog-change-column', 'change7d-high')}<th class="catalog-owned-column" aria-sort="${sort === 'owned' ? 'descending' : 'none'}"><button type="button" data-catalog-column="owned" data-catalog-sort="owned" aria-label="${text('Sort by')} ${text('Most owned')}">${text('Owned')}${sort === 'owned' ? ' ↓' : ''}</button></th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }

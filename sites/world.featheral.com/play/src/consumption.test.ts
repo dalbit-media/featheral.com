@@ -10,6 +10,7 @@ import { explorationQuote, nextExploration } from './workforce.ts';
 
 test('profit analysis confirmation states the fixed fee, expiry, replacement costs and explicit refresh charge', () => {
   const quote = marketConsumption({ type: 'profit-analysis' })!;
+  assert.equal(quote.subject, 'Crafting');
   assert.deepEqual(quote.costs, [{ asset: 'dollars', amount: 100 }]);
   assert.match(quote.notes.join(' '), /one game day/);
   assert.match(quote.notes.join(' '), /every ingredient/);

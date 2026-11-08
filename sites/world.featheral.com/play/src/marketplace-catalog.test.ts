@@ -1,11 +1,10 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { createAccount, snapshot } from '../server/economy.ts';
-import { filterMarketCatalog, formatPriceChange, renderMarketCatalog } from './marketplace-catalog.ts';
+import { catalogSorts, filterMarketCatalog, formatPriceChange, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort } from './marketplace-catalog.ts';
 import { marketAssets } from './market.ts';
-import { activeMarketAnalysis, marketAnalysisDuration, marketRarity } from './market-analysis.ts';
-import type { MarketAnalysis } from './market-analysis.ts';
+import { marketRarity } from './market-analysis.ts';
 
 const state = snapshot(createAccount(1000000));
 const tickers = [
@@ -70,25 +69,12 @@ test('change sorting ranks gainers and losers and always keeps markets without s
   assert.deepEqual(order('change7d-high'), ['torch', 'lamp', 'wood']);
   assert.deepEqual(order('change7d-low'), ['lamp', 'torch', 'wood']);
 });
-const report: MarketAnalysis = { generatedAt: state.serverTime, expiresAt: state.serverTime + marketAnalysisDuration, fee: 100,
-  items: [{ item: 'lamp', craftingFee: 1, ingredients: [], cost: 80, revenue: 90, profit: 10 },
-    { item: 'torch', craftingFee: 1, ingredients: [], cost: 5, revenue: 3, profit: -2 }] };
-test('paid profit and full-cost sorts use report values, keep unavailable items last and never expose expired analysis', () => {
-  const order = (sort: CatalogSort) => filterMarketCatalog(tickers, state, 'en', 'all', '', sort, false, report).map(ticker => ticker.asset);
-  assert.deepEqual(order('profit-high'), ['lamp', 'torch', 'collection-wood-1']);
-  assert.deepEqual(order('profit-low'), ['torch', 'lamp', 'collection-wood-1']);
-  assert.deepEqual(order('craft-cost-low'), ['torch', 'lamp', 'collection-wood-1']);
-  assert.deepEqual(order('craft-cost-high'), ['lamp', 'torch', 'collection-wood-1']);
+test('paid profit analysis and sorting are absent from marketplace catalogs', () => {
+  assert.doesNotMatch(catalogSorts.join(','), /profit|craft-cost/);
   for (const view of ['grid', 'table'] as const) {
-    const paid = renderMarketCatalog(tickers, state, 'lamp', view, 'en', false, 'profit-high', report);
-    assert.match(paid, /Total craft cost/); assert.match(paid, /data-profit="positive"/); assert.match(paid, /data-profit="negative"/);
-    const expired = renderMarketCatalog(tickers, state, 'lamp', view, 'en', false, 'name', report, report.expiresAt);
-    assert.doesNotMatch(expired, /catalog-analysis|Estimated profit|Total craft cost/);
-    assert.doesNotMatch(renderMarketCatalog(tickers, state, 'lamp', view, 'en', false), /catalog-analysis/);
+    const html = renderMarketCatalog(tickers, state, 'lamp', view, 'en', false);
+    assert.doesNotMatch(html, /catalog-analysis|Estimated profit|Total craft cost|profit-high|craft-cost-low/);
   }
-  assert.equal(activeMarketAnalysis(report, report.generatedAt - 1), null);
-  assert.ok(activeMarketAnalysis(report, report.expiresAt - 1));
-  assert.equal(activeMarketAnalysis(report, report.expiresAt), null);
 });
 test('dynamic rarity uses exact quantity boundaries, labels zero unavailable and sorts scarcity with unknowns last', () => {
   for (const [quantity, rarity] of [[0, 'unavailable'], [1, 'legendary'], [9, 'legendary'], [10, 'epic'], [49, 'epic'],
