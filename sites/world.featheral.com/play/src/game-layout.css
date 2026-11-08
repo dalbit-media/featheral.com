@@ -166,3 +166,218 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 .construction-card { grid-column: 1 / -1; }
 .crafting-quantity { display: flex; align-items: center; gap: 12px; }
 .crafting-quantity input { width: 88px; padding: 8px; }
+
+#app :is(.community-view,.marketplace-view){padding:16px}
+#app :is(.page-heading,.exchange-heading,.bank-heading){gap:12px;margin-bottom:12px}
+#app :is(.page-heading,.exchange-heading,.bank-heading) h1{font-size:24px}
+#app .page-heading .eyebrow{display:none}
+#app .page-heading p{margin:4px 0;font-size:12px;line-height:1.5}
+#app .page-emblem{width:40px;height:40px;border-radius:10px}
+#app .page-card,#app .exchange-card,#app .inbox-directory{padding:14px;border-radius:12px}
+#app :is(.page-card,.exchange-card) h2{font-size:16px;margin-bottom:10px}
+#app :is(.community-view,.marketplace-view) :is(input:not([type=checkbox]),select){min-height:40px;padding:8px}
+#app :is(.community-view,.marketplace-view) .button{min-height:40px;font-size:12px;padding:8px 10px}
+#app :is(.community-view,.marketplace-view) :is(button,input,select,summary,a):focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+#app .exchange-heading .market-bank-link{width:auto;max-width:none;min-height:40px;margin:0;font-size:11px}
+#app .exchange-heading .exchange-wallet{margin-left:auto}
+#app .exchange-wallet>span{display:none}
+#app .exchange-wallet strong{font-size:16px}
+#app .resource-market-navigation{justify-content:flex-start;gap:6px;margin:0 0 10px}
+#app .resource-market-navigation button{flex:0 1 auto;padding:8px 14px}
+#app .exchange-layout{grid-template-columns:minmax(0,1fr) 320px;gap:12px}
+#app .exchange-catalog{padding:12px}
+#app .exchange-catalog-choice>summary{display:flex;align-items:center;gap:8px;min-height:40px;cursor:pointer;list-style:none}
+#app .exchange-catalog-choice>summary::-webkit-details-marker{display:none}
+#app .catalog-current{display:flex;align-items:center;gap:8px}
+#app .catalog-current>span{font-size:11px}
+#app .catalog-current strong{font-size:13px}
+#app .catalog-current-price{font-size:12px}
+#app .catalog-filters{gap:8px;margin-top:8px}
+#app .catalog-filters label{font-size:11px;gap:4px;margin-bottom:8px}
+#app .catalog-toolbar{gap:6px;margin-bottom:8px}
+#app .catalog-owned-filter{min-height:40px;font-size:11px}
+#app .catalog-view-switch{padding:2px;gap:2px}
+#app .catalog-view-switch button{min-height:36px;padding:6px;font-size:11px}
+#app .exchange-assets{max-height:min(58dvh,640px);min-height:160px}
+#app .market-catalog-grid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:6px}
+#app .catalog-tile{padding:8px;gap:5px;border-radius:9px;background:#14231b}
+#app .catalog-card-meta{font-size:9px;line-height:1.35;gap:3px}
+#app .catalog-card-meta>span:first-child{display:none}
+#app .catalog-holdings{padding:2px 4px;max-width:100%}
+#app .catalog-tile .catalog-identity{grid-template-columns:24px minmax(0,1fr);gap:6px;padding:0;min-height:44px}
+#app .catalog-tile .catalog-identity>span>strong{font-size:11px;line-height:1.4;min-height:0}
+#app .catalog-tile .catalog-identity>.icon,#app .catalog-tile .catalog-identity>.item-art{width:24px;height:24px}
+#app .catalog-tile .catalog-price{padding:5px;min-height:54px;gap:2px}
+#app .catalog-price strong{font-size:11px}
+#app .catalog-price small{font-size:10px}
+#app .catalog-tile .catalog-last{display:none}
+#app .market-catalog-table .catalog-identity{min-height:44px}
+#app .market-catalog-table .catalog-price{min-height:44px;padding:4px}
+#app .market-catalog-table .catalog-identity :is(.icon,.item-art){width:24px;height:24px}
+#app .market-catalog-table th button{min-height:40px;width:100%;padding:4px;text-align:left;background:transparent;font:inherit;color:inherit;white-space:nowrap}
+#app .market-catalog-table th[aria-sort]:not([aria-sort=none]){color:var(--mint)}
+#app .exchange-order-entry{grid-column:2;grid-row:1/5}
+#app .exchange-order-entry form{gap:8px}
+#app .exchange-tabs{gap:4px;padding:3px}
+#app .exchange-tabs button{min-height:40px;font-size:12px}
+#app .ticket-stepper input{font-size:16px}
+#app .ticket-amounts{gap:4px}
+#app .ticket-amounts button{font-size:11px;min-height:40px}
+#app .exchange-order-entry .exchange-preview{font-size:11px;gap:5px}
+#app .exchange-preview .ticket-total{font-size:20px}
+#app .exchange-help{margin-top:8px}
+#app .exchange-help summary{min-height:40px}
+#app .exchange-instrument{grid-column:1;grid-row:2}
+#app .exchange-chart-card{grid-column:1;grid-row:3}
+#app .exchange-order-book{grid-column:1;grid-row:4}
+#app .market-chart{min-height:90px;max-height:140px}
+#app .market-chart-empty{min-height:90px;padding:12px}
+#app .exchange-book{margin-top:8px;gap:10px}
+#app .exchange-pool{margin-top:8px;padding:10px;gap:5px}
+#app .exchange-pool small{font-size:10px;line-height:1.5}
+#app .exchange-history-card{grid-row:auto}
+#app .marketplace-view :is(th,td){padding:6px}
+#app .market-table-scroll{max-height:230px}
+#app .market-funding{font-size:12px;margin-top:12px}
+#app .market-funding>summary{min-height:44px;cursor:pointer;padding:12px;border:1px solid var(--surface-border);border-radius:10px}
+#app .market-funding .exchange-card{margin-top:8px}
+#app .exchange-order-entry [data-market-resource-sale] .resource-sale{padding:0;margin-top:8px;background:none}
+#app .exchange-order-entry [data-market-resource-sale] h3{display:none}
+#app .exchange-order-entry .resource-sale form{gap:8px}
+#app .exchange-order-entry .resource-sale :is(small,p,label){font-size:11px;line-height:1.5}
+#app .exchange-order-entry .resource-sale-total{padding:6px 0}
+#app .exchange-order-entry .resource-sale-total strong{font-size:20px}
+#app .exchange-order-entry .resource-sale [role=status]:empty{display:none}
+#app .exchange-order-entry .resource-sale-quantity{gap:6px}
+#app .exchange-order-entry .resource-sale-actions{gap:6px}
+#app .exchange-order-entry .resource-sale label:has([data-sale-resource]),#app .exchange-order-entry .resource-sale label:has([data-sale-slider]){display:none}
+#app .exchange-order-entry .resource-sale label:has([data-sale-number]){grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px}
+#app .exchange-order-entry .resource-sale [data-sale-available]{font-size:10px;color:var(--muted)}
+#app .inbox-heading{padding:0 0 8px;margin-bottom:8px;gap:8px}
+#app .inbox-heading h1{font-size:24px}
+#app .inbox-layout{grid-template-columns:240px minmax(0,1fr);gap:12px}
+#app .inbox-directory{display:flex;flex-direction:column;gap:8px;overflow:hidden}
+#app .inbox-directory-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}
+#app .inbox-directory-heading h2{font-size:15px;margin:0}
+#app .inbox-directory-heading .button{min-width:40px;padding:6px}
+#app .inbox-search{display:block;flex-shrink:0}
+#app .inbox-directory .sr-only{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#app .inbox-search input,#app .inbox-mobile-channel select{width:100%;min-width:0;background:#101b14;color:inherit;border:1px solid var(--surface-border);border-radius:8px;font:inherit}
+#app .inbox-mobile-channel{display:none}
+#app [data-inbox-rooms]{min-height:0;overflow:auto;overscroll-behavior:contain}
+#app .inbox-contact{margin-top:6px;padding-top:6px;gap:4px}
+#app .inbox-contact>.button:first-child{font-size:12px;line-height:1.4}
+#app .inbox-contact small{font-size:10px}
+#app .inbox-contact>.button:last-child:not(:first-child){justify-self:start;min-height:36px;font-size:10px}
+#app .inbox-visit{flex-shrink:0;min-width:40px;padding:6px}
+#app .inbox-visit[hidden],#app .inbox-directory [hidden]{display:none}
+#app [data-communicate]{gap:6px;overflow:hidden}
+#app .chat-summary{font-size:13px;line-height:1.4;flex-shrink:0}
+#app .chat-summary strong{min-width:0;overflow-wrap:anywhere}
+#app .chat-summary>span{white-space:nowrap}
+#app .chat-status{margin:0;font-size:11px;line-height:1.5}
+#app .chat-tools{gap:6px;flex-shrink:0}
+#app .chat-tools [data-chat-settings]{min-width:40px;padding:6px}
+#app [data-chat-self]{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#app .chat-guidelines{margin-left:auto}
+#app .chat-guidelines summary{display:flex;align-items:center;justify-content:center;min-width:40px;min-height:40px;cursor:pointer}
+#app .chat-guidelines[open]{flex-basis:100%}
+#app .chat-guidelines p{max-width:50ch}
+#app .chat-messages{padding:8px;min-height:64px}
+#app .chat-message{padding:6px 0}
+#app .chat-message p{font-size:13px;line-height:1.5;margin-top:3px}
+#app .chat-composer{grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:end}
+#app .chat-composer textarea{height:44px;max-height:100px;padding:10px;font-size:13px}
+#app .chat-composer>div{flex-direction:column-reverse;gap:2px;font-size:9px}
+#app .chat-composer .button{min-width:72px;min-height:44px;padding:8px}
+#app .world-chat .chat-composer textarea{max-height:100px}
+#app .federation-page-content{display:grid;gap:12px}
+#app .federation-census{display:flex;align-items:center;gap:20px}
+#app .federation-census h2{margin:0;font-size:14px;max-width:110px}
+#app .page-census{flex:1;gap:12px}
+#app .page-census span{gap:3px}
+#app .page-census small{font-size:11px}
+#app .page-census strong{font-size:22px}
+#app .federation-banner{display:flex;align-items:center;gap:10px;padding:0;margin:0 0 12px}
+#app .federation-banner>div{min-width:0;flex:1}
+#app .federation-banner h2{font-size:18px;margin:4px 0;overflow-wrap:anywhere}
+#app .federation-banner>.icon{width:32px;height:32px}
+#app .federation-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--surface-border)}
+#app .federation-metrics>div{display:grid;align-content:start;gap:4px}
+#app .federation-metrics strong{font-size:20px;font-variant-numeric:tabular-nums}
+#app .federation-metrics small{font-size:10px;color:var(--muted)}
+#app .federation-metrics progress{height:3px;width:100%;accent-color:var(--mint)}
+#app .federation-actions-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+#app .federation-action-card{display:flex;flex-direction:column;align-items:start;gap:8px;padding:12px;border:1px solid var(--surface-border);border-radius:10px}
+#app .federation-action-card h3{margin:0;font-size:14px}
+#app .federation-action-card :is(p,small,a){margin:0;font-size:12px;line-height:1.5}
+#app .federation-action-card .fineprint:empty{display:none}
+#app .federation-cost{display:flex;flex-wrap:wrap;gap:8px;font-size:12px}
+#app .federation-cost>span{display:flex;align-items:center;gap:4px}
+#app .federation-state{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mint)}
+#app .federation-disclaimer{display:flex;align-items:center;gap:6px;margin:12px 0 0;font-size:11px;line-height:1.5}
+@media(max-width:1000px){
+  #app .exchange-layout{grid-template-columns:minmax(0,1fr)}
+  #app .exchange-order-entry{grid-column:1;grid-row:2;position:static}
+  #app .exchange-instrument{grid-row:3}
+  #app .exchange-chart-card{grid-row:4}
+  #app .exchange-order-book{grid-row:5}
+}
+@media(max-width:650px),(pointer:coarse){
+  #app :is(.community-view,.marketplace-view) :is(.button,input:not([type=checkbox]),select){min-height:44px}
+  #app :is(.exchange-tabs,.ticket-amounts,.catalog-view-switch) button,#app .market-catalog-table th button{min-height:44px}
+  #app .chat-tools :is([data-chat-settings],.inbox-visit){min-width:44px}
+  #app .chat-guidelines summary{min-width:44px;min-height:44px}
+}
+@media(max-width:650px){
+  #app :is(.community-view,.marketplace-view){padding:10px}
+  #app :is(.page-heading,.exchange-heading,.bank-heading) h1{font-size:21px}
+  #app .exchange-heading .market-bank-link{display:none}
+  #app .exchange-heading{margin-bottom:8px;flex-wrap:nowrap}
+  #app .exchange-heading .exchange-wallet strong{font-size:13px}
+  #app .exchange-catalog,#app .page-card,#app .exchange-card{padding:10px}
+  #app .catalog-filters{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #app .exchange-search{grid-column:1/-1}
+  #app .catalog-count{font-size:10px}
+  #app .catalog-count>span:last-child{display:none}
+  #app .catalog-current>span{display:none}
+  #app .catalog-current-price{font-size:10px}
+  #app .exchange-assets{max-height:340px;min-height:130px}
+  #app .market-catalog-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #app .catalog-price{min-width:0}
+  #app .market-catalog-table .catalog-last-column{display:none}
+  #app .market-catalog-table .catalog-name-cell{min-width:90px}
+  #app .inbox-heading{margin-bottom:8px;gap:6px}
+  #app .inbox-heading h1{font-size:21px}
+  #app .inbox-heading+.fineprint{display:none}
+  #app .inbox-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:8px}
+  #app .inbox-directory{display:grid;grid-template-columns:minmax(0,1fr) 44px;grid-template-rows:auto auto;gap:6px;padding:0;border:0;background:none}
+  #app .inbox-directory-heading{display:contents}
+  #app .inbox-directory-heading h2{display:none}
+  #app .inbox-directory-heading .button{grid-column:2;grid-row:1}
+  #app .inbox-search{grid-column:1;grid-row:1}
+  #app .inbox-mobile-channel{display:block;grid-column:1/-1;grid-row:2}
+  #app [data-inbox-rooms]{display:none}
+  #app .inbox-directory [data-inbox-status]{grid-column:1/-1;grid-row:3;margin:0;font-size:11px}
+  #app .inbox-layout .chat-page{padding:8px}
+  #app .chat-composer textarea{font-size:16px}
+  #app .federation-census{display:block}
+  #app .federation-census h2{max-width:none;margin-bottom:8px}
+  #app .federation-actions-grid{grid-template-columns:minmax(0,1fr)}
+  #app .federation-banner{flex-wrap:wrap}
+  #app .federation-banner .button{margin-left:42px}
+  #app .federation-action-card{padding:10px;gap:6px}
+  #app .federation-metrics{gap:8px}
+  #app .page-heading p{display:none}
+}
+@media(max-width:650px) and (max-height:650px){
+  #app .inbox-directory{grid-template-columns:minmax(80px,.7fr) minmax(0,1fr) 44px;grid-template-rows:auto}
+  #app .inbox-directory-heading .button{grid-column:3}
+  #app .inbox-mobile-channel{grid-column:2;grid-row:1}
+  #app .inbox-directory [data-inbox-status]{grid-row:2}
+}
+@media(min-width:651px) and (max-height:500px){
+  #app .inbox-layout{grid-template-columns:200px minmax(0,1fr);gap:8px}
+  #app .inbox-heading{margin-bottom:6px;padding-bottom:4px}
+  #app .inbox-heading+.fineprint{display:none}
+}

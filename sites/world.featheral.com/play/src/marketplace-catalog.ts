@@ -11,7 +11,8 @@ import { displayPrice, displayQuantity, formatResourceAmount, formatResourcePric
 import { isCustomizationItem } from './customization.ts';
 
 export type CatalogView = 'grid' | 'table';
-export type CatalogSort = 'name' | 'buy-low' | 'sell-high' | 'owned';
+export const catalogSorts = ['name', 'name-desc', 'buy-low', 'buy-high', 'sell-high', 'sell-low', 'owned'] as const;
+export type CatalogSort = typeof catalogSorts[number];
 type Ticker = MarketSnapshot['tickers'][number];
 
 export function marketOwned(state: ApiState, asset: MarketAsset): number {
@@ -22,22 +23,31 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
   const name = (asset: MarketAsset) => translate(marketAssetName(asset), language);
   return tickers.filter(({ asset }) => {
     const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isAutomationItem(asset) ? 'automation' : isVisibilityItem(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
-    return (category === 'all' || category === group) && name(asset).toLocaleLowerCase(locale(language)).includes(query.toLocaleLowerCase(locale(language)).trim())
+    return (category === 'all' || category === group || category === 'items' && group !== 'resources') && name(asset).toLocaleLowerCase(locale(language)).includes(query.toLocaleLowerCase(locale(language)).trim())
       && (!ownedOnly || marketOwned(state, asset) > 0);
   }).sort((a, b) => {
-    const difference = sort === 'buy-low' ? displayPrice(a.asset, a.ask) - displayPrice(b.asset, b.ask)
+    const priceSide = sort.startsWith('buy-') ? 'ask' : sort.startsWith('sell-') ? 'bid' : null;
+    if (priceSide) {
+      const aAvailable = marketPriceAvailable(a[priceSide]), bAvailable = marketPriceAvailable(b[priceSide]);
+      if (aAvailable !== bAvailable) return aAvailable ? -1 : 1;
+    }
+    const difference = priceSide && !marketPriceAvailable(a[priceSide]) && !marketPriceAvailable(b[priceSide]) ? 0
+      : sort === 'buy-low' ? displayPrice(a.asset, a.ask) - displayPrice(b.asset, b.ask)
+      : sort === 'buy-high' ? displayPrice(b.asset, b.ask) - displayPrice(a.asset, a.ask)
       : sort === 'sell-high' ? displayPrice(b.asset, b.bid) - displayPrice(a.asset, a.bid)
+      : sort === 'sell-low' ? displayPrice(a.asset, a.bid) - displayPrice(b.asset, b.bid)
       : sort === 'owned' ? displayQuantity(b.asset, marketOwned(state, b.asset)) - displayQuantity(a.asset, marketOwned(state, a.asset)) : 0;
-    return difference || name(a.asset).localeCompare(name(b.asset), locale(language));
+    const alphabetical = name(a.asset).localeCompare(name(b.asset), locale(language)) || a.asset.localeCompare(b.asset);
+    return difference || alphabetical * (sort === 'name-desc' ? -1 : 1);
   });
 }
-export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected: MarketAsset, view: CatalogView, language: Language, pending: boolean): string {
+export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected: MarketAsset, view: CatalogView, language: Language, pending: boolean, sort: CatalogSort = 'name'): string {
   const text = (label: string) => translate(label, language);
   const rows = tickers.map(ticker => {
     const name = text(marketAssetName(ticker.asset)), owned = formatResourceAmount(ticker.asset, marketOwned(state, ticker.asset), locale(language));
     const unit = tradingUnit(ticker.asset, locale(language));
     const art = isMarketResource(ticker.asset) ? icon(ticker.asset) : itemArt(ticker.asset);
-    const identity = `<button type="button" class="catalog-identity" data-market-asset="${ticker.asset}" aria-pressed="${ticker.asset === selected}" ${pending ? 'disabled' : ''}>${art}<span><strong>${name}</strong><small class="catalog-owned-inline">${text('Owned')} ${owned}</small></span></button>`;
+    const identity = `<button type="button" class="catalog-identity" title="${name}" data-market-asset="${ticker.asset}" aria-pressed="${ticker.asset === selected}" ${pending ? 'disabled' : ''}>${art}<span><strong>${name}</strong><small class="catalog-owned-inline">${text('Owned')} ${owned}</small></span></button>`;
     const trade = (side: 'buy' | 'sell') => {
       const value = side === 'buy' ? ticker.ask : ticker.bid, available = marketPriceAvailable(value);
       const price = available ? formatResourcePrice(ticker.asset, value, locale(language)) : text('No offers yet.');
@@ -51,6 +61,12 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
       : `<tr class="catalog-row" data-selected="${ticker.asset === selected}"><td class="catalog-name-cell">${identity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
   }).join('');
   if (!rows) return `<p class="fineprint">${text('No matching items.')}</p>`;
+  const heading = (label: string, ascending: CatalogSort, descending: CatalogSort, className = '') => {
+    const active = sort === ascending || sort === descending;
+    const direction = sort === ascending ? 'ascending' : 'descending';
+    const next = sort === ascending ? descending : ascending;
+    return `<th class="${className}" aria-sort="${active ? direction : 'none'}"><button type="button" data-catalog-column="${ascending}" data-catalog-sort="${next}" aria-label="${text('Sort by')} ${text(label)} · ${text(next === ascending ? 'Ascending' : 'Descending')}">${text(label)}${active ? sort === ascending ? ' ↑' : ' ↓' : ''}</button></th>`;
+  };
   return view === 'grid' ? `<div class="market-catalog-grid">${rows}</div>`
-    : `<table class="market-catalog-table"><thead><tr><th>${text('Item')}</th><th>${text('Buy')}</th><th>${text('Sell')}</th><th class="catalog-owned-column">${text('Owned')}</th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
+    : `<table class="market-catalog-table"><thead><tr>${heading('Item', 'name', 'name-desc')}${heading('Buy', 'buy-low', 'buy-high')}${heading('Sell', 'sell-low', 'sell-high')}<th class="catalog-owned-column" aria-sort="${sort === 'owned' ? 'descending' : 'none'}"><button type="button" data-catalog-column="owned" data-catalog-sort="owned" aria-label="${text('Sort by')} ${text('Most owned')}">${text('Owned')}${sort === 'owned' ? ' ↓' : ''}</button></th><th class="catalog-last-column">${text('Last sale')}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }

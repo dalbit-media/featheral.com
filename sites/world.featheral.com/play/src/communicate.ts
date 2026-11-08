@@ -5,6 +5,7 @@ import { isTitleItem, titleItems } from './customization.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { localize } from './i18n-dom.ts';
+import { icon } from './icons.ts';
 
 export class Communicate {
   private readonly room?: string;
@@ -21,6 +22,7 @@ export class Communicate {
   private attempt = 0;
   private connected = false;
   private saving = false;
+  private sendFailed = false;
   private readonly profileChanged = (): void => { if (!this.closed) void this.load(); };
   private cooldown = 0;
   private submission: ChatSubmission | null = null;
@@ -28,17 +30,18 @@ export class Communicate {
   private nodes = new Map<number, HTMLElement>();
   private unread = 0;
   private readonly visibilityChanged = (): void => {
-    if (this.visible()) { this.list.scrollTop = this.list.scrollHeight; this.clearUnread(); }
+    if (this.visible() && this.atBottom()) this.clearUnread();
   };
   constructor(root: HTMLElement, csrf: () => string, language: Language, room?: string, title = 'Public chat', privateRoom = false) {
     this.room = room; this.privateRoom = privateRoom;
     this.root = root; this.csrf = csrf; this.language = language;
+    const messageId = `chat-message-${crypto.randomUUID()}`;
     root.innerHTML = `<div class="chat-summary"><strong data-chat-title></strong><span data-chat-online></span></div>
       <p class="chat-status" data-chat-status role="status">Connecting to chat...</p>
-      <div class="chat-tools"><button class="button" data-chat-reconnect hidden>Reconnect</button><button class="button" data-chat-settings>Profile settings</button><span data-chat-self data-no-localize></span><details class="chat-guidelines"><summary>Chat rules</summary><p class="chat-rules">Public chat · latest 100 messages saved · one message every 3 seconds · one active chat tab per player. Enter to send, Shift+Enter for a new line. Do not share personal information.</p></details></div>
+      <div class="chat-tools"><button class="button" data-chat-reconnect hidden>Reconnect</button><button class="button" data-chat-settings title="Profile settings" aria-label="Profile settings">${icon('account')}</button><span data-chat-self data-no-localize></span><details class="chat-guidelines"><summary title="Chat rules" aria-label="Chat rules">${icon('help')}</summary><p class="chat-rules">Public chat · latest 100 messages saved · one message every 3 seconds · one active chat tab per player. Enter to send, Shift+Enter for a new line. Do not share personal information.</p></details></div>
       <div class="chat-messages" data-chat-messages role="log" aria-label="Chat messages" aria-live="off" tabindex="0"><p class="chat-empty">No messages yet. Start the conversation.</p></div>
       <button class="button chat-latest" data-chat-latest hidden>Jump to latest</button>
-      <form class="chat-composer" data-chat-composer><label class="sr-only" for="chat-message">Message</label><textarea id="chat-message" data-chat-text rows="2" maxlength="600" placeholder="Send a message to everyone" disabled></textarea><div><span data-chat-count></span><button class="button primary" data-chat-send disabled>Send</button></div></form>`;
+      <form class="chat-composer" data-chat-composer><label class="sr-only" for="${messageId}">Message</label><textarea id="${messageId}" data-chat-text rows="1" maxlength="600" placeholder="Send a message to everyone" disabled></textarea><div><span data-chat-count aria-live="off"></span><button class="button primary" data-chat-send disabled>Send</button></div></form>`;
     localize(root);
     root.querySelector('[data-chat-title]')!.textContent = translate(title, language);
     root.querySelector('.chat-rules')!.textContent = translate(privateRoom
@@ -48,7 +51,12 @@ export class Communicate {
     window.addEventListener(chatProfileChangedEvent, this.profileChanged);
     root.querySelector('[data-chat-settings]')!.addEventListener('click', () => window.dispatchEvent(new Event(chatProfileSettingsEvent)));
     root.querySelector('[data-chat-composer]')!.addEventListener('submit', event => { event.preventDefault(); void this.send(); });
-    this.input.addEventListener('input', () => { if (this.submission?.text !== this.input.value) this.submission = null; this.composer(); });
+    this.input.addEventListener('input', () => {
+      if (this.submission?.text !== this.input.value) { this.submission = null; this.sendFailed = false; }
+      this.input.style.height = '44px';
+      this.input.style.height = `${Math.min(100, Math.max(44, this.input.scrollHeight))}px`;
+      this.composer();
+    });
     this.input.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
         event.preventDefault();
@@ -70,10 +78,13 @@ export class Communicate {
   private status(text: string, error = false): void {
     const status = this.root.querySelector<HTMLElement>('[data-chat-status]')!;
     status.textContent = translate(text, this.language); status.classList.toggle('error', error);
+    status.hidden = text.startsWith('Connected ·');
   }
   private presence(online: number, capacity: number): void {
     if (!Number.isSafeInteger(online) || online < 0 || !Number.isSafeInteger(capacity) || capacity < online) throw new Error('Invalid chat presence');
-    this.root.querySelector('[data-chat-online]')!.textContent = translate(`${online} / ${capacity} online`, this.language);
+    const presence = this.root.querySelector<HTMLElement>('[data-chat-online]')!;
+    presence.textContent = `${online.toLocaleString(locale(this.language))} ${translate('Online', this.language)}`;
+    presence.title = translate(`${online} / ${capacity} online`, this.language);
     this.root.dispatchEvent(new CustomEvent<number>(chatPresenceChangedEvent, { bubbles: true, detail: online }));
   }
   private stop(): void {
@@ -149,7 +160,9 @@ export class Communicate {
     this.input.disabled = !this.connected || this.saving;
     const button = this.root.querySelector<HTMLButtonElement>('[data-chat-send]')!;
     button.disabled = !this.connected || this.saving || !this.input.value.trim() || length > chatMessageLimit || performance.now() < this.cooldown;
-    button.textContent = translate(this.saving ? 'Sending...' : 'Send', this.language);
+    const seconds = Math.max(0, Math.ceil((this.cooldown - performance.now()) / 1000));
+    button.textContent = seconds ? `${translate('Send', this.language)} · ${seconds}s`
+      : translate(this.saving ? 'Sending...' : this.sendFailed ? 'Retry send' : 'Send', this.language);
   }
   private async send(): Promise<void> {
     if (!this.connected || this.saving || !this.info || !this.input.value.trim() || [...this.input.value].length > chatMessageLimit || performance.now() < this.cooldown) return;
@@ -159,9 +172,10 @@ export class Communicate {
     try {
       const message = await chatSend(this.csrf(), this.submission, this.room);
       if (this.closed) return;
-      this.paint([message], false); this.input.value = ''; this.submission = null;
+      this.paint([message], false); this.input.value = ''; this.input.style.height = '44px'; this.submission = null; this.sendFailed = false;
+      this.list.scrollTop = this.list.scrollHeight; this.clearUnread();
       this.cooldown = performance.now() + 3000; this.status(this.privateRoom ? 'Connected · visitor chat' : 'Connected · public chat');
-    } catch (error) { if (!this.closed) this.status(error instanceof Error ? error.message : 'The action could not be completed.', true); }
+    } catch (error) { if (!this.closed) { this.sendFailed = true; this.status(error instanceof Error ? error.message : 'The action could not be completed.', true); } }
     finally { this.saving = false; this.composer(); if (!this.closed && this.connected) this.input.focus({ preventScroll: true }); }
   }
   private paint(batch: ChatMessage[], reset: boolean): void {
@@ -186,7 +200,8 @@ export class Communicate {
         node.classList.toggle('own', message.author === this.info?.profile?.id);
         const header = document.createElement('header'), author = document.createElement('strong'), time = document.createElement('time'), text = document.createElement('p');
         author.textContent = `${message.nickname}${isTitleItem(message.title) ? ` · ${translate(titleItems[message.title].title, this.language)}` : ''}`; time.dateTime = new Date(message.time).toISOString();
-        time.textContent = `${new Date(message.time).toLocaleTimeString(locale(this.language), { timeZone: 'UTC', hour12: false })} UTC`;
+        time.textContent = new Date(message.time).toLocaleTimeString(locale(this.language), { timeZone: 'UTC', hour12: false, hour: '2-digit', minute: '2-digit' });
+        time.title = `${new Date(message.time).toLocaleString(locale(this.language), { timeZone: 'UTC' })} UTC`;
         text.textContent = message.text; header.append(author, time); node.append(header, text); this.nodes.set(message.id, node);
       }
       fragment.append(node);

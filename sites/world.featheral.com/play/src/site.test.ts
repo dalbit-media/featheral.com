@@ -24,6 +24,23 @@ import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketp
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
 
+test('compact social controls preserve accessible labels, search feedback, per-room drafts and safe send retries', () => {
+  const inbox = readFileSync(new URL('./inbox.ts', import.meta.url), 'utf8');
+  const chat = readFileSync(new URL('./communicate.ts', import.meta.url), 'utf8');
+  assert.match(inbox, /data-inbox-search[^>]*aria-label="Search channels"/);
+  assert.match(inbox, /this\.drafts\.set\(this\.selected/);
+  assert.match(inbox, /this\.drafts\.get\(room\.id\)/);
+  assert.match(inbox, /this\.query\.trim\(\) && !matchesCount \? 'No matching channels\.'/);
+  assert.match(inbox, /channel === 'federation' && value\.kind === 'federation'/);
+  assert.match(chat, /chat-message-\$\{crypto\.randomUUID\(\)\}/);
+  assert.match(chat, /summary title="Chat rules" aria-label="Chat rules"/);
+  assert.match(chat, /!event\.shiftKey && !event\.isComposing/);
+  assert.match(chat, /this\.submission \?\?= \{ id: crypto\.randomUUID\(\)/);
+  assert.match(chat, /chatSend\(this\.csrf\(\), this\.submission, this\.room\)/);
+  assert.match(chat, /this\.sendFailed \? 'Retry send'/);
+  assert.match(chat, /this\.visible\(\) && this\.atBottom\(\)/);
+});
+
 test('2D maps start closer, repaint on interaction and stop painting unchanged scenes', () => {
   for (const name of ['World', 'SettlementMap']) {
     const file = name === 'World' ? './world.ts' : './settlement-map.ts';
@@ -927,8 +944,8 @@ test('mobile marketplace prioritizes trading and retains searchable selection an
   const market = readFileSync(new URL('./marketplace.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./mobile.css', import.meta.url), 'utf8');
   assert.match(market, /data-market-catalog><summary>[\s\S]*data-market-search[\s\S]*data-market-category/);
-  assert.match(market, /open = !matchMedia\(compactMarketQuery\)\.matches/);
-  assert.match(market, /if \(matchMedia\(compactMarketQuery\)\.matches\) \{[\s\S]*?open = false;[\s\S]*?focus\(\{ preventScroll: true \}\)/);
+  assert.match(market, /querySelector<HTMLDetailsElement>\('\[data-market-catalog\]'\)!\.open = true/);
+  assert.match(market, /if \(button\.dataset\.marketQuickSide && matchMedia\(compactMarketQuery\)\.matches\) \{[\s\S]*?open = false;[\s\S]*?focus\(\{ preventScroll: true \}\)/);
   assert.match(market, /list\.scrollTo\(scrollLeft, scrollTop\)/);
   assert.match(css, /\.exchange-order-entry\{grid-column:1;grid-row:2/);
   assert.match(css, /\.exchange-chart-card\{grid-column:1;grid-row:3/);
@@ -1010,7 +1027,7 @@ test('order tickets keep four-decimal limits, quote freshness and confirmation w
 test('mobile chat and spending sheets retain safety information and reachable controls', () => {
   const chat = readFileSync(new URL('./communicate.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./mobile.css', import.meta.url), 'utf8');
-  assert.match(chat, /<details class="chat-guidelines"><summary>Chat rules<\/summary>[\s\S]*?Do not share personal information\.[\s\S]*?<\/details>/);
+  assert.match(chat, /<details class="chat-guidelines"><summary title="Chat rules" aria-label="Chat rules">[\s\S]*?<\/summary>[\s\S]*?Do not share personal information\.[\s\S]*?<\/details>/);
   assert.match(css, /\.chat-page \.chat-composer\{position:sticky;bottom:0/);
   assert.match(css, /\.consumption-dialog\{position:fixed;inset:auto 0 0/);
   assert.match(css, /\.consumption-actions\{position:sticky;bottom:0/);

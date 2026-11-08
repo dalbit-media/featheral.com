@@ -57,7 +57,7 @@ export const guideTopics = [
       'Compare prices in the grid or table, filter your holdings, and choose Buy or Sell to prepare an order. Review the amount and total before confirming; selecting a price never places an order.',
       'Build a market stall, trade hub or city bank to sell owned resources directly in Settlement. Quick sales use the same live marketplace spot quotes, order matching and price protection, not fixed bank prices.',
       'Buy or sell now at the current price, or choose a price and leave an offer. Reserved funds and items return when you cancel an unfilled offer. Prices move; check the quote before confirming.',
-      'All non-collectible items use demand-priced liquidity and can be owned and traded in multiples. Each copy uses one bag slot; one equipped or placed copy is protected. Collectibles trade one at a time through player offers only. Existing reserves fund item pools without issuing FTH$.',
+      'All items use demand-priced spot liquidity and player offers. Each copy uses one bag slot; one equipped or placed copy is protected. Collectibles trade one at a time. Existing reserves fund item pools without issuing FTH$.',
       'Open Wallet and staking for the real Ethereum FTHG bridge and staking contract. Authorize your Dollar wallet in Account before spending its FTH$ on gameplay. FTH$ displays at most two decimals; gameplay retains four-place accounting precision.'],
     tip: 'Water bought in the market enters owned stock, ready for the next daily bill.', image: 'market', alt: 'Marketplace showing Water, buy and sell controls and price history.', path: '/market/?asset=water&side=buy', action: 'Buy Water' },
   { id: 'community', title: 'Better together.', icon: 'communicate', tag: 'Community',

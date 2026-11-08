@@ -11,7 +11,7 @@ import { localize } from './i18n-dom.ts';
 import { formatDollars, dollarsScale, dollarsSlippage, dollarsUnits } from './dollars.ts';
 import { marketConsumption } from './consumption.ts';
 import { confirmationOpen, confirmConsumption } from './confirmation.ts';
-import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
+import { catalogSorts, filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 import { SettlementSale } from './settlement-sale.ts';
@@ -44,9 +44,10 @@ export class Marketplace {
   private mode: 'spot' | 'limit' = 'spot';
   private category = 'all';
   private query = '';
-  private catalogView: CatalogView = matchMedia(compactMarketQuery).matches ? 'grid' : 'table';
+  private catalogView: CatalogView = 'grid';
   private sort: CatalogSort = 'name';
   private ownedOnly = false;
+  private catalogMarkup = '';
   private priceEdited = false;
   private historyCount = 120;
   private pending = false;
@@ -66,20 +67,25 @@ export class Marketplace {
       <div class="exchange-main"><section class="exchange-card exchange-instrument"><div data-market-instrument></div></section>
       <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span><div class="catalog-view-switch" role="group" aria-label="Sale history range"><button type="button" data-market-history="20" aria-pressed="false">20</button><button type="button" data-market-history="60" aria-pressed="false">60</button><button type="button" data-market-history="120" aria-pressed="true">120</button></div></div><div data-market-chart></div></section>
       <div class="exchange-trading"><section class="exchange-card exchange-order-book"><h2>Player offers</h2><div data-market-book></div></section>
-      <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" min="1" max="10000" step="1" required value="1"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount"><button type="button" data-market-amount="10">10</button><button type="button" data-market-amount="100">100</button><button type="button" data-market-amount="1000">1,000</button><button type="button" data-market-max>Max</button></div><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>Non-collectible items trade in multiples at demand-driven prices. One equipped or placed copy is protected; spare copies can be sold. Each waiting item reserves one bag slot. Collectibles trade one at a time through player offers only.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
+      <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" min="1" max="10000" step="1" required value="1"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount"><button type="button" data-market-amount="10">10</button><button type="button" data-market-amount="100">100</button><button type="button" data-market-amount="1000">1,000</button><button type="button" data-market-max>Max</button></div><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>All items use demand-driven spot prices and player offers. One equipped or placed copy is protected; spare copies can be sold. Each waiting item reserves one bag slot. Collectibles trade one at a time.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
       <section class="exchange-card exchange-history-card"><h2>My offers</h2><div data-market-orders></div></section><section class="exchange-card exchange-history-card"><h2>Recent purchases and sales</h2><div data-market-trades></div></section></div></div>`;
     const funding = document.createElement('section');
     funding.className = 'exchange-card';
     funding.innerHTML = `<h2>Fund market liquidity</h2><p>Markets start empty. Donate owned assets and existing FTH$ to the selected market. Donations are permanent and do not issue currency.</p><strong data-pool-funding-asset></strong><form data-pool-funding><label>Owned asset amount<input type="number" min="0.01" step="0.01" required data-pool-quantity></label><label>FTH$ donation<input type="number" min="0.0001" step="0.0001" required data-pool-dollars></label><button class="button" type="submit" data-pool-submit>Review donation</button></form>`;
-    root.append(funding);
+    const fundingDetails = document.createElement('details');
+    fundingDetails.className = 'market-funding';
+    fundingDetails.innerHTML = '<summary>Fund market liquidity</summary>';
+    fundingDetails.append(funding); root.append(fundingDetails);
     const navigation = document.createElement('nav');
     navigation.className = 'resource-market-navigation';
     navigation.setAttribute('aria-label', 'Marketplace section');
-    navigation.innerHTML = '<button type="button" class="button" data-market-section="resources">Resources</button><button type="button" class="button" data-market-section="items">Item marketplace</button>';
+    navigation.innerHTML = '<button type="button" class="button" data-market-section="all">All items</button><button type="button" class="button" data-market-section="resources">Resources</button><button type="button" class="button" data-market-section="items">Item marketplace</button>';
     root.querySelector('.exchange-heading')!.after(navigation);
+    root.querySelector('.exchange-heading')!.append(root.querySelector('.market-bank-link')!);
     const seller = document.createElement('div');
     seller.dataset.marketResourceSale = '';
-    root.querySelector('.exchange-main')!.prepend(seller);
+    root.querySelector('.exchange-order-entry')!.append(seller);
+    root.querySelector('.exchange-order-entry')!.append(root.querySelector('.exchange-help')!);
     this.resourceSale = new SettlementSale(state, next => { this.update(next); this.balances(); }, notify, language, undefined, 'market');
     if (isMarketResource(this.asset)) this.resourceSale.select(this.asset);
     this.resourceQuantity = new ResourceSaleQuantity(language, () => {
@@ -90,7 +96,6 @@ export class Marketplace {
     resourceControls.className = 'resource-sale'; resourceControls.dataset.marketResourceQuantity = '';
     resourceControls.append(this.resourceQuantity.root);
     root.querySelector('[data-market-form] .ticket-quantity')!.after(resourceControls);
-    root.querySelector<HTMLSelectElement>('[data-market-category]')!.querySelector('option[value=resources]')!.remove();
     funding.querySelector('form')!.addEventListener('submit', event => {
       event.preventDefault();
       const quantity = accountingQuantity(this.asset, Number(funding.querySelector<HTMLInputElement>('[data-pool-quantity]')!.value));
@@ -104,7 +109,14 @@ export class Marketplace {
     localize(root);
     root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Automation', this.language), 'automation'));
     root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Names & titles', this.language), 'customization'));
-    root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = !matchMedia(compactMarketQuery).matches;
+    root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Item marketplace', this.language), 'items'));
+    const sortSelect = root.querySelector<HTMLSelectElement>('[data-market-sort]')!;
+    for (const [value, label] of [['name-desc', 'Name Z-A'], ['buy-high', 'Highest buy price'], ['sell-low', 'Lowest sell price']])
+      sortSelect.add(new Option(translate(label, this.language), value));
+    const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'button';
+    clear.dataset.marketClear = ''; clear.textContent = translate('Reset filters', this.language);
+    root.querySelector('.catalog-toolbar')!.append(clear);
+    root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = true;
     this.configureQuantity();
     root.querySelectorAll<HTMLButtonElement>('[data-market-side]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSide === this.side)));
     root.addEventListener('input', event => {
@@ -130,7 +142,7 @@ export class Marketplace {
       }
       if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-category')) this.category = target.value;
       if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-sort')) {
-        const sort = (['name', 'buy-low', 'sell-high', 'owned'] as const).find(value => value === target.value);
+        const sort = catalogSorts.find(value => value === target.value);
         if (sort) this.sort = sort;
       }
       if (target instanceof HTMLInputElement && target.hasAttribute('data-market-owned')) this.ownedOnly = target.checked;
@@ -141,13 +153,21 @@ export class Marketplace {
       if (!button) return;
       if (button.dataset.marketSection) {
         if (this.pending || confirmationOpen()) return;
-        this.asset = button.dataset.marketSection === 'resources' ? 'wood' : marketAssets.find(asset => !isMarketResource(asset))!;
-        this.category = 'all'; this.query = ''; this.ownedOnly = false;
+        this.category = button.dataset.marketSection;
+        this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.value = this.category;
+        this.catalog();
+      }
+      if (button.hasAttribute('data-market-clear')) {
+        this.category = 'all'; this.query = ''; this.ownedOnly = false; this.sort = 'name';
         this.root.querySelector<HTMLInputElement>('[data-market-search]')!.value = '';
         this.root.querySelector<HTMLInputElement>('[data-market-owned]')!.checked = false;
         this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.value = 'all';
-        this.side = isMarketResource(this.asset) ? 'sell' : 'buy'; this.mode = 'spot';
-        this.fresh = false; this.configureQuantity(true); this.balances(); this.rememberSelection(); void this.refresh();
+        this.root.querySelector<HTMLSelectElement>('[data-market-sort]')!.value = 'name';
+        this.catalog();
+      }
+      if (button.dataset.catalogSort) {
+        const sort = catalogSorts.find(value => value === button.dataset.catalogSort);
+        if (sort) { this.sort = sort; this.root.querySelector<HTMLSelectElement>('[data-market-sort]')!.value = sort; this.catalog(); }
       }
       if (button.dataset.marketView === 'grid' || button.dataset.marketView === 'table') { this.catalogView = button.dataset.marketView; this.catalog(); }
       if (button.dataset.marketHistory) {
@@ -157,15 +177,17 @@ export class Marketplace {
       if (button.hasAttribute('data-market-refresh')) void this.refresh();
       if (this.pending || confirmationOpen()) return;
       if (isMarketAsset(button.dataset.marketAsset)) {
+        const changedAsset = this.asset !== button.dataset.marketAsset;
         this.asset = button.dataset.marketAsset; this.fresh = false; this.priceEdited = false;
-        if (button.dataset.marketQuickSide === 'buy' || button.dataset.marketQuickSide === 'sell') this.side = button.dataset.marketQuickSide;
+        if (changedAsset) this.mode = 'spot';
+        if (button.dataset.marketQuickSide === 'buy' || button.dataset.marketQuickSide === 'sell') { this.side = button.dataset.marketQuickSide; this.mode = 'spot'; }
         this.configureQuantity(true);
         this.catalog(); this.preview();
         this.root.querySelector('[data-market-chart]')!.innerHTML = '<p class="fineprint">Loading prices...</p>';
         this.root.querySelector('[data-market-book]')!.innerHTML = '<p class="fineprint">Loading prices...</p>';
         localize(this.root);
         this.rememberSelection(); void this.refresh();
-        if (matchMedia(compactMarketQuery).matches) {
+        if (button.dataset.marketQuickSide && matchMedia(compactMarketQuery).matches) {
           this.root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = false;
           this.root.querySelector<HTMLElement>('[data-market-catalog] summary')!.focus({ preventScroll: true });
         }
@@ -183,8 +205,9 @@ export class Marketplace {
         ? marketOwned(this.state(), this.asset) : sellableItemCount(this.state().inventory, this.asset)));
       if (button.dataset.marketLevel === 'buy' || button.dataset.marketLevel === 'sell') {
         this.side = button.dataset.marketLevel; this.mode = 'limit'; this.priceEdited = true;
+        this.configureQuantity(true); this.fresh = false;
         this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = String(displayPrice(this.asset, Number(button.dataset.marketLevelPrice)));
-        this.preview(); this.rememberSelection();
+        this.preview(); this.rememberSelection(); void this.refresh();
         this.root.querySelector<HTMLElement>('.exchange-order-entry')!.scrollIntoView({ block: 'start' });
         this.root.querySelector<HTMLElement>('[data-market-order-title]')!.focus({ preventScroll: true });
       }
@@ -201,7 +224,7 @@ export class Marketplace {
     });
     this.balances();
     void this.refresh();
-    setInterval(() => { if (!this.pending && !confirmationOpen()) void this.refresh(); }, 5000);
+    setInterval(() => { if (!document.hidden && this.root.isConnected && !this.pending && !confirmationOpen()) void this.refresh(); }, 5000);
   }
   private fmt(value: number, asset = this.asset): string { return formatResourceAmount(asset, value, locale(this.language)); }
   private money(value: number): string { return formatDollars(value, locale(this.language)); }
@@ -228,8 +251,10 @@ export class Marketplace {
     price.max = String(displayPrice(this.asset, 1000000));
     price.closest('label')!.firstChild!.textContent = `${translate('Price each', this.language)} · FTH$/${tradingUnit(this.asset, locale(this.language))}`;
     this.root.querySelector('.exchange-chart-card .exchange-section-title > span')!.textContent = `FTH$/${tradingUnit(this.asset, locale(this.language))} · UTC`;
-    this.root.querySelectorAll<HTMLButtonElement>('[data-market-amount]').forEach(button => {
-      button.textContent = this.fmt(Number(button.dataset.marketAmount));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-market-amount]').forEach((button, index) => {
+      const quantity = (isMarketResource(this.asset) ? [10, 100, 1000] : [1, 5, 10])[index];
+      button.dataset.marketAmount = String(quantity);
+      button.textContent = this.fmt(quantity);
     });
     const fundingQuantity = this.root.querySelector<HTMLInputElement>('[data-pool-quantity]')!;
     fundingQuantity.min = fundingQuantity.step = input.step;
@@ -268,7 +293,7 @@ export class Marketplace {
     this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2>${reference}<p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p></div><span class="exchange-venue">Players + game shop</span>`;
     if (!this.priceEdited && ticker) {
       const value = marketPriceAvailable(price) ? price : marketPriceFloor(this.asset);
-      if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = displayPrice(this.asset, value).toFixed(4);
+      if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = String(displayPrice(this.asset, value));
     }
   }
   balances(): void {
@@ -284,23 +309,27 @@ export class Marketplace {
     const list = this.root.querySelector<HTMLElement>('[data-market-assets]')!;
     const scrollTop = list.scrollTop, scrollLeft = list.scrollLeft;
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
-    const resources = isMarketResource(this.asset);
-    const tickers = filterMarketCatalog(this.data.market.tickers.filter(ticker => isMarketResource(ticker.asset) === resources), this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
-    list.innerHTML = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending);
+    const focusedColumn = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.catalogColumn : undefined;
+    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
+    const markup = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending, this.sort);
+    if (markup !== this.catalogMarkup) {
+      list.innerHTML = markup; localize(list); this.catalogMarkup = markup;
+    }
+    this.root.querySelectorAll<HTMLButtonElement>('[data-market-section]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSection === this.category)));
+    this.root.querySelector<HTMLElement>('[data-market-clear]')!.hidden = this.category === 'all' && !this.query && !this.ownedOnly && this.sort === 'name';
     this.root.querySelector('[data-market-count]')!.textContent = String(tickers.length);
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketView === this.catalogView)));
-    localize(list);
     list.scrollTo(scrollLeft, scrollTop);
     if (focusedAsset) this.root.querySelector<HTMLButtonElement>(`[data-market-asset="${focusedAsset}"]${focusedSide ? `[data-market-quick-side="${focusedSide}"]` : ':not([data-market-quick-side])'}`)?.focus({ preventScroll: true });
+    if (focusedColumn) list.querySelector<HTMLButtonElement>(`[data-catalog-column="${focusedColumn}"]`)?.focus({ preventScroll: true });
   }
   private preview(): void {
     const resources = isMarketResource(this.asset), resourceSpotSale = resources && this.side === 'sell' && this.mode === 'spot';
     const resourceLimitSale = resources && this.side === 'sell' && this.mode === 'limit';
-    this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.closest('label')!.hidden = resources;
+    this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.closest('label')!.hidden = false;
     const search = this.root.querySelector<HTMLInputElement>('[data-market-search]')!;
-    search.placeholder = translate(resources ? 'Search resources' : 'Search items', this.language);
+    search.placeholder = translate('Search items', this.language);
     search.closest('label')!.firstChild!.textContent = search.placeholder;
-    this.root.querySelectorAll<HTMLButtonElement>('[data-market-section]').forEach(button => button.setAttribute('aria-pressed', String((button.dataset.marketSection === 'resources') === resources)));
     const seller = this.root.querySelector<HTMLElement>('[data-market-resource-sale]')!;
     seller.hidden = !resourceSpotSale;
     if (resourceSpotSale && isMarketResource(this.asset)) { this.resourceSale.select(this.asset); this.resourceSale.mount(seller); }
@@ -322,7 +351,7 @@ export class Marketplace {
     const amount = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
     amount.disabled = this.pending || resourceLimitSale || resourceSpotSale;
     const quantity = this.quantity(), bag = this.state().inventory, owned = marketOwned(this.state(), this.asset);
-    this.root.querySelector('[data-market-order-side]')!.textContent = translate(resourceSpotSale ? 'Resource orders' : this.side === 'buy' ? 'Buy' : 'Sell', this.language);
+    this.root.querySelector('[data-market-order-side]')!.textContent = translate(this.side === 'buy' ? 'Buy' : 'Sell', this.language);
     this.root.querySelector('[data-market-order-asset]')!.textContent = this.name(this.asset);
     this.root.querySelector<HTMLElement>('[data-market-amounts]')!.hidden = !isLiquidAsset(this.asset) || resources && this.side === 'sell';
     const maximum = this.root.querySelector<HTMLButtonElement>('[data-market-max]')!;

@@ -1,5 +1,6 @@
 const paths: Record<string, string> = {
   search: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/>',
+  refresh: '<path d="M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-2l2 7M4 12l2 7a7 7 0 0 0 12-2"/>',
   account: '<circle cx="12" cy="8" r="4"/><path d="M4 22v-2a8 8 0 0 1 16 0v2"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   well: '<ellipse cx="12" cy="16" rx="8" ry="3"/><path d="M4 16v4c0 4 16 4 16 0v-4M6 14V6m12 8V6M3 6l9-4 9 4H3ZM12 6v8"/>',

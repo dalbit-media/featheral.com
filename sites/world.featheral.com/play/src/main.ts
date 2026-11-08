@@ -26,6 +26,7 @@ import { SettlementMap } from './settlement-map.ts';
 import { isSettlementTask, settlementDockTasks, settlementTaskFromHash, settlementTasks } from './settlement-ui.ts';
 import type { SettlementTask } from './settlement-ui.ts';
 import { Marketplace } from './marketplace.ts';
+import { federationPanel } from './federation-view.ts';
 import { SettlementSale } from './settlement-sale.ts';
 import { Inbox, SettlementChat } from './inbox.ts';
 import { isWaterFacility, waterProductionMultiplier } from './water-facilities.ts';
@@ -790,7 +791,7 @@ function renderCommunityPage(): void {
     return;
   }
   if (navigationPage === 'federation') {
-    replaceContent(root, `${heading}<div class="federation-page-content"><div class="page-card"><h2>Community census</h2><div class="page-census"><span><small>Your settlement</small><strong>${fmt(game.population)}</strong></span><span><small>Your federation</small><strong>${state.population.federation === null ? '\u2014' : fmt(state.population.federation)}</strong></span><span><small>Global settlements</small><strong>${fmt(state.population.global)}</strong></span></div></div><section class="page-card">${federationPanel()}</section></div>`);
+    replaceContent(root, `${heading}<div class="federation-page-content"><div class="page-card federation-census"><h2>Community census</h2><div class="page-census"><span><small>Your settlement</small><strong>${fmt(game.population)}</strong></span><span><small>Your federation</small><strong>${state.population.federation === null ? '\u2014' : fmt(state.population.federation)}</strong></span><span><small>Global settlements</small><strong>${fmt(state.population.global)}</strong></span></div></div><section class="page-card">${federationPanel(state, language)}</section></div>`);
   } else {
     if (!root.childElementCount) root.innerHTML = `${heading}<section class="page-card journal-tools"><label for="journal-search">Search your journal</label><input id="journal-search" type="search" placeholder="Find a discovery or milestone" autocomplete="off"><span data-journal-count role="status"></span><div class="panel-actions"><button class="button" data-action="export">${icon('download')} Export snapshot</button><button class="button" data-action="legacy-export">${icon('journal')} Old browser save</button></div><p class="fineprint">Recent events are shown newest first. Exports are records, not importable balances.</p></section><section class="page-card journal-page-list" data-journal-list aria-label="Recent events"></section>`;
     renderJournal();
@@ -1086,15 +1087,6 @@ function storagePanel(): string {
     ${warehouseUpgradeCard(state, language)}
     <div class="storage-grid">${resources.map(resourceStockCard).join('')}</div>
     ${game.stage < 0 ? `<div class="requirement-list">${requirement('home', 'Settlement', false)}</div>` : ''}`;
-}
-function federationPanel(): string {
-  return `<div class="federation-banner">${icon('federation')}<div><span class="eyebrow">${game.federation ? 'MEMBER' : 'NEARBY'}</span><h3>${escape(game.federation ?? 'Evergreen Union')}</h3></div>${game.federation ? icon('check') : ''}</div>
-    <div class="stat-grid visual-stats"><div>${icon('people')}<small>RELATIONS</small><strong>${game.relationship}<em>/100</em></strong>${meter(game.relationship, 100, 'Relationship')}</div><div>${icon('spark')}<small>CONTRIBUTION</small><strong>${fmt(game.contribution)}</strong></div><div>${icon('metal')}<small>EARNED</small><strong>${fmt(game.rewards)}</strong></div></div>
-    ${!game.federation ? `<div class="requirement-list">${requirement('home', 'Village', game.stage >= 3)}${requirement('people', '50 relations', game.relationship >= 50)}</div><div class="panel-actions"><button class="button" data-action="gift" aria-label="Send goodwill: +25 relationship">${icon('spark')} +25 ${costChips({ wood: 40, water: 30 })}</button><button class="button primary" data-action="join" ${game.stage < 3 || game.relationship < 50 ? 'disabled' : ''}>Join ${icon('arrow')}</button></div>` : ''}
-    <div class="building-grid compact-buildings"><div class="building reward-building">${icon('metal')}<h3>Member bonus</h3><div class="bonus-number">+20% <small>metal crew yield</small></div>${requirement('federation', 'Membership', !!game.federation)}<span class="mini-rule">Applied at the next work-week start</span>${resources.some(canClaim) ? `<button class="button primary wide" data-action="claim" aria-label="Claim eligible resources">${icon('download')} Claim</button>` : ''}</div>
-    <div class="building">${icon('flag')}<h3>Found federation</h3><div class="requirement-list">${requirement('home', 'City', game.stage >= 6)}${requirement('people', '10,001 residents', game.population > 10000)}</div><div class="upgrade-cost">${costChips({ metal: 5000 })}</div><button class="button wide" data-action="form" ${game.federation || game.stage < 6 || game.population <= 10000 ? 'disabled' : ''}>Found ${icon('arrow')}</button></div></div>
-    <h3 class="panel-section-heading">Assembly <span>01</span></h3><div class="proposal visual-proposal"><span class="building-emblem">${icon('water')}</span><div><h3>Restore watershed</h3><div class="requirement-list">${requirement('federation', 'Membership', !!game.federation)}${requirement('home', 'Town hall', game.townhall && game.stage >= 4)}</div></div><button class="button primary" data-action="vote" aria-label="Vote for watershed restoration" ${game.votes.includes('watershed') || !game.federation || !game.townhall || game.stage < 4 ? 'disabled' : ''}>${icon(game.votes.includes('watershed') ? 'check' : 'flag')}${game.votes.includes('watershed') ? 'Voted' : 'Vote'}</button></div>
-    <p class="fineprint">${icon('lock')} Simulation only · Game metal is not FTHG · No monetary rewards or real authority</p>`;
 }
 function syncCrewControls(root: HTMLElement): void {
   const number = root.querySelector<HTMLInputElement>('input[type="number"]')!;
