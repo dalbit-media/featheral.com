@@ -280,7 +280,7 @@ test('decoration retries and old inventory receipt normalization are read-only a
 test('crafting spends exact owned ingredients, improves gear automatically and never reveals terrain', () => {
   const account = settled(), before = snapshot(account);
   const fire = act(account, { type: 'craft', item: 'fire' });
-  assert.equal(fire.game.stock.wood, before.game.stock.wood - 15);
+  assert.equal(fire.game.stock.wood, before.game.stock.wood - craftingCost('fire').wood!);
   assert.equal(fire.game.stock.water, before.game.stock.water);
   assert.equal(fire.inventory.equipped, 'fire');
   assert.equal(radius(fire.game), 5);
@@ -291,7 +291,7 @@ test('crafting spends exact owned ingredients, improves gear automatically and n
   assert.deepEqual(torch.inventory.items, ['fire', 'torch']);
   const stock = { ...account.game.stock };
   act(account, { type: 'craft', item: 'torch' });
-  assert.deepEqual(account.game.stock, { ...stock, wood: stock.wood - 8 });
+  assert.deepEqual(account.game.stock, { ...stock, wood: stock.wood - craftingCost('torch').wood! });
   const bag = inventory(account);
   act(account, { type: 'equip', item: 'fire' });
   assert.equal(radius(account.game), 5);
@@ -313,8 +313,8 @@ test('owned market materials cannot bypass exploration discovery and unaffordabl
   for (let x = -30; x <= 30; x++) for (let y = -30; y <= 30; y++) account.game.explored.push(`${x},${y}`);
   const result = act(account, { type: 'craft', item: 'lantern' });
   assert.equal(radius(result.game), 10);
-  assert.equal(result.game.stock.oil, 495);
-  assert.equal(result.dollars, 496);
+  assert.equal(result.game.stock.oil, before.oil - craftingCost('lantern').oil!);
+  assert.equal(result.dollars, 500 - craftingCost('lantern').dollars!);
   act(account, { type: 'craft', item: 'fire' });
   assert.equal(inventory(account).equipped, 'lantern');
   account.game.stock.wood = 0;

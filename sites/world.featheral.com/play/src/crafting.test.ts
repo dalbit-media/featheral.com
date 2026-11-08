@@ -11,6 +11,7 @@ import { isMarketAsset, marketBasePrice } from './market.ts';
 import type { MarketSnapshot } from './market.ts';
 import { renderPriceChange } from './marketplace-catalog.ts';
 import { gameConsumption } from './consumption.ts';
+import { withDollarFee } from './costs.ts';
 import { translate } from './i18n.ts';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
@@ -59,19 +60,19 @@ test('civilization-level crafting checks are authoritative and leave existing ow
 });
 test('recipe disclosure counts sufficient ingredient types and shows physical owned/needed amounts for the batch', () => {
   const state = fixture();
-  state.game.stock.metal = 2;
-  state.game.stock.wood = 10;
+  state.game.stock.metal = 1;
+  state.game.stock.wood = 1;
   const html = craftingPanel(state, () => '', 'decoration', 'settlement', 2);
   const bench = html.split('data-detail="recipe-bench"')[1].split('</article>')[0];
   assert.doesNotMatch(bench, /<span>Recipe<\/span> <strong>/);
   assert.match(bench, /No item ingredients required/);
-  assert.match(bench, /500 kg \/ 2,400 kg/);
-  assert.match(bench, /0.02 t \/ 0.04 t/);
+  assert.match(bench, /50 kg \/ 300 kg/);
+  assert.match(bench, /0.01 t \/ 0.02 t/);
   assert.equal((bench.match(/class="missing"/g) ?? []).length, 2);
   assert.match(bench, /data-action-eligible="false"/);
   const logseat = html.split('data-detail="recipe-logseat"')[1].split('</article>')[0];
   assert.doesNotMatch(logseat, /<span>Recipe<\/span> <strong>/);
-  state.game.stock.wood = 100;
+  state.game.stock.wood = 10;
   const affordable = craftingPanel(state, () => '', 'affordable');
   assert.match(affordable, /recipe-bench/);
   assert.doesNotMatch(affordable, /recipe-skybeacon/);
@@ -97,18 +98,24 @@ test('every crafting recipe charges FTH$ per copy without mutating recipes or re
   for (const item of craftableKeys) {
     const cost = craftingCost(item);
     assert.ok(cost.dollars! >= 1, item);
+    assert.equal(cost.dollars, Math.max(1, withDollarFee(craftableItems[item].cost).dollars / 10), item);
     for (const quantity of [1, 10, 20, 50, 100]) {
       assert.equal(craftingCost(item, quantity).dollars, cost.dollars! * quantity);
+      for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
+        if (cost[resource] !== undefined) assert.equal(craftingCost(item, quantity)[resource], cost[resource]! * quantity);
       const quote = gameConsumption(state, { type: 'craft', item, quantity })!;
       assert.ok(quote.costs.some(row => row.asset === 'dollars' && row.amount === cost.dollars! * quantity));
     }
     for (const [resource, amount] of Object.entries(craftableItems[item].cost))
-      if (resource !== 'dollars') assert.equal(cost[resource as keyof typeof cost], amount);
+      if (resource !== 'dollars') {
+        assert.equal(cost[resource as keyof typeof cost], Math.ceil(amount / 10));
+        assert.ok(Number.isSafeInteger(cost[resource as keyof typeof cost]));
+      }
   }
-  assert.equal(craftingCost('logseat').dollars, 24);
-  assert.equal(craftingCost('bench').dollars, 100);
+  assert.equal(craftingCost('logseat').dollars, 2.4);
+  assert.equal(craftingCost('bench').dollars, 10);
   assert.equal(craftingCost('collector-wood-4').dollars, 1);
-  assert.equal(craftingCost('lantern').dollars, 4);
+  assert.equal(craftingCost('lantern').dollars, 1);
   assert.deepEqual(craftableItems, recipes);
   assert.deepEqual(craftableKeys.map(marketBasePrice), prices);
 });
@@ -201,9 +208,9 @@ test('profit estimates include raw resources, item inputs, fees and batch permit
     { asset: 'metal', bid: 1, ask: 2, last: null },
     { asset: 'craft-batch-10', bid: 25, ask: 30, last: null },
   ];
-  assert.deepEqual(craftingEstimate('bench', 1, tickers), { revenue: 160, cost: 150, net: 10 });
-  assert.deepEqual(craftingEstimate('bench', 10, tickers), { revenue: 1600, cost: 1525, net: 75 });
-  assert.equal(craftingCost('bench').dollars, 100);
+  assert.deepEqual(craftingEstimate('bench', 1, tickers), { revenue: 160, cost: 17, net: 143 });
+  assert.deepEqual(craftingEstimate('bench', 10, tickers), { revenue: 1600, cost: 195, net: 1405 });
+  assert.equal(craftingCost('bench').dollars, 10);
   assert.equal(craftingEstimate('bench', 1, tickers.filter(ticker => ticker.asset !== 'wood')), null);
   assert.equal(craftingEstimate('bench', 10, tickers.filter(ticker => ticker.asset !== 'craft-batch-10')), null);
   assert.equal(craftingEstimate('bench', 1, tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'metal' ? 0 : ticker.bid }))), null);
@@ -213,14 +220,14 @@ test('profit estimates include raw resources, item inputs, fees and batch permit
     { asset: 'collection-wood-1', bid: 10, ask: 12, last: null },
   ];
   assert.deepEqual(craftingEstimate('collector-wood-4', 1, collector), { revenue: 30, cost: 41, net: -11 });
-  for (const [bid, direction, label, amount] of [[160, 'profit', 'Estimated profit', '+10'], [140, 'loss', 'Estimated loss', '−10'], [150, 'even', 'Estimated break-even', '0']] as const) {
+  for (const [bid, direction, label, amount] of [[160, 'profit', 'Estimated profit', '+143'], [7, 'loss', 'Estimated loss', '−10'], [17, 'even', 'Estimated break-even', '0']] as const) {
     const html = craftingPanel(fixture(), () => '<span class="cost">fees</span>', 'decoration', 'settlement', 1, 'en',
       tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'bench' ? bid : ticker.bid })));
     const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
     assert.ok(bench.includes(`data-profit="${direction}"`));
     assert.ok(bench.includes(label));
     assert.ok(bench.includes(`${amount} FTH$`));
-    assert.match(bench, /Estimated input value and fees: 150 FTH\$/);
+    assert.match(bench, /Estimated input value and fees: 17 FTH\$/);
     assert.match(bench, /liquidity and execution are not guaranteed/);
   }
   const absent = craftingPanel(fixture(), () => '', 'decoration');

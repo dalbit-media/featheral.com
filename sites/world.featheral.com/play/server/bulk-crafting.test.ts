@@ -95,7 +95,7 @@ test('escrow and pending permits do not unlock batches and maximum only includes
   assert.equal(craftBatchOptions(account.game, bag, 'torch').length, 1);
   bag.marketReserved = [];
   bag.items = ['craft-batch-10', 'craft-batch-20', 'craft-batch-50', 'craft-batch-100'];
-  account.game.stock.wood = 8 * 20;
+  account.game.stock.wood = craftingCost('torch', 20).wood!;
   const options = craftBatchOptions(account.game, bag, 'torch');
   assert.deepEqual(options.map(option => option.quantity), [1, 10, 20, 50, 100]);
   assert.equal(options.find(option => option.quantity === 10)!.reason, null);
