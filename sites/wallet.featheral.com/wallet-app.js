@@ -40,14 +40,18 @@ async function mountFeatheralWallet(context) {
   let browserProvider, providerChosen = false, connectionReady = false, builtInPreferred = config.mode === "builtin";
   const announcedProviders = new Map(), boundProviders = new WeakSet();
   function providerChoices() {
-    if (announcedProviders.size) return [...announcedProviders].map(([provider, name]) => ({ provider, name }));
-    return [...new Set(window.ethereum?.providers || [window.ethereum])].filter(provider => typeof provider?.request === "function")
+    const world = window.FeatheralWorldAccount;
+    const choices = announcedProviders.size ? [...announcedProviders].map(([provider, name]) => ({ provider, name }))
+      : [...new Set(window.ethereum?.providers || [window.ethereum])].filter(provider => typeof provider?.request === "function")
       .map(provider => ({ provider, name: provider.isMetaMask ? "MetaMask" : provider.isCoinbaseWallet ? "Coinbase Wallet" : "Browser wallet" }));
+    if (world?.snapshot()?.account && window.location.hostname.startsWith("world."))
+      choices.unshift({ provider: world.provider, name: "World account" });
+    return choices;
   }
   function updateProviders() {
     const choices = providerChoices(), picker = $("extension-provider");
     if (!providerChosen || !choices.some(choice => choice.provider === browserProvider))
-      browserProvider = choices.length === 1 ? choices[0].provider : null;
+      browserProvider = choices[0]?.name === "World account" ? choices[0].provider : choices.length === 1 ? choices[0].provider : null;
     picker.replaceChildren(el("option", "Choose extension"));
     picker.firstChild.value = "";
     choices.forEach((choice, index) => { const option = el("option", choice.name); option.value = String(index); picker.append(option); });
@@ -321,7 +325,7 @@ async function mountFeatheralWallet(context) {
   }
   $("world-play").href = worldOrigin + "/play/";
   $("world-funds").href = worldOrigin + "/world-funds.html";
-  $("profile-link").href = worldOrigin + "/#/setup";
+  $("profile-link").href = worldOrigin + "/account/";
   $("activity-explorer").href = dollarOrigin + "/explorer/";
   function renderPortfolio(value) {
     const total = value.totals?.[primarySymbol];

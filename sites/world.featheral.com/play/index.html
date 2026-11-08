@@ -52,8 +52,8 @@
           <div class="eyebrow"><span class="status-light"></span> 무료 싱글플레이 탐험·건설 게임</div>
           <h1 id="hero-title">Explore a world.<br /><span>Build a settlement. Shape a federation.</span></h1>
           <p class="hero-description">주민을 배치해 자원을 모으고, 창고와 건물을 업그레이드하세요. 21가지 지형을 탐험하며 작은 정착지를 수도까지 키워 보세요.</p>
-          <div class="hero-actions"><a class="btn btn-dark" href="/explore/">Start exploring <span aria-hidden="true">&rarr;</span></a><a class="text-link" href="#how-it-works"><span class="play-circle" aria-hidden="true">&#9654;</span> Getting started</a></div>
-          <p class="entry-note"><span data-icon="check" aria-hidden="true"></span> 설치·지갑 연결·결제 없이, PC와 모바일 브라우저에서 바로 플레이하세요.</p>
+          <div class="hero-actions"><a class="btn btn-dark" href="/account/">Register / Sign in <span aria-hidden="true">&rarr;</span></a><a class="text-link" href="#how-it-works"><span class="play-circle" aria-hidden="true">&#9654;</span> Getting started</a></div>
+          <p class="entry-note"><span data-icon="check" aria-hidden="true"></span> Register with a username and password or your wallet. Set an avatar and profile description, then explore. No payment or wallet extension is required.</p>
           <div class="prototype-note"><span class="tiny-island" aria-hidden="true">&#10022;</span><span>정착지를 세우면 첫 주민 12명이 합류합니다.<small>플레이 가능한 초기 프로토타입 · PC·모바일 웹 지원</small></span></div>
         </div>
         <div class="hero-world">
@@ -138,9 +138,9 @@
         <div><p class="eyebrow">시작 전에 알아 두세요</p><h2 id="faq-title">궁금한 점이<br />있으신가요?</h2><a class="text-link" href="/whitepaper/">더 알아보기: 백서 <span aria-hidden="true">&nearr;</span></a></div>
         <div class="faq-list">
           <details><summary>Featheral은 어떤 게임인가요?<span aria-hidden="true">+</span></summary><p>Featheral은 브라우저에서 즐기는 캐주얼 정착지 건설·Web3 거버넌스 시뮬레이션입니다. 지도를 탐험하고 정착지를 키우며, 주민을 배치해 자원을 모으고 가상의 연방과 의회에 참여할 수 있습니다. 현재는 시뮬레이션 서버 기반 싱글플레이 프로토타입이며, 실제 배포된 DAO가 아닙니다.</p></details>
-          <details><summary>지갑이나 암호화폐가 필요한가요?<span aria-hidden="true">+</span></summary><p>아니요. 지갑 연결, 결제, 가스비, 토큰 클레임 없이 브라우저에서 바로 플레이하세요. 자산을 판매해 기존 FTH$를 받고 게임과 거래소에서 사용하세요. 정착·주민·건물·탐험 지급금은 없습니다.</p></details>
+          <details><summary>지갑이나 암호화폐가 필요한가요?<span aria-hidden="true">+</span></summary><p>Register with a username and password to create a built-in wallet, or connect an external wallet. Your public username, avatar and profile description are required. No payment or Ethereum transaction is needed to register.</p></details>
           <details><summary>자원을 모으고 성장하려면 어떻게 하나요?<span aria-hidden="true">+</span></summary><p>정착하면 주민이 자원별로 자동 배치됩니다. 채집팀이 게임 시간 7일마다 자원을 보내며, 미배치 주민은 자원을 생산하지 않습니다. 거리에 따른 주간 운송비, 탐험 출발 비용, 주민 모집에 쓸 금속을 준비하세요. 모집 비용은 인구가 늘수록 높아집니다. 탐험에는 주민 2명이 필요하고 게임 시간 1~3주가 걸립니다. 탐험한 지역은 무료로 즉시 이동할 수 있습니다. 각 자원은 저장량 50%부터 받을 수 있으며, 주민 모집은 금속을 먼저 지불하면 게임 시간 1주 뒤에 완료됩니다. 한 번에 한 팀만 모집하며 자동으로 반복하지 않습니다.</p></details>
-          <details><summary>내 세계는 저장되나요?<span aria-hidden="true">+</span></summary><p>Progress is saved by the Dollar game service. Guest access depends on its browser cookie; an authorized wallet can restore its linked settlement by signing again. Exported snapshots cannot restore funds.</p></details>
+          <details><summary>내 세계는 저장되나요?<span aria-hidden="true">+</span></summary><p>Progress is saved by the Dollar game service. Sign in to your World account on another device to restore its linked settlement. Keep your password and encrypted wallet backup safe. Existing guest funds require explicit handling; exported snapshots cannot restore funds.</p></details>
           <details><summary>페더럴 골드(FTHG)는 출시되었나요?<span aria-hidden="true">+</span></summary><p>FTHG is an actual Ethereum Mainnet token. World never creates simulated FTHG. Open Wallet and staking for configured bridge operations; FTH$ redemption requires an authorized service, not a public withdrawal form.</p></details>
           <details><summary>어떻게 참여하고 소식을 받을 수 있나요?<span aria-hidden="true">+</span></summary><p>공식 GitHub, Discord, X, Telegram 링크는 아직 공개되지 않았으며 각 카드에 준비 중으로 표시되어 있습니다. 검증된 링크가 추가되면 해당 채널에서 공지를 확인하고 참여하세요. 이메일 목록, 자동 알림 등록, 외부 계정 연결 기능은 운영하지 않습니다.</p></details>
         </div>
@@ -159,6 +159,8 @@
     <script src="/shared/site-links.js" vite-ignore></script>
     <script src="/shared/wallet-profile.js" vite-ignore></script>
     <script>FeatheralProfile.mount(document.getElementById("walletButton"), { primaryCurrency: "fthDollar", walletUrl: FeatheralSites.url("dollar", "/wallet/") });</script>
+    <script src="/shared/world-account.js" vite-ignore></script>
+    <script>if (location.hash === "#/setup") location.replace("/account/");</script>
     <script type="module" src="/src/landing.ts"></script>
   </body>
 </html>

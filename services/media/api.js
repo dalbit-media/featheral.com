@@ -42,7 +42,7 @@ function addressList(raw) {
 }
 
 // Profiles remain an independent service; this database owns only social actions.
-function createWorldApi({ env = require("../operations/runtime").environment(), sqlite, profiles = null, profileHandler = null, logger = console } = {}) {
+function createWorldApi({ env = require("../operations/runtime").environment(), sqlite, profiles = null, profileHandler = null, authorizeMedia = null, logger = console } = {}) {
   if (!sqlite || typeof sqlite.open !== "function") throw new Error("World Feed Database requires an injected managed sqlite opener from services/database/sqlite.js.");
   const admins = addressList(env.FEATHERAL_ADMIN_WALLETS);
   const moderators = [...new Set([...addressList(env.WORLD_MODERATORS), ...admins])];
@@ -91,6 +91,10 @@ function createWorldApi({ env = require("../operations/runtime").environment(), 
     const input = await body(req);
     rateLimit(req, "social", 60);
     const kind = String(input.kind || "").toUpperCase();
+    if (new URL(`http://${req.headers.host || "localhost"}`).hostname.startsWith("media.")) {
+      if (!authorizeMedia) throw Object.assign(new Error("World sign-in is unavailable."), { status: 503 });
+      authorizeMedia(input.worldSession, input.data?.w);
+    }
     if (!["SESSION", "POST", "DELETE", "LIKE", "UNLIKE", "REPOST", "UNREPOST", "FOLLOW", "UNFOLLOW", "MOD"].includes(kind)) {
       throw Object.assign(new Error("Unknown action kind."), { status: 400 });
     }
@@ -108,10 +112,14 @@ function createWorldApi({ env = require("../operations/runtime").environment(), 
     const q = url.searchParams;
     if (req.method === "GET" && route === "/profile/ui") return json(res, 200, require("../identity/profile-ui").profileUi());
     if (req.method === "POST" && route === "/profile/prepare") {
+      if (new URL(`http://${req.headers.host || ""}`).hostname.startsWith("media."))
+        return json(res, 410, { error: "Profile setup has moved to World. Open /account/ on World." });
       rateLimit(req, "profile-prepare", 20);
       return json(res, 200, require("../identity/profile-ui").prepareProfile(await body(req, 64 * 1024)));
     }
     if (req.method === "POST" && route === "/profile") {
+      if (new URL(`http://${req.headers.host || ""}`).hostname.startsWith("media."))
+        return json(res, 410, { error: "Profile setup has moved to World. Open /account/ on World." });
       if (!profileHandler) return json(res, 503, { error: "World profile updates require the configured DB API profile service." });
       return profileHandler(req, res);
     }

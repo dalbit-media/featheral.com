@@ -105,12 +105,16 @@
     const data = { w: wallet, by: signer ? signer.address : wallet, n: nonce(), ts: new Date().toISOString(), ...fields };
     const message = socialMessage(kind, data);
     data.sig = signer ? await signer.signMessage(message) : await walletSign(wallet, message);
-    return api("/actions", { method: "POST", body: JSON.stringify({ kind, data }) });
+    return api("/actions", { method: "POST", body: JSON.stringify({ kind, data, worldSession: window.FeatheralWorldAccount.snapshot()?.csrf }) });
   }
 
   // One wallet signature delegates a throwaway key for several days, so later posts and likes need no popups.
   async function ensureSession() {
-    if (!state.account) throw new Error("Connect your wallet first.");
+    const world = window.FeatheralWorldAccount.snapshot() || await window.FeatheralWorldAccount.refresh();
+    if (!world.complete || world.expires <= Date.now()) {
+      location.assign(window.FeatheralWorldAccount.url());
+      throw new Error("Sign in to World and complete your profile first.");
+    }
     if (state.suspended) throw new Error("This wallet is suspended from Featheral Media.");
     const wallet = ethers.getAddress(state.account);
     if (state.session && state.session.wallet === wallet && state.session.exp > Date.now() + 3_600_000) return state.session;
@@ -212,10 +216,10 @@
     let busy = false;
     const area = el("textarea", { placeholder, value: drafts.get(draftKey) || "", maxLength: 600, "aria-label": replyTo ? "Write a reply" : "Write a post" });
     const counter = el("span", { className: "count" });
-    const label = () => !author ? "Connect to post" : replyTo ? "Reply" : "Post";
+    const label = () => !author ? "Sign in to World" : replyTo ? "Reply" : "Post";
     const send = el("button", { type: "button", className: "btn primary", textContent: label(), style: "border-radius:999px" });
     const status = el("p", { className: "composer-status muted fine", role: "status", "aria-live": "polite" });
-    const hint = el("p", { className: "composer-hint muted fine", textContent: state.suspended ? "This wallet is suspended from posting." : author ? "Public on the World ledger. First post: approve a free sign-in. Ctrl+Enter to post." : "Draft first, then choose your wallet to publish. Posting is free; posts remain in public ledger history." });
+    const hint = el("p", { className: "composer-hint muted fine", textContent: state.suspended ? "This wallet is suspended from posting." : author ? "Public on the World ledger. First post: approve a free sign-in. Ctrl+Enter to post." : "Draft first, then sign in on World to publish. Posting is free; posts remain in public ledger history." });
     const update = () => {
       const length = Array.from(area.value.trim()).length;
       counter.textContent = `${length} / ${MAX_TEXT}`;
@@ -229,7 +233,7 @@
     });
     send.addEventListener("click", async () => {
       if (send.disabled || busy) return;
-      if (!author) { $("walletButton").click(); return; }
+      if (!author) { location.assign(window.FeatheralWorldAccount.url()); return; }
       if (author.toLowerCase() !== state.account.toLowerCase()) { toast("Wallet changed. Review your draft before posting.", true); return; }
       busy = true;
       area.disabled = true;
@@ -369,7 +373,7 @@
     if (id !== state.renderId) return;
     const mine = viewer && viewer === address;
     const followButton = mine
-      ? el("a", { className: "btn", textContent: "Edit profile", href: "#/setup" })
+      ? el("a", { className: "btn", textContent: "Edit World profile", href: window.FeatheralWorldAccount.url() })
       : el("button", { type: "button", className: "btn primary", textContent: stats.viewerFollows ? "Following" : "Follow", onclick: (event) => guarded(async () => {
         const button = event.currentTarget;
         button.disabled = true;
@@ -457,7 +461,7 @@
     me.href = state.account ? `#/user/${ethers.getAddress(state.account)}` : "#/me";
   }
   function showGettingStarted(setup = false) {
-    setHead("Your Media profile");
+    setHead("Your World account");
     $("gettingStarted").hidden = false;
     $("composerHost").replaceChildren();
     $("feed").replaceChildren();
@@ -481,7 +485,7 @@
     $("gettingStarted").hidden = true;
     $("gettingGuide").hidden = true;
     try {
-      if (name === "setup") showGettingStarted(true);
+      if (name === "setup") { location.replace(window.FeatheralWorldAccount.url(new URL("/", location.origin).href)); return; }
       else if (name === "guide") { setHead("Media guide"); $("composerHost").replaceChildren(); $("feed").replaceChildren(); $("gettingGuide").hidden = false; }
       else if (name === "post" && /^0x[0-9a-f]{64}$/.test(arg || "")) await showPost(arg);
       else if (name === "user" && /^0x[0-9a-fA-F]{40}$/.test(arg || "")) await showUser(ethers.getAddress(arg.toLowerCase()), ["replies", "likes"].includes(extra) ? extra : "posts");
@@ -554,24 +558,9 @@
   setInterval(() => { if (!document.hidden) loadWorldStatus(); }, 60_000);
 
   FeatheralProfile.mount($("walletButton"), { walletUrl: FeatheralSites.url("dollar", "/wallet/") });
-  const profileEditor = window.FeatheralWorldProfile.mount($("profileEditor"), {
-    address: state.account,
-    onAccount: address => FeatheralProfile.setAccount(address),
-    onSaved: async profile => {
-      await FeatheralProfile.setAccount(profile.address);
-      state.profile = profile; renderRail();
-      if (state.route === "user") route();
-    },
-  }).catch(error => {
-    console.error("World profile editor:", error);
-    $("profileEditor").textContent = `Profile editor unavailable: ${error.message}`;
-    return null;
-  });
-  window.addEventListener("featheral:wallet", event => {
-    void profileEditor.then(editor => editor?.load(event.detail.account || "")).catch(error => {
-      console.error("World profile editor:", error);
-      $("profileEditor").textContent = `Profile editor unavailable: ${error.message}`;
-    });
+  $("world-sign-in").href = window.FeatheralWorldAccount.url();
+  window.FeatheralWorldAccount.refresh().catch(error => {
+    console.error("World sign-in:", error); toast(`World sign-in unavailable: ${error.message}`, true);
   });
   const siteHeader = document.querySelector(".world-header");
   const ecoBar = document.querySelector(".eco-bar");

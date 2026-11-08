@@ -94,6 +94,8 @@ const fmt = (n: number): string => n.toLocaleString(languageLocale);
 const escape = (s: string): string => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 let state: ApiState;
 try {
+  if (!await window.FeatheralWorldAccount.requireProfile()) throw new Error('Complete your World profile before playing.');
+  await window.FeatheralWorldAccount.request('/game', {});
   state = await connect();
 } catch (error) {
   document.querySelector('#app')!.textContent = `Cannot connect to the authoritative API. Start the backend and reload. ${error instanceof Error ? error.message : 'Connection failed.'}`;

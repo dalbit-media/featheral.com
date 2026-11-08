@@ -127,7 +127,11 @@ if (reserveMode === "live") {
 }
 if (api.ledger.genesis.goldPublicKey && !goldKeys && !runtimeSettings.replica) throw new Error("This ledger requires its Gold reserve engine. Restore GOLD_RESERVE_MODE and the original Gold key.");
 const reserveEngine = goldKeys ? gold.enableReserve(api.ledger, goldKeys.privateKey, () => store?.recoverFunds()) : null;
-const world = createWorldApi({ env, fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles, profileHandler: async (req, res) => {
+const world = createWorldApi({ env, fthLedger: api.ledger, sqlite: cms.database.sqlite, profiles: cms.database.profiles,
+  authorizeMedia: (token, address) => {
+    if (!worldAccounts) throw Object.assign(new Error("Media sign-in requires the World writer server."), { status: 503 });
+    worldAccounts.authorizeMedia(token, address);
+  }, profileHandler: async (req, res) => {
   const original = req.url;
   try { req.url = "/api/v1/notes/profiles"; return await api.handle(req, res); }
   finally { req.url = original; }
@@ -143,6 +147,32 @@ const gameApiOrigin = require("../services/operations/origin").worldOrigin(env, 
 if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, defaultClockSpeed, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;
+const worldAccounts = reader ? null : require("../services/identity/world-accounts").createWorldAccounts({
+  forwardedOrigin: gameApiOrigin,
+  sqlite: cms.database.sqlite, profiles: cms.database.profiles,
+  file: path.join(path.dirname(gameDirectory), "world-accounts.sqlite"),
+  bootstrapGame: async (req, res, address, secure) => {
+    if (!store) throw Object.assign(new Error("World gameplay requires the writer server."), { status: 503 });
+    const cookie = secure ? "__Host-terra" : "terra-dev";
+    let token = req.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith(cookie + "="))?.slice(cookie.length + 1);
+    if (token) {
+      try { store.chatSession(token); }
+      catch (error) { if (error.status !== 401) throw error; token = null; }
+    }
+    if (!token) token = store.create().token;
+    let wallet = store.walletContext(token).fundWallet;
+    if (wallet && wallet.toLowerCase() !== address.toLowerCase()) {
+      token = store.create().token; wallet = null;
+    }
+    if (!wallet) store.linkWallet(token, address, false, true);
+    const owner = store.chatSession(token).owner, profile = cms.database.profiles.get(address);
+    store.chat.syncWorldProfile(owner, address, profile.username, Date.now());
+    const current = res.getHeader("Set-Cookie");
+    res.setHeader("Set-Cookie", [...(Array.isArray(current) ? current : current ? [current] : []),
+      `${cookie}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=34560000${secure ? "; Secure" : ""}`]);
+    return { connected: true, accountId: store.walletContext(token).fundAccountId };
+  },
+});
 cms.setCreationPayments(api.creationPayments);
 cms.setWorkspaceProfiles(address => cms.database.profiles.get(address));
 cms.setNoteSupply(api.noteSupply);
@@ -221,7 +251,7 @@ function redirect(res, location, status = 302) {
   res.writeHead(status, { Location: location, "Cache-Control": "no-store" });
   res.end();
 }
-async function forwardGame(req, res) {
+async function forwardGame(req, res, bodyLimit = 2048) {
   const upstream = env.FTH_LEDGER_UPSTREAM_URL;
   if (!upstream) throw new Error("Reader game requests require the Dollar writer upstream URL.");
   const controller = new AbortController();
@@ -234,13 +264,14 @@ async function forwardGame(req, res) {
       let size = 0;
       for await (const chunk of req) {
         size += chunk.length;
-        if (size > 2048) { res.writeHead(413, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Request body too large." })); return; }
+        if (size > bodyLimit) { res.writeHead(413, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "Request body too large." })); return; }
         chunks.push(chunk);
       }
       body = Buffer.concat(chunks);
     }
     const headers = { host: new URL(gameApiOrigin).host };
-    for (const name of ["origin", "cookie", "content-type", "x-csrf-token", "sec-fetch-site", "accept"]) if (req.headers[name]) headers[name] = req.headers[name];
+    if (req.url.startsWith("/api/world-account/")) headers["x-featheral-world-origin"] = gameApiOrigin;
+    for (const name of ["origin", "cookie", "content-type", "x-csrf-token", "sec-fetch-site", "accept", "x-forwarded-proto"]) if (req.headers[name]) headers[name] = req.headers[name];
     const response = await fetch(new URL(req.url, upstream), { method: req.method, headers, body, redirect: "manual", signal: controller.signal });
     clearTimeout(timer);
     for (const [name, value] of response.headers) if (!["set-cookie", "content-length", "content-encoding", "transfer-encoding", "connection"].includes(name)) res.setHeader(name, value);
@@ -256,6 +287,14 @@ async function forwardGame(req, res) {
 }
 
 const pay = require("../services/pay/server").createPayApi({ siteUrl });
+function authorizeWorldGame(req, hostname) {
+  const address = worldAccounts.authorizeGame(req);
+  const cookie = hostname.endsWith("localhost") ? "terra-dev" : "__Host-terra";
+  const token = req.headers.cookie?.split(";").map(value => value.trim()).find(value => value.startsWith(cookie + "="))?.slice(cookie.length + 1);
+  if (!token || store.walletContext(token).fundWallet?.toLowerCase() !== address.toLowerCase())
+    throw Object.assign(new Error("Reconnect your World settlement from the World account page."), { status: 403 });
+}
+
 const server = http.createServer(async (req, res) => {
   if (!requestPolicy(req, res, cms.operationsSettings)) return;
   cms.serverProfile?.recordRequest(req, res);
@@ -277,6 +316,15 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ error: "Site is assigned to another server." }));
     }
     if (url.pathname.startsWith("/api/telemetry/")) return cms.telemetryRequest(req, res);
+    if (url.pathname.startsWith("/api/world-account/")) {
+      if (worldAccounts) await worldAccounts.handle(req, res);
+      else if (site === "world") await forwardGame(req, res, 64 * 1024);
+      else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Use World to manage your account." }));
+      }
+      return;
+    }
     if (site === "cms") return redirect(res, siteUrl(req, "admin", url.pathname + url.search), 301);
     if (site === "db" && url.pathname.startsWith("/api/")) {
       if (url.pathname.startsWith("/api/v1/db/")) return cms(req, res);
@@ -449,6 +497,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (url.pathname.startsWith("/api/dollar/game/")) {
+      if (worldAccounts && site === "world" && !url.pathname.startsWith("/api/dollar/game/wallet/") && url.pathname !== "/api/dollar/game/stats") {
+        try {
+          authorizeWorldGame(req, hostname);
+        } catch (error) {
+          if (!error.status) throw error;
+          res.writeHead(error.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          return res.end(JSON.stringify({ error: error.message }));
+        }
+      }
       if (dollarGameApi) dollarGameApi.emit("request", req, res);
       else await forwardGame(req, res);
       return;
@@ -457,6 +514,14 @@ const server = http.createServer(async (req, res) => {
     if (await world.handle(req, res)) return;
     if (await api.handle(req, res)) return;
     if (url.pathname === "/api/session" || url.pathname.startsWith("/api/chat") || (site === "world" && url.pathname.startsWith("/api/"))) {
+      if (worldAccounts && site === "world" && url.pathname.startsWith("/api/chat")) {
+        try { authorizeWorldGame(req, hostname); }
+        catch (error) {
+          if (!error.status) throw error;
+          res.writeHead(error.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+          return res.end(JSON.stringify({ error: error.message }));
+        }
+      }
       if (gameApi) gameApi.emit("request", req, res);
       else await forwardGame(req, res);
       return;
@@ -502,6 +567,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (site === "world" && p === "/wallet-sync-frame.html")
         res.setHeader("Content-Security-Policy", `frame-ancestors ${hostname.endsWith("localhost") ? "http://localhost:* http://*.localhost:*" : "https://featheral.com https://*.featheral.com"}; default-src 'self'; object-src 'none'; base-uri 'none'`);
+      if (site === "world" && p === "/account/index.html")
+        res.setHeader("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'none'");
       res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
       res.end(data);
     });
@@ -553,6 +620,7 @@ function shutdown(exitCode = 0) {
   dollarGameApi?.emit("close");
   store?.close();
   world.close();
+  worldAccounts?.close();
   api.close();
   gold.close();
   cms.database?.sqlite.closeAll();

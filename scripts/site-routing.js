@@ -3,6 +3,9 @@ const path = require("node:path");
 
 function worldResource(site, pathname) {
   if (site === "world") {
+    if (["/account/account.js", "/account/account.css"].includes(pathname))
+      return { directory: "world.featheral.com", pathname };
+    if (pathname === "/account") return { redirect: "world", pathname: "/account/" };
     if (pathname === "/play" || pathname === "/play/" || pathname === "/play/index.html")
       return { redirect: "world", pathname: "/explore/" };
     if (pathname.startsWith("/play/")) {

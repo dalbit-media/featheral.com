@@ -11,6 +11,9 @@ test('World profile actions retain English defaults and localized Korean guidanc
   assert.equal(translate('Use World profile in Play', 'ko'), '플레이에서 월드 프로필 사용');
   assert.equal(translate('Edit avatar & profile', 'ko'), '아바타 및 프로필 편집');
   assert.notEqual(translate('Use your World profile in the avatar menu to join chat.', 'ko'), 'Use your World profile in the avatar menu to join chat.');
+  for (const text of ['Join World', 'Register', 'Sign in', 'Password', 'Profile description', 'Finish registration', 'Continue to Media',
+    'Choose an avatar and write a profile description.', 'Username or password is incorrect.'])
+    assert.notEqual(translate(text, 'ko'), text);
 });
 
 test('the account pane has accessible modal controls, settings and explicitly unavailable payouts', () => {
@@ -25,8 +28,8 @@ test('the account pane has accessible modal controls, settings and explicitly un
   assert.doesNotMatch(pane, /data-account-nickname|Save nickname|connectWallet\(/);
   assert.match(pane, /window\.FeatheralProfile\.mount/);
   assert.match(pane, /panelRoot: this\.dialog/);
-  assert.match(pane, /profileUrl: '\/#\/setup'/);
-  assert.match(pane, /href="\/#\/setup" target="_blank" rel="noopener"/);
+  assert.match(pane, /profileUrl: '\/account\/'/);
+  assert.match(pane, /href="\/account\/" target="_blank" rel="noopener"/);
   assert.doesNotMatch(pane, /Edit them in the wallet profile menu/);
   assert.match(pane, /worldProfileLinkMessage\(world\.account, csrf, issuedAt\)/);
   assert.match(pane, /linkWorldProfile\(csrf, \{ address: world\.account, issuedAt, signature \}\)/);

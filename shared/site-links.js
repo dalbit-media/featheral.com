@@ -152,7 +152,11 @@
     for (const bar of root.querySelectorAll(".eco-bar")) bar.dataset.familyReady = "true";
   }
 
-  if (current === "world" && /^#\/(?:feed|following|post|user|me|setup|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {
+  if (current === "world" && window.location.hash === "#/setup") {
+    window.location.replace(url("world", "/account/"));
+    return;
+  }
+  if (current === "world" && /^#\/(?:feed|following|post|user|me|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {
     window.location.replace(url("media") + window.location.search + window.location.hash);
     return;
   }

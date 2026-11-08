@@ -1112,7 +1112,7 @@ test('wallet leads with the actual primary balance, smaller portfolio estimates 
   assert.equal(nodes['recent-history'].children.length, 3);
   assert.equal(nodes['recent-history'].children[0].children[1].textContent, '9 FTHX');
   assert.equal(nodes.history.children.length, 4);
-  assert.equal(nodes['profile-link'].href, 'http://world.localhost:8080/#/setup');
+  assert.equal(nodes['profile-link'].href, 'http://world.localhost:8080/account/');
 });
 test('public-address embeds ignore stored sessions belonging to another account', async () => {
   const publicAddress = '0x2222222222222222222222222222222222222222';

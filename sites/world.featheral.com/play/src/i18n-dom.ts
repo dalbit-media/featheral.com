@@ -55,7 +55,7 @@ export function localize(root: ParentNode): void {
     }
     if (element instanceof HTMLAnchorElement && element.getAttribute('href')?.startsWith('/')) {
       const url = new URL(element.href);
-      if (url.origin === location.origin && ['/about/', '/whitepaper/', ...Object.values(gamePages).map(page => page.path)].includes(url.pathname)) {
+      if (url.origin === location.origin && ['/about/', '/account/', '/whitepaper/', ...Object.values(gamePages).map(page => page.path)].includes(url.pathname)) {
         url.searchParams.set('lang', language);
         if (url.href !== element.href) element.href = url.href;
       }

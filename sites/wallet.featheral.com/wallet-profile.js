@@ -11,7 +11,7 @@
   const site = host.split(".")[0];
   const defaultPrimary = ["gold", "foundation", "featheral", "localhost"].includes(site) ? "FTHG" : site === "silver" ? "FTHS" : ["world", "dollar"].includes(site) ? "FTH$" : "FTHX";
   let primary = defaultPrimary;
-  const worldProfileUrl = `${centralOrigin.replace("//wallet.", "//media.")}/#/setup`;
+  const worldProfileUrl = `${centralOrigin.replace("//wallet.", "//world.")}/account/`;
   const AVATAR_SIZE = 160;
   const MAX_AVATAR_BYTES = 40 * 1024;
   const USERNAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]{2,23}$/;
@@ -275,6 +275,7 @@
   }
 
   function renderButton() {
+    if (!button) return;
     if (!options.ethereumProvider) {
       button.title = "Open shared wallet";
       button.setAttribute("aria-label", `Open ${primary} wallet`);
@@ -761,6 +762,12 @@
     button.addEventListener("click", onButtonClick);
     renderButton();
     if (!options.ethereumProvider) return Promise.resolve();
+    if (window.FeatheralWorldAccount) {
+      const account = window.FeatheralWorldAccount.snapshot()?.account;
+      if (!account) return Promise.resolve();
+      selectedProvider = window.FeatheralWorldAccount.provider;
+      return setAccount(account).then(refreshProfile);
+    }
     const available = discoverWallets();
     if (available.length !== 1) return Promise.resolve();
     useProvider(available[0].provider);
@@ -786,7 +793,7 @@
 
   async function refreshProfile() {
     if (!button || !state.account) return;
-    if (isDisconnected()) { await disconnect(false); return; }
+    if (isDisconnected() && !window.FeatheralWorldAccount?.snapshot()?.account) { await disconnect(false); return; }
     try {
       await Promise.all([loadProfile(), loadBalances()]);
       renderButton();
@@ -799,7 +806,7 @@
   }
   const profileChannel = typeof BroadcastChannel === "function" ? new BroadcastChannel("featheral-world-profile") : null;
   if (profileChannel) profileChannel.onmessage = async (event) => {
-    if (event.data?.type === "disconnect" && button) await disconnect(false);
+    if (event.data?.type === "disconnect" && button && !window.FeatheralWorldAccount?.snapshot()?.account) await disconnect(false);
     else if (event.data?.type === "profile") await refreshProfile();
   };
   window.addEventListener("focus", refreshProfile);
@@ -807,5 +814,13 @@
   window.FeatheralProfile = {
     mount, setAccount, setRate, disconnect, isDisconnected, snapshot, getProvider, ensureSigner,
     refresh: refreshProfile,
+    setWorldProvider(provider) { selectedProvider = provider; },
+    setWorldSession(session, provider) {
+      const changed = state.account.toLowerCase() !== (session.account || "").toLowerCase();
+      selectedProvider = provider; state.account = session.account || ""; state.profile = session.profile; state.chainId = session.account ? 1 : 0;
+      if (changed) { state.balances = null; state.wallet = null; summary = null; summaryError = null; state.pendingAvatar = undefined; }
+      renderButton(); emit();
+      if (changed && button) void refreshProfile();
+    },
   };
 })();

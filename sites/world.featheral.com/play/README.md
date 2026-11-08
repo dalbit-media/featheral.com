@@ -8,6 +8,22 @@ The shared wallet/profile and site-navigation scripts and styles are served by t
 gateway at `/shared/`, not bundled by Vite. Their HTML tags use `vite-ignore` to
 preserve the runtime URLs and classic-script ordering without build warnings.
 
+## World account and required profile
+
+Register or sign in on `/account/` before playing. Username/password registration
+creates a password-encrypted built-in wallet with a server-stored encrypted backup
+for cross-device access; connecting an external wallet is an alternative. An
+uploaded avatar, valid username and nonblank profile description are required.
+Media registration and editing also happen on World, with one shared public
+profile. Existing guest settlements and wallet balances are preserved: restoring
+a wallet-owned game moves no funds and refuses to discard guest money.
+
+Keep your password and an encrypted wallet backup. There is no password reset.
+The original registration username remains the password sign-in name after a
+public profile rename. Server account sessions expire after seven days; no
+private key is stored unencrypted on the server or shared with Media. See the
+root README for the credential database and writer/reader deployment boundary.
+
 ## Languages
 
 The public site and simulator default to **English**, independent of the browser's preferred language. The 한국어 / English selector appears in the landing-page footer and the game's account settings. An explicit selection is saved as `featheral-language` in local storage and survives navigation/reloads. `?lang=ko` and `?lang=en` explicitly override the saved preference for the current page; the selector saves its choice and updates this URL. Homepage/game links carry the selected language. If storage is unavailable, an explicit console warning is emitted and these URLs retain the choice across navigation.

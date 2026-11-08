@@ -16,6 +16,9 @@ export function worldProfileAssets(): Plugin {
         return [
           { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/wallet-profile.css', 'vite-ignore': true }, injectTo: 'head' },
           { tag: 'script', attrs: { src: '/shared/wallet-profile.js', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'script', attrs: { src: '/shared/wallet/ethers.js', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'script', attrs: { src: '/shared/world-account.js', 'vite-ignore': true }, injectTo: 'head' },
+          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/world-account.css', 'vite-ignore': true }, injectTo: 'head' },
           { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/featheral.css', 'vite-ignore': true }, injectTo: 'head' },
           { tag: 'script', attrs: { src: '/shared/site-links.js', defer: true, 'vite-ignore': true }, injectTo: 'head' },
         ];
@@ -102,6 +105,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve('index.html'),
+        'account/index': resolve('account', 'index.html'),
         'explore/index': resolve('explore', 'index.html'),
         'settlement/index': resolve('settlement', 'index.html'),
         'market/index': resolve('market', 'index.html'),

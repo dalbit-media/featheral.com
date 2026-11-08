@@ -139,6 +139,40 @@ Notes profile writer and DB API profile store; it creates no second identity sto
 and charges no fee. Bio text is signature-bound and limited to 1,000 characters.
 Older name/avatar signatures remain valid and preserve an existing bio.
 
+### World registration and shared Media identity
+
+World owns registration and profile setup at `/account/`. A username and password
+(12-256 characters) create a built-in Ethereum-compatible wallet in the browser.
+The server stores a salted scrypt password hash and the password-encrypted
+keystore, never a plaintext password, recovery phrase or private key. Signing in
+on another device downloads and decrypts that backup locally. External-wallet
+sign-in is an alternative using a short-lived, origin-bound signature challenge.
+Keep an encrypted backup: password reset and recovery without the password are
+not supported. The original registration username remains the password login
+name even if the public profile is renamed.
+
+A username, uploaded avatar and nonblank public description are required before
+World gameplay or Media participation. Legacy signed profile records stay valid
+but incomplete profiles must be completed on World. Media has no registration
+or editor of its own; old setup links redirect to World. Public feeds remain
+readable without signing in. Media session authorization is reviewed on World,
+and subsequent signed social actions also require an active World account.
+A one-use, 60-second handoff supports browsers that isolate cross-origin cookies;
+Media keeps only a revocable, Media-scoped authorization in tab session storage.
+
+World sign-in uses a host-only HttpOnly, SameSite=Strict cookie, seven-day
+persistent sessions and rate-limited authentication. Credentials and sessions
+live in `data/world-accounts.sqlite` by default (beside `DOLLAR_GAME_DIR`);
+include this database in private backups and preserve it during deployments.
+Reader World endpoints forward to the existing writer, never create a second
+credential authority. Reader account requests carry the configured World origin
+to the Dollar writer without relying on an overridden Host header; that origin
+must match the writer's World configuration. World and Media writes must reach
+that authority.
+Settlement bootstrap restores the wallet-owned game across devices, keeps
+legacy direct-wallet mode unchanged, never transfers funds, and refuses to
+discard an existing guest budget when restoring another settlement.
+
 ### Unified administration, CMS editing and reviewed deployment
 
 The Foundation homepage now describes all fourteen current public sites and the

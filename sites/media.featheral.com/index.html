@@ -44,13 +44,13 @@
       <div class="welcome-hero">
         <p class="welcome-eyebrow">Post · Follow · Connect</p>
         <h2 id="welcome-title">Your voice. Your community.</h2>
-        <p>Read public posts without signing in. Connect a wallet to publish, reply and follow.</p>
+        <p>Read public posts without signing in. Sign in to World to publish, reply and follow.</p>
         <a class="btn" href="#/feed">Browse the community</a>
       </div>
       <section id="profileSetup" class="welcome-card" aria-labelledby="setup-title">
-        <p class="welcome-eyebrow" data-cms-copy="index-html-4539">Make yourself recognizable · Optional</p><h2 id="setup-title" data-cms-copy="index-html-4607">Your avatar &amp; profile</h2>
-        <p data-cms-copy="index-html-4668">Use one public identity across community posts and World chat. Profile setup is optional; gameplay does not require it.</p>
-        <div id="profileEditor" class="inline-profile"><p class="muted">Enable JavaScript to connect your wallet and set up a profile. You can read this introduction without connecting.</p></div>
+        <p class="welcome-eyebrow">One World account</p><h2 id="setup-title">Sign in on World</h2>
+        <p>Media uses your World account. Register on World with a username and password or an external wallet, then set your required avatar and profile description. There is no separate Media registration.</p>
+        <a class="btn primary" id="world-sign-in" href="https://world.featheral.com/account/">Sign in to World</a>
         <a class="welcome-skip" href="#/feed">Skip for now — browse posts</a>
       </section>
       <section class="welcome-card"><h2 data-cms-copy="index-html-5912">A community, not just a game</h2><p data-cms-copy="index-html-5949">Share what you are building, follow others and join nearby public chat. Community posts require a connected wallet and a free sign-in signature. Posts, profiles and avatars are public—never share secrets.</p><a class="btn" href="#/feed">Visit the community feed</a></section>
@@ -72,10 +72,10 @@
     <p class="muted fine side-foot">Posts are signed by your wallet and recorded on the open World communication ledger. <a href="/ledger/#/sql">Query it with SQL</a> · <a href="#/guide">Getting-started guide</a> · <a href="/docs/">Docs</a></p>
   </aside>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="/shared/wallet/ethers.js"></script>
 <script src="/shared/site-links.js"></script>
 <script src="/shared/wallet-profile.js"></script>
-<script src="/shared/world-profile.js"></script>
+<script src="/shared/world-account.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

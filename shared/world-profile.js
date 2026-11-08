@@ -55,8 +55,8 @@
           } catch (error) { report(error); }
           finally { busy = false; input.disabled = !address; submit.disabled = !address; input.value = ""; }
         });
-        const clear = element("button", "Use default avatar"); clear.type = "button";
-        clear.addEventListener("click", () => { if (!busy) { avatar = ""; preview.src = "/shared/logo-world.svg"; } });
+        const clear = element("button", "Choose another avatar"); clear.type = "button";
+        clear.addEventListener("click", () => { if (!busy) input.click(); });
         label.append(clear);
       } else {
         if (field.type === "text") { input.type = "text"; input.autocomplete = "nickname"; input.pattern = field.pattern; input.minLength = field.minLength; }
@@ -100,10 +100,11 @@
       const input = { address: owner, username: fields.get("username").value.trim(), avatar, bio: fields.get("bio").value };
       for (const control of form.elements) control.disabled = true;
       try {
-        if (!window.FeatheralWallet?.authenticate) throw new Error("Shared wallet is still loading. Retry shortly.");
+        if (!options.sign && !window.FeatheralWallet?.authenticate) throw new Error("Shared wallet is still loading. Retry shortly.");
+        if (!avatar || !input.bio.trim()) throw new Error("Choose an avatar and write a profile description.");
         message.textContent = "Review and approve your public profile in the wallet.";
         const prepared = await request("/prepare", input);
-        const authorization = await window.FeatheralWallet.authenticate(selected => {
+        const authorization = options.sign ? { signature: await options.sign(prepared.message, owner) } : await window.FeatheralWallet.authenticate(selected => {
           if (selected.toLowerCase() !== owner.toLowerCase() || generation !== current) throw new Error("Wallet changed. Reconnect before saving this profile.");
           return prepared;
         });

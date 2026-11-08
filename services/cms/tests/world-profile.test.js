@@ -11,6 +11,7 @@ const sqlite = require("../../database/sqlite");
 const { profileMessage, verifySignedProfile } = require("../../identity/profile");
 const { profileUi, prepareProfile } = require("../../identity/profile-ui");
 const { validate } = require("../../../sites/wallet.featheral.com/site-sign-in");
+const avatar = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0uoAAAAASUVORK5CYII=";
 
 test("Dollar startup does not import ledger profiles into read-only replica storage", t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dollar-replica-profile-"));
@@ -28,10 +29,13 @@ test("Dollar startup does not import ledger profiles into read-only replica stor
 });
 
 test("World JSON profile model and constrained wallet approval bind bio, avatar, wallet and timestamp", async () => {
-  const wallet = Wallet.createRandom(), input = { address: wallet.address, username: "AppInsider", bio: "Volunteer\nMobile tools", avatar: "" };
+  const wallet = Wallet.createRandom(), input = { address: wallet.address, username: "AppInsider", bio: "Volunteer\nMobile tools", avatar };
   const model = profileUi();
   assert.equal(model.schema, "featheral.profile"); assert.equal(model.version, 1);
   assert.deepEqual(model.fields.map(field => field.name), ["username", "avatar", "bio"]);
+  assert.ok(model.fields.every(field => field.required));
+  assert.throws(() => prepareProfile({ ...input, avatar: "" }), /avatar/);
+  assert.throws(() => prepareProfile({ ...input, bio: "   " }), /description/);
   const browserPattern = new RegExp(model.fields[0].pattern, "v");
   assert.equal(browserPattern.test("App-Insider"), true);
   assert.equal(browserPattern.test("-invalid"), false);
@@ -83,9 +87,9 @@ test("App uses the World profile API to persist signed bio in the DB API, includ
   assert.equal((await call("/api/v1/world/profile/ui")).data.fields[2].name, "bio");
   assert.equal((await call(`/api/v1/world/profile/${wallet.address}`)).data.profile, null);
   const png = Buffer.concat([Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0uoAAAAASUVORK5CYII=", "base64"), Buffer.alloc(20 * 1024)]);
-  assert.equal((await call("/api/v1/world/profile/prepare", { address: wallet.address, username: "AvatarLimit", avatar: `data:image/png;base64,${png.toString("base64")}` })).status, 200,
+  assert.equal((await call("/api/v1/world/profile/prepare", { address: wallet.address, username: "AvatarLimit", bio: "Avatar sizing test", avatar: `data:image/png;base64,${png.toString("base64")}` })).status, 200,
     "profile preparation accepts permitted avatars above the unrelated 16 KiB social-action limit");
-  const prepared = await call("/api/v1/world/profile/prepare", { address: wallet.address, username: "AppNative", avatar: "", bio: "Building tools with Featheral." });
+  const prepared = await call("/api/v1/world/profile/prepare", { address: wallet.address, username: "AppNative", avatar, bio: "Building tools with Featheral." });
   assert.equal(prepared.status, 200);
   const signed = { ...prepared.data.profile, signature: await wallet.signMessage(prepared.data.message) };
   assert.equal((await call("/api/v1/world/profile", { ...signed, bio: "Unauthorized edit" })).status, 401);
@@ -95,7 +99,7 @@ test("App uses the World profile API to persist signed bio in the DB API, includ
   for (const route of [`/api/v1/world/profile/${wallet.address}`, `/api/v1/notes/profiles/${wallet.address}`, `/api/v1/world/users/${wallet.address}`])
     assert.equal((await call(route)).data.profile.bio, signed.bio);
   const other = Wallet.createRandom();
-  const duplicate = prepareProfile({ address: other.address, username: "AppNative", bio: "", avatar: "" });
+  const duplicate = prepareProfile({ address: other.address, username: "AppNative", bio: "Another builder", avatar });
   assert.equal((await call("/api/v1/world/profile", { ...duplicate.profile, signature: await wallet.signMessage(duplicate.message) })).status, 401);
   assert.equal((await call("/api/v1/world/profile", { ...duplicate.profile, signature: await other.signMessage(duplicate.message) })).status, 409);
   const legacy = { address: wallet.address, username: "AppNative2", avatar: "", issuedAt: new Date(Date.parse(signed.issuedAt) + 10).toISOString() };

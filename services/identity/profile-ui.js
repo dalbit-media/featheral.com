@@ -7,8 +7,8 @@ function profileUi() {
     fields: [
       { name: "username", label: "Username", type: "text", required: true, minLength: 3, maxLength: 24,
         pattern: USERNAME_PATTERN.source, hint: "3-24 letters, numbers, _ . or -. Usernames are unique." },
-      { name: "avatar", label: "Avatar", type: "image", accept: "image/png,image/jpeg,image/webp", size: 160, maxBytes: MAX_AVATAR_BYTES },
-      { name: "bio", label: "Bio", type: "textarea", maxLength: 1000, hint: "A short public introduction. Do not include private information." },
+      { name: "avatar", label: "Avatar", type: "image", required: true, accept: "image/png,image/jpeg,image/webp", size: 160, maxBytes: MAX_AVATAR_BYTES },
+      { name: "bio", label: "Profile description", type: "textarea", required: true, maxLength: 1000, hint: "A short public introduction. Do not include private information." },
     ], submitLabel: "Save profile" };
 }
 function prepareProfile(input) {
@@ -18,7 +18,11 @@ function prepareProfile(input) {
   if (typeof input.username !== "string" || !USERNAME_PATTERN.test(input.username)) throw fail("Choose a valid 3-24 character username.");
   const avatar = input.avatar ?? "", bio = input.bio ?? "";
   validateAvatar(avatar); validateBio(bio);
+  if (!avatar || !bio.trim()) throw fail("Choose an avatar and write a profile description.");
   const profile = { address: ethers.getAddress(input.address), username: input.username, avatar, bio, issuedAt: new Date().toISOString() };
   return { profile, message: profileMessage(profile) };
 }
-module.exports = { profileUi, prepareProfile };
+function completeProfile(profile) {
+  return !!profile && USERNAME_PATTERN.test(profile.username || "") && !!profile.avatar && typeof profile.bio === "string" && !!profile.bio.trim();
+}
+module.exports = { profileUi, prepareProfile, completeProfile };
