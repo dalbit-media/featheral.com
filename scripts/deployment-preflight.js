@@ -51,7 +51,7 @@ function verifyCompatibility(candidate, previous, { policy = readPolicy } = {}) 
 function preflight(candidate, previous) {
   candidate = fs.realpathSync(candidate);
   if (previous) previous = fs.realpathSync(previous);
-  for (const file of ["scripts/serve.js", "ecosystem.config.cjs"]) {
+  for (const file of ["scripts/serve.js", "scripts/stop-release-gateways.js", "ecosystem.config.cjs"]) {
     execFileSync(process.execPath, ["--check", path.join(candidate, file)], { encoding: "utf8", timeout: 30000, stdio: ["ignore", "pipe", "pipe"] });
   }
   const assignment = JSON.parse(fs.readFileSync(path.join(candidate, ".deployment-hosts.json"), "utf8"));

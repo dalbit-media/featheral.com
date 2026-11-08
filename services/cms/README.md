@@ -37,6 +37,16 @@ compatibility fix through the usual reviewed Git release and retry self-sync.
 Never reset ledger data, replace keys or disable preflight to resolve this.
 
 PM2 is attached to its persistent systemd service before cutover. The candidate is
+managed directly as `node scripts/serve.js`, not `npm start`: the installer has
+already built the release, and PM2 must signal the actual gateway (including
+post-health market authorization), not an npm wrapper. Before candidate or
+rollback startup, PM2 deletes its old app and the installer waits for verified
+Node gateway processes in the previous/candidate release directories to exit.
+The shutdown helper checks the executable, exact entrypoint, working directory
+and process start time before sending SIGTERM. It never kills an arbitrary port
+owner or unrelated process; timeout or inspection failure blocks competing
+writer startup. Include the helper in the Git-tracked reviewed release.
+The candidate is
 not saved as the boot process until gateway identity and every assigned HTTPS
 site pass health checks. A candidate crash/restart loop aborts immediately rather
 than waiting through repeated 502s; diagnostics include PM2's numbered log files.

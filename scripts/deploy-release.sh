@@ -241,8 +241,9 @@ mkdir -p "$shared/tools"
 [[ -x "$shared/tools/node_modules/.bin/pm2" ]] || npm install --prefix "$shared/tools" --no-save pm2@6
 pm2="$shared/tools/node_modules/.bin/pm2"
 start_release() {
-  # PM2 restart can retain the old npm working directory across release paths.
+  # Older npm-managed releases can leave their Node gateway behind after PM2 deletion.
   if "$pm2" describe featheral >/dev/null 2>&1; then "$pm2" delete featheral; fi
+  node "$release/scripts/stop-release-gateways.js" "$1" "$release" "${previous:-}"
   "$pm2" start "$1/ecosystem.config.cjs"
 }
 candidate="$release/nginx-featheral.conf"

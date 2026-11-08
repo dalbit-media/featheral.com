@@ -2,7 +2,7 @@ const path = require('node:path');
 module.exports = {
   apps: [{
     name: 'featheral', cwd: __dirname,
-    script: 'npm', args: 'start', interpreter: 'none',
+    script: 'scripts/serve.js', interpreter: process.execPath,
     instances: 1, exec_mode: 'fork', autorestart: true,
     kill_timeout: 30000, restart_delay: 5000,
     env: { NODE_ENV: 'production' },

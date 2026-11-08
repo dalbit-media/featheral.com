@@ -165,6 +165,10 @@ const digestFiles = (root, files) => {
 };
 async function prepareRelease(root, files, content, prepared) {
   if (files.includes('scripts/deploy-release.sh')
+    && fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').includes('scripts/stop-release-gateways.js')
+    && !files.includes('scripts/stop-release-gateways.js'))
+    throw error(503, 'Gateway shutdown helper is missing from the Git-tracked release inventory. Track the new script and review the release again; no installation started.');
+  if (files.includes('scripts/deploy-release.sh')
     && fs.readFileSync(path.join(root, 'scripts', 'deploy-release.sh'), 'utf8').includes('scripts/deployment-preflight.js')
     && !files.includes('scripts/deployment-preflight.js'))
     throw error(503, 'Deployment preflight is missing from the Git-tracked release inventory. Track the new script and review the release again; no installation started.');

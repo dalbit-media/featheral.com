@@ -12,7 +12,7 @@ const env = { DEPLOY_TARGET: 'featheral@server.example:/opt/featheral', DEPLOY_K
 function reviewedFixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-reviewed-source-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const files = ['scripts/deploy-release.sh', 'scripts/deployment-preflight.js', 'scripts/serve.js', 'scripts/init-settings.js',
+  const files = ['scripts/deploy-release.sh', 'scripts/deployment-preflight.js', 'scripts/stop-release-gateways.js', 'scripts/serve.js', 'scripts/init-settings.js',
     'package.json', 'ecosystem.config.cjs', 'services/cms/lib/admin-auth.js',
     'sites/admin.featheral.com/login.html', 'sites/admin.featheral.com/js/login.js'];
   for (const file of files) {
@@ -395,6 +395,15 @@ test('release packaging rejects a required preflight missing from the reviewed i
     { status: 503 });
   assert.equal(fs.existsSync(path.join(directory, 'release.zip')), false);
 });
+test('release packaging rejects a gateway shutdown helper missing from the reviewed inventory', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-missing-shutdown-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'scripts'));
+  fs.writeFileSync(path.join(directory, 'scripts', 'deploy-release.sh'), 'node "$release/scripts/stop-release-gateways.js"');
+  await assert.rejects(require('../lib/deployment').prepareRelease(directory, ['scripts/deploy-release.sh'], '{}', directory),
+    { status: 503, message: /Gateway shutdown helper is missing/ });
+  assert.equal(fs.existsSync(path.join(directory, 'release.zip')), false);
+});
 test('a deployed release retains its reviewed Git-tracked inventory without shipping Git metadata', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'featheral-release-inventory-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -507,7 +516,9 @@ test('remote script preserves private state and singleton PM2, validates Nginx, 
   for (const step of ['import-pages', 'pm2-start', 'health', 'pm2-startup']) assert.match(script, new RegExp(`step=${step}\\n\\s*phase "\\$step"`));
   const pm2 = require('../../../ecosystem.config.cjs');
   assert.equal(pm2.apps[0].instances, 1);
-  assert.equal(pm2.apps[0].args, 'start');
+  assert.equal(pm2.apps[0].script, 'scripts/serve.js');
+  assert.equal(pm2.apps[0].interpreter, process.execPath);
+  assert.equal(pm2.apps[0].args, undefined);
 });
 test('deployment startup selects DB-only mode before loading CMS or financial services, without needing shared credentials', () => {
   const vm = require('node:vm');
