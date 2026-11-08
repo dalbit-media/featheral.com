@@ -2,6 +2,7 @@
 const { courses, experience, interests } = require("./work-learning");
 const LEVELS = ["orientation", "learning", "practitioner", "mentor", "steward"];
 const WEEK = 7 * 86400000, MONDAY = Date.UTC(1970, 0, 5);
+const QUIZ_RETRY_WAIT = 30 * 60000;
 const weekStart = now => Math.floor((now - MONDAY) / WEEK) * WEEK + MONDAY;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const siteTeams = [
@@ -29,7 +30,7 @@ class WorkspaceHR {
     this.work = workspace; this.db = workspace.db;
     if (this.db.readOnlyReplica) {
       const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-      this.schemaReady = ["work_enrollment", "work_learning", "work_positions", "work_pay_policy",
+      this.schemaReady = ["work_enrollment", "work_learning", "work_admin_access", "work_positions", "work_pay_policy",
         "work_assignments", "work_payroll", "work_paid_missions"].every(name => tables.has(name))
         && this.db.prepare("PRAGMA table_info(work_missions)").all().some(row => row.name === "min_level");
       if (!this.schemaReady) console.warn("Featheral App HR is unavailable on this read-only replica. Initialize the workspace on the writable source and sync a fresh database snapshot.");
@@ -113,11 +114,16 @@ class WorkspaceHR {
     const member = this.work.member(owner);
     const progress = this.db.prepare("SELECT course,score,passed,attempts,at FROM work_learning WHERE address=?").all(owner);
     const stage = member?.status === "active" ? member.level : "orientation";
-    return { passPercent: 80, stage, experience, interests, enrollment: this.enrollment(owner),
-      courses: courses.filter(course => LEVELS.indexOf(course.level) <= LEVELS.indexOf(stage)).map(course => ({
+    const available = courses.filter(course => LEVELS.indexOf(course.level) <= LEVELS.indexOf(stage));
+    const current = available.find(course => course.level === stage && !progress.find(row => row.course === course.id)?.passed);
+    return { passPercent: 80, retryWaitMs: QUIZ_RETRY_WAIT, serverNow: this.work.now(), stage, experience, interests, enrollment: this.enrollment(owner),
+      steps: available.map(course => ({ id: course.id, title: course.title, level: course.level,
+        passed: !!progress.find(row => row.course === course.id)?.passed, locked: course !== current && !progress.find(row => row.course === course.id)?.passed })),
+      courses: available.filter(course => course === current || progress.find(row => row.course === course.id)?.passed).map(course => ({
         id: course.id, level: course.level, title: course.title, body: course.body, sites: course.sites,
         questions: course.questions.map(({ prompt, options }) => ({ prompt, options })),
         progress: progress.find(row => row.course === course.id) || null,
+        retryAt: progress.find(row => row.course === course.id && !row.passed)?.at + QUIZ_RETRY_WAIT || null,
       })) };
   }
   quiz(owner, key, input) {
@@ -126,7 +132,15 @@ class WorkspaceHR {
     if (!member || !["visitor", "active"].includes(member.status)) throw fail(403, "Register as a visitor before taking quizzes.");
     if (!this.enrollment(owner)) throw fail(409, "Choose your experience and work interests before learning.");
     const stage = member.status === "active" ? member.level : "orientation";
-    if (!course || LEVELS.indexOf(course.level) > LEVELS.indexOf(stage)) throw fail(403, "Complete your current learning level before this quiz.");
+    if (!course || course.level !== stage) throw fail(403, "Complete your current learning level before this quiz.");
+    const prior = courses.slice(0, courses.indexOf(course)).filter(row => row.level === course.level);
+    if (prior.some(row => !this.db.prepare("SELECT passed FROM work_learning WHERE address=? AND course=?").get(owner, row.id)?.passed))
+      throw fail(403, "Pass the previous quiz before starting this step.");
+    const progress = this.db.prepare("SELECT passed,at FROM work_learning WHERE address=? AND course=?").get(owner, key);
+    if (progress?.passed) throw fail(409, "This quiz is already passed. Continue to the next step.");
+    const retryAt = progress ? progress.at + QUIZ_RETRY_WAIT : null;
+    if (retryAt > this.work.now()) throw Object.assign(fail(429, "Wait at least 30 minutes after a failed quiz before retaking it."),
+      { retryAt, retryAfter: Math.ceil((retryAt - this.work.now()) / 1000) });
     const answers = input?.answers;
     if (!Array.isArray(answers) || answers.length !== course.questions.length
       || answers.some((value, index) => !Number.isInteger(value) || value < 0 || value >= course.questions[index].options.length))
@@ -138,7 +152,7 @@ class WorkspaceHR {
         score=MAX(work_learning.score,excluded.score),passed=MAX(work_learning.passed,excluded.passed),
         attempts=work_learning.attempts+1,at=excluded.at`).run(owner, key, score, Number(passed), this.work.now());
       const required = courses.filter(row => row.level === stage);
-      const complete = required.length && required.every(row => this.db.prepare("SELECT passed FROM work_learning WHERE address=? AND course=?").get(owner, row.id)?.passed);
+      const complete = course.level === stage && required.length && required.every(row => this.db.prepare("SELECT passed FROM work_learning WHERE address=? AND course=?").get(owner, row.id)?.passed);
       if (complete && stage !== "steward") {
         const next = LEVELS[LEVELS.indexOf(stage) + 1];
         if (member.status === "visitor") {
@@ -149,7 +163,7 @@ class WorkspaceHR {
         this.work.audit(owner, "learning.advance", owner, { previous: stage, level: next });
       }
       this.work.audit(owner, "learning.quiz", key, { score, passed });
-      return { score, passed, member: this.work.member(owner) };
+      return { score, passed, retryAt: passed ? null : this.work.now() + QUIZ_RETRY_WAIT, member: this.work.member(owner) };
     });
   }
   chart() {

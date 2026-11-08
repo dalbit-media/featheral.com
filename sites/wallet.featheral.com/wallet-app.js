@@ -1,4 +1,19 @@
 "use strict";
+async function resetWalletLocalData(local, session, revoke, signOut, activeToken) {
+  const tokens = new Set([activeToken, ...["featheral-creation-token", "featheral-context-wallet-token"].map(key => local.getItem(key))].filter(Boolean));
+  for (const token of tokens) await revoke(token);
+  await signOut();
+  for (const store of [local, session]) {
+    const keys = [];
+    for (let index = 0; index < store.length; index++) {
+      const key = store.key(index);
+      if (key && (key.startsWith("featheral-") || key.startsWith("featheral."))
+        && key !== "featheral-encrypted-wallet-v1") keys.push(key);
+    }
+    for (const key of keys) store.removeItem(key);
+  }
+  local.setItem("featheral-wallet-reset", "1");
+}
 async function mountFeatheralWallet(context) {
   const nativeDocument = globalThis.document, cleanup = [];
   const listen = (target, name, callback, options) => {
@@ -123,10 +138,11 @@ async function mountFeatheralWallet(context) {
   const vault = interactive ? vaultReader : null;
   const savedVault = vaultReader?.read();
   const ACTIVE_ACCOUNT = "featheral-wallet-active-account";
+  let locallyReset = storage.getItem("featheral-wallet-reset") === "1";
   function selectedAddress() {
     const address = storage.getItem(ACTIVE_ACCOUNT) || (context ? storage.getItem("featheral-wallet-public-account") : null);
     if (address && !/^0x[0-9a-f]{40}$/i.test(address)) throw new Error("Stored active wallet address is invalid. Open the full wallet to select an account.");
-    return address || vaultReader?.read()?.address || null;
+    return address || (!locallyReset ? vaultReader?.read()?.address : null) || null;
   }
   let builtInActive = false, vaultDraft, idleAt = Date.now(), refreshQueued = false, returnedAddress, siteApproval;
   const sendSite = data => context ? context.onMessage(data) : window.opener.postMessage(data, config.parentOrigin);
@@ -324,7 +340,7 @@ async function mountFeatheralWallet(context) {
     cleanup.push(cancelWorldSync);
   }
   $("world-play").href = worldOrigin + "/play/";
-  $("world-funds").href = worldOrigin + "/world-funds.html";
+  $("world-funds").href = worldOrigin + "/bank/#funds";
   $("profile-link").href = worldOrigin + "/account/";
   $("activity-explorer").href = dollarOrigin + "/explorer/";
   function renderPortfolio(value) {
@@ -430,6 +446,7 @@ async function mountFeatheralWallet(context) {
     return worldDiscovery;
   }
   function syncWorldAccount(force = false) {
+    if (locallyReset) return;
     if (worldDiscovery && !force) return;
     discoverWorldAccount(force).then(changed => {
       if (!changed) return;
@@ -810,6 +827,7 @@ async function mountFeatheralWallet(context) {
   async function ensureSession() {
     if (token) return true;
     if (!interactive) throw new Error("This address view is read-only.");
+    storage.removeItem("featheral-wallet-reset"); locallyReset = false;
     if (vault && (builtInPreferred || !providerChoices().length)) {
       if (vault.signer) { await loginWallet(vault.signer.address, true); return true; }
       tab("account"); $("local-wallet").open = true;
@@ -859,6 +877,25 @@ async function mountFeatheralWallet(context) {
     $("vault-action").value = vault?.read() ? "unlock" : "create"; updateVault(); $("vault-password").focus();
   });
   $("refresh").addEventListener("click", () => refresh().catch(status));
+  $("reset-local-data").addEventListener("click", async () => {
+    if (busy || !interactive) return;
+    lock(true);
+    try {
+      requireVisible();
+      if (!await review("Reset local data and wallet connections for " + location.hostname + "?\nYour encrypted built-in wallet backup, server profile, settlements and balances will be kept. Cached profiles and preferences will be cleared. Extension permissions and other sites are unchanged.", "Reset local data")) return;
+      ++epoch; ++contextEpoch; cancelWorldSync();
+      vault?.lock();
+      await resetWalletLocalData(localStorage, sessionStorage, endLocalSession, async () => {
+        const world = window.FeatheralWorldAccount;
+        if (location.hostname.startsWith("world.") && world?.snapshot()?.account) await world.request("/logout", {});
+      }, token);
+      locallyReset = true; returnedAddress = null; builtInActive = false; worldAccount = "";
+      reset(); updateVault();
+      location.reload();
+    } catch (error) { status(error); }
+    finally { lock(false); }
+  });
+  $("reset-local-data").disabled = !interactive;
   async function copyAddress() {
     try { if (!owner) throw new Error("Connect your wallet first."); await navigator.clipboard.writeText(owner); $("status").textContent = "Address copied."; }
     catch (error) { status(error); }
@@ -980,6 +1017,7 @@ async function mountFeatheralWallet(context) {
     finally { lock(false); updateVault(); }
   }
   async function loginWallet(address, local) {
+    storage.removeItem("featheral-wallet-reset"); locallyReset = false;
     idleAt = Date.now();
     if (token) await api("/logout", {});
     reset(); owner = address; builtInActive = local; builtInPreferred = local;
@@ -1142,6 +1180,7 @@ async function mountFeatheralWallet(context) {
     if (boundProviders.has(provider)) return;
     boundProviders.add(provider);
     const accountsChanged = accounts => {
+      if (locallyReset) return;
       if (provider !== browserProvider || builtInActive || !interactive) return;
       returnedAddress = accounts[0] || null;
       if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress); else storage.removeItem(ACTIVE_ACCOUNT);
@@ -1194,7 +1233,7 @@ async function mountFeatheralWallet(context) {
     finally { visibleRefreshPending = false; }
   }
   async function resume() {
-    if (!context || !interactive || !context.visible() || busy) return;
+    if (!context || !interactive || !context.visible() || busy || locallyReset) return;
     const current = contextEpoch, provider = browserProvider;
     const record = vaultReader?.read(), selected = selectedAddress();
     if (!builtInActive && record?.address && selected && record.address.toLowerCase() === selected.toLowerCase()) builtInPreferred = true;
@@ -1330,7 +1369,7 @@ async function mountFeatheralWallet(context) {
     updateVault();
   }
   if (!storageAvailable) $("status").textContent = "Browser wallet storage is blocked. Allow storage for this site's wallet to create or restore a built-in account.";
-  if (interactive && !builtInPreferred && !token && !publicAddress() && browserProvider) {
+  if (interactive && !locallyReset && !builtInPreferred && !token && !publicAddress() && browserProvider) {
     try {
       const accounts = await browserProvider.request({ method: "eth_accounts" });
       if (accounts[0] && /^0x[0-9a-fA-F]{40}$/.test(accounts[0])) storage.setItem(ACTIVE_ACCOUNT, accounts[0]);

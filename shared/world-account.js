@@ -52,7 +52,7 @@
     return refreshing;
   }
   function url(returnTo = location.href) {
-    const destination = new URL("/account/", onWorld ? location.origin : worldOrigin);
+    const destination = new URL("/login/", onWorld ? location.origin : worldOrigin);
     destination.searchParams.set("returnTo", returnTo);
     return destination.href;
   }

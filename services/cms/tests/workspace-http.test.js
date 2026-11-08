@@ -15,7 +15,17 @@ const { WEEK, weekStart } = require("../../notes/workspace-hr");
 async function fixture(t, env = {}, prepareNotes = () => {}) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), profiles = new Map(), deliveries = [];
   prepareNotes(notes, creation.markets);
+  let permissions = ["*"], handoffs = new Map();
   const { router, workspace } = workspaceApi({ notes, markets: creation.markets, profileReader: address => profiles.get(address),
+    worldHandoff: (code, origin) => {
+      const value = handoffs.get(code);
+      if (!value || value.origin !== origin) throw Object.assign(new Error("World handoff expired."), { status: 401 });
+      handoffs.delete(code); return value.address;
+    },
+    workspaceAdminAuth: (req, res, next) => {
+      if (req.get("authorization") !== "Basic fixture-admin") return res.status(401).json({ error: "Admin authorization required" });
+      req.adminPermissions = permissions; req.adminWallet = "0x" + "8".repeat(40); next();
+    },
     env, cmsAuth: (req, res, next) => req.get("authorization") === "Basic fixture-admin" ? next() : res.status(401).json({ error: "Admin authorization required" }),
     pushTransport: { setVapidDetails() {}, async sendNotification(subscription, payload) { deliveries.push({ subscription, payload: JSON.parse(payload) }); } } });
   const app = express(); app.use(express.json({ limit: "8mb" })); app.use("/api/intranet", router);
@@ -44,15 +54,58 @@ async function fixture(t, env = {}, prepareNotes = () => {}) {
     assert.equal(result.status, 200);
     const cookie = result.headers["set-cookie"][0].split(";")[0];
     if (role) {
-      profiles.set(owner, { username: role, avatar: "" });
+      profiles.set(owner, { username: role, avatar: "https://example.test/avatar.png", bio: "Building together." });
       assert.equal((await call("/apply", { motivation: "Build together", experience: "building", interests: [division] }, { cookie })).status, 200);
       assert.equal((await call(`/admin/members/${owner}`, { status: "active", role, level: "learning", division, team: `${division}-general` },
         { host: "admin.localhost", admin: true, method: "PUT" })).status, 200);
     }
     return { cookie, owner, wallet, result };
   }
-  return { notes, creation, workspace, call, login, profiles, deliveries };
+  return { notes, creation, workspace, call, login, profiles, deliveries, handoffs, setPermissions: value => { permissions = value; } };
 }
+test("World App handoff shares identity, is origin-bound and single-use, and quizzes enforce Retry-After", async t => {
+  const f = await fixture(t), wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
+  f.profiles.set(owner, { username: "WorldMember", avatar: "https://example.test/avatar.png", bio: "Shared public bio." });
+  f.handoffs.set("world-code", { address: wallet.address, origin: "http://app.localhost" });
+  assert.equal((await f.call("/world-login", { code: "world-code" }, { host: "admin.localhost" })).status, 403);
+  const login = await f.call("/world-login", { code: "world-code" });
+  assert.equal(login.status, 200);
+  const options = { cookie: login.headers["set-cookie"][0].split(";")[0] };
+  assert.equal((await f.call("/world-login", { code: "world-code" })).status, 401);
+  const me = (await f.call("/me", undefined, options)).body;
+  assert.equal(me.address, owner); assert.equal(me.profile.username, "WorldMember");
+  await f.call("/apply", { motivation: "Useful work", experience: "building", interests: ["engineering"] }, options);
+  let now = Date.UTC(2026, 10, 2, 12); f.workspace.now = () => now;
+  const first = courses[0], second = courses[1], answers = first.questions.map(question => question.answer);
+  assert.equal((await f.call(`/learning/${second.id}/quiz`, { answers }, options)).status, 403);
+  const failed = await f.call(`/learning/${first.id}/quiz`, { answers: answers.map((answer, i) => (answer + 1) % first.questions[i].options.length) }, options);
+  assert.equal(failed.body.retryAt, now + 1800000);
+  let retake = await f.call(`/learning/${first.id}/quiz`, { answers }, options);
+  assert.equal(retake.status, 429); assert.equal(retake.headers["retry-after"], "1800");
+  now += 1799999; retake = await f.call(`/learning/${first.id}/quiz`, { answers }, options);
+  assert.equal(retake.status, 429); assert.equal(retake.headers["retry-after"], "1");
+  now += 1; assert.equal((await f.call(`/learning/${first.id}/quiz`, { answers }, options)).status, 200);
+});
+test("workspace Admin permission routes cannot escalate or access financial operations", async t => {
+  const f = await fixture(t), member = await f.login(undefined, "volunteer");
+  const admin = { host: "admin.localhost", admin: true }, input = { ...f.workspace.member(member.owner) };
+  f.setPermissions(["workspace-tasks"]);
+  let data = await f.call("/admin", undefined, admin);
+  assert.equal(data.status, 200); assert.equal("payroll" in data.body, false); assert.equal("adminAccess" in data.body, false);
+  assert.deepEqual(data.body.enrollments, []); assert.equal(data.body.members[0].motivation, "");
+  assert.equal((await f.call("/admin/missions", { assignee: "0x" + "8".repeat(40), status: "done" }, admin)).status, 403);
+  assert.equal((await f.call(`/admin/members/${member.owner}`, input, { ...admin, method: "PUT" })).status, 403);
+  assert.equal((await f.call("/admin/teams", { name: "Extra", division: "engineering" }, admin)).status, 403);
+  for (const [path, method] of [["/admin/access/" + member.owner, "PUT"], ["/admin/grants", "POST"], ["/admin/payroll-policy", "PUT"], ["/admin/evaluate", "POST"]])
+    assert.equal((await f.call(path, {}, { ...admin, method })).status, 403);
+  assert.equal((await f.call("/admin/missions", { title: "Assigned task", body: "Review evidence", division: "engineering", team: "engineering-general", assignee: "", status: "ready" }, admin)).status, 200);
+  f.setPermissions(["workspace-members"]);
+  assert.equal((await f.call(`/admin/members/${member.owner}`, input, { ...admin, method: "PUT" })).status, 200);
+  assert.equal((await f.call("/admin/missions", {}, admin)).status, 403);
+  f.setPermissions(["*"]);
+  const grant = await f.call(`/admin/access/${member.owner}`, { permissions: ["workspace-tasks"], approval: "ASSIGN ADMIN PERMISSIONS" }, { ...admin, method: "PUT" });
+  assert.equal(grant.status, 200); assert.deepEqual(f.workspace.adminPermissions(member.owner), ["workspace-tasks"]);
+});
 test("App HTTP reports an unmigrated replica explicitly while public Silver remains readable", async t => {
   t.mock.method(console, "warn", () => {});
   const f = await fixture(t, {}, (notes, markets) => {
@@ -75,11 +128,12 @@ test("public enrollment and quizzes qualify membership without any admin approva
   const f = await fixture(t);
   let now = Date.UTC(2026, 10, 2, 12); f.workspace.now = () => now;
   let visitor = await f.login();
-  f.profiles.set(visitor.owner, { username: "OpenContributor" });
+  f.profiles.set(visitor.owner, { username: "OpenContributor", avatar: "https://example.test/avatar.png", bio: "Building together." });
   assert.equal((await f.call("/organization", undefined, visitor)).status, 403);
   assert.equal((await f.call("/apply", { motivation: "Deliver useful work", experience: "building", interests: ["engineering"], role: "director", status: "active" }, visitor)).status, 200);
   const learning = await f.call("/learning", undefined, visitor);
-  assert.equal(learning.body.courses.length, 5);
+  assert.equal(learning.body.courses.length, 1);
+  assert.equal(learning.body.steps.length, 5);
   assert.equal(learning.body.courses.every(course => course.questions.every(question => !("answer" in question))), true);
   for (const course of courses.filter(course => course.level === "orientation")) {
     assert.equal((await f.call(`/learning/${course.id}/quiz`, { answers: course.questions.map(question => question.answer) }, visitor)).status, 200);
@@ -121,7 +175,7 @@ test("App HTTP access is wallet-authenticated, visitor-learning gated, host-boun
   assert.match(pending.result.headers["set-cookie"][0], /SameSite=Strict/);
   assert.equal(pending.result.body.token, undefined);
   assert.equal((await ui.call("/apply", { motivation: "Help" }, pending)).status, 409);
-  ui.profiles.set(pending.owner, { username: "NewInsider", avatar: "" });
+  ui.profiles.set(pending.owner, { username: "NewInsider", avatar: "https://example.test/avatar.png", bio: "Building together." });
   assert.equal((await ui.call("/me", undefined, pending)).body.member.status, "visitor");
   assert.equal((await ui.call("/apply", { motivation: "Help", status: "active", role: "director", experience: "new", interests: ["learning"] }, pending)).status, 200);
   assert.equal((await ui.call("/directory", undefined, pending)).status, 403);

@@ -5,8 +5,10 @@ import type { PublicStats } from './api-types.ts';
 import { language, languageLocale, localize, wireLanguageControls } from './i18n-dom.ts';
 import { translate } from './i18n.ts';
 import { dollarsUnits, dollarsScale, formatDollars } from './dollars.ts';
+import { localizePublicCopy } from './public-feature-i18n.ts';
 
 localize(document);
+localizePublicCopy(document);
 wireLanguageControls();
 document.querySelectorAll<HTMLElement>('[data-icon]').forEach(element => {
   element.innerHTML = icon(element.dataset.icon!);

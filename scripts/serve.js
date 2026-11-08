@@ -175,6 +175,7 @@ const worldAccounts = reader ? null : require("../services/identity/world-accoun
 });
 cms.setCreationPayments(api.creationPayments);
 cms.setWorkspaceProfiles(address => cms.database.profiles.get(address));
+if (worldAccounts) cms.setWorkspaceWorldHandoff((code, origin, purpose) => worldAccounts.consumeAppHandoff(code, origin, purpose));
 cms.setNoteSupply(api.noteSupply);
 cms.setDollarWallet(api.walletAccount, api.exchangeSettlement);
 const ethereumWalletCache = new Map();
@@ -558,7 +559,7 @@ const server = http.createServer(async (req, res) => {
       }
       const html = cms.renderSitePage(contentHost, p.slice(1));
       res.writeHead(200, { "Content-Type": types[".html"], "Cache-Control": "no-store" });
-      return res.end(html);
+      return res.end(site === "media" ? require("./site-routing").mediaNavigationHtml(html) : html);
     }
     fs.readFile(file, (err, data) => {
       if (err) {
@@ -567,10 +568,12 @@ const server = http.createServer(async (req, res) => {
       }
       if (site === "world" && p === "/wallet-sync-frame.html")
         res.setHeader("Content-Security-Policy", `frame-ancestors ${hostname.endsWith("localhost") ? "http://localhost:* http://*.localhost:*" : "https://featheral.com https://*.featheral.com"}; default-src 'self'; object-src 'none'; base-uri 'none'`);
-      if (site === "world" && p === "/account/index.html")
+      if (site === "world" && ["/account/index.html", "/login/index.html", "/register/index.html"].includes(p))
         res.setHeader("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'none'");
       res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
-      res.end(data);
+      res.end(site === "world" && ["/community/", "/community/index.html"].includes(url.pathname)
+        ? require("./site-routing").worldCommunityHtml(data.toString())
+        : site === "media" && path.extname(file) === ".html" ? require("./site-routing").mediaNavigationHtml(data.toString()) : data);
     });
   } catch (error) {
     console.error("Request handler failed:", error);

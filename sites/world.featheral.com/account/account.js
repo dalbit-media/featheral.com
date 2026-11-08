@@ -2,7 +2,14 @@
 (() => {
   const $ = id => document.getElementById(id), world = window.FeatheralWorldAccount;
   const query = new URLSearchParams(location.search);
-  let mode = "register", pending = null, editor = null, busy = false, approvalRequest = null, displayedAccount = null;
+  const authPage = /^\/(?:login|register)(?:\/|$)/.test(location.pathname);
+  let mode = location.pathname.startsWith("/login") ? "login" : "register", pending = null, editor = null, busy = false, approvalRequest = null, displayedAccount = null;
+  function navigate(path) {
+    const destination = new URL(path, location.origin);
+    destination.search = query.toString();
+    if (path !== "/login/") destination.searchParams.delete("switch");
+    location.assign(destination.href);
+  }
   const vault = new FeatheralVault.Vault({ getItem: key => localStorage.getItem(key) });
   const passwordNote = $("password-note").textContent;
   function connectedBuiltInWallet() {
@@ -16,7 +23,9 @@
     $("credentials").elements.confirmation.required = mode === "register" && !existing;
     $("credentials").elements.password.autocomplete = mode === "login" || existing ? "current-password" : "new-password";
     $("credentials-submit").textContent = mode === "login" ? "Sign in" : existing ? "Enable username login" : "Create built-in wallet";
-    $("password-note").textContent = existing
+    $("password-note").textContent = mode === "login"
+      ? "Use your existing World password to unlock your encrypted wallet. No new wallet is created. There is no password reset."
+      : existing
       ? "Use your existing built-in wallet password. Your username and password will sign in to this same wallet on any device. No new wallet is created and no funds move."
       : passwordNote;
   }
@@ -63,12 +72,23 @@
   async function showSession() {
     const session = world.snapshot();
     if (!session?.account) return;
+    if (authPage && query.has("switch") && !busy && !query.get("approve")) {
+      displayedAccount = session.account;
+      $("profile").hidden = true; $("sign-in").hidden = false;
+      $("continue").hidden = true; $("backup").hidden = true;
+      return;
+    }
+    if (authPage && !query.get("approve") && (!query.has("switch") || busy) && (session.loginUsername || !connectedBuiltInWallet() || mode === "login")) {
+      navigate("/account/"); return;
+    }
     displayedAccount = session.account;
     $("sign-out").hidden = false;
     $("switch-account").hidden = !!query.get("approve");
     $("account-name").hidden = false; $("account-name").textContent = session.profile?.username || session.account;
     $("account-title").textContent = "Your World account";
+    $("account-description").textContent = "Manage your shared World profile, avatar and encrypted wallet backup.";
     if (!session.loginUsername && connectedBuiltInWallet() && !query.get("approve")) {
+      if (!authPage) { navigate("/register/"); return; }
       mode = "register";
       document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option.dataset.mode === mode)));
       $("profile").hidden = true; $("sign-in").hidden = false;
@@ -84,9 +104,11 @@
     if (!session.profile?.username && session.loginUsername)
       $("profile-editor").querySelector('[name="username"]').value = session.loginUsername;
     $("continue").hidden = !session.complete || !!query.get("approve");
-    $("continue").textContent = new URL(allowedReturn(query.get("returnTo"))).hostname.startsWith("media.") ? "Continue to Media" : "Continue to World";
+    const destination = new URL(allowedReturn(query.get("returnTo")));
+    $("continue").textContent = destination.hostname.startsWith("admin.") ? "Continue to Admin" : destination.hostname.startsWith("app.") ? "Continue to App" : destination.hostname.startsWith("media.") ? "Continue to Media"
+      : destination.pathname.startsWith("/community/") ? "Continue to Community" : "Continue to World";
     $("backup").hidden = session.walletType !== "built-in";
-    status(session.complete ? "Signed in to World. World and Media share this profile." : "Choose an avatar and write your public profile description to continue.");
+    status(session.complete ? "Signed in to World. World, Media and App share this profile." : "Choose an avatar and write your public profile description to continue.");
     $("profile").hidden = !!query.get("approve") && session.complete;
   }
   async function perform(work) {
@@ -99,6 +121,7 @@
   }
   document.querySelectorAll("[data-mode]").forEach(button => button.onclick = () => {
     if (busy) return;
+    if (!query.get("approve")) { navigate(button.dataset.mode === "login" ? "/login/" : "/register/"); return; }
     mode = button.dataset.mode;
     document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option === button)));
     updateCredentials();
@@ -134,9 +157,8 @@
         status("Creating and encrypting your built-in wallet…");
         const signer = ethers.Wallet.createRandom(), keystore = await signer.encrypt(password);
         pending = { signer, keystore, password, username };
-        form.elements.password.value = ""; form.elements.confirmation.value = "";
-        status("Set your avatar and public description, then save the profile and finish registration.");
-        await loadEditor(signer.address);
+        await register(pending);
+        form.reset();
       }
     });
   };
@@ -162,6 +184,7 @@
   });
   $("switch-account").onclick = () => {
     if (busy) return;
+    if (!query.get("approve")) { query.set("switch", "1"); navigate("/login/"); return; }
     pending = null; editor = null;
     $("profile-editor").replaceChildren(); $("profile").hidden = true; $("sign-in").hidden = false;
     $("finish-registration").hidden = true; $("switch-account").hidden = true;
@@ -175,7 +198,7 @@
   });
   window.addEventListener("focus", () => { if (!busy && !pending) { try { updateCredentials(); } catch (error) { report(error); } } });
   $("sign-out").onclick = () => void perform(async () => {
-    await world.request("/logout", {}); pending = null; location.replace("/account/");
+    await world.request("/logout", {}); pending = null; location.replace("/login/");
   });
   $("backup").onclick = () => void perform(async () => {
     const backup = pending ? { keystore: pending.keystore } : await world.request("/backup", {});
@@ -188,11 +211,19 @@
     const session = await world.refresh();
     if (!session.complete) throw new Error("Complete your World username, avatar and description first.");
     const target = new URL(allowedReturn(query.get("returnTo")));
-    if (target.hostname.startsWith("media.")) {
+    if (target.hostname.startsWith("admin.")) {
+      status("Requesting your explicitly assigned App administration access. No funds move…");
+      const handoff = await world.request("/admin-handoff", { origin: target.origin });
+      target.searchParams.set("worldAdminSignIn", handoff.code);
+    } else if (target.hostname.startsWith("app.")) {
+      status("Connecting your World profile to App. No funds move…");
+      const handoff = await world.request("/app-handoff", { origin: target.origin });
+      target.searchParams.set("worldAppSignIn", handoff.code);
+    } else if (target.hostname.startsWith("media.")) {
       status("Connecting your World account to Media…");
       const handoff = await world.request("/media-handoff", { origin: target.origin });
       target.searchParams.set("worldSignIn", handoff.code);
-    } else {
+    } else if (target.origin === location.origin && /^\/(?:explore|settlement|market|federation|bank|communicate|contacts|journal|help|play)(?:\/|$)/.test(target.pathname)) {
       status("Connecting your existing World settlement. No funds move…");
       await world.request("/game", {});
     }
@@ -225,8 +256,13 @@
   });
   void (async () => {
     await world.refresh(); await showSession();
-    if (query.has("switch") && world.snapshot()?.account && !query.get("approve")) $("switch-account").click();
-    if (!world.snapshot()?.account) { updateCredentials(); status("Register or sign in to set up your World profile."); }
+    if (!authPage && !world.snapshot()?.account && !query.get("approve")) { navigate("/login/"); return; }
+    if (!authPage && query.has("switch") && world.snapshot()?.account && !query.get("approve")) $("switch-account").click();
+    if (!world.snapshot()?.account || authPage && query.has("switch")) {
+      document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option.dataset.mode === mode)));
+      $("account-title").textContent = mode === "login" ? "Sign in to World" : "Register for World";
+      updateCredentials(); status(mode === "login" ? "Sign in with your World username and password." : "Register to set up your World profile.");
+    }
     if (query.get("approve")) {
       const parent = new URL(query.get("parentOrigin"));
       if (!/^[a-f0-9]{32}$/.test(query.get("approve")) || !window.opener

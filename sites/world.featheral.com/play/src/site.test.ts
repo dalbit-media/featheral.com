@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { formatPublicTotal, publicSite, resolvePublicSite } from './site.ts';
-import { landingSeo, whitepaperPage, worldProfileAssets } from '../vite.config.ts';
+import { landingSeo, whitepaperPage, worldProfileAssets, worldAccountPage } from '../vite.config.ts';
 import { newGame, stages, terrainDetails } from './engine.ts';
 import { settlementLayoutPanel, settlementProfile, settlementScene } from './settlement-scene.ts';
 import { cellKey, legacySpaceCells, positionEntries, settlementBuildings, settlementPositions, validSettlementCell } from './settlement-layout.ts';
@@ -23,6 +23,31 @@ import { waterFacilityKeys, waterFacilities } from './water-facilities.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
+
+test('World has dedicated login, registration and profile pages, with no homepage credential form', async () => {
+  const plugin = worldAccountPage();
+  const transform = typeof plugin.transformIndexHtml === 'object' ? plugin.transformIndexHtml.handler : plugin.transformIndexHtml;
+  assert.equal(typeof transform, 'function');
+  if (typeof transform !== 'function') throw new Error('Missing World account transform');
+  for (const file of ['login/index.html', 'register/index.html', 'account/index.html']) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    const html = await transform(source, { path: file, filename: file });
+    assert.equal(typeof html, 'string');
+    if (typeof html !== 'string') throw new Error('Missing World account form');
+    assert.equal((html.match(/id="credentials"/g) ?? []).length, 1);
+    assert.equal((html.match(/id="profile-editor"/g) ?? []).length, 1);
+    assert.doesNotMatch(html, /<!-- WORLD_ACCOUNT -->/);
+    assert.match(html, /src="\/account\/account.js"/);
+    assert.match(html, /src="\/shared\/world-account.js"/);
+  }
+  const homepage = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(homepage, /href="\/register\/">Register/);
+  assert.match(homepage, /href="\/login\/">Sign in/);
+  assert.doesNotMatch(homepage, /WORLD_ACCOUNT|id="account"|src="\/account\/account.js"/);
+  const game = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  assert.match(game, /FeatheralWorldAccount\.requireProfile/);
+  assert.doesNotMatch(game, /\/register/);
+});
 
 test('compact social controls preserve accessible labels, search feedback, per-room drafts and safe send retries', () => {
   const inbox = readFileSync(new URL('./inbox.ts', import.meta.url), 'utf8');
@@ -1207,20 +1232,22 @@ test('landing copy leads with playable goals and immediate play links without hi
   assert.match(hero, /주민을 배치해 자원을 모으고/);
   assert.ok(hero.includes(`${Object.keys(terrainDetails).length}가지 지형`));
   assert.match(hero, /수도까지 키워/);
-  assert.match(hero, /Start exploring/);
-  assert.match(hero, /설치·지갑 연결·결제 없이/);
+  assert.match(hero, /href="\/register\/">Register/);
+  assert.match(hero, /No payment or wallet extension is required/);
   assert.match(hero, /초기 프로토타입/);
-  const playCalls = [...landing.matchAll(/<a class="(?:btn [^"]*|preview-cta)" href="([^"]+)">/g)];
+  const playCalls = [...landing.matchAll(/<a class="(?:btn [^"]*|preview-cta)" href="([^"]+)"[^>]*>/g)];
   assert.equal(playCalls.length, 4);
-  assert.match(landing, /class="play-launch" href="\/explore\/"/);
-  for (const [, href] of playCalls) assert.ok(['/explore/', '/settlement/'].includes(href), href);
+  assert.match(landing, /<!-- WORLD_PUBLIC_NAV -->/);
+  for (const [, href] of playCalls) assert.ok(['/explore/', '/settlement/', '/register/', '/community/'].includes(href), href);
   assert.match(landing, /게임 시간 7일마다/);
   assert.match(landing, /게임 시간 1~3주 후 복귀하면/);
   assert.match(landing, /미배치 주민은 자원을 생산하지 않으며/);
   assert.match(landing, /실제 DAO나 온체인 게임 경제가 아니며, 금전적 보상을 제공하지 않습니다/);
-  assert.match(landing, /FTHG is an actual Ethereum Mainnet token/);
-  assert.match(landing, /FTH\$ redemption requires an authorized service/);
-  assert.match(landing, /공식 링크는 준비 중/);
+  assert.match(landing, /Gold API reads actual Ethereum FTHG/);
+  assert.match(landing, /Conversion and staking require a deployed, funded Ethereum bridge/);
+  assert.match(landing, /href="\/community\/"/);
+  assert.match(landing, /Sign in and complete your World profile to publish/);
+  assert.doesNotMatch(landing, /현재 회원 가입이나 알림 구독 기능은 운영하지 않습니다/);
 });
 
 test('unpublished public links stay empty rather than pointing to invented accounts', () => {

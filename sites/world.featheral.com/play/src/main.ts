@@ -1465,6 +1465,7 @@ async function syncProduction(): Promise<void> {
 window.addEventListener('storage', event => {
   if (event.key === 'featheral-wallet-updated' || event.key === 'featheral-world-account') void syncProduction();
 });
+window.addEventListener('featheral:wallet-updated', () => void syncProduction());
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncProduction(); });
 setInterval(() => void syncProduction(), serverSyncIntervalMs + Math.random() * 5000);
 let nextDeadlineSyncAt = 0;
@@ -1521,4 +1522,4 @@ window.addEventListener('pagehide', () => {
 scheduleClockAnimation();
 if (marketPage) marketplace = new Marketplace(document.querySelector<HTMLElement>('#marketplace-content')!, () => state,
   next => { if (next.revision >= state.revision) { synchronize(next); render(); } }, toast, language);
-if (bankPage) new WalletPage(document.querySelector<HTMLElement>('#bank-content')!);
+if (bankPage) new WalletPage(document.querySelector<HTMLElement>('#bank-content')!, async () => { await syncProduction(); });

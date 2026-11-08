@@ -8,13 +8,22 @@ const { Wallet } = require("ethers");
 const { createAdminAuth, adminWallets } = require("../lib/admin-auth");
 async function fixture(t, replica = false) {
   const wallets = [Wallet.createRandom(), Wallet.createRandom()], clock = { now: Date.now() };
-  const auth = createAdminAuth({ wallets: wallets.map(wallet => wallet.address), now: () => clock.now });
+  const assigned = new Map(), handoffs = new Map();
+  const auth = createAdminAuth({ wallets: wallets.map(wallet => wallet.address), now: () => clock.now,
+    permissionsFor: wallet => assigned.get(wallet) || [],
+    worldHandoff: (code, origin) => {
+      const record = handoffs.get(code);
+      if (!record || record.origin !== origin) throw Object.assign(new Error("Invalid World handoff"), { status: 401 });
+      handoffs.delete(code); return record.address;
+    } });
   const app = express();
   if (replica) app.use((req, res, next) => {
     if (require("../../operations/replica").allowReplicaRequest(req, res, { replica: { readOnly: true } })) next();
   });
   app.use("/api/admin-auth", auth.router);
   app.use(auth.gate);
+  app.get("/api/intranet/admin", (req, res, next) => auth.authenticate(req, res, next, { allowDelegated: true }),
+    (req, res) => res.json({ wallet: req.adminWallet, permissions: req.adminPermissions, root: req.cmsAuthorized }));
   app.get("/private", auth.authenticate, (req, res) => res.json({ wallet: req.adminWallet, session: req.adminSession }));
   app.post("/private", auth.authenticate, (_req, res) => res.json({ saved: true }));
   app.post("/api/deployment/plan", auth.authenticate, (_req, res) => res.json({ reviewed: true }));
@@ -46,10 +55,40 @@ async function fixture(t, replica = false) {
     assert.equal(verified.status, 200);
     return { ...verified, challenge, signature };
   }
-  return { call, wallets, clock, login };
+  return { call, wallets, clock, login, assigned, handoffs };
 }
 test("Admin accepts exactly the project origin and Dollar reserve wallet by default", () => {
   assert.deepEqual(adminWallets, ["0xD2f1Be8414472E9f436B65e91A2B8dFDa418287c", "0x706CCb6109046a6a4A08dbAD4444A46408703ccb"]);
+});
+test("explicitly assigned Admin wallets are scope-limited and revocation invalidates sessions and pending challenges", async t => {
+  const f = await fixture(t), delegate = Wallet.createRandom();
+  assert.equal((await f.call("/api/admin-auth/challenge", { address: delegate.address })).status, 403);
+  f.assigned.set(delegate.address, ["workspace-tasks"]);
+  const signedIn = await f.login(delegate);
+  const session = await f.call("/api/admin-auth/session", undefined, signedIn);
+  assert.deepEqual(session.body.permissions, ["workspace-tasks"]);
+  assert.equal(session.body.wallets.includes(delegate.address), false);
+  const workspace = await f.call("/api/intranet/admin", undefined, signedIn);
+  assert.equal(workspace.status, 200); assert.equal(workspace.body.root, false);
+  assert.equal((await f.call("/private", undefined, signedIn)).status, 403);
+  assert.equal((await f.call("/api/deployment/plan", {}, signedIn)).status, 403);
+  const challenge = await f.call("/api/admin-auth/challenge", { address: delegate.address });
+  f.assigned.delete(delegate.address);
+  assert.equal((await f.call("/api/intranet/admin", undefined, signedIn)).status, 401);
+  assert.equal((await f.call("/api/admin-auth/verify", { signature: await delegate.signMessage(challenge.body.message) }, challenge)).status, 403);
+  assert.equal((await f.call("/api/admin-auth/session", undefined, signedIn)).body.authenticated, false);
+  assert.deepEqual((await f.call("/api/admin-auth/session", undefined, await f.login())).body.permissions, ["*"]);
+});
+test("World handoff admits explicitly approved App administrators but never bypasses root signature login", async t => {
+  const f = await fixture(t), delegate = Wallet.createRandom();
+  f.assigned.set(delegate.address, ["workspace-members"]);
+  f.handoffs.set("delegate-code", { address: delegate.address, origin: "http://admin.localhost" });
+  const result = await f.call("/api/admin-auth/world-login", { code: "delegate-code" });
+  assert.equal(result.status, 200);
+  assert.equal((await f.call("/api/intranet/admin", undefined, result)).status, 200);
+  assert.equal((await f.call("/api/admin-auth/world-login", { code: "delegate-code" })).status, 401);
+  f.handoffs.set("root-code", { address: f.wallets[0].address, origin: "http://admin.localhost" });
+  assert.equal((await f.call("/api/admin-auth/world-login", { code: "root-code" })).status, 403);
 });
 test("loopback replica Admin can sign in and read without permitting persistent writes", async t => {
   const f = await fixture(t, true);

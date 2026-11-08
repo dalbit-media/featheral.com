@@ -182,7 +182,7 @@
       btn(`💬 ${count(post.replies)}`, "reply", false, () => openReply(post), "Reply"),
       btn(`⟳ ${count(post.reposts)}`, "repost", post.reposted, toggle("REPOST", "reposted", "reposts"), "Repost"),
       btn(`${post.liked ? "♥" : "♡"} ${count(post.likes)}`, "like", post.liked, toggle("LIKE", "liked", "likes"), "Like"),
-      btn("↗", "share", false, async () => { await navigator.clipboard?.writeText(`${location.origin}/#/post/${post.id}`); toast("Link copied"); }, "Copy link"),
+      btn("↗", "share", false, async () => { await navigator.clipboard?.writeText(`${location.origin}${location.pathname.startsWith("/community/") ? "/community/" : "/"}#/post/${post.id}`); toast("Link copied"); }, "Copy link"),
       el("a", { className: "act", href: `/ledger/#/tx/${post.id}`, title: "View this post on the ledger", textContent: "⛓", onclick: (event) => event.stopPropagation() }),
       mine ? btn("🗑", "del", false, () => guarded(async () => {
         if (!confirm("Delete this post? It stays in the public ledger history but is hidden everywhere.")) return;
@@ -311,7 +311,7 @@
   function setHead(pageTitle, ...children) {
     $("colHead").replaceChildren(...children);
     $("colHead").hidden = children.length === 0;
-    document.title = `${pageTitle} · Featheral Media`;
+    document.title = `${pageTitle} · ${location.pathname.startsWith("/community/") ? "Featheral World" : "Featheral Media"}`;
   }
   function title(text, sub, back) {
     return el("div", { className: "col-title" }, back ? el("a", { className: "back", href: "#/feed", textContent: "←", "aria-label": "Back" }) : null, el("div", {}, text ? el("h1", { textContent: text }) : null, sub ? el("small", { textContent: sub }) : null));
@@ -485,7 +485,7 @@
     $("gettingStarted").hidden = true;
     $("gettingGuide").hidden = true;
     try {
-      if (name === "setup") { location.replace(window.FeatheralWorldAccount.url(new URL("/", location.origin).href)); return; }
+      if (name === "setup") { location.replace(window.FeatheralWorldAccount.url(new URL(location.pathname.startsWith("/community/") ? "/community/" : "/", location.origin).href)); return; }
       else if (name === "guide") { setHead("Media guide"); $("composerHost").replaceChildren(); $("feed").replaceChildren(); $("gettingGuide").hidden = false; }
       else if (name === "post" && /^0x[0-9a-f]{64}$/.test(arg || "")) await showPost(arg);
       else if (name === "user" && /^0x[0-9a-fA-F]{40}$/.test(arg || "")) await showUser(ethers.getAddress(arg.toLowerCase()), ["replies", "likes"].includes(extra) ? extra : "posts");

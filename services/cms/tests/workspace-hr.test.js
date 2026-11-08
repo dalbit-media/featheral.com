@@ -41,12 +41,13 @@ function fixture(t) {
   t.after(() => { workspace.hr.close(); notes.close(); });
   const owner = "0x" + "1".repeat(40), manager = "0x" + "2".repeat(40);
   async function enroll(address = owner, interest = "engineering") {
-    profiles.set(address, { username: "Contributor" });
+    profiles.set(address, { username: "Contributor", avatar: "https://example.test/avatar.png", bio: "Building together." });
     await workspace.apply(address, { motivation: "Help with verified work", experience: "building", interests: [interest] });
     return address;
   }
   function pass(stage = "orientation", address = owner) {
-    for (const course of courses.filter(row => row.level === stage)) workspace.hr.quiz(address, course.id, { answers: course.questions.map(question => question.answer) });
+    for (const course of courses.filter(row => row.level === stage && !workspace.hr.learning(address).steps.find(step => step.id === row.id).passed))
+      workspace.hr.quiz(address, course.id, { answers: course.questions.map(question => question.answer) });
   }
   function configure(base = 100, incentive = 10) {
     return workspace.hr.configure("admin", { rates: Object.fromEntries(["orientation", "learning", "practitioner", "mentor", "steward"].map(level => [level, base])),
@@ -67,6 +68,7 @@ test("orientation quizzes automatically grant membership at 80%, never managemen
   assert.equal(f.workspace.hr.quiz(f.owner, course.id, { answers: sixty }).passed, false);
   assert.equal(f.workspace.member(f.owner).status, "visitor");
   const eighty = correct.map((answer, index) => index < 4 ? answer : (answer + 1) % 3);
+  f.setTime(f.now() + 30 * 60000);
   assert.equal(f.workspace.hr.quiz(f.owner, course.id, { answers: eighty }).score, 80);
   f.pass();
   const member = f.workspace.active(f.owner);
@@ -84,8 +86,51 @@ test("learning levels are sequential and membership is never trusted from quiz i
   f.pass("mentor"); assert.equal(f.workspace.member(f.owner).level, "steward");
   assert.equal(f.workspace.member(f.owner).role, "volunteer");
 });
+test("only the next quiz is exposed and failure cooldown survives reconstruction with exact 30-minute eligibility", async t => {
+  const f = fixture(t); await f.enroll();
+  const [first, second] = courses, answers = first.questions.map(question => question.answer);
+  let learning = f.workspace.hr.learning(f.owner);
+  assert.deepEqual(learning.courses.map(row => row.id), [first.id]);
+  assert.equal(learning.steps[1].locked, true);
+  assert.throws(() => f.workspace.hr.quiz(f.owner, second.id, { answers: second.questions.map(question => question.answer) }), { status: 403 });
+  const wrong = answers.map((answer, index) => (answer + 1) % first.questions[index].options.length);
+  const failedAt = f.now(), result = f.workspace.hr.quiz(f.owner, first.id, { answers: wrong });
+  assert.equal(result.passed, false); assert.equal(result.retryAt, failedAt + 1800000);
+  const reopened = new Workspace(f.notes, f.workspace.markets, owner => f.profiles.get(owner), f.now);
+  f.setTime(failedAt + 1799999);
+  assert.throws(() => reopened.hr.quiz(f.owner, first.id, { answers }), error => error.status === 429 && error.retryAfter === 1 && error.retryAt === result.retryAt);
+  assert.equal(f.notes.db.prepare("SELECT attempts FROM work_learning WHERE address=? AND course=?").get(f.owner, first.id).attempts, 1);
+  f.setTime(failedAt + 1800000);
+  assert.equal(reopened.hr.quiz(f.owner, first.id, { answers }).passed, true);
+  assert.throws(() => reopened.hr.quiz(f.owner, first.id, { answers }), { status: 409 });
+  learning = reopened.hr.learning(f.owner);
+  assert.equal(learning.steps[1].locked, false); assert.equal(learning.steps[2].locked, true);
+  assert.deepEqual(learning.courses.filter(row => !row.progress?.passed).map(row => row.id), [second.id]);
+  assert.equal(f.workspace.member(f.owner).status, "visitor");
+});
+test("Admin permissions require a complete shared profile and active membership, persist and revoke without changing roles", async t => {
+  const f = fixture(t); await f.enroll();
+  const input = { permissions: ["workspace-tasks"], approval: "ASSIGN ADMIN PERMISSIONS" };
+  await assert.rejects(f.workspace.setAdminAccess(f.manager, f.owner, input), /Active membership/);
+  f.pass();
+  await assert.rejects(f.workspace.setAdminAccess(f.manager, f.owner, { ...input, permissions: ["*"] }), { status: 400 });
+  await assert.rejects(f.workspace.setAdminAccess(f.manager, f.owner, { ...input, approval: "" }), { status: 400 });
+  await f.workspace.setAdminAccess(f.manager, f.owner, input);
+  assert.deepEqual(f.workspace.adminPermissions(f.owner), ["workspace-tasks"]);
+  assert.equal(f.workspace.member(f.owner).role, "volunteer");
+  const reopened = new Workspace(f.notes, f.workspace.markets, owner => f.profiles.get(owner), f.now);
+  assert.deepEqual(reopened.adminPermissions(f.owner), ["workspace-tasks"]);
+  await reopened.setAdminAccess(f.manager, f.owner, { ...input, permissions: [] });
+  assert.deepEqual(f.workspace.adminPermissions(f.owner), []);
+  await f.workspace.setAdminAccess(f.manager, f.owner, input);
+  f.workspace.setMember(f.manager, f.owner, { ...f.workspace.member(f.owner), status: "suspended" });
+  assert.deepEqual(f.workspace.adminPermissions(f.owner), []);
+  assert.equal(f.notes.db.prepare("SELECT * FROM work_admin_access WHERE address=?").get(f.owner), undefined);
+  assert.equal(f.workspace.admin().audit.find(row => row.action === "admin.permissions").actor, f.manager);
+  assert.equal("payroll" in f.workspace.admin(false), false);
+});
 test("experience and interests are required, validated and not public directory or organization data", async t => {
-  const f = fixture(t); f.profiles.set(f.owner, { username: "Visitor" });
+  const f = fixture(t); f.profiles.set(f.owner, { username: "Visitor", avatar: "https://example.test/avatar.png", bio: "Building together." });
   await assert.rejects(f.workspace.apply(f.owner, { motivation: "Help" }), /experience/);
   await assert.rejects(f.workspace.apply(f.owner, { motivation: "Help", experience: "new", interests: ["engineering", "engineering"] }), /interest/);
   await f.enroll(); assert.equal((await f.workspace.me(f.owner)).org.positions.length, 0);

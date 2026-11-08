@@ -65,6 +65,20 @@ test("World password registration stores only hashed credentials and encrypted w
   const session = await call("session", undefined, crossDevice.cookie);
   assert.equal(session.data.account, wallet.address); assert.equal(session.data.keystore, undefined);
   const csrf = { "X-CSRF-Token": session.data.csrf };
+  assert.equal((await call("app-handoff", { origin: "http://evil.localhost" }, crossDevice.cookie, csrf)).status, 403);
+  const appHandoff = await call("app-handoff", { origin: "http://app.localhost" }, crossDevice.cookie, csrf);
+  assert.equal(appHandoff.status, 200);
+  assert.throws(() => accounts.consumeAppHandoff(appHandoff.data.code, "http://evil.localhost"), { status: 401 });
+  assert.equal(accounts.consumeAppHandoff(appHandoff.data.code, "http://app.localhost"), wallet.address);
+  assert.throws(() => accounts.consumeAppHandoff(appHandoff.data.code, "http://app.localhost"), { status: 401 });
+  const adminHandoff = await call("admin-handoff", { origin: "http://admin.localhost" }, crossDevice.cookie, csrf);
+  assert.equal(adminHandoff.status, 200);
+  assert.throws(() => accounts.consumeAppHandoff(adminHandoff.data.code, "http://admin.localhost"), { status: 401 });
+  assert.equal(accounts.consumeAppHandoff(adminHandoff.data.code, "http://admin.localhost", "admin"), wallet.address);
+  const staleHandoff = await call("app-handoff", { origin: "http://app.localhost" }, crossDevice.cookie, csrf);
+  const afterExpiry = Date.now() + 60001, clock = t.mock.method(Date, "now", () => afterExpiry);
+  assert.throws(() => accounts.consumeAppHandoff(staleHandoff.data.code, "http://app.localhost"), { status: 401 });
+  clock.mock.restore();
   assert.doesNotThrow(() => accounts.authorizeMedia(session.data.csrf, wallet.address));
   assert.throws(() => accounts.authorizeMedia(null, wallet.address), /Sign in/);
   assert.throws(() => accounts.authorizeMedia(session.data.csrf, Wallet.createRandom().address), /another wallet/);
@@ -263,6 +277,9 @@ test("World wallet switching requires the selected wallet's signature and publis
   });
   vm.runInContext(fs.readFileSync(path.join(root, "shared/world-account.js"), "utf8"), context);
   const world = window.FeatheralWorldAccount;
+  const setupUrl = new URL(world.url());
+  assert.equal(setupUrl.pathname, "/login/");
+  assert.equal(setupUrl.searchParams.get("returnTo"), "http://world.localhost:8080/");
   await world.refresh();
   assert.equal(world.snapshot().account, first.address);
   await assert.rejects(world.signInWallet(second.address, () => first.signMessage("Sign in to World as " + second.address)), /does not match/);
@@ -291,10 +308,10 @@ test("Media keeps public browsing but requires a complete World session for writ
   const server = http.createServer((req, res) => world.handle(req, res));
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); world.close(); });
-  async function call(route, input) {
+  async function call(route, input, host = "media.localhost", prefix = "/api/v1/media/") {
     return new Promise((resolve, reject) => {
-      const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: "/api/v1/media/" + route,
-        method: input === undefined ? "GET" : "POST", headers: { Host: "media.localhost", "Content-Type": "application/json" } }, res => {
+      const req = http.request({ hostname: "127.0.0.1", port: server.address().port, path: prefix + route,
+        method: input === undefined ? "GET" : "POST", headers: { Host: host, "Content-Type": "application/json" } }, res => {
         const chunks = [];
         res.on("data", chunk => chunks.push(chunk));
         res.on("end", () => resolve({ status: res.statusCode, data: JSON.parse(Buffer.concat(chunks).toString()) }));
@@ -315,6 +332,16 @@ test("Media keeps public browsing but requires a complete World session for writ
   const accepted = await call("actions", { kind: "SESSION", data, worldSession: "world-session" });
   assert.equal(accepted.status, 200, accepted.data.error);
   assert.equal(authorizations, 3);
+  assert.equal((await call("timeline", undefined, "world.localhost")).status, 200);
+  assert.equal((await call("actions", { kind: "POST", data: { w: wallet.address } }, "world.localhost")).status, 401);
+  assert.equal((await call("actions", { kind: "POST", data: { w: wallet.address } }, "world.localhost", "/api/v1/world/")).status, 401);
+  const post = { w: wallet.address, by: delegate.address, text: "One World, one community.", rp: "",
+    n: "cd".repeat(12), ts: new Date().toISOString() };
+  post.sig = await delegate.signMessage(socialMessage("POST", post));
+  const published = await call("actions", { kind: "POST", data: post, worldSession: "world-session" }, "world.localhost");
+  assert.equal(published.status, 200, published.data.error);
+  const timeline = await call("timeline");
+  assert.equal(timeline.data.posts[0].text, post.text);
 });
 
 test("Media signing bridge binds the World popup, origin, nonce, message and signer and rejects closure", async () => {

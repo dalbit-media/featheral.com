@@ -684,9 +684,15 @@
     try { localStorage.setItem(DISCONNECTED_KEY, value); } catch { /* storage unavailable */ }
   }
   function isDisconnected() {
+    try { if (localStorage.getItem("featheral-wallet-reset") === "1") return true; }
+    catch (error) { console.error("Wallet reset state unavailable:", error); }
     return readState() === "1";
   }
   function setDisconnected(value) {
+    if (!value) {
+      try { localStorage.removeItem("featheral-wallet-reset"); }
+      catch (error) { console.error("Wallet reset state could not be cleared:", error); }
+    }
     writeState(value ? "1" : "0");
   }
   async function disconnect(notify = true) {

@@ -1,11 +1,18 @@
 "use strict";
 const path = require("node:path");
+const fs = require("node:fs");
 
 function worldResource(site, pathname) {
   if (site === "world") {
-    if (["/account/account.js", "/account/account.css"].includes(pathname))
+    if (pathname === "/community") return { redirect: "world", pathname: "/community/" };
+    if (["/community/", "/community/index.html"].includes(pathname))
+      return { directory: "media.featheral.com", pathname: "/index.html" };
+    if (["/community/app.js", "/community/app.css"].includes(pathname))
+      return { directory: "media.featheral.com", pathname: pathname.slice("/community".length) };
+    if (["/account/account.js", "/account/account.css", "/account/home-account.css"].includes(pathname))
       return { directory: "world.featheral.com", pathname };
     if (pathname === "/account") return { redirect: "world", pathname: "/account/" };
+    if (["/login", "/register"].includes(pathname)) return { redirect: "world", pathname: pathname + "/" };
     if (pathname === "/play" || pathname === "/play/" || pathname === "/play/index.html")
       return { redirect: "world", pathname: "/explore/" };
     if (pathname.startsWith("/play/")) {
@@ -32,4 +39,23 @@ function worldResource(site, pathname) {
   return null;
 }
 
-module.exports = { worldResource };
+function mediaNavigationHtml(html) {
+  const nav = fs.readFileSync(path.join(__dirname, "..", "shared", "world-navigation.html"), "utf8")
+    .replace(/href="([^"]+)"/g, (_, target) => `href="https://world.featheral.com${target}" data-site="world" data-path="${target}"`)
+    .replace('data-path="/community/"', 'data-path="/community/" aria-current="page"');
+  return html.replace('<!-- WORLD_PUBLIC_NAV -->', nav);
+}
+function worldCommunityHtml(html) {
+  return mediaNavigationHtml(html).replace('href="/app.css"', 'href="/community/app.css"')
+    .replace('src="/app.js"', 'src="/community/app.js"')
+    .replace('<title>Community feed · Featheral Media</title>', '<title>Community · Featheral World</title>')
+    .replace('content="Public wallet-signed posts, conversations and profiles on Featheral Media."',
+      'content="Meet World builders, share wallet-signed posts and discuss settlements, exploration and federations with your shared World profile."')
+    .replace('href="https://media.featheral.com/"', 'href="https://world.featheral.com/community/"')
+    .replace('content="Featheral Media"', 'content="Community · Featheral World"')
+    .replaceAll('/shared/logo-media.svg', '/shared/logo-world.svg')
+    .replace('<b>Featheral Media</b>', '<b>Featheral World</b>')
+    .replace('aria-label="Media site"', 'aria-label="World site"');
+}
+
+module.exports = { worldResource, worldCommunityHtml, mediaNavigationHtml };

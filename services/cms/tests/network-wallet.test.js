@@ -53,7 +53,8 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
   if (activeAddress) store.set('featheral-wallet-active-account', activeAddress);
   if (savedPublicAddress) store.set('featheral-wallet-public-account', savedPublicAddress);
   if (worldAccount) { store.set('featheral-world-account', worldAccount); store.delete('featheral-creation-token'); }
-  const storage = { getItem: key => { if (storageBlocked) throw new Error('Storage denied'); return store.get(key) || null; }, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) };
+  const storage = { get length() { return store.size; }, key: index => [...store.keys()][index] || null,
+    getItem: key => { if (storageBlocked) throw new Error('Storage denied'); return store.get(key) || null; }, setItem: (key, value) => store.set(key, value), removeItem: key => store.delete(key) };
   const reply = data => ({ ok: true, headers: { get: () => 'application/json' }, json: async () => data });
   const fetch = async (url, options = {}) => {
     const body = options.body ? JSON.parse(options.body) : undefined;
@@ -1094,6 +1095,29 @@ test('pinned views cannot write and blocked storage explicitly explains inline s
   assert.match(blocked.nodes.status.textContent, /storage is blocked/);
   assert.equal(blocked.calls.some(call => call.body), false);
 });
+test('Account reset requires approval, preserves the encrypted wallet and blocks automatic reconnection', async () => {
+  const ui = await fixture('notes', { contextual: true, manualReview: true });
+  ui.store.set('featheral-encrypted-wallet-v1', 'encrypted-backup');
+  ui.store.set('featheral-world-account', 'cached-budget');
+  const cancelled = ui.nodes['reset-local-data'].click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(ui.nodes['wallet-review-message'].textContent, /encrypted built-in wallet backup/);
+  await ui.nodes['wallet-review-cancel'].click(); await cancelled;
+  assert.equal(ui.store.get('featheral-context-wallet-token'), 'test-token');
+  assert.equal(ui.reloads(), 0);
+  const approved = ui.nodes['reset-local-data'].click();
+  await new Promise(resolve => setImmediate(resolve));
+  await ui.nodes['wallet-review-confirm'].click(); await approved;
+  assert.equal(ui.store.get('featheral-encrypted-wallet-v1'), 'encrypted-backup');
+  assert.equal(ui.store.has('featheral-context-wallet-token'), false);
+  assert.equal(ui.store.has('featheral-world-account'), false);
+  assert.equal(ui.store.get('featheral-wallet-reset'), '1');
+  assert.equal(ui.reloads(), 1);
+  ui.providerChange(['0x2222222222222222222222222222222222222222']);
+  await ui.reopenContext();
+  assert.equal(ui.store.has('featheral-wallet-active-account'), false);
+});
+
 test('wallet leads with the actual primary balance, smaller portfolio estimates and newest transactions', async () => {
   const walletData = { portfolio: { assets: [], totals: { FTHX: { value: '150500000000000000000', partial: true, unpriced: ['Ethereum FTHG'] } },
     usd: '12.34', fthg: '2000000000000000000', partial: true, pricedFthDollar: '10000000000000000000', unpriced: ['FTHA'], source: 'Test' },

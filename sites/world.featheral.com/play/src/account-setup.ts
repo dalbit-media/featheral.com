@@ -1,10 +1,13 @@
 import { localize, wireLanguageControls } from './i18n-dom.ts';
+import { localizePublicCopy } from './public-feature-i18n.ts';
 
 localize(document);
+localizePublicCopy(document);
 wireLanguageControls();
 const observer = new MutationObserver(() => {
   observer.disconnect();
   localize(document);
+  localizePublicCopy(document);
   observe();
 });
 function observe(): void {

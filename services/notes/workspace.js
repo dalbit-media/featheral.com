@@ -7,6 +7,7 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 const ROLES = ["volunteer", "intern", "contributor", "lead", "manager", "director"];
 const LEVELS = ["orientation", "learning", "practitioner", "mentor", "steward"];
 const STATES = ["draft", "ready", "in_progress", "review", "done", "cancelled"];
+const ADMIN_PERMISSIONS = ["workspace-members", "workspace-tasks"];
 const text = (value, name, max = 2000) => {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw fail(400, `${name} must contain 1-${max} characters.`);
   return value.trim();
@@ -42,6 +43,7 @@ class Workspace {
       CREATE TABLE IF NOT EXISTS work_missions(id TEXT PRIMARY KEY,title TEXT NOT NULL,body TEXT NOT NULL,division TEXT NOT NULL,
         team TEXT NOT NULL,assignee TEXT NOT NULL,status TEXT NOT NULL,evidence TEXT NOT NULL,revision INTEGER NOT NULL,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_audit(id INTEGER PRIMARY KEY,actor TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL,data TEXT NOT NULL,at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS work_admin_access(address TEXT PRIMARY KEY,permissions TEXT NOT NULL,actor TEXT NOT NULL,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_grants(request TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,address TEXT NOT NULL,
         amount INTEGER NOT NULL,reason TEXT NOT NULL,mission TEXT UNIQUE,at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS work_calls(id TEXT PRIMARY KEY,channel TEXT NOT NULL,caller TEXT NOT NULL,callee TEXT NOT NULL,
@@ -92,9 +94,12 @@ class Workspace {
       throw fail(401, "Sign-in expired. Connect again.");
     if (typeof input.signature !== "string" || W.recoverAddress(challenge.message, input.signature).toLowerCase() !== owner)
       throw fail(401, "Invalid wallet signature.");
-    const token = crypto.randomBytes(32).toString("hex");
+    return this.loginWorld(owner, () => this.db.prepare("DELETE FROM work_challenges WHERE address=?").run(owner));
+  }
+  loginWorld(value, consume = () => {}) {
+    const owner = address(value), token = crypto.randomBytes(32).toString("hex");
     this.atomic(() => {
-      this.db.prepare("DELETE FROM work_challenges WHERE address=?").run(owner);
+      consume();
       this.db.prepare("INSERT INTO work_sessions VALUES (?,?,?)").run(digest(token), owner, this.now() + 86400000);
       this.db.prepare("INSERT OR IGNORE INTO work_members VALUES (?,'visitor','volunteer','orientation','learning','learning-general','',?)").run(owner, this.now());
     });
@@ -125,11 +130,11 @@ class Workspace {
     const member = this.member(owner), org = this.org();
     if (member?.status !== "active") org.positions = [];
     return { address: owner, profile: profile ? { username: profile.username, avatar: profile.avatar, bio: profile.bio || "", address: owner } : null,
-      member, org, silver: this.notes.balance(owner, "FTHS"), learning: this.hr.learning(owner), compensation: this.hr.compensation(owner) };
+      member, org, adminPermissions: this.adminPermissions(owner), silver: this.notes.balance(owner, "FTHS"), learning: this.hr.learning(owner), compensation: this.hr.compensation(owner) };
   }
   async apply(owner, input) {
     const profile = await this.profileReader(owner);
-    if (!profile?.username) throw fail(409, "Create your World profile before registering your work interests.");
+    if (!profile?.username || !profile.avatar || !profile.bio?.trim()) throw fail(409, "Complete your World username, avatar and bio before registering your work interests.");
     const motivation = text(input?.motivation, "Introduction", 1000), existing = this.member(owner);
     if (existing && !["visitor", "pending", "active"].includes(existing.status)) throw fail(409, "This membership is restricted. Contact an administrator.");
     return this.atomic(() => {
@@ -154,11 +159,38 @@ class Workspace {
       this.db.prepare("UPDATE work_members SET status=?,role=?,level=?,division=?,team=? WHERE address=?")
         .run(status, role, level, division, team, owner);
       if (status !== "active") {
+        this.db.prepare("DELETE FROM work_admin_access WHERE address=?").run(owner);
         this.db.prepare("DELETE FROM work_push WHERE address=?").run(owner);
         this.db.prepare("UPDATE work_calls SET status='ended' WHERE caller=? OR callee=?").run(owner, owner);
       }
       this.audit(actor, "membership.update", owner, { previous, status, role, level, division, team });
       return this.member(owner);
+    });
+  }
+  adminPermissions(value) {
+    const owner = address(value);
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_admin_access'").get()) return [];
+    if (this.member(owner)?.status !== "active") return [];
+    const row = this.db.prepare("SELECT permissions FROM work_admin_access WHERE address=?").get(owner);
+    return row ? JSON.parse(row.permissions).filter(permission => ADMIN_PERMISSIONS.includes(permission)) : [];
+  }
+  async setAdminAccess(actor, value, input) {
+    const owner = address(value), permissions = input?.permissions;
+    if (!Array.isArray(permissions) || permissions.length > ADMIN_PERMISSIONS.length
+      || new Set(permissions).size !== permissions.length || permissions.some(permission => !ADMIN_PERMISSIONS.includes(permission))
+      || input.approval !== "ASSIGN ADMIN PERMISSIONS") throw fail(400, "Choose supported permissions and confirm ASSIGN ADMIN PERMISSIONS.");
+    if (permissions.length) {
+      this.active(owner);
+      const profile = await this.profileReader(owner);
+      if (!profile?.username || !profile.avatar || !profile.bio?.trim()) throw fail(409, "A complete World profile is required for Admin promotion.");
+    }
+    return this.atomic(() => {
+      if (permissions.length) {
+        this.active(owner);
+        this.db.prepare("INSERT OR REPLACE INTO work_admin_access VALUES (?,?,?,?)").run(owner, JSON.stringify(permissions), actor, this.now());
+      } else this.db.prepare("DELETE FROM work_admin_access WHERE address=?").run(owner);
+      this.audit(actor, "admin.permissions", owner, { permissions });
+      return { address: owner, permissions };
     });
   }
   addTeam(actor, input) {
@@ -434,15 +466,16 @@ class Workspace {
     return { call, signals: this.db.prepare("SELECT id,sender,body FROM work_signals WHERE call=? AND id>? AND sender!=? ORDER BY id LIMIT 200")
       .all(key, after, owner).map(row => ({ ...row, body: JSON.parse(row.body) })) };
   }
-  admin() {
+  admin(includeFinancial = true) {
     this.hr.settleDue();
     return { org: this.org(), members: this.db.prepare("SELECT * FROM work_members ORDER BY at DESC LIMIT 1000").all(),
       missions: this.db.prepare("SELECT * FROM work_missions ORDER BY at DESC LIMIT 1000").all(),
-      grants: this.db.prepare("SELECT * FROM work_grants ORDER BY at DESC LIMIT 100").all(),
-      audit: this.db.prepare("SELECT * FROM work_audit ORDER BY id DESC LIMIT 100").all(), silver: this.silver(),
-      payroll: this.db.prepare("SELECT * FROM work_payroll WHERE status!='no_assignments' ORDER BY period DESC LIMIT 1000").all(),
-      policy: this.hr.policy(), nextPolicy: this.hr.policy(weekStart(this.now()) + WEEK),
+      ...(includeFinancial ? { grants: this.db.prepare("SELECT * FROM work_grants ORDER BY at DESC LIMIT 100").all(),
+        audit: this.db.prepare("SELECT * FROM work_audit ORDER BY id DESC LIMIT 100").all(), silver: this.silver(),
+        payroll: this.db.prepare("SELECT * FROM work_payroll WHERE status!='no_assignments' ORDER BY period DESC LIMIT 1000").all(),
+        policy: this.hr.policy(), nextPolicy: this.hr.policy(weekStart(this.now()) + WEEK),
+        adminAccess: this.db.prepare("SELECT * FROM work_admin_access ORDER BY at DESC").all().map(row => ({ ...row, permissions: JSON.parse(row.permissions) })) } : {}),
       enrollments: this.db.prepare("SELECT address,experience,interests FROM work_enrollment").all() };
   }
 }
-module.exports = { Workspace, ROLES, LEVELS, STATES };
+module.exports = { Workspace, ROLES, LEVELS, STATES, ADMIN_PERMISSIONS };

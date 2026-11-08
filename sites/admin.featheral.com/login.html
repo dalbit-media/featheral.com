@@ -20,11 +20,12 @@
 <body>
   <main>
     <h1>Featheral Admin</h1>
-    <p>Sign in with the origin or Dollar reserve wallet. One button connects your wallet and asks you to sign a message.</p>
+    <p>Root administrators sign with the origin or Dollar reserve wallet. Approved App administrators can use their shared World profile or an authorized signing wallet.</p>
     <p>No password, network switch, gas or transaction is needed.</p>
     <label id="login-provider-field" hidden>Signing wallet<select id="login-provider"><option value="">Choose a wallet</option></select></label>
     <div class="login-actions">
     <button id="login-sign" type="button">Connect and sign in</button>
+    <button id="login-world" type="button">Continue with World profile</button>
     </div>
     <p id="login-status" role="status" aria-live="polite"></p>
     <details><summary>Need help signing in?</summary><p>Unlock your Ethereum wallet and select the origin or Dollar reserve account. If several wallet extensions are installed, choose the correct signing wallet above. Approve both the connection and the sign-in message in your wallet.</p><p>A wallet connected on another Featheral site is not automatically connected to Admin. Server updates end Admin sessions; sign in again after an update.</p></details>

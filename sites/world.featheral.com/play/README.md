@@ -10,7 +10,19 @@ preserve the runtime URLs and classic-script ordering without build warnings.
 
 ## World account and required profile
 
-Register or sign in on `/account/` before playing. Username/password registration
+Register at `/register/`, sign in at `/login/` and edit your profile at `/account/`
+before playing. Credentials are no longer embedded in the public homepage.
+Media and game account links preserve their destination; all three use the same
+World identity and signing provider. Signed-out profile visits go to login.
+Successful authentication returns to the profile page. The shared form is reused
+for the dedicated Media signature approval popup at `/account/?approve=...`.
+Old homepage `/#account` links redirect to the profile page.
+Community is available on World at `/community/`, reusing Media's feed, signed
+posting, shared profile store and social database on the World origin. Writes on
+either social API alias require a complete World session on World/Media hosts.
+Play opens in the same tab; optional `data-game-window` links retain the separate
+map-window behavior. The game Account panel links back to World and Community.
+Username/password registration
 creates a password-encrypted built-in wallet with a server-stored encrypted backup
 for cross-device access; connecting an external wallet is an alternative. If the
 selected wallet already has a built-in encrypted backup on World in this browser,
@@ -50,6 +62,22 @@ Korean copy uses familiar game terms: 채집팀 (resource crews), 자원지 (res
 World About and Play default to English, independent of browser language. An explicit `?lang=ko` or saved Korean preference still selects Korean. The source HTML retains Korean fallback copy for visitors without JavaScript; localization sets the document language, titles, descriptions and Open Graph locale to the selected language. Both languages use explicit number/date locales; the authoritative game clock remains UTC, not local wall time.
 
 ## Landing page and public materials
+
+The homepage is canonical at `/`. Public navigation has dedicated bilingual
+pages at `/features/exploration/`, `/features/settlements/`,
+`/features/marketplace/`, `/features/federations/`, `/guide/` and `/roadmap/`.
+The pages render crawlable descriptions, headings, canonical URLs, alternate
+language URLs and structured data at build time, using the production World
+origin by default. Sitemap entries include these pages and Community.
+Sample scenes reuse actual game drawing code and are labeled as examples,
+never live player activity. Gameplay routes remain unchanged.
+Roadmap names the current World-building phase and separates available systems,
+pending federation economics and proposed future business/governance direction.
+Top-level navigation is Home, Game, Community and About, with Account and Play
+actions. Game groups the four feature pages and Guide; About groups Roadmap and
+Whitepaper; Account groups Sign in, Register and Profile. Native disclosure
+submenus support keyboard/touch use, Escape, outside-click dismissal and active
+page highlighting. World and Community reuse the same navigation template.
 
 World landing-page statistics appear once in the main hero section, not in the site header. The header retains site navigation and the wallet control.
 
@@ -108,7 +136,7 @@ the full recipe cost, affordable filter and maximum craftable count; confirmatio
 uses the same total-cost helper as the server. Invalid/unaffordable batches spend
 nothing. Existing single-item commands remain valid.
 
-- `/about/` is the search-readable landing page with optional live public totals. World `/about/` serves the same landing page; `/about/` remains canonical. It fetches anonymous `/api/stats` without cookies, never creates a session, and remains readable if the API is unavailable.
+- `/` is the search-readable landing page with optional live public totals; legacy `/about/` redirects there. Anonymous `/api/stats` reads remain available without cookies or a gameplay session, and the page stays readable if statistics are unavailable.
 - `/` opens the simulator; all Start/Play calls to action go there and resume the same browser session.
 - `/settlement/` uses the exploration map's shared isometric projection, tile palette, trees, house artwork and weather renderer. Its 21-by-21 local parcel grows through all nine tiers, including built banks and town halls. The six-action dock opens residents, production, inventory, crafting, Layout and buildings in focused panels (bottom sheets on smaller screens). Click buildings to manage them. In Layout, drag buildings or owned decorations to empty land cells, or choose Move on map and tap a destination. Coordinate inputs provide precise and keyboard-accessible placement; arrow keys and Enter also select grid cells. Pan by dragging empty ground and zoom with the wheel or buttons. Moves cost nothing and change no gameplay effects. Buildings cannot be demolished or duplicated; decorations can return to inventory without losing their item slot. Occupied cells, water and out-of-bounds positions are rejected by both client and authoritative API. Positions persist across reloads, retries and restarts; legacy six-space decorations migrate without losing items or paid work. New tier buildings find empty cells without displacing custom layouts. The parcel is cosmetic local space, not newly revealed exploration territory. The canvas and camera survive task changes and server refreshes alongside crew drafts, filters, disclosures and panel scroll. Direct `#inventory`, `#crafting`, `#management` and task links, sessions and language preferences remain supported.
 - The complete white paper is a dedicated reading page at `/whitepaper/`, English by default, with Korean at `/whitepaper/?lang=ko`, a chapter table of contents, mobile-friendly tables and print styling. Both languages are rendered at build time from the [Korean source](./public/WHITEPAPER.ko.md) and [English source](./public/WHITEPAPER.md), keeping all rules and disclosures intact. The Korean fallback is readable without JavaScript; the language selector uses the site's existing preference. Site navigation no longer opens raw Markdown; both source documents remain available below `/`.
@@ -120,11 +148,11 @@ nothing. Existing single-item commands remain valid.
 
 Set the root HTTPS website URL and official GitHub/Discord/X/Telegram URLs in [site.ts](./src/site.ts), then rebuild. Empty channels remain visibly **준비 중 / Coming soon**, with no fake accounts or active notification subscriptions. Nonempty links must be HTTPS without embedded credentials; the site URL must be a root origin, not a subdirectory.
 
-The landing HTML contains the main content, title, description, Open Graph/Twitter text, and WebApplication structured data. Configuring the public site URL adds canonical links for the landing and white paper pages, absolute social image URLs, and a sitemap for the public pages; no domain is invented while it is unknown. `/robots.txt` excludes API crawling and points to `/sitemap.xml` when configured. The simulator is excluded from indexing by its own `noindex,follow` metadata. The default Korean social image is `public/images/social-preview-ko.png`; `public/images/social-preview.png` remains the English version. Both use the original world artwork.
+The landing HTML contains the main content, title, description, Open Graph/Twitter text, and WebApplication structured data. The public build defaults to the verified production origin `https://world.featheral.com`, with canonical links, absolute social image URLs and a sitemap for public pages. `/robots.txt` excludes API crawling and points to `/sitemap.xml`. The simulator is excluded from indexing by its own `noindex,follow` metadata. The default Korean social image is `public/images/social-preview-ko.png`; `public/images/social-preview.png` remains the English version. Both use the original world artwork.
 
 The World site serves this build at `/`; `dist/index.html` is the game entry, `dist/about/index.html` is the marketing page, and the remaining HTML entries preserve game and white-paper routes under `/`. The repository's `npm start` builds this app before serving it and starts the game API alongside the other World services. Set `APP_ORIGIN` to the exact public HTTPS origin of the World site in production. Deployed servers default to `https://` plus their assigned `world.*` hostname when `APP_ORIGIN` is unset or a loopback origin copied from a development machine, so synced dev settings cannot reject the public site with "Origin rejected." The API remains same-origin at `/api/`; do not expose its internal port publicly. Missing routes and assets remain 404s instead of falling back to the game.
 
-Before public release, supply verified links, set the canonical origin, review the white paper/disclosures for the actual deployment, and complete the production/security requirements below. SEO metadata and prototype disclaimers do not make this mock safe to expose publicly.
+Before public release, supply verified links, confirm the canonical origin, review the white paper/disclosures for the actual deployment, and complete the production/security requirements below. SEO metadata and prototype disclaimers do not make this mock safe to expose publicly.
 
 ### Live world totals
 
@@ -472,7 +500,7 @@ The Bank route uses the same native wallet panel as the other sites, not a block
 
 Successful World reads publish only the public budget account to the same-origin wallet panels. Cross-origin panels use the existing explicit World account sync popup; it shares no session, key or spending authority. Synced public accounts remain readable on Dollar ledger replicas. Wallet panels always show the World balance in FTH$, independently of their selected portfolio valuation currency. Fund transfers notify other World tabs, and returning to a visible game tab refreshes authoritative balances.
 
-The World funds page has Deposit/Withdraw, exact-amount entry and a Max preset. Authorization and transfers use the native wallet approval flow, supporting built-in and extension wallets without changing their key custody. Only canonical separate-budget authorization and current-budget deposit/withdrawal messages from the canonical World origin are allowed; the transfer still requires its authorized Ethereum address. No balance moves automatically, and failed transfers retain the same request ID for retry.
+Account and Bank embed one shared World funds component: Deposit/Withdraw, exact 18-decimal entry, Max, before/after previews, explicit review and pending-transfer recovery. No separate page or manual synchronization step is required. Visible balances refresh every 30 seconds and on focus; successful transfers refresh gameplay and wallet views. World's authenticated built-in wallet signs after explicit review/unlock, or the linked external wallet signs; the central native approval flow remains the fallback. Legacy direct mode already shares one balance and remains unchanged unless explicitly switched to a separate budget. Separate game budgets stay isolated, never silently merged with wallet funds. No balance moves automatically; interrupted transfers reuse the persisted request and durable receipt. The old World funds URL mounts the same component and bootstraps the signed-in settlement before reading balances.
 
 Deposits use native Dollar signatures with the exact destination, amount and nonce; the memo hashes the World owner, request ID, Origin and session CSRF. Withdrawals sign the exact World account, authorized destination, base-unit amount, request ID, Origin and CSRF. A request ID is 16–128 ASCII letters/digits/underscores/hyphens; amounts are positive canonical integer strings. Transfers are bounded by spendable balances and the safe gameplay accounting ceiling (including pending deposits), with at most 1,000 active requests per owner. Views show all active requests and the latest 100 closed requests; durable replay receipts are retained. No transfer mints currency or falls back to another funding source.
 

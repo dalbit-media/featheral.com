@@ -1,4 +1,5 @@
 .world-app{--world-header-height:61px;--world-eco-height:34px}
+.world-app .world-header nav{flex-wrap:wrap;justify-content:flex-end}
 .world-app .wp-panel{top:calc(var(--world-header-height) + var(--world-eco-height) + 12px);max-height:calc(100vh - var(--world-header-height) - var(--world-eco-height) - 24px)}
 .app{display:grid;grid-template-columns:minmax(72px,260px) minmax(0,600px) minmax(0,350px);justify-content:center;gap:0;min-height:calc(100vh - var(--world-eco-height) - var(--world-header-height))}
 .rail{position:sticky;top:var(--world-header-height);align-self:start;height:calc(100vh - var(--world-header-height));display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-right:1px solid var(--line)}

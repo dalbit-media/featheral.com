@@ -9,9 +9,9 @@ import { icon } from './icons.ts';
 import type { ApiState } from './api-types.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { downloadSnapshot, renderJournalEntries } from './journal.ts';
-import { linkFundWallet, linkWorldProfile, readChatProfile, revokeFundWallet } from './api.ts';
+import { linkFundWallet, linkWorldProfile, readChatProfile, revokeFundWallet, refresh } from './api.ts';
 import { needsWalletSigner, walletLinkMessage } from './funds.ts';
-import { loadWorldWallet } from './wallet-view.ts';
+import { loadWorldWallet, loadWorldFunds } from './wallet-view.ts';
 import { formatUnits } from 'ethers';
 import { chatProfileChangedEvent, chatProfileSettingsEvent } from './chat.ts';
 import { worldProfileLinkMessage } from './world-profile.ts';
@@ -64,8 +64,8 @@ export class AccountPane {
     this.dialog.setAttribute('aria-labelledby', 'account-title');
     this.dialog.innerHTML = `<header class="account-heading"><button type="button" class="button account-back" aria-label="Back to account" hidden>${icon('chevron')}</button><div><small>YOUR PIONEER</small><h2 id="account-title" tabindex="-1">Account</h2></div><button type="button" class="button account-close" aria-label="Close account">${icon('close')}</button></header>
       <div class="account-content">
-        <section class="account-profile" aria-labelledby="account-profile-title"><h3 id="account-profile-title">World profile</h3><div class="account-world-profile"><button type="button" class="wallet-icon" data-world-profile-button aria-label="Connect wallet and view World profile"></button><strong data-world-profile-name data-no-localize></strong><a class="button" href="/account/" target="_blank" rel="noopener">Edit avatar &amp; profile</a></div><p>Your World username and avatar are shared with Play. Edit them on the World Getting started page.</p><button type="button" class="button primary wide" data-world-profile-link>Use World profile in Play</button><p data-account-profile-status role="status"></p><button type="button" class="button" data-account-profile-retry hidden>Reconnect</button></section>
-        <section class="account-section account-wallet-section" aria-labelledby="account-wallet-title"><h3 id="account-wallet-title">Wallet and World budget</h3><p>Authorize a separate World fund, then deposit or withdraw existing FTH$. Gameplay spends the World budget only after you switch. Legacy direct-wallet sessions stay unchanged until you approve. Never share your recovery phrase or private key.</p><button type="button" class="button primary wide" data-fund-wallet-link>Authorize World budget</button><p data-wallet-status role="status"></p><a class="button wide" href="/world-funds.html" target="_blank" rel="noopener">Deposit / Withdraw World funds</a>
+        <section class="account-profile" aria-labelledby="account-profile-title"><h3 id="account-profile-title">World profile</h3><div class="account-world-profile"><button type="button" class="wallet-icon" data-world-profile-button aria-label="Connect wallet and view World profile"></button><strong data-world-profile-name data-no-localize></strong><a class="button" href="/account/">Edit avatar &amp; profile</a></div><p>Your World username and avatar are shared with Play. Edit them on your World account page.</p><button type="button" class="button primary wide" data-world-profile-link>Use World profile in Play</button><p data-account-profile-status role="status"></p><button type="button" class="button" data-account-profile-retry hidden>Reconnect</button></section>
+        <section class="account-section account-wallet-section" aria-labelledby="account-wallet-title"><h3 id="account-wallet-title">Wallet and World budget</h3><p>Transfer existing FTH$ without leaving the game. Gameplay uses your approved budget; wallet funds never move automatically.</p><div data-account-funds></div><button type="button" class="button primary wide" data-fund-wallet-link>Authorize World budget</button><p data-wallet-status role="status"></p>
         <button type="button" class="button wide" data-fund-wallet-revoke>Stop wallet gameplay access</button>
         <a class="button wide" href="/bank/">Open wallet, conversion and staking</a>
         </section>
@@ -82,10 +82,15 @@ export class AccountPane {
     const switchAccount = document.createElement('a');
     switchAccount.className = 'button wide';
     switchAccount.textContent = this.t('Switch account');
-    const switchUrl = new URL('/account/', location.origin);
+    const switchUrl = new URL('/login/', location.origin);
     switchUrl.searchParams.set('switch', '1'); switchUrl.searchParams.set('returnTo', location.href);
     switchAccount.href = switchUrl.href;
     identity.append(switchAccount);
+    for (const [label, href] of [['World', '/'], ['Community', '/community/']]) {
+      const link = document.createElement('a');
+      link.className = 'button'; link.textContent = this.t(label); link.href = href;
+      identity.append(link);
+    }
     this.walletReady = window.FeatheralProfile.mount(this.dialog.querySelector<HTMLButtonElement>('[data-world-profile-button]')!,
       { panelRoot: this.dialog, primaryCurrency: 'fthDollar', walletUrl: '/wallet/', profileUrl: '/account/', ethereumProvider: true });
     window.addEventListener('featheral:wallet', () => {
@@ -162,6 +167,15 @@ export class AccountPane {
     this.trigger.setAttribute('aria-expanded', 'true');
     this.dialog.querySelector<HTMLButtonElement>('.account-close')!.focus();
     void this.loadProfile(profile);
+    const root = this.dialog.querySelector<HTMLElement>('[data-account-funds]')!;
+    void loadWorldFunds().then(async () => {
+      const panel = window.FeatheralWorldFunds!.mount(root, { onSettled: async () => { this.update(await refresh()); }, onRender: () => localize(root) });
+      await panel.refresh(); localize(root);
+      this.dialog.querySelector<HTMLElement>('[data-fund-wallet-link]')!.hidden = true;
+    }).catch(error => {
+      console.error('World funds unavailable.', error);
+      root.textContent = error instanceof Error ? error.message : 'World funds unavailable.';
+    });
   }
   private profileStatus(message: string, error = false): void {
     const status = this.dialog.querySelector<HTMLElement>('[data-account-profile-status]')!;

@@ -6,7 +6,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "sites", "media.featheral.com", "app.js"), "utf8");
 const account = "0x1111111111111111111111111111111111111111";
 
-function fixture({ posts = [], failFeed = false } = {}) {
+function fixture({ posts = [], failFeed = false, pathname = "/community/" } = {}) {
   const nodes = {};
   class Node {
     constructor(tag) {
@@ -38,11 +38,12 @@ function fixture({ posts = [], failFeed = false } = {}) {
   const calls = [];
   let action = async () => ({ post: posts[0] });
   const window = {};
+  const document = { getElementById: node, createElement: (tag) => new Node(tag), querySelector: () => null, body: new Node("body") };
   vm.runInNewContext(`${source.slice(0, source.indexOf('  $("searchForm").addEventListener'))}
     window.test = { state, drafts, composer, showHome, showGettingStarted, loadFeed, emptyHome, focusComposer, setAction: (work) => { act = work; } };
   })();`, {
-    window, ethers: require("ethers"), location: { hash: "", origin: "http://world.localhost" },
-    document: { getElementById: node, createElement: (tag) => new Node(tag), querySelector: () => null, body: new Node("body") },
+    window, ethers: require("ethers"), location: { hash: "", origin: "http://world.localhost", pathname },
+    document,
     setTimeout: () => 0, clearTimeout() {}, Event: class { constructor(type) { this.type = type; } },
     async fetch(url) {
       calls.push(url);
@@ -51,7 +52,7 @@ function fixture({ posts = [], failFeed = false } = {}) {
   });
   window.test.setAction((...args) => action(...args));
   return {
-    ...window.test, nodes, node, calls, find,
+    ...window.test, nodes, node, calls, find, document,
     setAction(work) { action = work; },
     mount() {
       const box = window.test.composer();
@@ -63,6 +64,13 @@ function fixture({ posts = [], failFeed = false } = {}) {
 }
 
 describe("World posting experience", () => {
+  it("keeps World community titles while retaining standalone Media branding", async () => {
+    for (const [pathname, brand] of [["/community/", "Featheral World"], ["/", "Featheral Media"]]) {
+      const ui = fixture({ pathname });
+      await ui.showHome("all");
+      expect(ui.document.title).to.equal(`Community feed · ${brand}`);
+    }
+  });
   it("omits repeated sidebar titles while retaining community feed tabs", async () => {
     const ui = fixture();
     ui.showGettingStarted();

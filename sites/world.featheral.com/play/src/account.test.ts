@@ -29,7 +29,7 @@ test('the account pane has accessible modal controls, settings and explicitly un
   assert.match(pane, /window\.FeatheralProfile\.mount/);
   assert.match(pane, /panelRoot: this\.dialog/);
   assert.match(pane, /profileUrl: '\/account\/'/);
-  assert.match(pane, /href="\/account\/" target="_blank" rel="noopener"/);
+  assert.match(pane, /href="\/account\/"/);
   assert.doesNotMatch(pane, /Edit them in the wallet profile menu/);
   assert.match(pane, /worldProfileLinkMessage\(world\.account, csrf, issuedAt\)/);
   assert.match(pane, /linkWorldProfile\(csrf, \{ address: world\.account, issuedAt, signature \}\)/);

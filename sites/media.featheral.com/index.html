@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Community feed · Featheral Media</title>
 <meta name="description" content="Public wallet-signed posts, conversations and profiles on Featheral Media.">
+<link rel="canonical" href="https://media.featheral.com/">
 <meta property="og:title" content="Featheral Media">
 <meta property="og:image" content="/shared/logo-media.svg">
 <link rel="icon" href="/shared/logo-media.svg">
@@ -13,14 +14,14 @@
 <link rel="stylesheet" href="/shared/wallet-profile.css">
 <link rel="stylesheet" href="/shared/world-profile.css">
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/shared/world-navigation.css">
 </head>
 <body class="site-world world-app">
 <nav class="eco-bar" aria-label="Featheral sites"><a data-site="foundation">Foundation</a><a data-site="gold">Gold · FTHG</a><a data-site="dollar">Dollar · FTH$</a><a data-site="world">World</a></nav>
 <header class="top world-header">
   <a class="brand" href="/"><img src="/shared/logo-media.svg" alt="" width="34" height="34"><b>Featheral Media</b></a>
-  <nav aria-label="Media site">
-    <a href="/ledger/">Ledger</a>
-    <a class="play-launch" data-site="world" data-path="/explore/" href="https://world.featheral.com/explore/" target="_blank" rel="noopener" aria-label="Play (opens a new window)" title="Play in a new window"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M8 5v14l11-7z"/></svg><span>Play</span></a>
+  <nav class="world-navigation" aria-label="Media site">
+    <!-- WORLD_PUBLIC_NAV -->
     <button id="walletButton" class="wallet-icon" type="button" title="Connect wallet to see your balance and profile" aria-label="Connect wallet">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v3"/><path d="M3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M21 12h-4a2 2 0 0 0 0 4h4z"/></svg>
     </button>
@@ -50,7 +51,7 @@
       <section id="profileSetup" class="welcome-card" aria-labelledby="setup-title">
         <p class="welcome-eyebrow">One World account</p><h2 id="setup-title">Sign in on World</h2>
         <p>Media uses your World account. Register on World with a username and password or an external wallet, then set your required avatar and profile description. There is no separate Media registration.</p>
-        <a class="btn primary" id="world-sign-in" href="https://world.featheral.com/account/">Sign in to World</a>
+        <a class="btn primary" id="world-sign-in" href="https://world.featheral.com/login/">Sign in to World</a>
         <a class="welcome-skip" href="#/feed">Skip for now — browse posts</a>
       </section>
       <section class="welcome-card"><h2 data-cms-copy="index-html-5912">A community, not just a game</h2><p data-cms-copy="index-html-5949">Share what you are building, follow others and join nearby public chat. Community posts require a connected wallet and a free sign-in signature. Posts, profiles and avatars are public—never share secrets.</p><a class="btn" href="#/feed">Visit the community feed</a></section>

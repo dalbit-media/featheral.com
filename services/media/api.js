@@ -91,7 +91,8 @@ function createWorldApi({ env = require("../operations/runtime").environment(), 
     const input = await body(req);
     rateLimit(req, "social", 60);
     const kind = String(input.kind || "").toUpperCase();
-    if (new URL(`http://${req.headers.host || "localhost"}`).hostname.startsWith("media.")) {
+    const hostname = new URL(`http://${req.headers.host || "localhost"}`).hostname;
+    if (req.url.startsWith("/api/v1/media/") || hostname.startsWith("media.") || hostname.startsWith("world.")) {
       if (!authorizeMedia) throw Object.assign(new Error("World sign-in is unavailable."), { status: 503 });
       authorizeMedia(input.worldSession, input.data?.w);
     }

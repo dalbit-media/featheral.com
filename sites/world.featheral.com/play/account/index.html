@@ -9,28 +9,9 @@
   <link rel="stylesheet" href="/account/account.css" vite-ignore>
 </head>
 <body>
-  <header><a href="/">Featheral World</a><a href="https://media.featheral.com/" data-site="media">Media</a><label>Language<select data-language aria-label="Language"><option value="en">English</option><option value="ko">한국어</option></select></label><button id="switch-account" type="button" hidden>Switch account</button><button id="sign-out" type="button" hidden>Sign out</button></header>
+  <header><a href="/">Featheral World</a><nav class="world-navigation" aria-label="World site"><!-- WORLD_PUBLIC_NAV --></nav><label>Language<select data-language aria-label="Language"><option value="en">English</option><option value="ko">한국어</option></select></label></header>
   <main>
-    <section class="account-card" aria-labelledby="account-title">
-      <p class="eyebrow">One identity for World and Media</p>
-      <h1 id="account-title">Join World</h1>
-      <p>Register with a username and password, or use your own wallet. Your username, avatar and profile description are required and public.</p>
-      <p id="status" role="status" aria-live="polite">Loading your World account…</p>
-      <p id="account-name" data-no-localize hidden></p>
-      <div id="sign-in">
-        <nav aria-label="Account options"><button type="button" data-mode="register" aria-pressed="true">Register</button><button type="button" data-mode="login" aria-pressed="false">Sign in</button></nav>
-        <form id="credentials">
-          <label>Username<input name="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{2,23}" autocomplete="username"></label>
-          <label>Password<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
-          <label id="confirmation">Confirm password<input name="confirmation" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
-          <p class="fine" id="password-note">A built-in wallet is created and encrypted in this browser. Only its encrypted backup is saved on the server for cross-device sign-in. Use a unique password of at least 12 characters. There is no password reset; keep your encrypted backup.</p>
-          <button type="submit" class="primary" id="credentials-submit">Create built-in wallet</button>
-        </form>
-        <p class="divider">Or</p><button type="button" id="external">Sign in with an external wallet</button>
-      </div>
-      <section id="profile" hidden><div id="profile-editor"></div><button type="button" id="finish-registration" class="primary" hidden>Finish registration</button><button type="button" id="backup" hidden>Download encrypted wallet backup</button><button type="button" id="continue" class="primary" hidden>Continue to World</button></section>
-      <section id="approval" hidden><h2>Media signature request</h2><p>Only the exact message below will be signed. No funds move.</p><pre id="approval-message" data-no-localize></pre><button type="button" id="approve" class="primary">Review and approve</button><button type="button" id="reject">Reject</button></section>
-    </section>
+    <!-- WORLD_ACCOUNT -->
   </main>
   <script src="/shared/wallet/ethers.js" vite-ignore></script>
   <script src="/shared/wallet/vault.js" vite-ignore></script>

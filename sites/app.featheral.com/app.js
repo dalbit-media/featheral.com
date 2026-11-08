@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id);
   const state = { me: null, channel: null, channels: [], members: [], missions: [], messages: new Map(), view: "inbox", document: null,
     config: null, polling: false, sending: false, draftRequest: null, mission: null, experience: null, interests: [] };
-  let profileEditor;
+  let quizRetryTimer;
   const short = value => `..${value.slice(-5)}`;
   const node = (tag, content, className) => {
     const element = document.createElement(tag);
@@ -50,9 +50,9 @@
   }
   for (const tab of document.querySelectorAll("[data-view]")) tab.addEventListener("click", () => show(tab.dataset.view));
   async function signIn() {
-    if (!window.FeatheralWallet) throw new Error("Wallet is still loading. Retry shortly.");
-    const authorization = await window.FeatheralWallet.authenticate(address => api("/challenge", { address }));
-    await api("/login", authorization); await loadMe();
+    const destination = new URL(link("world", "/login/"));
+    destination.searchParams.set("returnTo", new URL("/", location.origin).href);
+    location.assign(destination.href);
   }
   action($("signin"), signIn);
   action($("check-profile"), loadMe);
@@ -63,33 +63,35 @@
   });
   async function loadMe() {
     state.me = await api("/me");
+    state.me.learning.receivedAt = Date.now();
     const { member, profile, address, silver } = state.me, active = member?.status === "active";
     $("onboarding").hidden = active; $("workspace").hidden = !active;
     $("signin").hidden = true; $("signup").hidden = false;
-    $("signup-title").textContent = profile?.username || "Create your World profile";
-    $("signup-status").textContent = !profile ? "You are a visitor. Set up your public name, avatar and bio here. Your World profile is shared across Featheral."
-      : member?.status === "visitor" || !member ? "Welcome, visitor. Share your experience and interests, then pass all orientation quizzes. No admin approval is required."
+    $("signup-title").textContent = profile?.username || "Complete your World profile";
+    $("signup-status").textContent = !profile ? "Complete your public profile on World, then return here. App uses the same name, avatar, bio and wallet."
+      : member?.status === "visitor" || !member ? "Your World profile is connected. Save your interests, then pass orientation one step at a time to promote it to App membership."
       : `Access ${member.status}. Contact an administrator about this restriction.`;
-    $("application").hidden = !profile || !["visitor", "active"].includes(member?.status);
+    $("application").hidden = !profile?.username || !profile.avatar || !profile.bio?.trim() || !["visitor", "active"].includes(member?.status);
     $(active ? "member-preferences" : "visitor-preferences").append($("application"));
     $("application").querySelector("[type=submit]").textContent = active ? "Save experience & interests" : "Save visitor registration";
     renderPreferences(true); renderLearning(); renderCompensation();
+    $("visitor-preferences").open = !state.me.learning.enrollment;
     const root = $("profile-editor");
     $(active ? "account-profile" : "signup-profile").append(root);
-    if (!profileEditor) profileEditor = await window.FeatheralWorldProfile.mount(root, { address, onSaved: loadMe });
-    else await profileEditor.load(address, true);
+    root.replaceChildren();
+    if (profile) {
+      const card = node("div", undefined, "shared-profile");
+      if (profile.avatar) { const image = node("img"); image.src = profile.avatar; image.alt = ""; image.className = "avatar"; card.append(image); }
+      card.append(node("strong", profile.username), node("p", profile.bio, "fine"));
+      root.append(card);
+    }
+    const profileLink = node("a", profile ? "Edit shared profile on World" : "Set up your World profile");
+    const profileUrl = new URL(link("world", "/account/")); profileUrl.searchParams.set("returnTo", new URL("/", location.origin).href);
+    profileLink.href = profileUrl.href; root.append(profileLink);
+    $("promotion-path").textContent = `World profile → ${active ? "App member" : "App visitor"} → Admin by explicit approval and assigned permissions. Quiz completion never grants Admin authority.`;
     if (!active) {
       clearPrivate();
       return;
-    }
-    function clearPrivate() {
-      if (call) cleanupCall();
-      state.channel = null; state.channels = []; state.members = []; state.missions = []; state.messages.clear();
-      state.document = null; state.mission = null; state.config = null; state.draftRequest = null;
-      for (const id of ["messages", "channels", "mission-list", "people-list", "org-chart", "identity", "call-people"]) $(id).replaceChildren();
-      for (const id of ["document-dialog", "mission-dialog", "call-picker"]) if ($(id).open) $(id).close();
-      for (const id of ["document-body", "mission-evidence", "mission-title", "mission-body", "message", "attachment"]) $(id).value = "";
-      $("attachment-name").textContent = ""; $("silver-balance").textContent = ""; $("conversation").hidden = true;
     }
     $("identity").replaceChildren();
     if (profile?.avatar) {
@@ -98,6 +100,9 @@
     $("identity").append(node("h2", profile?.username || short(address)), node("p", address, "fine"),
       node("p", `${member.role} / ${member.level}`), node("p", `${member.division} / ${member.team}`, "fine"));
     if (profile?.bio) $("identity").append(node("p", profile.bio));
+    if (state.me.adminPermissions.length) {
+      const admin = node("a", "Open assigned Admin workspace"); admin.href = link("admin", "/#/intranet"); $("identity").append(admin);
+    }
     $("silver-balance").textContent = `${silver.toLocaleString()} FTHS`;
     const directory = await api("/directory"); state.members = directory.members;
     renderPeople();
@@ -106,6 +111,15 @@
     await loadChannels();
     const requested = location.hash.match(/^#inbox\/([a-zA-Z0-9_-]+)$/)?.[1];
     if (!state.channel && requested && state.channels.some(channel => channel.id === requested)) await openChannel(requested);
+  }
+  function clearPrivate() {
+    if (call) cleanupCall();
+    state.channel = null; state.channels = []; state.members = []; state.missions = []; state.messages.clear();
+    state.document = null; state.mission = null; state.config = null; state.draftRequest = null;
+    for (const id of ["messages", "channels", "mission-list", "people-list", "org-chart", "identity", "call-people"]) $(id).replaceChildren();
+    for (const id of ["document-dialog", "mission-dialog", "call-picker"]) if ($(id).open) $(id).close();
+    for (const id of ["document-body", "mission-evidence", "mission-title", "mission-body", "message", "attachment"]) $(id).value = "";
+    $("attachment-name").textContent = ""; $("silver-balance").textContent = ""; $("conversation").hidden = true;
   }
   function renderPreferences(reset = false) {
     const learning = state.me.learning;
@@ -161,21 +175,38 @@
     choices($("interest-choices"), learning.interests, true);
   }
   function renderLearning() {
+    clearTimeout(quizRetryTimer);
     if (!state.me) return;
     const active = state.me.member?.status === "active", root = $(active ? "member-learning" : "visitor-learning");
     $(active ? "visitor-learning" : "member-learning").replaceChildren();
     root.replaceChildren();
     if (!state.me.learning.enrollment || !["visitor", "active"].includes(state.me.member?.status)) return;
-    const learning = state.me.learning, required = learning.courses.filter(course => course.level === learning.stage);
+    const learning = state.me.learning, required = learning.steps.filter(course => course.level === learning.stage);
     root.append(node("h2", `${learning.stage} learning`),
-      node("p", `${required.filter(course => course.progress?.passed).length} / ${required.length} current-level quizzes passed. Every required quiz needs ${learning.passPercent}%.`, "fine"));
+      node("p", `${required.filter(course => course.passed).length} / ${required.length} current-level quizzes passed. Every required quiz needs ${learning.passPercent}%.`, "fine"));
     if (learning.stage === "steward") root.append(node("p", "You have completed the learning pathway. Management roles remain separately assigned."));
-    for (const course of learning.courses) {
-      const card = node("details", undefined, "card lesson"), summary = node("summary", `${course.title}${course.progress?.passed ? " / Passed" : ""}`);
-      card.append(summary, node("p", course.body));
+    const steps = node("ol", undefined, "learning-steps");
+    for (const step of learning.steps) {
+      const row = node("li", `${step.passed ? "Passed" : step.locked ? "Locked" : "Current"} · ${step.title}`);
+      row.className = step.passed ? "passed" : step.locked ? "locked" : "current";
+      if (!step.passed && !step.locked) row.setAttribute("aria-current", "step");
+      steps.append(row);
+    }
+    root.append(steps);
+    for (const course of learning.courses.filter(course => !course.progress?.passed)) {
+      const card = node("section", undefined, "card lesson");
+      card.append(node("h3", course.title), node("p", course.body));
       const destinations = node("div", undefined, "account-links");
       for (const site of course.sites) { const destination = node("a", site); destination.href = link(site); destination.target = "_blank"; destination.rel = "noopener"; destinations.append(destination); }
       card.append(destinations);
+      const remaining = course.retryAt - (learning.serverNow + Date.now() - learning.receivedAt);
+      if (remaining > 0) {
+        const wait = node("p", `Retake available ${new Date(course.retryAt).toLocaleString()}. Wait at least 30 minutes after failure; the next step remains locked.`, "quiz-wait");
+        wait.setAttribute("role", "status");
+        quizRetryTimer = setTimeout(() => { void loadMe().catch(status); }, remaining + 100);
+        card.append(wait, button("Check retake availability", loadMe)); root.append(card);
+        continue;
+      }
       const form = node("form");
       course.questions.forEach((question, index) => {
         const field = node("fieldset"); field.append(node("legend", question.prompt));
@@ -194,9 +225,13 @@
         try {
           const values = new FormData(form), answers = course.questions.map((_, index) => Number(values.get(`question-${index}`)));
           const result = await api(`/learning/${course.id}/quiz`, { answers });
-          feedback.textContent = `${result.score}% / ${result.passed ? "Passed" : "Review the lesson and retry"}`;
-          if (result.passed) { await loadMe(); $("status").textContent = `${course.title}: ${result.score}% / Passed`; $("status").hidden = false; }
-        } catch (error) { feedback.textContent = error.message; status(error); }
+          await loadMe();
+          $("status").textContent = `${course.title}: ${result.score}% / ${result.passed ? "Passed. The next step is available." : "Not passed. Wait at least 30 minutes before retaking."}`;
+          $("status").hidden = false;
+        } catch (error) {
+          feedback.textContent = error.message; status(error);
+          if ([409, 429].includes(error.status)) void loadMe().catch(status);
+        }
         finally { submit.disabled = false; }
       });
       card.append(form); root.append(card);
@@ -207,8 +242,8 @@
     const active = state.me.member?.status === "active", root = $(active ? "member-compensation" : "visitor-compensation");
     $(active ? "visitor-compensation" : "member-compensation").replaceChildren(); root.replaceChildren();
     const pay = state.me.compensation;
-    const card = node("section", undefined, "card");
-    card.append(node("h2", "Weekly contribution record"), node("p", `${new Date(pay.period).toISOString().slice(0, 10)} to ${new Date(pay.ends).toISOString().slice(0, 10)} / UTC Monday to Monday`));
+    const card = node(active ? "section" : "details", undefined, "card");
+    card.append(node(active ? "h2" : "summary", "Weekly contribution record"), node("p", `${new Date(pay.period).toISOString().slice(0, 10)} to ${new Date(pay.ends).toISOString().slice(0, 10)} / UTC Monday to Monday`));
     const percent = pay.assigned ? (pay.accomplished * 100 / pay.assigned).toFixed(1) : "0";
     const progress = node("progress"); progress.max = pay.assigned || 1; progress.value = pay.accomplished;
     progress.setAttribute("aria-label", "Approved weekly task completion");
@@ -452,8 +487,13 @@
       for (const notification of await worker?.getNotifications() || []) notification.close();
     }
     await api("/logout", {});
+    clearTimeout(quizRetryTimer);
     clearPrivate(); state.me = null; state.experience = null; state.interests = [];
     $("workspace").hidden = true; $("onboarding").hidden = false; $("signup").hidden = true; $("signin").hidden = false;
+    $("promotion-path").textContent = "World profile → App membership → Admin by explicit approval.";
+    $("status").hidden = true;
+    for (const id of ["profile-editor", "visitor-learning", "member-learning", "visitor-compensation", "member-compensation", "experience-choices", "interest-choices"]) $(id).replaceChildren();
+    $("motivation").value = "";
     $("messages").replaceChildren(); $("channels").replaceChildren(); $("message").value = ""; $("attachment").value = "";
   });
   action($("visitor-signout"), async () => { await api("/logout", {}); location.reload(); });
@@ -610,5 +650,13 @@
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void tick(); });
   setInterval(() => void tick(), 3000);
-  loadMe().catch(error => { if (error.status !== 401) status(error); });
+  const hasWorldHandoff = new URL(location.href).searchParams.has("worldAppSignIn");
+  void (async () => {
+    const url = new URL(location.href), code = url.searchParams.get("worldAppSignIn");
+    if (code) {
+      url.searchParams.delete("worldAppSignIn"); history.replaceState(null, "", url.href);
+      await api("/world-login", { code });
+    }
+    await loadMe();
+  })().catch(error => { if (error.status !== 401 || hasWorldHandoff) status(error); });
 })();

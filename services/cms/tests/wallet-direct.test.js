@@ -291,7 +291,7 @@ test('extension discovery prefers a single provider and explicitly selects among
 test('no extension defaults to builtin create/unlock and extension rejection never creates a wallet', async () => {
   for (const record of [null, { address }]) for (const builtInPreferred of [false, true]) {
     const nodes = new Map(), calls = [];
-    const context = vm.createContext({ token: '', interactive: true, builtInPreferred,
+    const context = vm.createContext({ token: '', interactive: true, builtInPreferred, storage: { removeItem() {} }, locallyReset: false,
       providerChoices: () => builtInPreferred ? [{ provider: {} }] : [], browserProvider: builtInPreferred ? {} : null,
       vault: { read: () => record }, tab: view => calls.push(view), updateVault() {},
       $: id => { if (!nodes.has(id)) nodes.set(id, { focus: () => calls.push('focus') }); return nodes.get(id); } });
@@ -299,7 +299,7 @@ test('no extension defaults to builtin create/unlock and extension rejection nev
     assert.equal(await context.ensureSession(), false);
     assert.equal(nodes.get('vault-action').value, record ? 'unlock' : 'create');
   }
-  const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false, providerChoices: () => [{}],
+  const context = vm.createContext({ token: '', interactive: true, builtInPreferred: false, storage: { removeItem() {} }, locallyReset: false, providerChoices: () => [{}],
     vault: {}, providerChosen: false, epoch: 0, contextEpoch: 0, requireVisible() {},
     browserProvider: { request: async () => { throw Object.assign(new Error('Rejected'), { code: 4001 }); } } });
   vm.runInContext(app.slice(app.indexOf('  async function ensureSession()'), app.indexOf('  $("connect").addEventListener')), context);

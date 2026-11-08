@@ -206,6 +206,12 @@ function sidebarSite(sites) {
 }
 
 function renderSidebar(active) {
+  if (state.adminPermissions && !state.adminPermissions.includes('*')) {
+    $('#set-switch').replaceChildren();
+    $('#nav').innerHTML = '<a href="#/intranet" class="active">App administration</a>';
+    $('.sidebar-foot').textContent = 'Assigned App permissions only';
+    return;
+  }
   const lib = [...(state.integratedSites || []), ...state.library].filter((m, i, all) => m.status === 'ready'
     && all.findIndex(other => siteSelectionUrl(other) === siteSelectionUrl(m)) === i);
   const selectedSite = sidebarSite(lib);
@@ -298,6 +304,9 @@ async function render() {
   const { parts, q } = parseHash();
   closeModal();
   try {
+    if (state.adminPermissions && !state.adminPermissions.includes('*') && parts[0] !== 'intranet') {
+      location.replace('#/intranet'); return;
+    }
     if (isLocal() && !managesSites() && (!parts.length || parts[0] === 'import' || (parts[0] === 'set' && parts[1] !== homeKey()))) {
       const key = homeKey();
       if (!key) { state.key = null; renderSidebar(''); return setView(`<div class="card">${emptyBox('🗄', 'No stored data found in the data folder.')}</div>`, token); }
@@ -349,6 +358,11 @@ function siteCrumb(...rest) {
 
 window.addEventListener('hashchange', render);
 window.addEventListener('DOMContentLoaded', async () => {
-  try { await Promise.all([loadConfig(), loadLibrary()]); await render(); }
+  try {
+    const session = await api('/api/admin-auth/session');
+    state.adminPermissions = session.permissions;
+    if (session.permissions?.includes('*')) await Promise.all([loadConfig(), loadLibrary()]);
+    await render();
+  }
   catch (error) { console.error(error); setView(errorBox(error)); }
 });

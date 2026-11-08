@@ -39,6 +39,18 @@
     if (!response.ok) throw new Error(result.error || `Admin sign-in failed (HTTP ${response.status}).`);
     return result;
   }
+  document.querySelector("#login-world").addEventListener("click", () => {
+    const target = new URL("/login/", location.origin.replace("//admin.", "//world."));
+    target.searchParams.set("returnTo", new URL("/", location.origin).href);
+    location.assign(target.href);
+  });
+  const returnUrl = new URL(location.href), code = returnUrl.searchParams.get("worldAdminSignIn");
+  if (code) {
+    returnUrl.searchParams.delete("worldAdminSignIn"); history.replaceState(null, "", returnUrl.href);
+    busy = true; sign.disabled = true;
+    void authRequest("world-login", { code }).then(() => { location.reload(); })
+      .catch(error => { console.error("World Admin sign-in failed:", error); show(error.message, true); busy = false; sign.disabled = false; });
+  }
   sign.addEventListener("click", async () => {
     if (busy) return;
     discover();
@@ -47,7 +59,7 @@
       return;
     }
     if (chooser.value === "") {
-      show("Choose the wallet that holds the origin or Dollar reserve account, then continue.");
+      show("Choose your explicitly authorized Admin wallet, then continue.");
       chooser.focus();
       return;
     }
@@ -65,8 +77,6 @@
       const accounts = await provider.request({ method: "eth_requestAccounts" });
       const account = accounts?.[0];
       if (!ethers.isAddress(account)) throw new Error("The wallet did not return an Ethereum account. Unlock it, select an account and retry.");
-      if (!session.wallets?.some(address => address.toLowerCase() === account.toLowerCase()))
-        throw new Error("This account is not an Admin wallet. Switch to the origin or Dollar reserve account in your wallet, then retry.");
       provider.on?.("accountsChanged", accountChanged);
       const challenge = await authRequest("challenge", { address: account });
       if (changed) throw new Error("Wallet account changed. Retry with the authorized Admin account.");
@@ -94,5 +104,5 @@
     }
   });
   discover();
-  show(wallets.length ? "Ready. Connect and sign in with the origin or Dollar reserve wallet." : "Use an Ethereum signing wallet extension or your wallet's browser to sign in.");
+  show(wallets.length ? "Ready. Sign in with a root wallet or an App wallet with assigned Admin permissions." : "Use an Ethereum signing wallet extension or your wallet's browser to sign in.");
 })();

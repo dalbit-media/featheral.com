@@ -3,7 +3,7 @@ const express = require("express");
 const crypto = require("node:crypto");
 const { Workspace } = require("../../notes/workspace");
 const fail = (status, message) => Object.assign(new Error(message), { status });
-function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require("../../operations/runtime").environment(), pushTransport }) {
+function workspaceApi({ notes, markets, cmsAuth, workspaceAdminAuth = cmsAuth, profileReader, worldHandoff, env = require("../../operations/runtime").environment(), pushTransport }) {
   const workspace = new Workspace(notes, markets, profileReader), router = express.Router(), limits = new Map();
   const webPush = pushTransport || require("web-push");
   const pushEnabled = !!(env.APP_VAPID_PUBLIC_KEY && env.APP_VAPID_PRIVATE_KEY);
@@ -15,7 +15,10 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
   const adminHost = req => ["admin.featheral.com", "admin.localhost"].includes(req.hostname);
   const run = fn => (req, res) => Promise.resolve().then(() => fn(req, res)).catch(error => {
     console.error("Featheral App:", error);
-    if (!res.headersSent) res.status(error.status || 500).json({ error: error.message });
+    if (!res.headersSent) {
+      if (error.retryAfter) res.set("Retry-After", String(error.retryAfter));
+      res.status(error.status || 500).json({ error: error.message, ...(error.retryAt ? { retryAt: error.retryAt } : {}) });
+    }
   });
   const limit = (req, max) => {
     const key = req.socket.remoteAddress, now = Date.now(), records = (limits.get(key) || []).filter(at => now - at < 60000);
@@ -58,6 +61,15 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
     res.cookie("featheral_app", token, { httpOnly: true, secure: secure(req), sameSite: "strict", path: "/api/intranet", maxAge: 86400000 });
     res.json({ connected: true });
   }));
+  router.post("/world-login", run(async (req, res) => {
+    limit(req, 30);
+    if (!req.hostname.startsWith("app.")) throw fail(403, "Use App to promote your World profile.");
+    if (!worldHandoff) throw fail(503, "World sign-in is unavailable on this App server.");
+    const address = await worldHandoff(req.body?.code, origin(req));
+    const token = workspace.loginWorld(address);
+    res.cookie("featheral_app", token, { httpOnly: true, secure: secure(req), sameSite: "strict", path: "/api/intranet", maxAge: 86400000 });
+    res.json({ connected: true });
+  }));
   router.post("/logout", run((req, res) => {
     workspace.logout(cookie(req));
     res.clearCookie("featheral_app", { path: "/api/intranet", sameSite: "strict", secure: secure(req) });
@@ -72,15 +84,41 @@ function workspaceApi({ notes, markets, cmsAuth, profileReader, env = require(".
   router.get("/compensation", run((req, res) => res.json(workspace.hr.compensation(owner(req)))));
   router.use("/admin", (req, res, next) => {
     if (!adminHost(req)) return res.status(404).json({ error: "Use the administration site." });
-    cmsAuth(req, res, next);
+    workspaceAdminAuth(req, res, () => {
+      const permissions = req.adminPermissions || [];
+      if (!permissions.some(permission => ["*", "workspace-members", "workspace-tasks"].includes(permission)))
+        return res.status(403).json({ error: "Explicit workspace administration permissions are required." });
+      const permission = /^\/(members|teams)(\/|$)/.test(req.path) ? "workspace-members"
+        : /^\/missions(\/|$)/.test(req.path) ? "workspace-tasks" : null;
+      if (!permissions.includes("*") && !(req.method === "GET" && req.path === "/") && (!permission || !permissions.includes(permission)))
+        return res.status(403).json({ error: "This administration operation is outside your assigned permissions." });
+      next();
+    });
   });
-  router.get("/admin", run((req, res) => res.json(workspace.admin())));
-  router.put("/admin/members/:address", run((req, res) => res.json(workspace.setMember("admin", req.params.address, req.body))));
-  router.post("/admin/teams", run((req, res) => res.json(workspace.addTeam("admin", req.body))));
-  router.post("/admin/missions", run((req, res) => res.json(workspace.saveMission("admin", req.body, null, true))));
-  router.put("/admin/missions/:id", run((req, res) => res.json(workspace.saveMission("admin", req.body, req.params.id, true))));
-  router.post("/admin/grants", run((req, res) => res.json(workspace.grant("admin", req.body))));
-  router.put("/admin/payroll-policy", run((req, res) => res.json(workspace.hr.configure("admin", req.body))));
+  router.get("/admin", run((req, res) => {
+    const permissions = req.adminPermissions || [], root = permissions.includes("*");
+    const data = workspace.admin(root);
+    if (!root && !permissions.includes("workspace-members")) {
+      data.enrollments = [];
+      data.members = data.members.map(({ motivation, ...member }) => ({ ...member, motivation: "" }));
+    }
+    res.json({ ...data, permissions });
+  }));
+  router.put("/admin/access/:address", run(async (req, res) => res.json(await workspace.setAdminAccess(req.adminWallet || "admin", req.params.address, req.body))));
+  router.put("/admin/members/:address", run((req, res) => res.json(workspace.setMember(req.adminWallet || "admin", req.params.address, req.body))));
+  router.post("/admin/teams", run((req, res) => res.json(workspace.addTeam(req.adminWallet || "admin", req.body))));
+  function saveAdminMission(req, key) {
+    if (!req.adminPermissions.includes("*") && req.body?.status === "done") {
+      const previous = key ? notes.db.prepare("SELECT assignee FROM work_missions WHERE id=?").get(key) : null;
+      if ([previous?.assignee, req.body?.assignee].some(address => address?.toLowerCase() === req.adminWallet.toLowerCase()))
+        throw fail(403, "A different authorized administrator must approve your own task.");
+    }
+    return workspace.saveMission(req.adminWallet, req.body, key, true);
+  }
+  router.post("/admin/missions", run((req, res) => res.json(saveAdminMission(req, null))));
+  router.put("/admin/missions/:id", run((req, res) => res.json(saveAdminMission(req, req.params.id))));
+  router.post("/admin/grants", run((req, res) => res.json(workspace.grant(req.adminWallet || "admin", req.body))));
+  router.put("/admin/payroll-policy", run((req, res) => res.json(workspace.hr.configure(req.adminWallet || "admin", req.body))));
   router.post("/admin/evaluate", run((req, res) => { workspace.hr.settleDue(); res.json(workspace.admin()); }));
   router.use((req, res, next) => {
     try { workspace.active(owner(req)); next(); } catch (error) { res.status(error.status || 500).json({ error: error.message }); }

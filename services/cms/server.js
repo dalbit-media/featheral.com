@@ -143,7 +143,12 @@ function resolveHostname(value) {
 const hostName = (req) => resolveHostname(req.hostname) || String(req.hostname || '').toLowerCase().replace(/\.$/, '');
 const localRequest = (req) => ['localhost', '127.0.0.1', '::1'].includes(hostName(req)) &&
   ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
-const adminAuth = require('./lib/admin-auth').createAdminAuth({ adminHost: String(CONFIG.cmsHost).toLowerCase() });
+const adminAuth = require('./lib/admin-auth').createAdminAuth({ adminHost: String(CONFIG.cmsHost).toLowerCase(),
+  permissionsFor: address => app.workspace?.adminPermissions(address) || [],
+  worldHandoff: (code, origin) => {
+    if (!workspaceWorldHandoff) throw Object.assign(new Error('World Admin sign-in is unavailable on this server.'), { status: 503 });
+    return workspaceWorldHandoff(code, origin, 'admin');
+  } });
 app.use('/api/admin-auth', adminAuth.router);
 function cmsAuth(req, res, next) {
   adminAuth.authenticate(req, res, next);
@@ -358,9 +363,16 @@ function fail(res, e) {
 const notFound = (msg) => Object.assign(new Error(msg), { status: 404 });
 let workspaceProfileReader = () => { throw Object.assign(new Error('World profile reader is unavailable. Use the main gateway.'), { status: 503 }); };
 app.setWorkspaceProfiles = reader => { workspaceProfileReader = reader; };
+let workspaceWorldHandoff;
+app.setWorkspaceWorldHandoff = consume => { workspaceWorldHandoff = consume; };
 if (creation) {
   const { router, workspace } = require('./lib/workspace-api').workspaceApi({
     notes, markets: creation.markets, cmsAuth, profileReader: address => workspaceProfileReader(address),
+    workspaceAdminAuth: (req, res, next) => adminAuth.authenticate(req, res, next, { allowDelegated: true }),
+    worldHandoff: (code, origin) => {
+      if (!workspaceWorldHandoff) throw Object.assign(new Error('World App sign-in is unavailable on this server.'), { status: 503 });
+      return workspaceWorldHandoff(code, origin);
+    },
   });
   app.workspace = workspace;
   workspace.hr.start();

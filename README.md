@@ -23,7 +23,7 @@ Services are named by ownership: `database`, `gold`, `notes` (including Dollar a
 
 Header title links return to the current site's landing page. Foundation, Gold, Dollar, Silver, Stats, World and Media share an identical compact family bar with exactly those seven links in that order and the same 11px text, spacing and layout. Readable foreground and panel colors follow each site's theme, with the current page marked in bold. Other sites retain their current-site and same-currency links alongside the family links. Every non-embedded site has the full core-site hierarchy in its footer, including cross-currency destinations and Admin.
 
-The seven family sites align header contents and page containers to a shared 1280px width, with 24px side gutters (16px on mobile) and padded site headers. The top family bar links Foundation, Gold, Dollar, Silver, World and Media; Stats keeps the family layout but is linked from the footer's Tools group (its own bar still shows it as the current site). Links to World's Explore game (`/explore/`, `/play/`) open it in a centered, chrome-free popup window sized to the screen (up to 1600×1000); modifier-clicks and blocked popups fall back to normal navigation. World game pages (Explore, Settlement, Market, Inbox, Federation and the other `#app` pages) are full-viewport apps: they omit the family bar, ecosystem footer and family layout. Their topbar carries `data-no-central-wallet`, so the shared wallet loader adds no header button; the game uses its own FTH$ chip and account menu instead. On desktop the Explore and Settlement maps fill the whole area beside the rail; Market, Inbox, Federation and guide pages share one content width (`--game-content-width`, 1680px) so headings and panels line up. Media retains its feed columns inside that container. Active family links use themed foreground and button colors so they stay readable on light and dark backgrounds.
+The seven family sites align header contents and page containers to a shared 1280px width, with 24px side gutters (16px on mobile) and padded site headers. The top family bar links Foundation, Gold, Dollar, Silver, World and Media; Stats keeps the family layout but is linked from the footer's Tools group (its own bar still shows it as the current site). Links to World's Explore game (`/explore/`, `/play/`) use ordinary same-tab navigation. Only links explicitly marked `data-game-window` request a centered, chrome-free popup (up to 1600×1000); modifier-clicks and blocked popups fall back to normal navigation. World game pages (Explore, Settlement, Market, Inbox, Federation and the other `#app` pages) are full-viewport apps: they omit the family bar, ecosystem footer and family layout. Their topbar carries `data-no-central-wallet`, so the shared wallet loader adds no header button; the game uses its own FTH$ chip and account menu instead. On desktop the Explore and Settlement maps fill the whole area beside the rail; Market, Inbox, Federation and guide pages share one content width (`--game-content-width`, 1680px) so headings and panels line up. Media retains its feed columns inside that container. Active family links use themed foreground and button colors so they stay readable on light and dark backgrounds.
 The family bar stays hidden until its links are initialized, avoiding a flash of legacy page navigation before the shared header takes over.
 Wallet and Exchange join App, Media, X, Notes and Sites in the FTHX family navigation. Reapplying shared navigation preserves unchanged links and keyboard focus. Fixed-header public pages grow with their content instead of overlapping the ecosystem footer.
 Public pages without their own skip link receive a keyboard-accessible skip-to-content control that preserves SPA routes. The ecosystem footer spans the page and uses two-column groups with larger link targets on mobile.
@@ -91,11 +91,27 @@ follow the existing read-only replica rules; never start another ledger writer.
 ### Foundation App and Silver
 
 `app.featheral.com` is a mobile-first, installable contribution workspace open to
-everyone. Connect the shared wallet, register as a visitor, create your World
-profile and bio, and select experience and work interests through icon buttons.
+everyone. Sign in or register on World, complete the shared username/avatar/bio,
+then continue to App with a short-lived, one-use, origin-bound sign-in handoff.
+App uses that same wallet and public profile; profile edits stay on World.
+Select experience and work interests through compact icon buttons.
 Pass all ecosystem orientation quizzes at 80% or more to earn membership without
 administrator approval. Sequential learning levels unlock division agendas;
 management responsibilities and protected Admin credentials remain separate.
+Only the current unfinished quiz is available; future quiz bodies/questions are
+not sent until the preceding step is passed. Failed attempts require at least
+30 real minutes before retry, enforced from persistent server timestamps across
+reloads and restarts. Passed quizzes cannot be retaken.
+Root Admin wallets can explicitly promote an active App member with
+`workspace-members` (people/teams), `workspace-tasks` (tasks/reviews), or both.
+Grants are persistent, audited and revocable; current membership and permissions
+are checked on every Admin request. Suspension/restriction clears the grant.
+Delegated administrators land directly in App administration and cannot grant
+Admin permissions, issue funds, configure payroll, deploy, access keys or manage
+other sites. Quiz levels and management roles never grant protected Admin access.
+Approved App administrators may continue from World using their built-in account
+or sign an Admin challenge with their external wallet. Root wallets must still
+sign an Admin challenge; World handoffs never bypass root signing.
 Every member sees the full prefilled Foundation/division/site/contributor chart.
 Admin's **App / organization & HR** view (`#/intranet`) manages all sites, staffing,
 task reviews and next-week compensation policy. Members have scoped channels,
@@ -141,7 +157,12 @@ Older name/avatar signatures remain valid and preserve an existing bio.
 
 ### World registration and shared Media identity
 
-World owns registration and profile setup at `/account/`. A username and password
+World owns registration at `/register/`, sign-in at `/login/` and profile setup
+at `/account/`, separate from the public homepage. Media and gameplay preserve
+their return URL and use the same World session, profile and signing provider.
+The old homepage `/#account` link redirects to `/account/`, which also retains
+the dedicated, nonce-bound Media signature approval popup.
+A username and password
 (12-256 characters) create a built-in Ethereum-compatible wallet in the browser.
 If a built-in wallet is already selected on World and its encrypted backup is
 stored in that browser, signup reuses it: enter a username and the existing wallet
@@ -155,6 +176,14 @@ sign-in is an alternative using a short-lived, origin-bound signature challenge.
 Keep an encrypted backup: password reset and recovery without the password are
 not supported. The original registration username remains the password login
 name even if the public profile is renamed.
+
+Web wallet **Account → Reset local data and connection** requires confirmation.
+It revokes this site's wallet sessions, signs out of World when run on World,
+clears this origin's Featheral connection/cache/preferences and reloads without
+automatic reconnection. The encrypted built-in wallet backup, legacy local
+game saves, server profiles, settlements, balances and extension permissions
+are preserved. Other sites' local storage is unaffected; reconnect explicitly
+when ready. Logout or storage failures are reported, not treated as success.
 
 A username, uploaded avatar and nonblank public description are required before
 World gameplay or Media participation. Legacy signed profile records stay valid
@@ -237,7 +266,7 @@ Visible wallet views refresh balances and portfolio totals every 30 seconds, wit
 
 Initial pool funding remains explicitly approved using existing balances; no liquidity or volume is created automatically. Notes charts display completed trades and actual pool spot prices. Gold reserve and Ethereum bridge/staking screens are hosted at Exchange `/gold-channel/` and `/ethereum/`, reusing the central implementations and their original APIs/signing restrictions. Old Gold conversion and central Ethereum page URLs redirect there. FTHG is never relabeled as an internal note or made tradable through fictitious reserves.
 
-World Play's **Account → Authorize World budget** explicitly switches to a separate gameplay fund without moving existing funds. Legacy direct-wallet sessions remain unchanged until signed approval; existing guest funds stay in World. Dollar's **Deposit / Withdraw** opens the same-origin World funds screen: signed deposits move existing wallet FTH$ into World, and signed withdrawals return it only to the authorized wallet. Exact requests and the original Dollar journal recover interrupted transfers without issuance or duplicate debits. Gameplay in separate mode spends only the World budget. Returning from World funds synchronizes its public account into Dollar; use **Sync World account** after changing the World identity elsewhere.
+World Play's **Account → World funds** and **Wallet** page contain the same integrated deposit/withdraw panel. Dollar's **Deposit / Withdraw in World** opens that Wallet page. Exact amounts (up to 18 decimals), Max, before/after balance previews, explicit review, pending-transfer recovery and receipts require no separate funds page or manual wallet-to-game synchronization. Signed transfers can use the authenticated World built-in wallet or its external wallet. Visible balances refresh every 30 seconds, on focus and after transfers. Game state and wallet panels refresh after settlement. Legacy direct-wallet sessions continue using one balance until an explicit separate-budget authorization; separate budgets are never silently merged with wallet funds or other settlements. Transfers retain the original exact-once Dollar journals and never mint currency. The old funds URL remains supported by the same panel.
 
 Dollar's portfolio reports combined wallet, Exchange trading and linked World assets,
 with unpriced assets explicitly excluded. Initial indicative references are
@@ -734,12 +763,12 @@ similar. FTH$ retains the historical `profiles` projection for old blocks. The
 
 ## Featheral World
 
-`sites/world.featheral.com/` is an X-style social network. The feed (`/`) supports posts of up to 280 characters, replies, reposts, likes, follows, a Following timeline, profiles, search and threads. Social actions are wallet-authorized and persisted as application database records, not currency transactions or blocks. Usernames and avatars come from the DB API wallet-profile store. One wallet signature delegates a throwaway session key for six days, so later posts and likes need no wallet popup.
+World is the public game site and shared identity home. Its Community (`/community/`) reuses the Media social application and database, supporting posts of up to 280 characters, replies, reposts, likes, follows, a Following timeline, profiles, search and threads. Social actions are wallet-authorized application records, not currency transactions or blocks. Usernames and avatars come from the shared profile store. One wallet signature delegates a throwaway session key for six days, so later posts and likes need no wallet popup. Both social API aliases require a complete World session on World and Media hosts.
 
 - Feed database browser: `/ledger/` (actions, database statistics and SQL). The dedicated `ledger.featheral.com` site hosts the FTH$ block explorer at `/explorer/` and a paginated Notes activity explorer for FTHX, FTHS and defined community notes. Notes activity is database-backed and is not represented as hash-chained blocks. The Dollar `/explorer/` URL redirects to the canonical Ledger explorer. Public Notes reads use `GET /api/notes/ledger/currencies` and `GET /api/notes/ledger/:symbol/entries?limit=50&before=<entry-id>`; pages are capped at 100 and use stable descending-ID cursors. API: `/api/v1/world/*`.
 - The wallet connection is shared across the ecosystem sites.
-- The empty Community feed (`/#/feed`) shows clearly labeled example posts for inspiration only; these are never submitted to the ledger or shown as real activity. Visitors can draft before connecting and use an example to start a blank draft. Drafts stay in memory across feed navigation, are separated by wallet, and are kept after cancelled or failed posting; reloading clears them. Publishing requires wallet sign-in.
-- Getting started: `/`; optional profile editor: `/#/setup`; quick guide: `/#/guide`. Legacy About entries redirect to home.
+- The empty Community feed (`/community/#/feed`) shows clearly labeled example posts for inspiration only; these are never submitted to the ledger or shown as real activity. Visitors can draft before connecting and use an example to start a blank draft. Drafts stay in memory across feed navigation, are separated by wallet, and are kept after cancelled or failed posting; reloading clears them. Publishing requires World sign-in and a complete profile.
+- Getting started: `/`; registration: `/register/`; login: `/login/`; required profile editor: `/account/`; community quick guide: `/community/#/guide`. Legacy About entries redirect to home.
 
 ## Admin consoles
 

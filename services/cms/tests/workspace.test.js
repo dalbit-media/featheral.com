@@ -15,7 +15,7 @@ function fixture(t) {
   t.after(() => notes.close());
   const members = ["1", "2", "3", "4", "5"].map(character => "0x" + character.repeat(40));
   async function member(index, role = "volunteer", division = "engineering") {
-    const owner = members[index]; profiles.set(owner, { username: `person${index}`, avatar: "" });
+    const owner = members[index]; profiles.set(owner, { username: `person${index}`, avatar: "https://example.test/avatar.png", bio: "Building together." });
     await workspace.apply(owner, { motivation: "Help build Featheral", experience: "building", interests: [division] });
     workspace.setMember("admin", owner, { status: "active", role, level: "learning", division, team: `${division}-general` });
     return owner;
@@ -69,8 +69,10 @@ test("App sign-in is origin-bound, nonce-limited, expiring, hashed at rest and s
 });
 test("profile-first visitor registration keeps management roles separate from quiz-earned membership", async t => {
   const { workspace, members, profiles } = fixture(t), owner = members[0];
-  await assert.rejects(workspace.apply(owner, { motivation: "Ready" }), /World profile/);
+  await assert.rejects(workspace.apply(owner, { motivation: "Ready" }), /World username, avatar and bio/);
   profiles.set(owner, { username: "Volunteer", avatar: "" });
+  await assert.rejects(workspace.apply(owner, { motivation: "Ready" }), /World username, avatar and bio/);
+  profiles.set(owner, { username: "Volunteer", avatar: "https://example.test/avatar.png", bio: "Building together." });
   const pending = await workspace.apply(owner, { motivation: "Ready", role: "director", status: "active", experience: "new", interests: ["learning"] });
   assert.equal(pending.status, "visitor"); assert.equal(pending.role, "volunteer");
   assert.throws(() => workspace.channels(owner), /membership/);
@@ -192,7 +194,7 @@ test("membership, private attachments, revisions and approved Silver survive reo
   let notes;
   t.after(() => { notes?.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   notes = new Notes(file);
-  let creation = new Creation(notes, {}), workspace = new Workspace(notes, creation.markets, () => ({ username: "PersistentInsider" }));
+  let creation = new Creation(notes, {}), workspace = new Workspace(notes, creation.markets, () => ({ username: "PersistentInsider", avatar: "https://example.test/avatar.png", bio: "Building together." }));
   const owner = "0x" + "1".repeat(40);
   await workspace.apply(owner, { motivation: "Persistent work", experience: "building", interests: ["learning"] });
   workspace.setMember("admin", owner, { status: "active", role: "volunteer", level: "learning", division: "learning", team: "learning-general" });

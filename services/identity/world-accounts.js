@@ -134,7 +134,7 @@ function createWorldAccounts({ sqlite, file, profiles, bootstrapGame, forwardedO
     if (!pathname.startsWith("/api/world-account/")) return false;
     const path = pathname.slice("/api/world-account".length);
     try {
-      if (!["/session", "/media-session", "/challenge", "/register", "/login", "/wallet-login", "/logout", "/backup", "/media-handoff", "/game"].includes(path))
+      if (!["/session", "/media-session", "/challenge", "/register", "/login", "/wallet-login", "/logout", "/backup", "/media-handoff", "/app-handoff", "/admin-handoff", "/game"].includes(path))
         throw fail(404, "Unknown World account operation.");
       const { origin, secure } = context(req);
       const mediaOrigin = secure ? "https://media.featheral.com" : `http://media.localhost${new URL(origin).port ? ":" + new URL(origin).port : ""}`;
@@ -163,7 +163,7 @@ function createWorldAccounts({ sqlite, file, profiles, bootstrapGame, forwardedO
         if (url.searchParams.has("handoff")) {
           const id = url.searchParams.get("handoff"), handoff = handoffs.get(id);
           handoffs.delete(id);
-          if (!handoff || handoff.expires <= Date.now() || req.headers.origin !== handoff.origin)
+          if (!handoff || handoff.purpose || handoff.expires <= Date.now() || req.headers.origin !== handoff.origin)
             throw fail(401, "World sign-in handoff expired. Return to World and retry.");
           row = mediaSession(handoff.token, handoff.address);
         }
@@ -219,6 +219,14 @@ function createWorldAccounts({ sqlite, file, profiles, bootstrapGame, forwardedO
           const account = db.prepare("SELECT keystore FROM world_password_accounts WHERE address=?").get(row.address);
           if (!account) throw fail(404, "This account uses an external wallet.");
           result = { keystore: account.keystore };
+        } else if (path === "/app-handoff" || path === "/admin-handoff") {
+          const purpose = path === "/app-handoff" ? "app" : "admin", targetOrigin = origin.replace("//world.", `//${purpose}.`);
+          if (input.origin !== targetOrigin || !completeProfile(profiles.get(row.address))) throw fail(403, "Complete your World profile and choose the requested return origin.");
+          for (const [id, record] of handoffs) if (record.expires <= Date.now()) handoffs.delete(id);
+          if (handoffs.size >= 10000) throw fail(503, "World sign-in is busy. Retry shortly.");
+          const code = crypto.randomBytes(32).toString("hex");
+          handoffs.set(code, { token: row.csrf, address: row.address, origin: targetOrigin, purpose, expires: Date.now() + 60000 });
+          result = { code };
         } else if (path === "/media-handoff") {
           if (input.origin !== mediaOrigin) throw fail(403, "Unsupported Media return origin.");
           for (const [id, record] of handoffs) if (record.expires <= Date.now()) handoffs.delete(id);
@@ -257,6 +265,15 @@ function createWorldAccounts({ sqlite, file, profiles, bootstrapGame, forwardedO
     mediaSession(token, address);
     if (!completeProfile(profiles.get(address))) throw fail(403, "Complete your World profile before using Media.");
   }
-  return { handle, authorizeGame, authorizeMedia, session: req => session(req, context(req).secure), view, close: () => db.close() };
+  function consumeAppHandoff(code, origin, purpose = "app") {
+    const record = typeof code === "string" && handoffs.get(code);
+    if (!record || record.purpose !== purpose || record.origin !== origin || record.expires <= Date.now())
+      throw fail(401, "World App sign-in expired. Sign in again on World.");
+    handoffs.delete(code);
+    mediaSession(record.token, record.address);
+    if (!completeProfile(profiles.get(record.address))) throw fail(403, "Complete your World profile before joining App.");
+    return record.address;
+  }
+  return { handle, authorizeGame, authorizeMedia, consumeAppHandoff, session: req => session(req, context(req).secure), view, close: () => db.close() };
 }
 module.exports = { createWorldAccounts };

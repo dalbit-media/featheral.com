@@ -4,11 +4,9 @@
 <body>
 <header><a href="/explore/">← World Play</a><h1>World funds</h1><button id="walletButton" class="wallet-icon" type="button">Wallet</button></header>
 <main>
-  <section><p class="eyebrow">Shared World budget</p><h2 id="world-balance">— FTH$</h2><p id="fund-mode">Loading your existing World account…</p><p id="fund-wallet"></p><button id="authorize" type="button" disabled>Authorize World budget</button></section>
-  <section><p class="eyebrow">Authorized wallet</p><h2 id="wallet-balance">— FTH$</h2><p>Deposits move existing wallet FTH$ into World. Withdrawals return World FTH$ only to this wallet. No Ethereum transaction, issuance or automatic transfer.</p></section>
-  <section><form id="fund-form"><label>Direction<select id="direction"><option value="deposit">Wallet → World</option><option value="withdraw">World → Wallet</option></select></label><label>FTH$ amount<span class="fund-amount"><input id="amount" aria-label="FTH$ amount" required inputmode="decimal" placeholder="0.00"><button id="max" type="button" disabled>Max</button></span></label><button id="review" type="submit" disabled>Review transfer</button></form><p id="status" role="status"></p><div id="pending"></div></section>
-  <section><h2>Recent fund transfers</h2><div id="activity"></div></section>
-  <a id="dollar-link" href="https://dollar.featheral.com/wallet/">Open Dollar wallet &amp; portfolio</a>
+  <div data-world-funds></div>
+  <p><a href="/bank/">Open integrated wallet &amp; portfolio</a></p>
 </main>
-<script src="/shared/wallet/embed.js" data-central-wallet-loader defer></script><script src="/world-funds.js" defer></script>
+<style>body{margin:0;background:#f4f8f6;color:#20352c;font:14px/1.5 system-ui}header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;max-width:850px;margin:auto}header h1{font-size:20px}main{max-width:700px;margin:auto;padding:0 16px 32px}a{color:#176b4a}</style>
+<script src="/shared/wallet/ethers.js"></script><script src="/shared/world-account.js"></script><script src="/shared/wallet/embed.js" data-central-wallet-loader defer></script><script src="/world-funds.js" defer></script>
 </body></html>

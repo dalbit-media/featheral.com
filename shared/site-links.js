@@ -153,14 +153,19 @@
   }
 
   if (current === "world" && window.location.hash === "#/setup") {
-    window.location.replace(url("world", "/account/"));
+    window.location.replace(url("world", "/account/") + window.location.search);
     return;
   }
-  if (current === "world" && /^#\/(?:feed|following|post|user|me|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {
-    window.location.replace(url("media") + window.location.search + window.location.hash);
+  if (current === "world" && !window.location.pathname.startsWith("/community/")
+    && /^#\/(?:feed|following|post|user|me|search|guide|explore)(?:\/|$)/.test(window.location.hash)) {
+    window.location.replace(url("world", "/community/") + window.location.search + window.location.hash);
     return;
   }
   window.FeatheralSites = { url, apply, current, SITES, currencies };
+  if (current === "world" && window.location.pathname === "/" && window.location.hash === "#account") {
+    window.location.replace(url("world", "/account/") + window.location.search);
+    return;
+  }
   // The Explore map needs a large, chrome-free viewport, so it opens in its own sized window.
   const EXPLORE_WINDOW = "featheral-explore";
   function openExplore(href) {
@@ -177,7 +182,7 @@
     if (window.name === EXPLORE_WINDOW || event.defaultPrevented || event.button !== 0
       || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
-    if (!link || link.hasAttribute("download")) return;
+    if (!link || link.hasAttribute("download") || !link.hasAttribute("data-game-window")) return;
     const target = new URL(link.href, window.location.href);
     const world = new URL(url("world"));
     if (target.host !== world.host || !/^\/(?:explore|play)(?:\/(?:index\.html)?)?$/.test(target.pathname)) return;
