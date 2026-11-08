@@ -11,6 +11,9 @@ import { customizationItems, isCustomizationItem } from './customization.ts';
 import type { CustomizationItem } from './customization.ts';
 import { collectorRecipes } from './collector-recipes.ts';
 import type { CollectorBundle } from './collector-recipes.ts';
+import { activityEquipmentItems, isActivityEquipment } from './activity-equipment.ts';
+import type { EquippedActivities } from './activity-equipment.ts';
+import { bulkCraftingItems, bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
@@ -52,7 +55,7 @@ export const decorationItems = {
   skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
 } satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {
@@ -74,6 +77,7 @@ export interface ItemInventory {
   items: ItemId[];
   pending: ExplorationFind[];
   equipped: VisibilityItem | null;
+  activityEquipment?: EquippedActivities;
   placements?: Partial<Record<DecorationSlot, DecorationItem>>;
   layout?: SettlementLayout;
   marketReserved?: ItemId[];
@@ -109,7 +113,7 @@ export function isCollectible(value: unknown): value is Collectible {
   return typeof value === 'string' && value.startsWith('relic-') && Object.hasOwn(terrainDetails, value.slice(6));
 }
 export function sellableItemCount(bag: ItemInventory, item: ItemId): number {
-  const protectedCopy = bag.equipped === item || (isDecorationItem(item)
+  const protectedCopy = bag.equipped === item || Object.values(bag.activityEquipment ?? {}).some(equipped => equipped === item) || (isDecorationItem(item)
     && (bag.layout?.positions[item] || Object.values(bag.placements ?? {}).includes(item))) ? 1 : 0;
   return Math.max(0, bag.items.filter(id => id === item).length - protectedCopy);
 }
@@ -135,7 +139,7 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   return resources.every(resource => found.has(resource as Resource));
 }
 export function craftingStage(item: CraftableItem): number {
-  return isDecorationItem(item) ? decorationItems[item].stage : 0;
+  return isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
 }
 export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;
@@ -143,9 +147,15 @@ export function craftingStageName(item: CraftableItem): string {
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
   return Object.fromEntries(Object.entries(craftableItems[item].cost).map(([resource, amount]) => [resource, amount * quantity]));
 }
-export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<CollectionItem, number>> {
-  if (!Object.hasOwn(collectorRecipes, item)) return {};
-  return Object.fromEntries(Object.entries(collectorRecipes[item as CollectorBundle].ingredients).map(([id, count]) => [id, count * quantity]));
+export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
+  const ingredients = isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
+    : Object.hasOwn(collectorRecipes, item) ? collectorRecipes[item as CollectorBundle].ingredients : {};
+  return Object.fromEntries(Object.entries(ingredients).map(([id, count]) => [id, count * quantity]));
+}
+export function craftingInputs(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
+  const ingredients = craftingIngredients(item, quantity), permit = bulkCraftingPermit(quantity);
+  if (permit) ingredients[permit] = (ingredients[permit] ?? 0) + 1;
+  return ingredients;
 }
 export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableItem): number {
   if (game.stage < craftingStage(item) || !recipeDiscovered(game, item)) return 0;
@@ -155,8 +165,8 @@ export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableI
   return Math.max(0, Math.min(100, ...(count ? [] : [room]),
     ...Object.entries(craftableItems[item].cost).filter(([, amount]) => amount > 0).map(([resource, amount]) =>
       Math.floor((resource === 'dollars' ? game.dollars / 10000 : game.stock[resource as Resource]) / amount)),
-    ...Object.entries(ingredients).map(([id, amount]) => Math.floor(bag.items.filter(owned => owned === id).length / amount))));
+    ...Object.entries(ingredients).map(([id, amount]) => Math.floor(sellableItemCount(bag, id as ItemId) / amount))));
 }
 export function craftingFits(bag: ItemInventory, item: CraftableItem, quantity: number): boolean {
-  return inventoryUsed(bag) - Object.values(craftingIngredients(item, quantity)).reduce((sum, amount) => sum + amount, 0) + quantity <= itemStorage[bag.storage].capacity;
+  return inventoryUsed(bag) - Object.values(craftingInputs(item, quantity)).reduce((sum, amount) => sum + amount, 0) + quantity <= itemStorage[bag.storage].capacity;
 }

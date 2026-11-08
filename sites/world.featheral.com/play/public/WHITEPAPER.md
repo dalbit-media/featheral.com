@@ -227,7 +227,7 @@ An expedition costs `(10 + 5 * ceil(distance from settlement) + 5 * (terrain wee
 
 FTH$ is the main game currency; Metal is a construction resource. Gold is separate and exchangeable with FTH$. Neither currency is cash or a promise of future token allocation.
 
-**Investigate** is a cheaper, repeatable action on discovered land, shown left of Explore. Two idle residents work for exactly one game week, paying 10% of the concurrent Explore route fee upfront (minimum FTH$0.10). Every active Investigate or Explore team doubles the next field fee. Each job has a 10% chance of one collection or activity permit; successful finds are 90% one-week and 10% four-week permits, never keepsakes or high-tier items. The server locks the result at departure, so retries and reloads cannot reroll it. Different known destinations may be investigated concurrently and reused after return. Investigations do not reveal land, add contribution or block exploration automation. Paid jobs finish despite later shortages; full item storage retains findings as pending. Already-paid legacy investigations retain their original one-resident, one-day deadline.
+**Investigate** is a cheaper, repeatable action on discovered land, shown left of Explore. Two idle residents work for exactly one game week. The upfront base fee is 10% of the undiscounted concurrent Explore route fee (minimum FTH$0.10 before equipment). Equipped investigation gear alone can reduce it by up to 50%. Every active Investigate or Explore team doubles the next field fee. Each job has a 10% chance of one collection or activity permit; successful finds are 90% one-week and 10% four-week permits, never keepsakes or high-tier items. The server locks the result at departure, so retries and reloads cannot reroll it. Different known destinations may be investigated concurrently and reused after return. Investigations do not reveal land, add contribution or block exploration automation. Paid jobs finish despite later shortages; full item storage retains findings as pending. Already-paid legacy investigations retain their original one-resident, one-day deadline.
 
 ### Item inventory, equipment, and crafting
 
@@ -250,9 +250,48 @@ Expeditions that reveal new tiles use the climate-dependent discovery plan above
 
 Decorations can occupy any empty land cell in the settlement parcel, not just six designated spaces. Craft flower planters (12 Wood, 6 Water), benches (24 Wood, 2 Metal), pioneer banners (12 Wood, 4 Metal), fountains (60 Metal, 40 Water), boardwalks (45 Wood, 6 Metal), and market canopies (36 Wood, 8 Metal), using discovered ingredients and owned resources. The catalog adds 24 decorations across nine civilization tiers: simple log seats and wildflower beds, village gazebos and clock towers, town lighting and pavilions, city solar pergolas and living walls, and capital biodomes and sky beacons. Each has distinct artwork and variable resource budgets. Metal includes mineral construction supplies, Water includes planting/filling, and Oil includes fuel/polymer processing. These are simplified settlement supply bundles.
 
-Compact crafting cards disclose **Recipe available/required ingredient types** on click, with owned/required counts and missing-resource states for the selected batch. Higher-tier decorations require the matching settlement civilization level to craft; trading and cosmetic placement remain available for owned items. Investigate and Craft each require at least two real seconds between successful actions, enforced by persisted server deadlines independently of game-clock acceleration. Requests show an activity indicator and cooldown animation. Cancellation or failed validation spends nothing and starts no cooldown; idempotent retries never duplicate an accepted action. Existing reserve prices and ledger history are preserved; new markets use signed additive authorization.
+Wide desktop settlement panels show compact crafting/building cards with visible resource costs, small icon actions and **Recipe available/required ingredient types** links. Recipe details include owned/required counts and missing-resource states for the selected batch; upgrade details preserve next-level previews and shortfalls. Higher-tier decorations require the matching settlement civilization level to craft; trading and cosmetic placement remain available for owned items. Each crafting recipe, building/construction, warehouse/storage expansion and settlement-tier upgrade has its own two-real-second cooldown. Different recipes or buildings can be used while another cools down; quantities and alternate routes to the same building cannot bypass its cooldown. Investigation retains a separate two-second cooldown. Persisted server deadlines are independent of game-clock acceleration. Requests remain serialized for safe spending and show activity/cooldown animation. Cancellation or failed validation spends nothing and starts no cooldown; idempotent retries never duplicate an accepted action. Existing reserve prices and ledger history are preserved; new markets use signed additive authorization.
 
 Placement is free after founding and uses owned items only. Each building or decoration occupies one cell; occupied cells, water and positions outside the parcel are rejected. Move or return a decoration to inventory before reusing its cell. Returning decorations never destroys items, and placed decorations still occupy one inventory slot. These cosmetics never change production, workforce, exploration visibility or rewards. Positions persist with transactional saves and exact-once retry receipts. Existing six-space layouts migrate onto the grid without losing items or ongoing work. New tier buildings find empty cells without moving existing custom layouts.
+
+### Consumable bulk crafting permits
+
+Craft one copy without a permit, or consume one matching permit for an exact batch
+of 10, 20, 50 or 100 copies. Four staged recipes combine existing decorations,
+unused collector permits and raw materials: the 10-copy permit unlocks at
+Settlement, 20 at Neighborhood, 50 at Town and 100 at City. Permits can also trade
+at spot prices. Click Craft to see owned batch options, disabled shortfalls and
+the largest feasible exact batch, then review total ingredients, permit consumption
+and output count. A higher permit does not authorize smaller batches.
+
+All spending is atomic and server-authoritative. Cancellation, shortages, invalid
+quantities and failed requests consume nothing; retries never consume twice.
+Storage accounts for the consumed permit before adding output. Batch and single
+crafting share the same recipe cooldown. Existing monetary policy, historical
+retry receipts, keys and ledger history are preserved; four additional markets
+use signed additive authorization.
+
+### Permanent activity equipment
+
+Nine craftable equipment items reuse decorations, unused collector permits and raw
+materials to lower new activity fees. Investigation has Survey satchel (10%,
+Settlement), Field survey station (25%, Village) and Precision survey array (50%,
+City). Exploration has Trail supply kit (10%, Settlement), Expedition outpost kit
+(25%, Village) and Expedition logistics network (50%, City). Attraction, meaning
+resident recruitment, has Settler welcome kit (10%, Settlement), Community welcome
+pavilion (25%, Town) and Settler hospitality network (50%, City).
+
+Equip one permanent item per activity in inventory. Owning additional copies does
+not stack effects, and the maximum discount is 50%. Fees round upward to FTH$0.0001;
+manual actions, automatic departures, affordability checks and confirmations use
+the same server-validated equipment. Investigation starts from its undiscounted
+route fee, not an exploration-discounted quote. Staffing, discovery probabilities,
+arrival counts and already-paid jobs remain unchanged. Crafting consumes unused
+ingredients atomically but does not automatically equip the result. Placed
+decoration copies, pending finds, market escrow and active automation time cannot
+be used as ingredients. Equipped copies are protected from sale; spares remain
+spot-tradable. Existing monetary policy, keys, genesis and reserve targets are
+preserved; the new markets use signed additive authorization only.
 
 ### Paid weekly collection and owned storage
 

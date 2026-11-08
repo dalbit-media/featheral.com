@@ -9,7 +9,7 @@ export const guideTopics = [
     paragraphs: ['Gather Wood here, then visit the lake at 3, 0 for Water. Only the materials needed for founding can be gathered by hand. No starting FTH$ or Metal is granted.',
       'Settle on dry land to welcome your first 12 residents. Move across known tiles for free; click unknown terrain to send an expedition.',
       'Each field team needs two idle residents. Investigate and Explore share exponential route fees: 1x, 2x, 4x, 8x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.',
-      'Investigate discovered land with two idle residents for one game week. Pay 10% of the concurrent Explore route fee (minimum FTH$0.10) for a 10% item chance; finds are 90% one-week and 10% four-week permits. Investigations do not reveal tiles. Each active Investigate or Explore team doubles the next field fee.'],
+      'Investigate discovered land with two idle residents for one game week. The base cost is 10% of the undiscounted concurrent Explore route fee (minimum FTH$0.10 before equipment). Equipped investigation gear can lower this cost by up to 50%. Item chance is 10%; finds are 90% one-week and 10% four-week permits. Investigations do not reveal tiles. Each active field team doubles the next base fee.'],
     tip: 'Try this: settle, check your Water supply, then send your first explorers.', image: 'explore', alt: 'Exploration screen with fog, terrain and resident controls.', path: '/', action: 'Explore' },
   { id: 'water', title: 'Water first. Every day.', icon: 'water', tag: 'Survival',
     intro: 'Keep a Water reserve. Collect completed resources from the header.',

@@ -90,7 +90,7 @@ export function settlementPositions(game: Game, bag: ItemInventory): SettlementL
     const item = bag.placements?.[slot];
     if (item) saved[item] = { ...legacySpaceCells[slot] };
   }
-  const active = [...buildings.map(building => building.id), ...bag.items.filter(isDecorationItem)];
+  const active = new Set([...buildings.map(building => building.id), ...bag.items.filter(isDecorationItem)]);
   const positions: SettlementLayout['positions'] = {}, occupied = new Set<string>();
   for (const id of active) {
     const position = saved[id];

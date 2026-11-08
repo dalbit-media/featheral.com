@@ -1,3 +1,15 @@
+<div class="account-layout" data-account-screen="register">
+<aside class="account-story" aria-labelledby="account-story-title">
+  <p class="eyebrow" data-public-en="YOUR WORLD STARTS HERE" data-public-ko="여기서 시작되는 나의 세계">YOUR WORLD STARTS HERE</p>
+  <h2 id="account-story-title" data-public-en="One identity. A world of possibilities." data-public-ko="하나의 계정, 끝없는 가능성.">One identity. A world of possibilities.</h2>
+  <img src="/images/featheral-world.svg" width="900" height="760" alt="" class="account-world-art">
+  <ol class="account-journey">
+    <li><span>01</span><div><strong data-public-en="Choose your sign-in" data-public-ko="로그인 방식 선택">Choose your sign-in</strong><p data-public-en="Username and password, or an existing wallet." data-public-ko="아이디와 비밀번호 또는 기존 지갑으로 시작하세요.">Username and password, or an existing wallet.</p></div></li>
+    <li><span>02</span><div><strong data-public-en="Make it yours" data-public-ko="나만의 프로필">Make it yours</strong><p data-public-en="Add your public username, avatar and description." data-public-ko="공개 아이디, 아바타와 소개를 설정하세요.">Add your public username, avatar and description.</p></div></li>
+    <li><span>03</span><div><strong data-public-en="Build and connect" data-public-ko="건설하고 연결하기">Build and connect</strong><p data-public-en="Your profile follows you into World, Community and App." data-public-ko="월드, 커뮤니티와 앱에서 같은 프로필을 사용하세요.">Your profile follows you into World, Community and App.</p></div></li>
+  </ol>
+  <a href="/#guide" class="account-guide" data-public-en="New to World? Read the guide →" data-public-ko="처음이신가요? 가이드 읽기 →">New to World? Read the guide →</a>
+</aside>
 <section id="account-setup" class="account-card world-account" aria-labelledby="account-title">
   <div class="account-actions"><button id="switch-account" type="button" hidden>Switch account</button><button id="sign-out" type="button" hidden>Sign out</button></div>
   <p class="eyebrow">One identity for World, Media and App</p>
@@ -6,7 +18,7 @@
   <p id="status" role="status" aria-live="polite">Loading your World account…</p>
   <p id="account-name" data-no-localize hidden></p>
   <div id="sign-in">
-    <nav aria-label="Account options"><button type="button" data-mode="register" aria-pressed="true">Register</button><button type="button" data-mode="login" aria-pressed="false">Sign in</button></nav>
+    <nav class="account-mode" aria-label="Account options"><button type="button" data-mode="register" aria-pressed="true">Register</button><button type="button" data-mode="login" aria-pressed="false">Sign in</button></nav>
     <form id="credentials">
       <label>Username<input name="username" required minlength="3" maxlength="24" pattern="[A-Za-z0-9_][A-Za-z0-9_.\-]{2,23}" autocomplete="username"></label>
       <label>Password<input name="password" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
@@ -14,8 +26,12 @@
       <p class="fine" id="password-note">A built-in wallet is created and encrypted in this browser. Only its encrypted backup is saved on the server for cross-device sign-in. Use a unique password of at least 12 characters. There is no password reset; keep your encrypted backup.</p>
       <button type="submit" class="primary" id="credentials-submit">Create built-in wallet</button>
     </form>
-    <p class="divider">Or</p><button type="button" id="external">Sign in with an external wallet</button>
+    <p class="divider">Or</p>
+    <div class="account-wallet-option"><h2 data-public-en="Bring your own wallet" data-public-ko="기존 지갑 사용">Bring your own wallet</h2>
+      <p class="fine" data-public-en="Connect an Ethereum wallet and approve a free sign-in message. No transfer or transaction is required." data-public-ko="이더리움 지갑을 연결하고 무료 로그인 메시지를 승인하세요. 송금이나 거래는 필요하지 않습니다.">Connect an Ethereum wallet and approve a free sign-in message. No transfer or transaction is required.</p>
+      <button type="button" id="external">Sign in with an external wallet</button></div>
   </div>
   <section id="profile" hidden><div id="profile-editor"></div><button type="button" id="finish-registration" class="primary" hidden>Finish registration</button><button type="button" id="backup" hidden>Download encrypted wallet backup</button><button type="button" id="continue" class="primary" hidden>Continue to World</button></section>
   <section id="approval" hidden><h3>Media signature request</h3><p>Only the exact message below will be signed. No funds move.</p><pre id="approval-message" data-no-localize></pre><button type="button" id="approve" class="primary">Review and approve</button><button type="button" id="reject">Reject</button></section>
 </section>
+</div>

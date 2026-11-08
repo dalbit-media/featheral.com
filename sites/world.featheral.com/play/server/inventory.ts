@@ -3,8 +3,8 @@ import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
 import type { CollectionItem } from '../src/collection.ts';
 import type { ActivityItem } from '../src/automation.ts';
-import { craftingCost, craftingFits, craftingIngredients, craftingStage, craftingStageName, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, visibilityItems } from '../src/items.ts';
-import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemInventory, VisibilityItem } from '../src/items.ts';
+import { craftingCost, craftingFits, craftingInputs, craftingStage, craftingStageName, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, sellableItemCount, visibilityItems } from '../src/items.ts';
+import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemId, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
 import { arrangementError, cellKey, legacySpaceCells, positionEntries, settlementEntityName, settlementPositions } from '../src/settlement-layout.ts';
 import type { GridPosition, SettlementEntity } from '../src/settlement-layout.ts';
@@ -13,6 +13,9 @@ import { activityKinds, isAutomationItem } from '../src/automation.ts';
 import type { ExplorationFind } from '../src/items.ts';
 import { customizationKeys, customizationName, isCustomizationItem, isTitleItem, namingItems, titleItems } from '../src/customization.ts';
 import type { CustomizationItem } from '../src/customization.ts';
+import { activityEquipmentItems, equipmentActivities, isActivityEquipment } from '../src/activity-equipment.ts';
+import type { ActivityEquipment, EquipmentActivity } from '../src/activity-equipment.ts';
+import { bulkCraftingPermit, isBulkCraftingItem, validCraftingQuantity } from '../src/bulk-crafting.ts';
 
 export function inventory(account: Account): ItemInventory {
   if (!account.inventory) {
@@ -24,16 +27,27 @@ export function inventory(account: Account): ItemInventory {
   account.inventory.layout ??= { version: 1, positions: {} };
   Object.assign(account.inventory.layout.positions, positions);
   account.game.visibilityRadius = account.inventory.equipped ? visibilityItems[account.inventory.equipped].radius : 4;
+  const equipped = account.inventory.activityEquipment ?? {};
+  for (const activity of equipmentActivities) {
+    const item = equipped[activity];
+    if (item !== undefined && (!isActivityEquipment(item) || activityEquipmentItems[item].activity !== activity || !account.inventory.items.includes(item)))
+      throw new GameError('Invalid activity equipment in inventory.');
+  }
+  account.game.activityEquipment = { ...equipped };
   return account.inventory;
 }
 export function craft(account: Account, item: CraftableItem, quantity = 1): string {
-  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) throw new GameError('Invalid crafting quantity.');
+  if (!validCraftingQuantity(quantity)) throw new GameError('Invalid crafting quantity. Choose 1, 10, 20, 50 or 100.');
   const bag = inventory(account), game = account.game;
   if (game.stage < 0) throw new GameError('Establish a settlement before crafting.');
   if (game.stage < craftingStage(item)) throw new GameError(`Requires ${craftingStageName(item)} civilization level.`);
-  const ingredients = craftingIngredients(item, quantity);
-  if (Object.entries(ingredients).some(([id, count]) => bag.items.filter(owned => owned === id).length < count))
-    throw new GameError('Not enough collector items to craft this bundle.');
+  const ingredients = craftingInputs(item, quantity);
+  const permit = bulkCraftingPermit(quantity);
+  if (permit) {
+    if (sellableItemCount(bag, permit) < 1) throw new GameError('A matching bulk crafting permit is required for this batch.');
+  }
+  if (Object.entries(ingredients).some(([id, count]) => sellableItemCount(bag, id as ItemId) < count))
+    throw new GameError(isActivityEquipment(item) || isBulkCraftingItem(item) ? 'Not enough unused decoration or collector ingredients. Return placed decorations to inventory first.' : 'Not enough collector items to craft this bundle.');
   if (!craftingFits(bag, item, quantity)) throw new GameError('Item inventory is full. Upgrade item storage first.');
   if (!recipeDiscovered(game, item)) throw new GameError('Explore the ingredient resources before crafting this item.');
   const recipe = craftableItems[item];
@@ -84,6 +98,17 @@ export function equip(account: Account, item: VisibilityItem | null): string {
   bag.equipped = item;
   inventory(account);
   return note(account.game, item ? `Equipped ${visibilityItems[item].name}. Visibility applies to future expeditions.` : 'Visibility equipment removed.');
+}
+export function equipActivity(account: Account, activity: EquipmentActivity, item: ActivityEquipment | null): string {
+  const bag = inventory(account);
+  if (item !== null && (!isActivityEquipment(item) || activityEquipmentItems[item].activity !== activity || !bag.items.includes(item)))
+    throw new GameError('Own matching activity equipment before equipping it.');
+  const equipped = bag.activityEquipment ??= {};
+  if ((equipped[activity] ?? null) === item) throw new GameError('Activity equipment selection is unchanged.');
+  if (item === null) delete equipped[activity];
+  else equipped[activity] = item;
+  inventory(account);
+  return note(account.game, item ? `Equipped ${activityEquipmentItems[item].name}. Discounts apply to new activity only.` : `Removed ${activity} equipment.`);
 }
 export function expandInventory(account: Account): string {
   const bag = inventory(account), next = itemStorage[bag.storage + 1];

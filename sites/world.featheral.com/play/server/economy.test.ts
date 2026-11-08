@@ -948,13 +948,13 @@ test('level 99 warehouse and construction upgrades stop exactly at the cap', () 
   execute(account, { type: 'warehouse' });
   assert.equal(account.warehouse, 99);
   assert.equal(snapshot(account).warehouseCost, null);
-  assert.throws(() => execute(account, { type: 'warehouse' }), /maximum level/);
+  assert.throws(() => execute(account, { type: 'warehouse' }, account.updatedAt + 2000), /maximum level/);
   for (const kind of ['housing', 'cistern', 'workshop', 'logistics'] as const) {
     account.game.constructionLevels = { ...account.game.constructionLevels, [kind]: 98 };
     execute(account, { type: 'construction', kind });
     assert.equal(account.game.constructionLevels[kind], 99);
     const saved = structuredClone(account);
-    assert.throws(() => execute(account, { type: 'construction', kind }), /maximum level/);
+    assert.throws(() => execute(account, { type: 'construction', kind }, account.updatedAt + 2000), /maximum level/);
     assert.deepEqual(account, saved);
   }
 });

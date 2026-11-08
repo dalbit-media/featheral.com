@@ -20,7 +20,7 @@
 #crafting .recipe-resources .available{color:#b9df9d}
 #crafting .recipe-resources .missing{color:#f3a7a7}
 #crafting .recipe-card>.button{min-height:44px;font-size:11px;margin-top:auto}
-.button[data-action="craft"],.button[data-action="investigate"]{position:relative;overflow:hidden}
+.button[data-action-eligible],.button.action-cooling,.button.action-working{position:relative;overflow:hidden}
 .action-feedback{font-variant-numeric:tabular-nums;font-size:10px}
 .action-feedback:empty{display:none}
 .button.action-cooling:after{content:"";position:absolute;bottom:0;left:0;width:100%;height:3px;background:#c3e7a0;transform-origin:left;transform:scaleX(var(--action-progress));transition:transform .1s linear}
@@ -28,6 +28,54 @@
 @keyframes craft-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.button.action-cooling:after{transition:none}.button.action-working .action-feedback:before{animation:none}}
 @media(max-width:380px){#crafting .craft-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}#crafting .recipe-card{padding:8px}#crafting .recipe-card:has(.recipe-details[open]){grid-column:1 / -1}}
+#crafting .craft-grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px}
+#crafting .recipe-card{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;text-align:left;padding:10px;gap:6px}
+#crafting .recipe-heading{grid-column:1 / -1;display:flex;align-items:center;gap:8px;min-width:0}
+#crafting .recipe-heading .item-art{width:34px;height:34px;margin:0;flex-shrink:0}
+#crafting .recipe-heading .item-art svg{width:34px;height:34px}
+#crafting .recipe-heading>div:not(.item-art){min-width:0}
+#crafting .recipe-card h3{font-size:12px;min-height:0;text-align:left;margin:0;line-height:1.4}
+.consumption-costs{display:flex;flex-wrap:wrap;align-items:center;gap:4px;grid-column:1 / -1;min-width:0}
+.consumption-costs .cost{font-size:10px;padding:3px 4px;gap:3px;max-width:100%;overflow-wrap:anywhere}
+.consumption-costs .cost .icon{width:12px;height:12px}
+.consumption-costs small{font-size:10px;color:var(--muted)}
+#crafting .recipe-details{grid-column:1;align-self:center}
+#crafting .recipe-details[open]{grid-column:1 / -1}
+#crafting .recipe-details summary,.settlement-task-body .upgrade-details summary{justify-content:flex-start;min-height:30px;border:0;border-radius:0;padding:0;font-size:11px;color:#c5e7b4;text-decoration:underline;text-underline-offset:3px}
+#crafting .recipe-card>.compact-item-action,.settlement-task-body .upgrade-option>.compact-item-action{justify-self:end;width:32px;min-width:32px;min-height:32px;height:32px;padding:6px;margin:0;gap:0;position:relative}
+#crafting .recipe-card>.compact-item-action .icon,.settlement-task-body .upgrade-option>.compact-item-action .icon{width:14px;height:14px}
+.compact-item-action .action-feedback:not(:empty){position:absolute;inset:0;display:grid;place-items:center;background:var(--mint);color:#122119;font-size:10px}
+.compact-item-action:has(.action-feedback:not(:empty))>.icon{visibility:hidden}
+.control-label{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.settlement-task-body .settlement-tier-card{padding:12px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.settlement-task-body .settlement-tier-card .upgrade-target,.settlement-task-body .settlement-tier-card .requirement-list{grid-column:1 / -1;margin:0}
+.settlement-task-body .settlement-tier-card .consumption-costs{grid-column:1}
+.settlement-task-body .settlement-tier-card .upgrade-target h3{font-size:14px}
+.settlement-task-body .settlement-tier-card>.compact-item-action{width:32px;min-width:32px;min-height:32px;height:32px;padding:6px}
+.settlement-task-body .settlement-tier-card>.compact-item-action>.icon{width:14px;height:14px}
+.settlement-task-body .upgrade-options{grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:8px}
+.settlement-task-body .upgrade-option{padding:12px;gap:8px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-content:start}
+.settlement-task-body .upgrade-option-heading,.settlement-task-body .upgrade-option-benefit,.settlement-task-body .upgrade-details[open]{grid-column:1 / -1}
+.settlement-task-body .upgrade-option-heading{gap:7px;align-items:center}
+.settlement-task-body .upgrade-option-heading>div{min-width:0}
+.settlement-task-body .upgrade-option-heading h3{font-size:12px}
+.settlement-task-body .upgrade-option-icon{width:28px;height:28px}
+.settlement-task-body .upgrade-option-icon .icon{width:16px;height:16px}
+.settlement-task-body .upgrade-option-heading small,.settlement-task-body .upgrade-option-status,.settlement-task-body .upgrade-option-benefit{font-size:10px;line-height:1.5}
+.settlement-task-body .upgrade-option-status{flex-basis:100%}
+.settlement-task-body .upgrade-details{min-width:0;align-self:center}
+.settlement-task-body .upgrade-details summary{display:flex;align-items:center;gap:5px;cursor:pointer;list-style:none}
+.settlement-task-body .upgrade-details summary::-webkit-details-marker{display:none}
+.settlement-task-body .upgrade-details summary .icon{width:12px;height:12px}
+.settlement-task-body .upgrade-details[open] summary .icon{transform:rotate(180deg)}
+@media(max-width:650px){
+  #crafting .craft-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #crafting .recipe-card{padding:8px}
+  #crafting .recipe-card>.compact-item-action,.settlement-task-body .upgrade-option>.compact-item-action{width:44px;min-width:44px;min-height:44px;height:44px}
+  .settlement-task-body .settlement-tier-card>.compact-item-action{width:44px;min-width:44px;min-height:44px;height:44px}
+  #crafting .recipe-details summary,.settlement-task-body .upgrade-details summary{min-height:44px}
+  #crafting .recipe-card:has(.recipe-details[open]){grid-column:1 / -1}
+}
 .settlement-sale{margin-top:24px}
 .settlement-sale form{display:grid;gap:10px;max-width:580px}
 .settlement-sale label{font-size:13px}
@@ -335,3 +383,9 @@
 }
 @media(max-width:650px) and (max-height:740px){.explore-page .minimap,.explore-page .map-coordinate,.explore-page .compass-rose{display:none}.explore-page .map-heading h1{margin-top:7px;font-size:23px}.explore-page .map-toolbar{top:auto;bottom:12px}}
 @media(max-width:650px) and (max-height:650px){.explore-page .map-heading{top:10px}.explore-page .map-heading h1{margin:0;font-size:20px}.explore-page .map-heading p,.explore-page .map-heading .eyebrow{display:none}.explore-page .map-toolbar{flex-direction:row;left:10px;right:auto;bottom:10px}.explore-page .map-toolbar>span{display:none}}
+.activity-equipment-slots{display:grid;gap:6px;margin-block:10px}.activity-equipment-slots>p{margin:0}.activity-equipment-slot{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border,#536658);border-radius:8px;min-width:0}.activity-equipment-slot>.item-art,.activity-equipment-slot>svg{width:32px;height:32px;flex:none}.activity-equipment-slot>span{display:grid;gap:2px;min-width:0;flex:1}.activity-equipment-slot small{overflow-wrap:anywhere}.activity-equipment-slot>.button{flex:none;font-size:.72rem;padding:6px}
+.activity-equipment-art{position:relative}.activity-equipment-art>b{position:absolute;right:-3px;bottom:-2px;background:#153c31;color:#bdf0d5;border:1px solid #678e7d;border-radius:4px;padding:1px 3px;font-size:9px;line-height:1.2}
+@media(max-width:650px){.inventory-item-detail:has(.activity-equipment-art){display:grid;grid-template-columns:34px repeat(2,minmax(0,1fr));align-items:center}.inventory-item-detail:has(.activity-equipment-art)>.item-art{width:34px;height:34px;margin:0}.inventory-item-detail:has(.activity-equipment-art)>div:not(.item-art){grid-column:2/-1}.inventory-item-detail:has(.activity-equipment-art)>[data-action="activity-gear"]{grid-column:2}.inventory-item-detail:has(.activity-equipment-art)>.button{min-height:44px}}
+@media(max-width:650px){.activity-equipment-slot>.button{min-height:44px}}
+@media(max-width:400px){#app .inventory-panel .inventory-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.inventory-panel .inventory-filters .button{overflow-wrap:anywhere}}
+.bulk-crafting-art{position:relative}.bulk-crafting-art>b{position:absolute;right:-2px;bottom:-2px;font-size:9px;background:#153c31;color:#d5edd0;border-radius:4px;padding:1px 3px}.recipe-bulk-hint{grid-column:1/-1;color:#c5e7b4;font-size:10px}

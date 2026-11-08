@@ -8,6 +8,8 @@ import { monetaryPolicy } from './monetary-policy.ts';
 import { constructionLevel, constructions, isConstruction } from './constructions.ts';
 import type { Construction } from './constructions.ts';
 import { recruitmentClimate, weeklyClimate } from './climate.ts';
+import { discountedActivityCost } from './activity-equipment.ts';
+import type { EquippedActivities } from './activity-equipment.ts';
 
 export type Resource = 'wood' | 'water' | 'metal' | 'oil';
 export type Terrain = 'forest' | 'meadow' | 'water' | 'mountain' | 'oil' | 'lithium'
@@ -76,6 +78,7 @@ export interface Game {
   harvested: Record<string, number>;
   light: number;
   visibilityRadius?: number;
+  activityEquipment?: EquippedActivities;
   bank: boolean;
   townhall: boolean;
   waterFacilities?: Partial<Record<WaterFacility, boolean>>;
@@ -189,7 +192,7 @@ export function upgrade(game: Game): string {
 }
 export function invite(game: Game, time?: number): string {
   if (game.stage < 0) throw new GameError('Establish your first settlement before inviting residents.');
-  pay(game, { dollars: recruitmentDollars(game.population, constructionLevel(game, 'housing'), time) });
+  pay(game, { dollars: recruitmentDollars(game.population, constructionLevel(game, 'housing'), time, game) });
   return note(game, `Recruiting ${recruitmentAmount(game.population, constructionLevel(game, 'housing'), time).toLocaleString()} residents. Arrival in one game week.`);
 }
 export function recruitmentAmount(population: number, housingLevel = 0, time?: number): number {
@@ -199,8 +202,9 @@ export function recruitmentAmount(population: number, housingLevel = 0, time?: n
 export function recruitmentMetal(population: number): number {
   return 10 + Math.ceil(population / 10);
 }
-export function recruitmentDollars(population: number, housingLevel = 0, time?: number): number {
-  return recruitmentAmount(population, housingLevel, time) * monetaryPolicy.recruitmentPerResident;
+export function recruitmentDollars(population: number, housingLevel = 0, time?: number, game?: Pick<Game, 'activityEquipment'>): number {
+  const cost = recruitmentAmount(population, housingLevel, time) * monetaryPolicy.recruitmentPerResident;
+  return game ? discountedActivityCost(game, 'attraction', cost) : cost;
 }
 export function build(game: Game, kind: 'bank' | 'townhall' | 'light' | WaterFacility | IncomeFacility): string {
   if (isIncomeFacility(kind)) {

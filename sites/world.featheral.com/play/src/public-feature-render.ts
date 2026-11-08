@@ -1,4 +1,4 @@
-import { publicWorldLinks, worldPublicOrigin } from './public-feature-content.ts';
+import { publicFeaturePages, publicWorldLinks, worldPublicOrigin } from './public-feature-content.ts';
 import type { PublicCopy, PublicFeature } from './public-feature-content.ts';
 import { readFileSync } from 'node:fs';
 
@@ -8,6 +8,8 @@ const copy = (value: PublicCopy): string => `data-public-en="${escape(value[0])}
 const text = (tag: string, value: PublicCopy, attributes = ''): string => `<${tag} ${copy(value)} ${attributes}>${escape(value[0])}</${tag}>`;
 
 export function renderPublicWorldNav(current = ''): string {
+  const page = publicFeaturePages.find(page => page.path === current);
+  if (page) current = `/#${page.visual}`;
   return readFileSync(new URL('../../../../shared/world-navigation.html', import.meta.url), 'utf8')
     .replace(`href="${current}"`, `href="${current}" aria-current="page"`);
 }

@@ -15,10 +15,20 @@ test("World community reuses the Media feed and assets without duplicating conte
   assert.match(html, /src="\/shared\/world-account.js"/);
   assert.match(html, /id="composerHost"/);
   assert.doesNotMatch(html, /WORLD_PUBLIC_NAV/);
-  assert.equal((html.match(/class="world-submenu"/g) || []).length, 3);
+  assert.equal((html.match(/class="world-submenu"/g) || []).length, 2);
   assert.match(html, /data-site="world" data-path="\/login\/"/);
   assert.match(html, /data-site="world" data-path="\/register\/"/);
-  assert.match(mediaNavigationHtml('<!-- WORLD_PUBLIC_NAV -->'), /href="https:\/\/world.featheral.com\/features\/exploration\/"/);
+  assert.match(mediaNavigationHtml('<!-- WORLD_PUBLIC_NAV -->'), /href="https:\/\/world.featheral.com\/#exploration"/);
+  assert.match(html, /data-path="\/#community" aria-current="page"/);
+});
+test("legacy World information routes forward to one hub, while gameplay and account routes stay separate", () => {
+  for (const [route, section] of [["/features/exploration", "exploration"], ["/features/settlements", "settlements"],
+    ["/features/marketplace", "marketplace"], ["/features/federations", "federations"], ["/guide", "guide"], ["/roadmap", "roadmap"]]) {
+    for (const suffix of ["", "/", "/index.html"])
+      assert.deepEqual(worldResource("world", route + suffix), { redirect: "world", pathname: "/#" + section });
+  }
+  for (const route of ["/explore/", "/settlement/", "/login/", "/register/", "/account/", "/whitepaper/"])
+    assert.deepEqual(worldResource("world", route), { directory: path.join("world.featheral.com", "play", "dist"), pathname: route });
 });
 test("World feed hashes stay within Community, and ordinary Play links no longer open a different window", () => {
   const links = fs.readFileSync(path.join(__dirname, "../../../shared/site-links.js"), "utf8");

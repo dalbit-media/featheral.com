@@ -9,6 +9,7 @@ import type { CollectionItem } from './collection.ts';
 import type { ActivityItem, ActivityKind } from './automation.ts';
 import type { Customization, CustomizationItem } from './customization.ts';
 import type { ActionReadyAt } from './action-timing.ts';
+import type { ActivityEquipment, EquipmentActivity } from './activity-equipment.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
@@ -21,6 +22,7 @@ export type Command =
   | { type: 'craft'; item: CraftableItem; quantity?: number }
   | { type: 'map-collect'; x: number; y: number }
   | { type: 'equip'; item: VisibilityItem | null }
+  | { type: 'activity-gear'; activity: EquipmentActivity; item: ActivityEquipment | null }
   | { type: 'decorate'; slot: DecorationSlot; item: DecorationItem | null }
   | { type: 'arrange'; entity: SettlementEntity; position: GridPosition | null }
   | { type: 'diplomacy'; action: 'gift' | 'join' | 'form' | 'vote' }

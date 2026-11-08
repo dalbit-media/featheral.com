@@ -4,6 +4,13 @@ const fs = require("node:fs");
 
 function worldResource(site, pathname) {
   if (site === "world") {
+    const publicSections = {
+      "/features/exploration": "exploration", "/features/settlements": "settlements",
+      "/features/marketplace": "marketplace", "/features/federations": "federations",
+      "/guide": "guide", "/roadmap": "roadmap",
+    };
+    const section = publicSections[pathname.replace(/\/index\.html$/, "").replace(/\/$/, "")];
+    if (section) return { redirect: "world", pathname: `/#${section}` };
     if (pathname === "/community") return { redirect: "world", pathname: "/community/" };
     if (["/community/", "/community/index.html"].includes(pathname))
       return { directory: "media.featheral.com", pathname: "/index.html" };
@@ -42,7 +49,7 @@ function worldResource(site, pathname) {
 function mediaNavigationHtml(html) {
   const nav = fs.readFileSync(path.join(__dirname, "..", "shared", "world-navigation.html"), "utf8")
     .replace(/href="([^"]+)"/g, (_, target) => `href="https://world.featheral.com${target}" data-site="world" data-path="${target}"`)
-    .replace('data-path="/community/"', 'data-path="/community/" aria-current="page"');
+    .replace('data-path="/#community"', 'data-path="/#community" aria-current="page"');
   return html.replace('<!-- WORLD_PUBLIC_NAV -->', nav);
 }
 function worldCommunityHtml(html) {

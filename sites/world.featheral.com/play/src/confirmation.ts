@@ -7,9 +7,80 @@ import type { Language } from './i18n.ts';
 import { icon } from './icons.ts';
 import { isMarketResource, marketAssetName } from './market.ts';
 import { formatResourceAmount } from './resource-units.ts';
+import type { CraftBatchOption } from './bulk-crafting.ts';
+import { itemName } from './items.ts';
 
 let activeDialog: HTMLDialogElement | null = null;
 export const confirmationOpen = (): boolean => activeDialog !== null;
+
+export function chooseCraftBatch(subject: string, options: CraftBatchOption[], language: Language): Promise<number | null> {
+  if (activeDialog) throw new Error('Please wait for the current server request.');
+  const trigger = document.activeElement, dialog = document.createElement('dialog');
+  activeDialog = dialog;
+  dialog.className = 'consumption-dialog craft-batch-dialog';
+  dialog.setAttribute('aria-labelledby', 'craft-batch-title');
+  const t = (text: string) => translate(text, language);
+  const heading = document.createElement('h2');
+  heading.id = 'craft-batch-title';
+  heading.textContent = t('Choose crafting batch');
+  const description = document.createElement('p');
+  description.className = 'consumption-subject';
+  description.textContent = t(subject);
+  const note = document.createElement('p');
+  note.className = 'consumption-note';
+  note.textContent = t('Bulk crafting consumes one matching permit plus all batch ingredients. Only exact batches are allowed. Nothing is spent until you confirm.');
+  const choices = document.createElement('div');
+  choices.className = 'craft-batch-choices';
+  const maximum = Math.max(1, ...options.filter(option => !option.reason).map(option => option.quantity));
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'button';
+    button.dataset.craftBatch = String(option.quantity);
+    button.disabled = option.reason !== null;
+    const label = document.createElement('strong'), detail = document.createElement('small');
+    label.textContent = option.quantity === 1 ? t('Craft one') : t(`Craft ${option.quantity} copies`);
+    detail.textContent = option.reason ? t(option.reason) : option.permit
+      ? `${t(itemName(option.permit))} · ${t('Owned')}: ${option.owned} · ${t('Consumes one permit')}${option.quantity === maximum ? ` · ${t('Maximum available batch')}` : ''}`
+      : t('No permit required');
+    button.append(label, detail);
+    button.addEventListener('click', () => dialog.close(String(option.quantity)));
+    choices.append(button);
+  }
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'button';
+  cancel.textContent = t('Cancel');
+  cancel.autofocus = true;
+  dialog.append(heading, description, note, choices, cancel);
+  return new Promise((resolve, reject) => {
+    const cancelDialog = () => dialog.close('cancel');
+    const cleanup = () => {
+      window.removeEventListener('pagehide', cancelDialog);
+      activeDialog = null;
+      dialog.remove();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true });
+    };
+    dialog.addEventListener('close', () => {
+      const choice = options.find(option => !option.reason && String(option.quantity) === dialog.returnValue);
+      cleanup();
+      resolve(choice?.quantity ?? null);
+    }, { once: true });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); cancelDialog(); });
+    dialog.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelDialog(); }
+    });
+    cancel.addEventListener('click', cancelDialog);
+    dialog.addEventListener('click', event => {
+      const bounds = dialog.getBoundingClientRect();
+      if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) cancelDialog();
+    });
+    window.addEventListener('pagehide', cancelDialog, { once: true });
+    document.body.append(dialog);
+    try { dialog.showModal(); }
+    catch (error) { cleanup(); reject(error); }
+  });
+}
 
 export function confirmConsumption(quote: ConsumptionQuote, language: Language): Promise<boolean> {
   if (activeDialog) throw new Error('Please wait for the current server request.');

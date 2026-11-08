@@ -6,7 +6,7 @@ import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/
 import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
-import { addPermitFind, arrange, collectFinds, craft, decorate, equip, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
+import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
 import { isSettlementEntity } from '../src/settlement-layout.ts';
 import { fthgScale } from '../src/fthg.ts';
 import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, settlementConsumptionForDays, settlementUpkeep, suppliedWorkWeeks, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
@@ -23,8 +23,10 @@ import { findActivityItem, findCustomizationItem, useCustomization } from './inv
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from '../src/customization.ts';
 import type { Customization } from '../src/customization.ts';
 import { expeditionFindPlan } from '../src/climate.ts';
-import { actionRemaining, actionThrottleMs } from '../src/action-timing.ts';
+import { actionRemaining, actionThrottleMs, timedActionKey } from '../src/action-timing.ts';
 import type { TimedAction } from '../src/action-timing.ts';
+import { activityEquipmentItems, isActivityEquipment, isEquipmentActivity } from '../src/activity-equipment.ts';
+import { validCraftingQuantity } from '../src/bulk-crafting.ts';
 
 interface LegacyWorkforce {
   crews: Partial<Record<Resource, { workers: number; readyAt: number; weeklyYield: number;
@@ -315,7 +317,7 @@ function activityReason(account: Account, activity: ActivityKind): string | null
   } else {
     if (account.recruitment) return 'Waiting for recruitment arrival';
     const amount = recruitmentAmount(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account));
-    const cost = recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account));
+    const cost = recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account), account.game);
     if (!Number.isSafeInteger(account.game.population + amount) || !Number.isSafeInteger(cost * dollarsScale)) return 'Population limit reached';
     if (account.game.dollars < cost * dollarsScale) return 'Not enough FTH$ for recruitment.';
   }
@@ -346,6 +348,7 @@ function runActivityAutomation(account: Account, event: number): void {
   }
 }
 export function accrue(account: Account, time: number): void {
+  inventory(account);
   const now = Math.max(account.updatedAt, time);
   initializeUpkeep(account, now);
   const cap = capacity(account);
@@ -542,7 +545,7 @@ export function snapshot(account: Account): Snapshot {
     collection: { fees: Object.fromEntries(resources.map(resource => [resource, (account.pickupFees?.[resource] ?? 0) / dollarsScale])) as Stock,
       automationUntil: { ...(account.automationUntil ?? empty()) } },
     resourceAccess: resourceAccess(account.game, climateTime(account), !physicalAt(account, account.updatedAt)),
-    recruitmentDollars: recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account)) };
+    recruitmentDollars: recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account), account.game) };
 }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Expected a JSON object.');
@@ -560,6 +563,7 @@ export function parseCommand(value: unknown): Command {
     'activate-collection': ['item'], 'collect-sell': ['resource', 'quantity', 'minimumDollars'],
     'use-customization': ['item', 'value'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
+    'activity-gear': ['activity', 'item'],
     'federation-contribute': ['asset', 'amount'],
   };
   if (typeof c.type !== 'string' || !Object.hasOwn(fields, c.type)
@@ -576,8 +580,9 @@ export function parseCommand(value: unknown): Command {
     || (c.type === 'trade' && (!oneOf(c.resource, resources) || !oneOf(c.direction, ['buy', 'sell']) || typeof c.amount !== 'number' || !Number.isSafeInteger(c.amount) || c.amount < 1 || c.amount > 10000))
     || (c.type === 'build' && !oneOf(c.kind, ['bank', 'townhall']) && !isWaterFacility(c.kind) && !isIncomeFacility(c.kind))
     || (c.type === 'construction' && !isConstruction(c.kind))
-    || (c.type === 'craft' && (!isCraftableItem(c.item) || (Object.hasOwn(c, 'quantity') && (typeof c.quantity !== 'number' || !Number.isSafeInteger(c.quantity) || c.quantity < 1 || c.quantity > 100))))
+    || (c.type === 'craft' && (!isCraftableItem(c.item) || (Object.hasOwn(c, 'quantity') && (typeof c.quantity !== 'number' || !validCraftingQuantity(c.quantity)))))
     || (c.type === 'equip' && c.item !== null && !isVisibilityItem(c.item))
+    || (c.type === 'activity-gear' && (!isEquipmentActivity(c.activity) || (c.item !== null && (!isActivityEquipment(c.item) || activityEquipmentItems[c.item].activity !== c.activity))))
     || (c.type === 'decorate' && (!isDecorationSlot(c.slot) || (c.item !== null && !isDecorationItem(c.item))))
     || (c.type === 'arrange' && !isSettlementEntity(c.entity))
     || (c.type === 'diplomacy' && !oneOf(c.action, ['gift', 'join', 'form', 'vote']))
@@ -599,6 +604,16 @@ function enforceActionThrottle(account: Account, action: TimedAction, realTime: 
   if (remaining) throw new ApiError(429, `Action cooling down. Try again in ${Math.ceil(remaining / 1000)} seconds.`);
 }
 export function execute(account: Account, command: Command, realTime = account.updatedAt,
+  sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
+  contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
+  const key = timedActionKey(command);
+  inventory(account);
+  if (key && key !== 'investigate') enforceActionThrottle(account, key, realTime);
+  const message = executeCommand(account, command, realTime, sellPickup, contribute);
+  if (key) (account.actionReadyAt ??= {})[key] = realTime + actionThrottleMs;
+  return message;
+}
+function executeCommand(account: Account, command: Command, realTime: number,
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
   contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
   const game = account.game;
@@ -661,7 +676,6 @@ export function execute(account: Account, command: Command, realTime = account.u
         readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
-      (account.actionReadyAt ??= {}).investigate = realTime + actionThrottleMs;
       return note(game, 'Two residents departed to investigate known terrain for one game week.');
     }
     case 'assign': {
@@ -696,13 +710,9 @@ export function execute(account: Account, command: Command, realTime = account.u
         ...game.incomeFacilities, [command.kind === 'workshop' ? 'workshop' : 'trade-hub']: true };
       return note(game, `${facility.name} upgraded to level ${level}. Benefits apply to new activity.`);
     }
-    case 'craft': {
-      enforceActionThrottle(account, 'craft', realTime);
-      const message = craft(account, command.item, command.quantity);
-      (account.actionReadyAt ??= {}).craft = realTime + actionThrottleMs;
-      return message;
-    }
+    case 'craft': return craft(account, command.item, command.quantity);
     case 'equip': return equip(account, command.item);
+    case 'activity-gear': return equipActivity(account, command.activity, command.item);
     case 'decorate': return decorate(account, command.slot, command.item);
     case 'arrange': return arrange(account, command.entity, command.position);
     case 'item-storage': return expandInventory(account);

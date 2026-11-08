@@ -24,20 +24,23 @@ function fixture(): Account {
   account.workforce!.crews = {};
   return account;
 }
-test('craft cooldown covers all recipes and batches, survives serialization, and accepts exactly 2000 real ms', () => {
+test('craft cooldown is per recipe, covers all batches, survives serialization, and accepts exactly 2000 real ms', () => {
   const account = fixture();
-  execute(account, { type: 'craft', item: 'torch', quantity: 3 }, start);
-  assert.equal(account.actionReadyAt?.craft, start + actionThrottleMs);
+  account.inventory!.items.push('craft-batch-10');
+  execute(account, { type: 'craft', item: 'torch', quantity: 10 }, start);
+  assert.equal(account.actionReadyAt?.['craft:torch'], start + actionThrottleMs);
   const restored: Account = JSON.parse(JSON.stringify(account));
   for (const time of [start, start + 250, start + 1999, start - 1000]) {
     const before = structuredClone(restored);
-    assert.throws(() => execute(restored, { type: 'craft', item: 'bench' }, time),
+    assert.throws(() => execute(restored, { type: 'craft', item: 'torch', quantity: 1 }, time),
       (error: unknown) => error instanceof ApiError && error.status === 429);
     assert.deepEqual(restored, before);
   }
-  execute(restored, { type: 'craft', item: 'bench' }, start + 2000);
-  assert.equal(restored.inventory!.items.length, 4);
-  assert.equal(snapshot(restored).actionReadyAt?.craft, start + 4000);
+  execute(restored, { type: 'craft', item: 'bench' }, start + 300);
+  execute(restored, { type: 'craft', item: 'torch' }, start + 2000);
+  assert.equal(restored.inventory!.items.length, 12);
+  assert.equal(snapshot(restored).actionReadyAt?.['craft:torch'], start + 4000);
+  assert.equal(snapshot(restored).actionReadyAt?.['craft:bench'], start + 2300);
 });
 test('investigate cooldown spans destinations but is independent of craft and accelerated game time', () => {
   const account = fixture();
@@ -95,13 +98,15 @@ test('HTTP rejects forged throttle fields and new IDs, preserves balances, and p
     for (const elapsed of [300, 1999]) {
       time = start + elapsed;
       const before = store.read(identity.token, session => structuredClone(session.account));
-      const denied = await post(body({ type: 'craft', item: 'bench' }));
+      const denied = await post(body({ type: 'craft', item: 'torch' }));
       assert.equal(denied.status, 429);
       assert.match((await denied.json()).error, /cooling down/);
       assert.deepEqual(store.read(identity.token, session => session.account), before);
     }
     assert.equal((await post({ ...body({ type: 'craft', item: 'torch' }), actionReadyAt: {} })).status, 400);
     time = start + 2000;
+    assert.equal((await post(body({ type: 'craft', item: 'torch' }))).status, 200);
+    time += 300;
     assert.equal((await post(body({ type: 'craft', item: 'bench' }))).status, 200);
     const next = store.read(identity.token, session => nextInvestigation(session.account.game)!);
     time += 300;
@@ -113,4 +118,29 @@ test('HTTP rejects forged throttle fields and new IDs, preserves balances, and p
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     store.close();
   }
+});
+test('buildings and upgrades throttle each facility independently and only successful actions start timers', () => {
+  const account = fixture();
+  account.game.stage = 8;
+  execute(account, { type: 'construction', kind: 'housing' }, start);
+  execute(account, { type: 'construction', kind: 'cistern' }, start + 300);
+  execute(account, { type: 'warehouse' }, start + 600);
+  const before = structuredClone(account);
+  for (const command of [{ type: 'construction', kind: 'housing' }, { type: 'construction', kind: 'cistern' }, { type: 'warehouse' }] as const)
+    assert.throws(() => execute(account, command, start + 1999), /cooling down/);
+  assert.deepEqual(account, before);
+  execute(account, { type: 'construction', kind: 'housing' }, start + 2000);
+  execute(account, { type: 'construction', kind: 'cistern' }, start + 2300);
+  execute(account, { type: 'warehouse' }, start + 2600);
+  assert.equal(account.game.constructionLevels?.housing, 2);
+  assert.equal(account.game.constructionLevels?.cistern, 2);
+  assert.equal(account.warehouse, 2);
+  execute(account, { type: 'construction', kind: 'workshop' }, start + 3000);
+  assert.throws(() => execute(account, { type: 'build', kind: 'workshop' }, start + 3300), /cooling down/);
+  execute(account, { type: 'build', kind: 'well' }, start + 3300);
+  execute(account, { type: 'build', kind: 'rainCollector' }, start + 3600);
+  assert.equal(account.actionReadyAt?.['building:well'], start + 5300);
+  assert.equal(account.actionReadyAt?.['building:rainCollector'], start + 5600);
+  assert.throws(() => execute(account, { type: 'build', kind: 'well' }, start + 5300), /already/);
+  assert.equal(account.actionReadyAt?.['building:well'], start + 5300);
 });

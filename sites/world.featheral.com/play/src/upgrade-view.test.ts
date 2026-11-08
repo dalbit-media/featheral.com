@@ -95,7 +95,7 @@ test('warehouse and all constructions reach level 99 with exact reviewed costs, 
   assert.equal(account.game.stock.wood, original.game.stock.wood - cost.wood);
   assert.equal(account.game.stock.metal, original.game.stock.metal - cost.metal);
   assert.deepEqual(apply(account, body, account.updatedAt, account.updatedAt), result);
-  assert.throws(() => execute(account, { type: 'warehouse' }), /maximum level/);
+  assert.throws(() => execute(account, { type: 'warehouse' }, account.updatedAt + 2000), /maximum level/);
   for (const kind of constructionKeys) {
     account.game.constructionLevels = { ...account.game.constructionLevels, [kind]: 98 };
     const before = state(account), required = constructionCost(account.game, kind)!;
@@ -104,7 +104,7 @@ test('warehouse and all constructions reach level 99 with exact reviewed costs, 
     execute(account, { type: 'construction', kind });
     assert.equal(constructionLevel(account.game, kind), 99);
     assert.deepEqual(state(account).workforce.crews, before.workforce.crews);
-    assert.throws(() => execute(account, { type: 'construction', kind }), /maximum/);
+    assert.throws(() => execute(account, { type: 'construction', kind }, account.updatedAt + 2000), /maximum/);
   }
 });
 test('upgrade status and review labels are bilingual, including long names and shortage explanations', () => {
@@ -119,4 +119,15 @@ test('upgrade status and review labels are bilingual, including long names and s
   account.game.constructionLevels = { cistern: 20 };
   assert.ok(resourceCapacity(capacity(account), 'water', account.game) > capacity(account));
   assert.match(constructionUpgradeCards(state(account), 'ko'), /현재/);
+});
+test('compact building cards show exact costs before recipe disclosures while preserving benefit previews and icon labels', () => {
+  const html = constructionUpgradeCards(state(fixture()), 'en');
+  const housing = html.split('id="upgrade-housing-name"')[1].split('</article>')[0];
+  assert.ok(housing.indexOf('consumption-costs') < housing.indexOf('<details'));
+  assert.match(housing, /6?[,0-9]+ kg/);
+  assert.match(housing, /data-detail="upgrade-housing-recipe"/);
+  assert.doesNotMatch(housing, /<details[^>]* open/);
+  assert.match(housing, /compact-item-action[^>]*data-construction="housing"[^>]*data-action-eligible="true"/);
+  assert.match(housing, /aria-label="Review build: Residential quarter, Level 1"/);
+  assert.match(housing, /class="control-label">Review build<\/span>/);
 });

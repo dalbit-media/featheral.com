@@ -1,7 +1,7 @@
 import { buildingCosts, diplomacyCosts, recruitmentAmount, stages } from './engine.ts';
 import type { Cost, Resource } from './engine.ts';
 import type { Command, Snapshot } from './api-types.ts';
-import { craftingCost, craftingIngredients, itemName, itemStorage } from './items.ts';
+import { craftingCost, craftingIngredients, craftingInputs, itemName, itemStorage } from './items.ts';
 import { isTitleItem } from './customization.ts';
 import { explorationCount, explorationQuote, investigationQuote } from './workforce.ts';
 import { activityItemDetails, activityName } from './automation.ts';
@@ -12,6 +12,8 @@ import { incomeFacilities, isIncomeFacility } from './income.ts';
 import { constructionCost, constructionLevel, constructions } from './constructions.ts';
 import { collectionItemDetails } from './collection.ts';
 import { dollarsScale } from './dollars.ts';
+import { activityEquipmentBenefit, activityEquipmentDiscount, isActivityEquipment } from './activity-equipment.ts';
+import { bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
 
 export interface ConsumptionAmount { asset: MarketAsset | 'fthg' | 'dollars'; amount: number }
 export interface ConsumptionQuote {
@@ -75,21 +77,24 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const cost = explorationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Explore', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Assigned residents return when the expedition finishes.',
-          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']), weeks: cost.weeks, residents: 2 };
+          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.',
+          ...(activityEquipmentDiscount(game, 'exploration') ? [`Equipped gear reduces exploration fees by ${activityEquipmentDiscount(game, 'exploration')}%. Paid jobs stay unchanged.`] : [])]), weeks: cost.weeks, residents: 2 };
     }
     case 'investigate': {
       const cost = investigationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Investigate', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Two idle residents return after one game week. Known terrain is not expanded.',
           '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.',
-          'Costs 10% of the concurrent Explore route fee, minimum FTH$0.10.',
+          'Costs 10% of the undiscounted concurrent Explore route fee, minimum FTH$0.10 before equipment discounts.',
+          ...(activityEquipmentDiscount(game, 'investigation') ? [`Equipped gear reduces investigation fees by ${activityEquipmentDiscount(game, 'investigation')}%. Paid jobs stay unchanged.`] : []),
           'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']),
         weeks: cost.weeks, residents: 2 };
     }
     case 'invite':
       return { ...quote('Recruit residents', 'Residents', { dollars: state.recruitmentDollars },
         ['Payment is made now. Residents arrive after one full game week.',
-          'Season, daily weather and temperature affect new recruitment. The paid arrival count is locked at departure.']), weeks: 1,
+          'Season, daily weather and temperature affect new recruitment. The paid arrival count is locked at departure.',
+          ...(activityEquipmentDiscount(game, 'attraction') ? [`Equipped gear reduces attraction fees by ${activityEquipmentDiscount(game, 'attraction')}%. Paid jobs stay unchanged.`] : [])]), weeks: 1,
         arrivals: recruitmentAmount(game.population, constructionLevel(game, 'housing'), state.physicalVersion ? state.serverTime : undefined) };
     case 'construction': {
       const cost = constructionCost(game, command.kind);
@@ -117,8 +122,15 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
     case 'craft':
       return { ...quote('Craft', `${command.quantity ?? 1} × ${itemName(command.item)}`, craftingCost(command.item, command.quantity)),
         costs: [...amounts(craftingCost(command.item, command.quantity)),
-          ...Object.entries(craftingIngredients(command.item, command.quantity)).map(([asset, amount]) => ({ asset: asset as MarketAsset, amount }))],
-        notes: Object.keys(craftingIngredients(command.item)).length ? ['Collector recipes consume owned permits, not active automation time or market escrow. Total collection time is preserved.'] : [] };
+          ...Object.entries(craftingInputs(command.item, command.quantity)).map(([asset, amount]) => ({ asset: asset as MarketAsset, amount }))],
+        receives: [{ asset: command.item, amount: command.quantity ?? 1 }],
+        notes: [...(bulkCraftingPermit(command.quantity ?? 1) ? ['Consumes one matching bulk crafting permit for this exact batch. Cancellation or failure consumes nothing.'] : []),
+          ...(isBulkCraftingItem(command.item) ? ['Consumes unused decorations and collector permits permanently. Use this permit when choosing an exact bulk batch after clicking Craft.']
+          : isActivityEquipment(command.item) ? [
+          'Consumes unused decorations and collector permits permanently. Placed decorations, active timers, pending finds and market escrow cannot be used.',
+          `${activityEquipmentBenefit(command.item)}. Equip one item per activity; discounts do not stack.`,
+          'Equipment is permanent and affects new manual and automatic jobs only. Crafting does not equip it automatically.',
+        ] : Object.keys(craftingIngredients(command.item)).length ? ['Collector recipes consume owned permits, not active automation time or market escrow. Total collection time is preserved.'] : [])] };
     case 'diplomacy':
       if (command.action === 'gift') return quote('Send goodwill shipment', 'Evergreen Union', diplomacyCosts.gift);
       if (command.action === 'form') return quote('Found federation', 'Verdant Federation', diplomacyCosts.form);

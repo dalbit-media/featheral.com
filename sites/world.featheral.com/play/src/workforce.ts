@@ -10,6 +10,7 @@ import { monetaryPolicy } from './monetary-policy.ts';
 import { productionClimate, weeklyClimate } from './climate.ts';
 import { worldDayMs } from './environment.ts';
 import { resourceBasePrice, resourceEconomy } from './resource-units.ts';
+import { discountedActivityCost } from './activity-equipment.ts';
 
 export const resourceKeys: Resource[] = ['wood', 'water', 'metal', 'oil'];
 export const emptyAllocation = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
@@ -89,7 +90,7 @@ export function fundAllocation(game: Game, pending: Stock, capacity: number, all
   return plan;
 }
 
-export function explorationQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: number; reward: number } {
+function routeQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: number; reward: number } {
   if (!Number.isSafeInteger(concurrent) || concurrent < 0) throw new RangeError('Invalid concurrent expedition count.');
   const home = game.home ?? game.position;
   const weeks = terrainDetails[terrainAt(x, y, game.seed)].weeks;
@@ -97,11 +98,16 @@ export function explorationQuote(game: Game, x: number, y: number, concurrent = 
     + (weeks - 1) * monetaryPolicy.explorationPerExtraWeek;
   return { dollars: dollars * 2 ** concurrent, weeks, reward: 0 };
 }
+export function explorationQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: number; reward: number } {
+  const quote = routeQuote(game, x, y, concurrent);
+  return { ...quote, dollars: discountedActivityCost(game, 'exploration', quote.dollars) };
+}
 export function explorationCount(expeditions: readonly Expedition[]): number {
   return expeditions.length;
 }
 export function investigationQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: 1 } {
-  return { dollars: Math.max(.1, Math.ceil(explorationQuote(game, x, y, concurrent).dollars * dollarsScale / 10) / dollarsScale), weeks: 1 };
+  const cost = Math.max(.1, Math.ceil(routeQuote(game, x, y, concurrent).dollars * dollarsScale / 10) / dollarsScale);
+  return { dollars: discountedActivityCost(game, 'investigation', cost), weeks: 1 };
 }
 export function nextInvestigation(game: Game, expeditions: readonly Expedition[] = []): { x: number; y: number; dollars: number; weeks: 1 } | null {
   const active = new Set(expeditions.map(expedition => `${expedition.x},${expedition.y}`));

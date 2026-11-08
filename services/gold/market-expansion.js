@@ -9,12 +9,22 @@ const decorationPrices = Object.freeze({
   tramstop: 678, solar: 864, verticalgarden: 448, observatory: 1344, lightspire: 1568,
   biodome: 2272, skybeacon: 2528,
 });
+const equipmentPrices = Object.freeze({
+  "survey-satchel": 350, "survey-station": 1500, "survey-array": 4500,
+  "trail-kit": 500, "trail-outpost": 1800, "trail-network": 5500,
+  "welcome-kit": 450, "welcome-pavilion": 2200, "welcome-network": 4800,
+});
+const bulkCraftingPrices = Object.freeze({
+  "craft-batch-10": 350, "craft-batch-20": 850, "craft-batch-50": 1800, "craft-batch-100": 3500,
+});
 const approvedMarkets = Object.fromEntries([
   ...Object.entries({
     "permit-settlement-name": 112, "permit-region-name": 184,
     "title-pioneer": 72, "title-explorer": 86, "title-steward": 96,
     "title-artisan": 120, "title-trader": 89, "title-naturalist": 128,
     ...decorationPrices,
+    ...equipmentPrices,
+    ...bulkCraftingPrices,
   }),
   ...["wood", "water", "metal", "oil", "all"].flatMap(resource =>
     Object.entries({ 4: 180, 12: 420, 26: 840, 52: 1620 }).map(([weeks, price]) =>
@@ -37,4 +47,4 @@ function approvedMarketExpansion(previous, next) {
   return additions.length > 0 && additions.every(asset =>
     Object.hasOwn(approvedMarkets, asset) && canonical(next[asset]) === canonical(approvedMarkets[asset]));
 }
-module.exports = { approvedMarkets, approvedMarketExpansion, decorationPrices };
+module.exports = { approvedMarkets, approvedMarketExpansion, decorationPrices, equipmentPrices, bulkCraftingPrices };

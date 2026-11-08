@@ -142,3 +142,7 @@
   .has-world-chat .minimap{display:none}
   .has-world-chat .sidebar{max-height:calc(100dvh - var(--scene-top) - var(--scene-bottom) - var(--layout-gap))}
 }
+@media(min-width:901px){
+  #app.has-world-chat .settlement-task-panel,#app.has-world-chat .settlement-task-panel:has(.inventory-panel){left:auto;right:var(--layout-gap);width:min(clamp(560px,48vw,800px),calc(100% - var(--canvas-rail) - var(--layout-gap)*2))}
+  #app.has-world-chat .settlement-task-body{padding:16px}
+}

@@ -74,6 +74,9 @@
     if (!session?.account) return;
     if (authPage && query.has("switch") && !busy && !query.get("approve")) {
       displayedAccount = session.account;
+      $("account-name").hidden = false;
+      $("account-name").textContent = session.profile?.username || session.account;
+      $("account-description").textContent = "Sign in with another username or connect another wallet. Each wallet keeps its own settlement and funds. Your current account stays connected until the new sign-in succeeds.";
       $("profile").hidden = true; $("sign-in").hidden = false;
       $("continue").hidden = true; $("backup").hidden = true;
       return;
@@ -279,8 +282,8 @@
     if (!authPage && query.has("switch") && world.snapshot()?.account && !query.get("approve")) $("switch-account").click();
     if (!world.snapshot()?.account || authPage && query.has("switch")) {
       document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option.dataset.mode === mode)));
-      $("account-title").textContent = mode === "login" ? "Sign in to World" : "Register for World";
-      updateCredentials(); status(mode === "login" ? "Sign in with your World username and password." : "Register to set up your World profile.");
+      $("account-title").textContent = query.has("switch") ? "Switch World account" : mode === "login" ? "Welcome back to World" : "Create your World identity";
+      updateCredentials(); status(query.has("switch") ? "Choose a different World account below. No funds move when switching accounts." : mode === "login" ? "Sign in with your World username and password." : "Register to set up your World profile.");
     }
     if (query.get("approve")) {
       const parent = new URL(query.get("parentOrigin"));

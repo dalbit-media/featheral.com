@@ -16,6 +16,7 @@ import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
 import { editableAllocation, emergencyCollection, explorationCount, nextExploration, nextInvestigation, resourceCapacity, workforceCounts } from './workforce.ts';
 import { inventoryPageSize, inventoryUsed, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
+import { isActivityEquipment, isEquipmentActivity } from './activity-equipment.ts';
 import type { ItemId } from './items.ts';
 import { craftingPanel, inventoryPanel } from './inventory-view.ts';
 import type { CraftingFilter, InventoryFilter } from './inventory-view.ts';
@@ -39,7 +40,8 @@ import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { gameConsumption } from './consumption.ts';
-import { confirmationOpen, confirmConsumption } from './confirmation.ts';
+import { chooseCraftBatch, confirmationOpen, confirmConsumption } from './confirmation.ts';
+import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
 import { activityKinds, activityName, isActivityItem, isActivityKind } from './automation.ts';
 import type { ActivityKind } from './automation.ts';
@@ -53,7 +55,7 @@ import { collectionClaimReason, collectionDurations, collectionItemDetails, coll
 import { formatResourceAmount, isResource } from './resource-units.ts';
 import { chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from './customization.ts';
-import { actionRemaining, isTimedAction, renderActionControls } from './action-timing.ts';
+import { actionRemaining, timedActionKey, renderActionControls } from './action-timing.ts';
 import type { TimedAction } from './action-timing.ts';
 
 const navigationPage = gamePage(location.pathname);
@@ -73,7 +75,6 @@ let inventorySelection: ItemId | null = null;
 let selectedBuilding: SettlementEntity = 'centre';
 let settlementTask = settlementTaskFromHash(location.hash);
 let craftingFilter: CraftingFilter = 'all';
-let craftingQuantity = 1;
 let pendingPlacement: { entity: SettlementEntity; origin: SettlementTask } | null = null;
 let settlementMap: SettlementMap | null = null;
 const crewDrafts = new Map<string, string>();
@@ -340,13 +341,22 @@ function toast(message: string, error = false): void {
 }
 async function act(command: Command, recenter = false): Promise<boolean> {
   if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return false; }
-  if (isTimedAction(command.type) && actionRemaining(state.actionReadyAt, command.type, Date.now())) {
+  const timedKey = timedActionKey(command);
+  if (timedKey && actionRemaining(state.actionReadyAt, timedKey, Date.now())) {
     toast('Action cooling down. Please wait.', true); return false;
   }
   const assignmentDraft = command.type === 'assign' ? crewDrafts.get(`crew-${command.resource}`) : undefined;
   const submittedDraft = command.type === 'assign' && assignmentDraft !== undefined && Number(assignmentDraft) === command.workers ? assignmentDraft : undefined;
   busy = true;
   try {
+    if (command.type === 'craft') {
+      const options = craftBatchOptions(state.game, state.inventory, command.item);
+      if (options.length > 1) {
+        const quantity = await chooseCraftBatch(itemName(command.item), options, language);
+        if (quantity === null) return false;
+        command = { ...command, quantity };
+      }
+    }
     const quote = gameConsumption(state, command);
     if (quote && command.type !== 'claim') {
       if (!await confirmConsumption(quote, language)) return false;
@@ -358,7 +368,7 @@ async function act(command: Command, recenter = false): Promise<boolean> {
       }
     }
     app.classList.add('action-pending');
-    if (isTimedAction(command.type)) { pendingTimedAction = command.type; renderActionTiming(); }
+    if (timedKey) { pendingTimedAction = timedKey; renderActionTiming(); }
     synchronize(await send(state, command));
     if (command.type === 'assign' && submittedDraft !== undefined && crewDrafts.get(`crew-${command.resource}`) === submittedDraft) crewDrafts.delete(`crew-${command.resource}`);
     if (command.type === 'automatic') {
@@ -935,7 +945,7 @@ function renderSettlement(): void {
   else if (settlementTask === 'production') content = storagePanel();
   else if (settlementTask === 'sell') content = '<div data-settlement-resource-sale></div>';
   else if (settlementTask === 'inventory') content = inventoryPanel(state, costChips, inventoryFilter, language, 'settlement', inventoryPage, inventorySelection);
-  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', craftingQuantity, language);
+  else if (settlementTask === 'crafting') content = craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language);
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
   if (settlementTask === 'buildings' || settlementTask === 'production') content += '<div data-settlement-sale></div>';
@@ -1044,7 +1054,7 @@ function workforcePanel(): string {
     ${exploreReason ? `<p class="fineprint" role="status">${escape(translate(exploreReason, language))}</p>` : ''}
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
     <p class="fineprint">Each field team needs two idle residents. Investigate and Explore share exponential route fees: 1x, 2x, 4x, 8x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.</p>
-    <p class="fineprint">Investigations use two idle residents for one game week on known land. They cost 10% of the concurrent Explore route fee and have a 10% chance of a low-tier permit.</p>
+    <p class="fineprint">Investigations use two idle residents for one game week on known land. The base fee is 10% of the undiscounted concurrent Explore route fee. Equipped investigation gear lowers the fee; the low-tier permit chance remains 10%.</p>
     <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon(expedition.kind === 'investigate' ? 'search' : 'compass')}<div><strong>${expedition.kind === 'investigate' ? `<span>Investigating</span> · ${expedition.workers} ${translate('residents', language)} (${expedition.x}, ${expedition.y})` : `${expedition.workers} residents exploring (${expedition.x}, ${expedition.y})`}</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>
     <section class="population-crews"><div class="crew-list resource-crews">${resources.map(resource => crewManagementCard(resource)).join('')}</div></section></div>`;
 }
@@ -1075,17 +1085,17 @@ function progressionPanel(): string {
   const ready = next && canAfford(game, next.cost) && game.population >= next.population
     && (game.stage >= 0 || !isWater(terrainAt(game.position.x, game.position.y, game.seed)));
   return `
-    ${next ? `<div class="upgrade-card"><div class="upgrade-target">${icon('layers')}<div><small>NEXT TIER</small><h3>${next.name}</h3></div>${icon('arrow')}</div><div class="requirement-list">${requirement('people', `${fmt(next.population)} residents`, game.population >= next.population)}${game.stage < 0 ? requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed))) : ''}</div><div class="upgrade-cost">${costChips(next.cost)}</div>    <button class="button primary wide" data-action="upgrade" ${ready ? '' : 'disabled'}>${icon('plus')}${game.stage < 0 ? 'Settle' : 'Upgrade'}</button></div>` : `<div class="notice">${icon('check')} Capital complete</div>`}
+    ${next ? `<div class="upgrade-card settlement-tier-card"><div class="upgrade-target">${icon('layers')}<div><small>NEXT TIER</small><h3>${next.name}</h3></div>${icon('arrow')}</div><div class="requirement-list">${requirement('people', `${fmt(next.population)} residents`, game.population >= next.population)}${game.stage < 0 ? requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed))) : ''}</div><div class="consumption-costs">${costChips(next.cost)}</div><button class="button primary compact-item-action" data-action="upgrade" data-action-eligible="${Boolean(ready)}" aria-label="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" title="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" ${ready ? '' : 'disabled'}>${icon(ready ? 'plus' : 'lock')}</button></div>` : `<div class="notice">${icon('check')} Capital complete</div>`}
     ${game.stage < 0 ? `<a class="button wide" href="/explore/">Gather founding supplies ${icon('arrow')}</a>` : next && !ready ? `<p class="upgrade-guidance">Meet the highlighted requirements to upgrade.</p><button class="button wide" data-settlement-panel="${game.population < next.population ? 'residents' : 'production'}">${game.population < next.population ? 'Manage residents' : 'Manage production'} ${icon('arrow')}</button>` : ''}`;
 }
 function buildingsPanel(): string {
   return `${warehouseUpgradeCard(state, language)}<h3 class="panel-section-heading">Settlement upgrades</h3>
-    <p class="fineprint">Season, weather and temperature affect new weekly output. Dispatched crews keep their confirmed yield.</p>
-    <p class="fineprint">Expand housing, Water reserves, production and collection routes. Upgrade costs grow linearly by target level. Benefits never mint FTH$.</p>
+    <details class="disclosure" data-detail="building-upgrades-help"><summary>Upgrade details ${icon('chevron')}</summary><p class="fineprint">Season, weather and temperature affect new weekly output. Dispatched crews keep their confirmed yield.</p>
+    <p class="fineprint">Expand housing, Water reserves, production and collection routes. Upgrade costs grow linearly by target level. Benefits never mint FTH$.</p></details>
     ${constructionUpgradeCards(state, language)}<h3 class="panel-section-heading">Commercial buildings</h3>
     <p class="fineprint">FTH$ is never granted for founding, residents, buildings or exploration. Sell owned resources at marketplace spot prices to fund your settlement.</p>
     ${commercialUpgradeCards(state, language)}<h3 class="panel-section-heading">Water facilities <span>${waterProductionMultiplier(game)}&times;</span></h3>
-    <p class="fineprint">Facility bonuses add together and increase Water collected per resident. They require assigned Water crews and apply from the next work week, without changing paid deliveries. Expand storage to keep the extra output. No extra weekly upkeep.</p>
+    <details class="disclosure" data-detail="building-water-help"><summary>Water facility details ${icon('chevron')}</summary><p class="fineprint">Facility bonuses add together and increase Water collected per resident. They require assigned Water crews and apply from the next work week, without changing paid deliveries. Expand storage to keep the extra output. No extra weekly upkeep.</p></details>
     <p class="fineprint"><span>Water per resident / week</span>: <strong>${resourceFmt('water', state.resourceAccess.water.perWorker)}</strong> · <span>Next work week</span></p>
     ${waterUpgradeCards(state, language)}
     <h3 class="panel-section-heading">Buildings</h3>${civicUpgradeCards(state, language)}
@@ -1186,15 +1196,6 @@ async function saveCrewAssignments(): Promise<void> {
   } finally { processingCrewAssignments = false; }
 }
 app.addEventListener('change', event => {
-  if (event.target instanceof HTMLInputElement && event.target.hasAttribute('data-crafting-quantity')) {
-    const quantity = event.target.valueAsNumber;
-    if (!event.target.validity.valid || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100) {
-      toast('Invalid crafting quantity.', true); event.target.value = String(craftingQuantity); return;
-    }
-    craftingQuantity = quantity;
-    if (settlementPage) renderSettlement(); else renderSidebar();
-    return;
-  }
   if (event.target instanceof HTMLSelectElement && event.target.hasAttribute('data-management-resource')) {
     const view = event.target.value;
     if (view === 'funds' || isResource(view)) openManagement(view);
@@ -1314,10 +1315,14 @@ app.addEventListener('click', event => {
       if (isConstruction(target.dataset.construction)) void act({ type: 'construction', kind: target.dataset.construction });
       break;
     case 'craft':
-      if (isCraftableItem(target.dataset.item)) void act({ type: 'craft', item: target.dataset.item, quantity: craftingQuantity });
+      if (isCraftableItem(target.dataset.item)) void act({ type: 'craft', item: target.dataset.item });
       break;
     case 'equip':
       if (isVisibilityItem(target.dataset.item)) void act({ type: 'equip', item: target.dataset.item });
+      break;
+    case 'activity-gear':
+      if (isEquipmentActivity(target.dataset.activity) && (target.dataset.item === undefined || isActivityEquipment(target.dataset.item)))
+        void act({ type: 'activity-gear', activity: target.dataset.activity, item: target.dataset.item ?? null });
       break;
     case 'close-settlement-task': showSettlementTask(null); break;
     case 'prepare-decoration':
@@ -1357,7 +1362,7 @@ app.addEventListener('click', event => {
     case 'item-storage': case 'collect-items': void act({ type: action }); break;
     case 'inventory-filter': {
       const filter = target.dataset.filter;
-      if (filter === 'all' || filter === 'utility' || filter === 'decoration' || filter === 'collectible' || filter === 'collectors' || filter === 'customization') {
+      if (filter === 'all' || filter === 'utility' || filter === 'efficiency' || filter === 'bulk' || filter === 'decoration' || filter === 'collectible' || filter === 'collectors' || filter === 'customization') {
         inventoryFilter = filter; inventoryPage = 0; inventorySelection = null;
         if (settlementPage) renderSettlement(); else renderSidebar();
       }
@@ -1378,7 +1383,7 @@ app.addEventListener('click', event => {
     }
     case 'crafting-filter': {
       const filter = target.dataset.filter;
-      if (filter === 'all' || filter === 'utility' || filter === 'decoration' || filter === 'affordable' || filter === 'collectors' || filter === 'customization') {
+      if (filter === 'all' || filter === 'utility' || filter === 'efficiency' || filter === 'bulk' || filter === 'decoration' || filter === 'affordable' || filter === 'collectors' || filter === 'customization') {
         craftingFilter = filter;
         if (settlementPage) renderSettlement(); else renderSidebar();
       }
@@ -1482,7 +1487,7 @@ window.addEventListener('featheral:wallet-updated', () => void syncProduction())
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncProduction(); });
 setInterval(() => void syncProduction(), serverSyncIntervalMs + Math.random() * 5000);
 setInterval(() => {
-  if (!document.hidden && (pendingTimedAction || Object.values(state.actionReadyAt ?? {}).some(time => time > Date.now()) || app.querySelector('.action-cooling,.action-working'))) renderActionTiming();
+  if (!document.hidden && (pendingTimedAction || Object.values(state.actionReadyAt ?? {}).some(time => time !== undefined && time > Date.now()) || app.querySelector('.action-cooling,.action-working'))) renderActionTiming();
 }, 100);
 let nextDeadlineSyncAt = 0;
 setInterval(() => {

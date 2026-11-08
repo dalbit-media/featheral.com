@@ -31,7 +31,7 @@ test('30 decorations cover all nine civilization levels with distinct artwork, r
     assert.doesNotMatch(decorationDrawing(id), /undefined|NaN/);
     assert.notEqual(translate(itemName(id), 'ko'), itemName(id));
     assert.ok(Object.values(decorationItems[id].cost).every(amount => Number.isSafeInteger(amount) && amount > 0));
-    assert.deepEqual(parseCommand({ type: 'craft', item: id, quantity: 2 }), { type: 'craft', item: id, quantity: 2 });
+    assert.deepEqual(parseCommand({ type: 'craft', item: id, quantity: 10 }), { type: 'craft', item: id, quantity: 10 });
   }
   assert.equal(Object.hasOwn(decorationItems.fountain.cost, 'wood'), false);
   assert.equal(decorationItems.logseat.cost.wood, 6);
@@ -82,4 +82,13 @@ test('collector recipe 4/8 discloses usable copies only, excluding market escrow
   assert.equal((recipe.match(/class="missing"/g) ?? []).length, 4);
   assert.match(recipe, /Metal auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
   assert.match(recipe, /Oil auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
+});
+test('compact craft cards show batch consumption before collapsed recipe details and name their icon action', () => {
+  const html = craftingPanel(fixture(), () => '<span class="cost">batch resources</span>', 'decoration', 'settlement', 2);
+  const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+  assert.ok(bench.indexOf('batch resources') < bench.indexOf('<details'));
+  assert.match(bench, /class="recipe-details" data-detail="recipe-bench"/);
+  assert.doesNotMatch(bench, /<details[^>]* open/);
+  assert.match(bench, /compact-item-action[^>]*data-item="bench"[^>]*aria-label="Craft: Wooden bench × 2"/);
+  assert.doesNotMatch(bench, /<span>Craft<\/span>/);
 });

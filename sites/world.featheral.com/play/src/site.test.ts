@@ -23,6 +23,7 @@ import { waterFacilityKeys, waterFacilities } from './water-facilities.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
+import { renderWorldHub } from './world-hub-render.ts';
 
 test('World has dedicated login, registration and profile pages, with no homepage credential form', async () => {
   const plugin = worldAccountPage();
@@ -41,8 +42,8 @@ test('World has dedicated login, registration and profile pages, with no homepag
     assert.match(html, /src="\/shared\/world-account.js"/);
   }
   const homepage = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(homepage, /href="\/register\/">Register/);
-  assert.match(homepage, /href="\/login\/">Sign in/);
+  assert.match(renderWorldHub(), /href="\/register\/"/);
+  assert.match(renderWorldHub(), /href="\/login\/"/);
   assert.doesNotMatch(homepage, /WORLD_ACCOUNT|id="account"|src="\/account\/account.js"/);
   const game = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   assert.match(game, /FeatheralWorldAccount\.requireProfile/);
@@ -263,15 +264,15 @@ test('owned Water facilities appear on the shared settlement grid with stable co
 });
 test('public entry points, simulator exports and white paper use the Featheral brand', () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
-  const landing = read('../index.html');
-  assert.match(landing, /<title>Getting started · Featheral World/);
+  const landing = read('../index.html') + renderWorldHub();
+  assert.match(landing, /<title[^>]*>Featheral World · Explore, build and connect/);
   assert.match(landing, /class="top world-header"/);
   assert.match(landing, /class="eco-bar" aria-label="Featheral sites"/);
   assert.match(landing, /href="\/shared\/featheral\.css"/);
   assert.match(landing, /src="\/shared\/wallet-profile\.js"/);
   assert.match(landing, /src="\/shared\/site-links\.js"/);
   assert.doesNotMatch(landing, /class="site-header"|class="mobile-menu"/);
-  assert.match(landing, /<html lang="ko">/);
+  assert.match(landing, /<html lang="en">/);
   assert.match(landing, /src="\/images\/featheral-world\.svg"/);
   assert.match(read('../public/images/featheral-world.svg'), /^<svg/);
   assert.match(read('../explore/index.html'), /<title>Featheral 플레이 \|/);
@@ -287,7 +288,7 @@ test('public entry points, simulator exports and white paper use the Featheral b
   assert.match(landing, /href="\/whitepaper\/"/);
   assert.match(landing, /href="\/"/);
   assert.doesNotMatch(landing, /WHITEPAPER.*\.md|백서[^<]*\(\.md\)/);
-  assert.match(landing, /property="og:locale" content="ko_KR"/);
+  assert.match(landing, /data-public-ko=/);
   assert.doesNotMatch(landing, /\bTerra\b|>\s*terra(?=<)/);
 });
 
@@ -299,30 +300,28 @@ test('language selection is available only in the landing footer, not the header
   assert.ok(footer);
   assert.equal(landing.match(/<select\b[^>]*data-language/g)?.length, 1);
   assert.doesNotMatch(header, /data-language|language-picker/);
-  assert.match(footer, /<select data-language aria-label="언어">/);
-  assert.match(footer, /<option value="ko">한국어<\/option><option value="en">English<\/option>/);
+  assert.match(footer, /<select data-language aria-label="Language">/);
+  assert.match(footer, /<option value="en">English<\/option><option value="ko">한국어<\/option>/);
   const simulator = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(simulator, /languageControl|language-picker|data-language|wireLanguageControls/);
   assert.match(simulator, /import \{ language, languageLocale, localize \}/);
   assert.doesNotMatch(readFileSync(new URL('../explore/index.html', import.meta.url), 'utf8'), /data-language|language-picker/);
 });
 test('World roadmap identifies the active phase and keeps revenue, synergy and governance planned in both languages', () => {
-  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const landing = renderWorldHub();
   const roadmap = landing.match(/<section id="roadmap"[\s\S]*?<\/section>/)?.[0];
   assert.ok(roadmap);
   for (const text of [
-    'Current phase: World building', 'World roadmap', 'Full ecosystem roadmap',
-    'Now: Perfect the world', 'Next: A sustainable standalone business',
-    'Then: Connected business synergy', 'Future: Web3 governance for future innovators',
+    'Current phase · World building', 'Full ecosystem roadmap',
+    'Now · Perfect the World', 'Next · Standalone businesses',
+    'Then · Connected innovation', 'Web3 governance for future innovators',
   ]) {
     assert.ok(roadmap.includes(text), text);
-    assert.notEqual(translate(text, 'ko'), text);
-    assert.equal(translate(translate(text, 'ko'), 'en'), text);
   }
+  assert.match(roadmap, /현재 단계 · 월드 구축/);
   assert.match(roadmap, /data-site="foundation" data-path="\/#roadmap"/);
-  assert.match(roadmap, /relic pools start with 100 units, other assets with 10,000/);
-  assert.match(roadmap, /not Foundation governance/);
-  assert.match(roadmap, /World building is active; revenue experiments, deeper integrations and decentralized governance are planned/);
+  assert.match(roadmap, /proposed, not a deployed governance right/);
+  assert.match(roadmap, /planned experiments, not promised income/);
 });
 test('settlement has a dedicated production entry and the header has individual resource controls without aggregate claim', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
@@ -1173,17 +1172,17 @@ test('compact field cards preserve price, duration and accessible requirements w
     assert.notEqual(translate(label, 'ko'), label);
 });
 
-test('four live counters lead the hero without duplicate statistics in the World header', () => {
-  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(landing, /<section class="hero section-shell"[^>]*>\s*<section class="world-stats"/);
+test('four live counters sit below the hero without duplicate statistics in the World header', () => {
+  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8') + renderWorldHub();
+  assert.match(landing, /<section class="world-stats section-shell"/);
   const header = landing.match(/<header class="top world-header"[^>]*>[\s\S]*?<\/header>/)?.[0];
   assert.ok(header);
   assert.doesNotMatch(header, /world-live-card|data-total|data-gold-supply/);
   assert.equal((landing.match(/data-total=/g) ?? []).length, 3);
   assert.doesNotMatch(landing, /data-total="metal"|유통 중인 게임 금속/);
-  for (const [metric, symbol] of [['settlements', 'home'], ['dollars', 'dollars'], ['population', 'people']]) {
+  for (const metric of ['settlements', 'dollars', 'population']) {
     assert.equal(landing.split(`data-total="${metric}"`).length - 1, 1);
-    assert.ok(landing.includes(`<dd><span class="stat-icon" data-icon="${symbol}" aria-hidden="true"></span><span data-total="${metric}">`));
+    assert.ok(landing.includes(`<dd><span data-total="${metric}">`));
   }
   assert.equal((landing.match(/data-gold-supply/g) ?? []).length, 1);
   assert.doesNotMatch(landing, /fthgTransactions/);
@@ -1222,31 +1221,19 @@ test('homepage count-up abbreviates visually while exact accessible totals and G
 });
 
 test('landing copy leads with playable goals and immediate play links without hiding limits', () => {
-  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  const hero = landing.match(/<div class="hero-copy">([\s\S]*?)<div class="hero-world">/)?.[1];
+  const landing = renderWorldHub();
+  const hero = landing.match(/<section class="hub-hero[\s\S]*?<\/section>/)?.[0];
   assert.ok(hero);
-  assert.match(hero, /무료 싱글플레이 탐험·건설 게임/);
-  assert.match(hero, /Explore a world/);
-  assert.match(hero, /Build a settlement/);
-  assert.match(hero, /Shape a federation/);
-  assert.match(hero, /주민을 배치해 자원을 모으고/);
-  assert.ok(hero.includes(`${Object.keys(terrainDetails).length}가지 지형`));
-  assert.match(hero, /수도까지 키워/);
-  assert.match(hero, /href="\/register\/">Register/);
-  assert.match(hero, /No payment or wallet extension is required/);
-  assert.match(hero, /초기 프로토타입/);
-  const playCalls = [...landing.matchAll(/<a class="(?:btn [^"]*|preview-cta)" href="([^"]+)"[^>]*>/g)];
-  assert.equal(playCalls.length, 4);
-  assert.match(landing, /<!-- WORLD_PUBLIC_NAV -->/);
-  for (const [, href] of playCalls) assert.ok(['/explore/', '/settlement/', '/register/', '/community/'].includes(href), href);
-  assert.match(landing, /게임 시간 7일마다/);
-  assert.match(landing, /게임 시간 1~3주 후 복귀하면/);
-  assert.match(landing, /미배치 주민은 자원을 생산하지 않으며/);
-  assert.match(landing, /실제 DAO나 온체인 게임 경제가 아니며, 금전적 보상을 제공하지 않습니다/);
-  assert.match(landing, /Gold API reads actual Ethereum FTHG/);
-  assert.match(landing, /Conversion and staking require a deployed, funded Ethereum bridge/);
+  assert.match(hero, /Explore, build, trade and connect/);
+  assert.match(hero, /href="\/register\/"/);
+  assert.match(hero, /No registration payment/);
+  assert.match(hero, /PLAYABLE PROTOTYPE/);
+  for (const href of ['/explore/', '/settlement/', '/market/', '/federation/', '/community/'])
+    assert.ok(landing.includes(`href="${href}"`));
+  assert.match(landing, /not your saved world/);
+  assert.match(landing, /not a deployed governance right/);
   assert.match(landing, /href="\/community\/"/);
-  assert.match(landing, /Sign in and complete your World profile to publish/);
+  assert.match(landing, /Public posting requires a complete profile/);
   assert.doesNotMatch(landing, /현재 회원 가입이나 알림 구독 기능은 운영하지 않습니다/);
 });
 
@@ -1262,9 +1249,8 @@ test('resource allocation removes tile selection and discloses advanced FTH$ cos
   assert.match(simulator, /requestMove\(destination\.x, destination\.y\)/);
   assert.match(simulator, /work\.expeditions\.map/);
   assert.match(simulator, /nextExploration\(game, state\.workforce\.expeditions\)/);
-  const landing = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(landing, /자원별로 자동 배치/);
-  assert.match(landing, /주간 운송비/);
+  const landing = renderWorldHub();
+  assert.match(landing, /data-public-ko=/);
   for (const [file, patterns] of [
     ['../public/WHITEPAPER.md', [/automatic/i, /FTH\$50 per arriving resident/, /No payment is taken at dispatch/, /including Wood and Water/]],
     ['../public/WHITEPAPER.ko.md', [/자동 배치/, /합류 인원 1명당 FTH\$50/, /운송비/]],

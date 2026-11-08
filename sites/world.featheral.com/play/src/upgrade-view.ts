@@ -33,16 +33,21 @@ function upgradeCard(state: ApiState, card: UpgradeCard, language: Language): st
   const amount = (asset: string, value: number) => asset === 'dollars' ? `${value.toLocaleString(loc, { maximumFractionDigits: 4 })} FTH$` : formatResourceAmount(asset, value, loc);
   const label = complete ? card.maximum === 1 ? 'Built' : 'Maximum level' : locked ? 'Locked' : missing ? 'Missing supplies' : card.level ? 'Ready to upgrade' : 'Ready to build';
   const button = card.level ? 'Review upgrade' : 'Review build';
+  const eligible = !locked && !missing && Boolean(card.cost);
+  const ready = entries.filter(([asset, required]) => owned(asset) >= required).length;
   return `<article class="upgrade-option${complete ? ' is-complete' : ''}" aria-labelledby="${card.id}-name">
     <header class="upgrade-option-heading"><span class="upgrade-option-icon">${icon(card.symbol)}</span><div><h3 id="${card.id}-name">${t(card.name)}</h3><small>${t('Level')} ${card.level} / ${card.maximum}</small></div><span class="upgrade-option-status">${t(label)}</span></header>
-    <p class="upgrade-option-benefit">${t(card.benefit)}</p>${card.preview ? `<div class="upgrade-option-preview">${card.preview}</div>` : ''}
-    ${complete ? '' : `<p class="upgrade-option-next">${t('Next level')}: <strong>${card.level + 1}</strong></p>
+    <p class="upgrade-option-benefit">${t(card.benefit)}</p>
+    ${complete ? '' : `<div class="consumption-costs" aria-label="${t('Upgrade cost')}">${entries.map(([asset, required]) => `<span class="cost${owned(asset) < required ? ' insufficient' : ''}" title="${t('Owned')}: ${amount(asset, owned(asset))}">${icon(asset)}<strong>${amount(asset, required)}</strong></span>`).join('')}</div>
+      <details class="upgrade-details recipe-details" data-detail="${card.id}-recipe"><summary><span>${t('Recipe')}</span> <strong>${ready}/${entries.length}</strong>${icon('chevron')}</summary>
+      <p class="upgrade-option-next">${t('Next level')}: <strong>${card.level + 1}</strong></p>
+      ${card.preview ? `<div class="upgrade-option-preview">${card.preview}</div>` : ''}
       ${locked ? `<p class="upgrade-option-lock">${icon('lock')}<span>${t('Requires settlement tier')}: ${t(stages[card.stage].name)}</span></p>` : ''}
       <div class="upgrade-option-costs"><div class="upgrade-cost-head"><span>${t('Upgrade cost')}</span></div>${entries.map(([asset, required]) => {
         const shortage = Math.max(0, required - owned(asset));
         return `<div class="upgrade-cost-row${shortage ? ' insufficient' : ''}"><span>${icon(asset)}<span>${asset === 'dollars' ? 'FTH$' : t(asset[0].toUpperCase() + asset.slice(1))}</span></span><strong>${amount(asset, required)}</strong><small>${t('Owned')}: ${amount(asset, owned(asset))}</small>${shortage ? `<span class="upgrade-cost-shortfall">${t('Missing')}: ${amount(asset, shortage)}</span>` : ''}</div>`;
       }).join('')}</div>
-      <button class="button primary wide" data-action="${card.action}" ${card.attributes ?? ''} aria-label="${t(button)}: ${t(card.name)}, ${t('Level')} ${card.level + 1}" ${locked || missing || !card.cost ? 'disabled' : ''}>${icon('plus')}<span>${t(button)}</span>${icon('arrow')}</button>`}
+      </details><button class="button primary compact-item-action" data-action="${card.action}" ${card.attributes ?? ''} data-action-eligible="${eligible}" aria-label="${t(button)}: ${t(card.name)}, ${t('Level')} ${card.level + 1}" title="${t(button)}: ${t(card.name)} · ${t(label)}" ${!eligible ? 'disabled' : ''}>${icon(eligible ? 'plus' : 'lock')}<span class="control-label">${t(button)}</span><span class="action-feedback" role="status"></span></button>`}
   </article>`;
 }
 export function warehouseUpgradeCard(state: ApiState, language: Language): string {

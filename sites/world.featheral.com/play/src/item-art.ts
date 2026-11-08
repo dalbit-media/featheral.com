@@ -6,6 +6,21 @@ import type { DecorationItem, ItemId } from './items.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, isActivityItem } from './automation.ts';
 import { isCustomizationItem, isTitleItem } from './customization.ts';
+import { activityEquipmentItems, isActivityEquipment } from './activity-equipment.ts';
+import type { ActivityEquipment } from './activity-equipment.ts';
+import { bulkCraftingItems, isBulkCraftingItem } from './bulk-crafting.ts';
+
+const activityEquipmentDrawings: Record<ActivityEquipment, string> = {
+  'survey-satchel': '<path d="M19 24V17a13 13 0 0 1 26 0v7" fill="none" stroke="#dec18b" stroke-width="4"/><path d="M12 22h40v35H12Z" fill="#ad8059"/><path d="M12 22h40l-7 17H19Z" fill="#d2af76"/><circle cx="32" cy="39" r="5" fill="#82c4ad"/><path d="m21 48 6 4 7-5 9 5" fill="none" stroke="#eadcaa" stroke-width="2"/>',
+  'survey-station': '<path d="m5 26 27-20 27 20-27 11Z" fill="#719c89"/><path d="M12 27v28m40-28v28" stroke="#c6ac7c" stroke-width="4"/><path d="m16 40 18-8 16 8-17 9Z" fill="#c6d6bd"/><path d="m22 40 12-5 9 5m-11 9v12m-7-2 7-10 9 10" fill="none" stroke="#dcc18f" stroke-width="3"/><circle cx="33" cy="26" r="5" fill="#8dd2bf"/>',
+  'survey-array': '<path d="m6 53 27-12 25 12-27 11Z" fill="#92aeb5"/><path d="M31 52V28m-12 9 12 15 14-15" stroke="#9ccfcd" stroke-width="4"/><path d="M11 15c9 29 33 29 44 0L33 28Z" fill="#aacac9"/><path d="m33 28 9-23" stroke="#f3da8e" stroke-width="3"/><circle cx="44" cy="8" r="5" fill="#8ff0dd"/><path d="M11 15c12 5 31 5 44 0" fill="none" stroke="#e1ebe0" stroke-width="2"/>',
+  'trail-kit': '<path d="M18 22V12h27v10" fill="none" stroke="#b89f6c" stroke-width="4"/><rect x="13" y="20" width="38" height="40" rx="8" fill="#699682"/><path d="M13 28h38M22 21v38m20-38v38" stroke="#ddc48c" stroke-width="3"/><path d="m28 43 6-10 6 10-6 9Z" fill="#f0d79a"/><path d="m8 18 6 35m42-35-5 35" stroke="#b29568" stroke-width="4"/>',
+  'trail-outpost': '<path d="m4 44 29-36 27 36-27 12Z" fill="#d5ad79"/><path d="m33 8 27 36-27 12Z" fill="#769889"/><path d="m23 48 10-22 8 23-8 7Z" fill="#334b40"/><path d="M9 43v16m46-16v16" stroke="#ba9a6a" stroke-width="3"/><path d="m6 57 26 6 26-6" fill="none" stroke="#d9c396" stroke-width="3"/><circle cx="16" cy="46" r="4" fill="#efce7c"/>',
+  'trail-network': '<path d="m5 41 27-14 27 14-27 15Z" fill="#a3bbc6"/><path d="M5 41v10l27 13 27-13V41" fill="none" stroke="#85a4b5" stroke-width="3"/><path d="m13 37 19-25 19 25" fill="none" stroke="#a8e4d9" stroke-width="3"/><circle cx="32" cy="12" r="7" fill="#e8d39b"/><circle cx="13" cy="37" r="5" fill="#8ce8d6"/><circle cx="51" cy="37" r="5" fill="#8ce8d6"/><path d="m19 46 13 6 13-6" fill="none" stroke="#f0db9f" stroke-width="3"/>',
+  'welcome-kit': '<path d="M12 27h40v29H12Z" fill="#cc9f73"/><path d="m8 27 24-16 24 16" fill="#779984"/><path d="M28 28h8v28m-24-14h40" stroke="#edd59c" stroke-width="4"/><path d="M32 28c-19-2-14-19-5-10l5 10c19-2 14-19 5-10Z" fill="none" stroke="#e9c77d" stroke-width="3"/><circle cx="51" cy="15" r="7" fill="#d5a0a5"/>',
+  'welcome-pavilion': '<path d="m3 25 29-21 29 21-29 13Z" fill="#87a78d"/><path d="m3 25 29 13 29-13" fill="none" stroke="#ecd8a8" stroke-width="3"/><path d="M12 28v27m40-27v27" stroke="#d8be90" stroke-width="4"/><path d="m5 55 27-12 27 12-27 9Z" fill="#a8b993"/><circle cx="26" cy="39" r="5" fill="#e4c99a"/><circle cx="40" cy="37" r="4" fill="#d8aca1"/><path d="M22 55V45h8v10m6-2V43h8v10" fill="#769f90"/>',
+  'welcome-network': '<path d="m6 53 26-14 26 14-26 11Z" fill="#94bcb5"/><path d="M14 49V20h14v36m8-1V10h14v38" fill="#9cb9ac"/><path d="M18 25h6m-6 8h6m-6 8h6m17-25h5m-5 9h5m-5 9h5" stroke="#96eed6" stroke-width="3"/><path d="M8 46c4-15 19-17 25-6m1 0c2-19 20-15 23-4" fill="none" stroke="#77a26a" stroke-width="4"/><circle cx="32" cy="44" r="7" fill="#ebd196"/>',
+};
 
 const equipmentDrawings = {
   fire: '<path d="m19 51 27 9m-29 0 29-9" stroke="#ad8053" stroke-width="6"/><path d="M32 13c4 11 15 13 12 26-2 12-23 13-25 0-1-8 9-14 13-26Z" fill="#e9b86c"/><path d="M32 32c8 10 5 15 0 15s-8-5 0-15" fill="#f3e4a0"/>',
@@ -49,6 +64,11 @@ export function decorationDrawing(id: DecorationItem): string {
   return `<ellipse cx="32" cy="57" rx="29" ry="6" fill="#102c2020"/>${decorationDrawings[id]}`;
 }
 export function itemArt(id: ItemId): string {
+  if (isBulkCraftingItem(id)) {
+    const recipe = bulkCraftingItems[id], color = ['#c3a479', '#96bd97', '#90bdce', '#c4ace1'][Math.floor(recipe.stage / 2)];
+    return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M13 7h32l8 8v43H13Z" fill="${color}"/><path d="M45 7v10h8M21 23h24m-24 8h16m-16 8h24" fill="none" stroke="#314b41" stroke-width="3"/><path d="m31 44 8-4 8 4v8l-8 5-8-5Z" fill="#426e5d"/><path d="m34 47 5 5 6-8" fill="none" stroke="#e4edca" stroke-width="2"/></svg><b>×${recipe.quantity}</b></div>`;
+  }
+  if (isActivityEquipment(id)) return `<div class="item-art activity-equipment-art"><svg viewBox="0 0 64 64" aria-hidden="true">${activityEquipmentDrawings[id]}</svg><b>−${activityEquipmentItems[id].discount}%</b></div>`;
   if (isCollectionItem(id)) return `<div class="item-art collection-item-art">${icon(collectionItemDetails(id).resource === 'all' ? 'warehouse' : collectionItemDetails(id).resource)}<b>${collectionItemDetails(id).weeks}w</b></div>`;
   if (isCustomizationItem(id)) return `<div class="item-art collection-item-art">${icon(isTitleItem(id) ? 'spark' : id === 'permit-region-name' ? 'world' : 'home')}</div>`;
   if (isActivityItem(id)) {

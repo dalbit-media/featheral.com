@@ -1,0 +1,28 @@
+.world-hub{background:#f4f6ef;color:#223b30;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+body.site-world.world-hub{--txt:#223b30;--ink:#223b30;--mut:#617460;--bg:#f4f6ef;--panel:#fff;--gold:#47734e;--gold-2:#72966e;--glow:#edf3e7;--btn:#e6ecdf}
+.world-hub .btn-dark{background:#294d37;color:#fff}.world-hub .btn-dark:hover{background:#3e6144}
+.world-hub .section-shell{max-width:1240px;padding-inline:32px;margin-inline:auto}
+.world-hub .world-header{position:sticky;top:0;z-index:40;background:#f4f6eff5;backdrop-filter:blur(12px);border-bottom:1px solid #d9e3d5}
+.world-hub .hub-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:36px;padding-block:48px}
+.hub-hero h1{font-size:clamp(38px,5.4vw,72px);line-height:1.04;letter-spacing:-.045em;margin:18px 0 24px;max-width:680px}
+.hub-lead{font-size:17px;line-height:1.75;color:#53675a;max-width:800px}
+.hub-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-block:24px}
+.hub-secondary{display:inline-flex;align-items:center;min-height:44px;color:#294d37;font-weight:650;text-decoration:underline;text-underline-offset:5px}
+.hub-caption,.hub-preview figcaption,.hub-hero-art figcaption{font-size:12px;line-height:1.6;color:#657769}
+.hub-hero-art{margin:0;min-width:0}.hub-hero-art img{display:block;width:100%;height:auto;max-height:450px;object-fit:contain}.hub-hero-art figcaption{text-align:center}
+.world-hub .hub-quick-links{display:flex;flex-wrap:wrap;gap:10px;padding-block:16px;border-block:1px solid #d9e3d5}
+.hub-quick-links a{display:flex;align-items:center;min-height:44px;padding:10px 18px;background:#e6ecdf;border-radius:100px;color:#294d37;font-size:13px;font-weight:650;text-decoration:none}
+.world-hub .world-stats{margin-block:28px;padding-block:24px;background:#e9efdf;border-radius:20px}
+.world-hub .world-stats h2{font-size:20px;margin:0}.world-hub .world-stats-grid>div{min-width:0;padding:12px}.world-hub .world-stats-grid dd{font-size:26px;margin:8px 0;overflow-wrap:anywhere}.world-hub .world-stats-grid dt{font-size:12px;color:#53675a}
+.hub-section{padding-block:54px;border-bottom:1px solid #d9e3d5;scroll-margin-top:160px}
+.hub-section-heading{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:24px}.hub-section-heading h2{font-size:clamp(26px,3vw,40px);letter-spacing:-.03em;line-height:1.2;max-width:760px;margin:10px 0}.hub-section-heading .btn{flex:none;white-space:nowrap}
+.hub-feature-content:has(.hub-preview){display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:28px}
+.hub-preview{min-width:0;margin:0;align-self:start;overflow:hidden;background:#e3ebdb;border:1px solid #d2dfcc;border-radius:18px}.hub-preview canvas{display:block;width:100%;height:auto}.hub-preview figcaption{padding:12px}
+.hub-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.hub-feature-content:has(.hub-preview) .hub-cards{grid-template-columns:1fr}
+.hub-cards article{padding:20px;background:#fff;border:1px solid #dde5d6;border-radius:14px;min-width:0}.hub-cards h3{font-size:16px;margin:0 0 10px}.hub-cards p{font-size:14px;line-height:1.7;color:#53675a;margin:0}
+.hub-scope{margin-top:20px;font-size:13px;color:#617460}.hub-scope summary{cursor:pointer;min-height:44px;display:flex;align-items:center}.hub-scope p{line-height:1.7;max-width:900px}
+.hub-roadmap-phases{margin-top:24px}
+.world-hub .site-footer{padding-block:32px;display:flex;gap:18px;flex-wrap:wrap;align-items:center}.world-hub .site-footer>p:last-child{width:100%;font-size:12px}
+@media(max-width:900px){.world-hub .hub-hero{gap:16px;padding-block:28px}.hub-feature-content:has(.hub-preview){grid-template-columns:1fr}.hub-preview{max-width:600px}.hub-cards{grid-template-columns:1fr}.hub-section-heading{align-items:flex-start;flex-direction:column}.hub-section{scroll-margin-top:190px}}
+@media(max-width:600px){.world-hub .section-shell{padding-inline:18px}.world-hub .hub-hero{grid-template-columns:1fr}.hub-hero-art{order:-1}.hub-hero-art img{max-height:230px}.hub-section{padding-block:32px;scroll-margin-top:170px}.hub-lead{font-size:15px}.world-hub .world-stats{margin-inline:12px}.world-hub .world-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.world-hub .world-stats-grid dd{font-size:22px}}
+@media(prefers-reduced-motion:no-preference){html:has(.world-hub){scroll-behavior:smooth}}

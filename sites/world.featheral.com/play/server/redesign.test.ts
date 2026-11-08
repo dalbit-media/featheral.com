@@ -153,7 +153,7 @@ test('all construction levels pay their exact linear material and FTH$ costs, re
     for (let level = 1; level <= constructions[kind].maxLevel; level++) {
       const cost = constructionCost(account.game, kind)!, before = structuredClone(account);
       const request = { id: randomUUID(), revision: account.revision, command: { type: 'construction', kind } };
-      const result = apply(account, request, account.updatedAt + 1000);
+      const result = apply(account, request, account.updatedAt + 2000);
       assert.equal(constructionLevel(account.game, kind), level);
       assert.equal(before.game.dollars - account.game.dollars, cost.dollars! * dollarsScale);
       for (const resource of resourceKeys) assert.equal(before.game.stock[resource] - account.game.stock[resource], cost[resource] ?? 0);
@@ -161,7 +161,7 @@ test('all construction levels pay their exact linear material and FTH$ costs, re
       assert.deepEqual(apply(account, request, account.updatedAt + 1000), result);
     }
     assert.equal(constructionCost(account.game, kind), null);
-    assert.throws(() => act(account, { type: 'construction', kind }), /maximum level/);
+    assert.throws(() => apply(account, { id: randomUUID(), revision: account.revision, command: { type: 'construction', kind } }, account.updatedAt + 2000), /maximum level/);
   }
 });
 test('housing changes only future recruitment batches at the fixed FTH$50 per resident', () => {

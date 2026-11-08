@@ -47,13 +47,14 @@ test('all twenty collector recipes preserve exact time per resource, including a
 });
 test('collector crafting batches free full inventory slots, reject escrow inputs and disclose exact consumed copies', () => {
   const account = settled(), bag = inventory(account);
-  bag.items = Array.from({ length: itemStorage[0].capacity }, () => 'collection-wood-1' as const);
-  assert.ok(craftingFits(bag, 'collector-wood-4', 5));
-  assert.equal(craftingMaximum(account.game, bag, 'collector-wood-4'), 5);
-  const quote = gameConsumption(snapshot(account), { type: 'craft', item: 'collector-wood-4', quantity: 5 })!;
-  assert.deepEqual(quote.costs, [{ asset: 'collection-wood-1', amount: 20 }]);
-  craft(account, 'collector-wood-4', 5);
-  assert.deepEqual(bag.items, Array.from({ length: 5 }, () => 'collector-wood-4'));
+  bag.storage = 2;
+  bag.items = ['craft-batch-10', ...Array.from({ length: 40 }, () => 'collection-wood-1' as const)];
+  assert.ok(craftingFits(bag, 'collector-wood-4', 10));
+  assert.equal(craftingMaximum(account.game, bag, 'collector-wood-4'), 10);
+  const quote = gameConsumption(snapshot(account), { type: 'craft', item: 'collector-wood-4', quantity: 10 })!;
+  assert.deepEqual(quote.costs, [{ asset: 'collection-wood-1', amount: 40 }, { asset: 'craft-batch-10', amount: 1 }]);
+  craft(account, 'collector-wood-4', 10);
+  assert.deepEqual(bag.items, Array.from({ length: 10 }, () => 'collector-wood-4'));
   bag.items = []; bag.marketSelling = ['collection-wood-1']; bag.marketReserved = ['collection-wood-1'];
   bag.pending = ['collection-wood-1']; account.automationUntil = { wood: account.updatedAt + worldWeekMs, water: 0, metal: 0, oil: 0 };
   const before = structuredClone(account);

@@ -5,7 +5,7 @@ const fs = require("node:fs"), path = require("node:path"), os = require("node:o
 const { spawnSync, execFileSync } = require("node:child_process");
 const vm = require("node:vm");
 const { readPolicy, verifyCompatibility } = require("../../../scripts/deployment-preflight");
-const { liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets } = require("../../notes/game-funds");
+const { liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets } = require("../../notes/game-funds");
 const { approvedMarkets, approvedMarketExpansion } = require("../../gold/market-expansion");
 const root = path.resolve(__dirname, "../../..");
 const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";
@@ -31,10 +31,27 @@ test("relic-release self-sync retains all 81 targets while crafting expansion on
   assert.equal(approvedMarketExpansion(previous, next), true);
   assert.equal(Object.keys(next).filter(asset => !Object.hasOwn(previous, asset)).length, 24);
 });
+test("crafting-release self-sync retains all 105 targets while equipment adds only nine approved markets", () => {
+  const previous = craftingLiquidityTargets(), next = equipmentLiquidityTargets();
+  assert.equal(Object.keys(previous).length, 105);
+  assert.equal(Object.keys(next).length, 114);
+  for (const [asset, target] of Object.entries(previous)) assert.deepEqual(next[asset], target);
+  assert.equal(approvedMarketExpansion(previous, next), true);
+  for (const asset of Object.keys(next).filter(asset => !Object.hasOwn(previous, asset))) assert.deepEqual(next[asset], approvedMarkets[asset]);
+});
+test("equipment-release catalog stays at 114 targets while bulk crafting adds exactly four approved markets", () => {
+  const previous = equipmentLiquidityTargets(), next = bulkCraftingLiquidityTargets();
+  assert.equal(Object.keys(previous).length, 114);
+  assert.equal(Object.keys(next).length, 118);
+  for (const [asset, target] of Object.entries(previous)) assert.deepEqual(next[asset], target);
+  const additions = Object.keys(next).filter(asset => !Object.hasOwn(previous, asset));
+  assert.deepEqual(additions, ["craft-batch-10", "craft-batch-20", "craft-batch-50", "craft-batch-100"]);
+  assert.equal(approvedMarketExpansion(previous, next), true);
+});
 test("legacy running self-sync accepts the original catalog while the new installer verifies all approved additions", t => {
-  const original = liquidityTargets(), expanded = craftingLiquidityTargets();
+  const original = liquidityTargets(), expanded = bulkCraftingLiquidityTargets();
   assert.equal(Object.keys(original).length, 32);
-  assert.equal(Object.keys(expanded).length, 105);
+  assert.equal(Object.keys(expanded).length, 118);
   for (const asset of Object.keys(approvedMarkets)) assert.equal(Object.hasOwn(original, asset), false);
   assert.deepEqual(Object.fromEntries(Object.entries(expanded).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset))), original);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-bootstrap-"));
@@ -65,8 +82,8 @@ test("preflight permits only explicitly approved additive markets without changi
   const original = { monetaryPolicy: { scale: 10000 }, collectionPolicy: { version: 1 }, markets };
   const candidate = { ...original, markets: { ...markets, ...approvedMarkets } };
   const verify = next => verifyCompatibility("new", "old", { policy: name => name === "new" ? next : original });
-  assert.equal(Object.keys(approvedMarkets).length, 73);
-  const actual = craftingLiquidityTargets();
+  assert.equal(Object.keys(approvedMarkets).length, 86);
+  const actual = bulkCraftingLiquidityTargets();
   for (const [asset, target] of Object.entries(approvedMarkets)) assert.deepEqual(actual[asset], target, asset);
   assert.doesNotThrow(() => verify(candidate));
   for (const next of [
@@ -82,9 +99,9 @@ test("preflight permits only explicitly approved additive markets without changi
   assert.equal(approvedMarketExpansion(markets, { ...markets, "title-pioneer": { ...approvedMarkets["title-pioneer"], extra: true } }), false);
 });
 test("identity/collector self-sync sees its unchanged catalog while the installer validates relic authorization", t => {
-  const original = authorizedLiquidityTargets(), full = craftingLiquidityTargets();
+  const original = authorizedLiquidityTargets(), full = bulkCraftingLiquidityTargets();
   assert.equal(Object.keys(original).length, 60);
-  assert.equal(Object.keys(full).length, 105);
+  assert.equal(Object.keys(full).length, 118);
   assert.equal(approvedMarketExpansion(original, full), true);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-relic-bootstrap-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

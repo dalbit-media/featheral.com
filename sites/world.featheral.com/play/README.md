@@ -59,27 +59,35 @@ The shared catalog in [translations.ts](./src/translations.ts) covers Korean cop
 
 Korean copy uses familiar game terms: 채집팀 (resource crews), 자원지 (resource sites), 주민 모집 (recruitment), 업그레이드, 거래소 (the in-game exchange), and 마을 회관. Exchange controls use 시장가/지정가, 매수/매도, 호가, 미체결 and 체결 내역. Use 받기 for game-resource claim buttons, 수령 대기 for pending resources, and 쿨타임 for recruitment cooldowns. Web3 copy uses 거버넌스, 온체인/오프체인, 컨트랙트, and 제로 주소. Reserve 토큰 클레임 for token-specific disclosures, never game metal; do not describe the prototype as a live DAO, real-time cooperative world, staking product, or token-earning opportunity. Keep the static Korean HTML, metadata, white paper, and catalog wording aligned so English reverse translation still works.
 
-World About and Play default to English, independent of browser language. An explicit `?lang=ko` or saved Korean preference still selects Korean. The source HTML retains Korean fallback copy for visitors without JavaScript; localization sets the document language, titles, descriptions and Open Graph locale to the selected language. Both languages use explicit number/date locales; the authoritative game clock remains UTC, not local wall time.
+World Hub and Play default to English, independent of browser language. An explicit `?lang=ko` or saved Korean preference still selects Korean. The hub renders English fallback copy with bilingual attributes at build time; localization selects the document language and content. Both languages use explicit number/date locales; the authoritative game clock remains UTC, not local wall time.
 
 ## Landing page and public materials
 
-The homepage is canonical at `/`. Public navigation has dedicated bilingual
-pages at `/features/exploration/`, `/features/settlements/`,
-`/features/marketplace/`, `/features/federations/`, `/guide/` and `/roadmap/`.
-The pages render crawlable descriptions, headings, canonical URLs, alternate
-language URLs and structured data at build time, using the production World
-origin by default. Sitemap entries include these pages and Community.
+The homepage is the canonical public hub at `/`. Exploration, Settlements,
+Marketplace, Federations, Guide, Roadmap and Community introductions share one
+bilingual, build-time-rendered page with section anchors. Legacy
+`/features/exploration/`, `/features/settlements/`, `/features/marketplace/`,
+`/features/federations/`, `/guide/` and `/roadmap/` URLs redirect to the matching
+hub anchor in production, Vite development and preview, preserving query parameters.
+Static builds also retain forwarding entries and a no-JavaScript continuation link.
+The sitemap includes the hub, Community feed and Whitepaper, not duplicate feature pages.
 Sample scenes reuse actual game drawing code and are labeled as examples,
 never live player activity. Gameplay routes remain unchanged.
 Roadmap names the current World-building phase and separates available systems,
 pending federation economics and proposed future business/governance direction.
-Top-level navigation is Home, Game, Community and About, with Account and Play
-actions. Game groups the four feature pages and Guide; About groups Roadmap and
-Whitepaper; Account groups Sign in, Register and Profile. Native disclosure
+Top-level navigation is Game, Community, Guide and Roadmap, with Account and Play
+actions. The logo returns to the hub; there is no Home menu. Game groups the four
+gameplay introductions; Account groups Sign in, Register, Profile and Switch account.
+Community posting and game routes remain separate working applications. Login,
+registration and profile remain dedicated pages with a unified responsive layout.
+Switching displays the current identity and keeps its session until a replacement
+sign-in succeeds; funds and settlements remain wallet-specific. Connected built-in
+wallet registration still reuses that wallet and its password. Native disclosure
 submenus support keyboard/touch use, Escape, outside-click dismissal and active
-page highlighting. World and Community reuse the same navigation template.
+page highlighting. World and Community reuse the same navigation template and
+explicit navigation font, size, weight and touch-target styles.
 
-World landing-page statistics appear once in the main hero section, not in the site header. The header retains site navigation and the wallet control.
+World public statistics appear once below the hero, not in the site header. The header retains site navigation and the wallet control.
 
 Explorer and settlement cameras start at 1.8x and 2.1x respectively; wheel and
 button zoom remain available. Both 2D maps repaint only when their scene, camera,
@@ -130,11 +138,13 @@ spending confirmation; cancellation spends nothing and the server revalidates
 costs, balances and level limits. Capacity previews share the server's warehouse
 formula; prices, unlocks, production timing and the level-99 limit are unchanged.
 
-Crafting supports atomic batches of **1–100 copies**, limited by owned resources
-and output item slots (including market reservations and consumed recipe items). Quantity selection updates
-the full recipe cost, affordable filter and maximum craftable count; confirmation
-uses the same total-cost helper as the server. Invalid/unaffordable batches spend
-nothing. Existing single-item commands remain valid.
+Crafting supports **one copy without a permit**, or exact atomic batches of
+**10, 20, 50 or 100 copies**, consuming one matching bulk crafting permit.
+Click Craft to choose among owned permits; insufficient ingredients or output
+space disable the corresponding choice. The largest feasible batch is labelled.
+Confirmation shows every batch ingredient, the consumed permit and output count.
+Invalid/unaffordable batches spend nothing. Existing single-item commands and
+historically accepted retry receipts remain valid.
 
 - `/` is the search-readable landing page with optional live public totals; legacy `/about/` redirects there. Anonymous `/api/stats` reads remain available without cookies or a gameplay session, and the page stays readable if statistics are unavailable.
 - `/` opens the simulator; all Start/Play calls to action go there and resume the same browser session.
@@ -150,15 +160,15 @@ Set the root HTTPS website URL and official GitHub/Discord/X/Telegram URLs in [s
 
 The landing HTML contains the main content, title, description, Open Graph/Twitter text, and WebApplication structured data. The public build defaults to the verified production origin `https://world.featheral.com`, with canonical links, absolute social image URLs and a sitemap for public pages. `/robots.txt` excludes API crawling and points to `/sitemap.xml`. The simulator is excluded from indexing by its own `noindex,follow` metadata. The default Korean social image is `public/images/social-preview-ko.png`; `public/images/social-preview.png` remains the English version. Both use the original world artwork.
 
-The World site serves this build at `/`; `dist/index.html` is the game entry, `dist/about/index.html` is the marketing page, and the remaining HTML entries preserve game and white-paper routes under `/`. The repository's `npm start` builds this app before serving it and starts the game API alongside the other World services. Set `APP_ORIGIN` to the exact public HTTPS origin of the World site in production. Deployed servers default to `https://` plus their assigned `world.*` hostname when `APP_ORIGIN` is unset or a loopback origin copied from a development machine, so synced dev settings cannot reject the public site with "Origin rejected." The API remains same-origin at `/api/`; do not expose its internal port publicly. Missing routes and assets remain 404s instead of falling back to the game.
+The World site serves this build at `/`; `dist/index.html` is the public hub, `dist/explore/index.html` is the exploration game entry, and the remaining HTML entries preserve game, account and whitepaper routes under `/`. Legacy public information URLs forward to hub sections. The repository's `npm start` builds this app before serving it and starts the game API alongside the other World services. Set `APP_ORIGIN` to the exact public HTTPS origin of the World site in production. Deployed servers default to `https://` plus their assigned `world.*` hostname when `APP_ORIGIN` is unset or a loopback origin copied from a development machine, so synced dev settings cannot reject the public site with "Origin rejected." The API remains same-origin at `/api/`; do not expose its internal port publicly. Missing routes and assets remain 404s instead of falling back to the game.
 
 Before public release, supply verified links, confirm the canonical origin, review the white paper/disclosures for the actual deployment, and complete the production/security requirements below. SEO metadata and prototype disclaimers do not make this mock safe to expose publicly.
 
 ### Live world totals
 
-The hero opens with four live totals before the illustration: settlements, cumulative FTHG transactions, FTH$ circulation and population. Card values below 10,000 remain unabbreviated; larger values use localized compact units (Korean 만/억/조 or English K/M/B/T) with at most one decimal, including during count-up animations. Hover text and screen-reader labels retain exact final totals, with up to four decimals for FTH$. The live Gold exchange rate remains unabbreviated. Wallets, marketplace displays, accounting and API totals retain their existing precision.
+Below the hero, four live totals show settlements, residents, World game FTH$ budgets and actual Ethereum FTHG supply. Card values below 10,000 remain unabbreviated; larger values use localized compact units (Korean 만/억/조 or English K/M/B/T) with at most one decimal, including during count-up animations. Hover text and screen-reader labels retain exact final totals, with up to four decimals for FTH$. The live Gold exchange rate remains unabbreviated. Wallets, marketplace displays, accounting and API totals retain their existing precision.
 
-The homepage shows established settlements, FTH$ circulation and the live Gold exchange rate, and the same global population census as the simulator. Circulating Metal is not displayed on the homepage. Its API aggregate remains available: Metal excludes pending production and unsettled visitors' starter supplies; it is not FTHG or cryptocurrency. Settlement/metal deltas commit atomically with claims, trades, spending, founding, and idempotent gameplay actions. Totals retain inactive settlements and their last recorded balances, matching the existing population-retention policy.
+The homepage shows established settlements, stored World game FTH$ budgets and the live Gold exchange rate, and the same global population census as the simulator. Game budgets are not the complete Dollar ledger supply or the separate wallet balance. Circulating Metal is not displayed on the homepage. Its API aggregate remains available: Metal excludes pending production and unsettled visitors' starter supplies; it is not FTHG or cryptocurrency. Settlement/metal deltas commit atomically with claims, trades, spending, founding, and idempotent gameplay actions. Totals retain inactive settlements and their last recorded balances, matching the existing population-retention policy.
 
 Settlement/metal aggregates initialize once from persisted settled worlds. Previously purged worlds cannot be reconstructed; the existing population census is preserved rather than rewritten. Later restarts and session cleanup do not reset these counters.
 
@@ -213,7 +223,7 @@ expedition deadline arrives. Hidden pages do not poll or paint maps.
 - Modals and the sidebar use owned-storage meters, automatic delivery indicators, level dots, icon cost chips, and met/locked requirement badges. Expand **All tiers** or the Field guide's rule sections for details; disclosures retain their open state during server refreshes. Icons supplement short labels rather than replacing accessible action names.
 - Send **multiple simultaneous expeditions**, limited only by idle residents and FTH$: each reserves two residents and pays its route fee multiplied by `2 ** active field teams` at departure (1x, 2x, 4x, 8x...). Investigate and Explore share the active team count; returned teams no longer increase the next fee. Active teams keep their workers across automatic/manual weekly allocation. Duplicate active destinations are rejected without payment; distinct survey areas may overlap, but contribution counts each newly revealed tile once. Quick exploration and confirmation use the same concurrent quote as the server. Teams return independently, including offline. Existing paid teams and retry receipts retain their original deadlines and costs.
 - Craft permanent visibility equipment in the Settlement inventory and equip one item. Campfire kits, torches, lamps, and explorer lanterns give a 5/6/8/10-tile view (unequipped: 4). Better gear affects **future expeditions**, never instant discovery or ongoing teams. Existing torch/lantern upgrades migrate free into owned torch/lamp items, preserving their 6/8-tile visibility.
-- **Investigate known land** using two idle residents for exactly **one game week**. It costs **10% of the concurrent Explore route fee**, rounded up to four-decimal FTH$ precision with a **FTH$0.10 minimum**. Each active Investigate or Explore team doubles the next field fee. Quick Investigate chooses the cheapest reachable discovered tile without an active team. Findings are locked at departure: **10% chance** of one collection or activity permit; successful finds are **90% one-week, 10% four-week** permits, never high-tier items or keepsakes. Teams return independently and release their residents; no terrain or contribution is added. Investigations do not block exploration automation. Repeat a known tile after return or investigate different tiles concurrently; shortages, storage overflow, confirmation and exact-once retries use existing rules. Already-paid legacy investigations retain their one-resident, one-day schedule. Explore sidebar buttons show only the action, FTH$ price and compact crew/week indicators; detailed requirements and unavailable reasons remain in tooltips, accessible descriptions and spending confirmations. Sidebar progress bars are 3px high; recurring buttons target 68–72px and secondary controls 36px on desktop or at least 44px on touch layouts. Recruitment retains its live countdown and progress while active. Other pages keep their detailed controls.
+- **Investigate known land** using two idle residents for exactly **one game week**. Its base cost is **10% of the undiscounted concurrent Explore route fee**, rounded up to four-decimal FTH$ precision with a **FTH$0.10 minimum before equipment discounts**. Only equipped investigation gear discounts this fee, by up to 50%. Each active Investigate or Explore team doubles the next field fee. Quick Investigate chooses the cheapest reachable discovered tile without an active team. Findings are locked at departure: **10% chance** of one collection or activity permit; successful finds are **90% one-week, 10% four-week** permits, never high-tier items or keepsakes. Teams return independently and release their residents; no terrain or contribution is added. Investigations do not block exploration automation. Repeat a known tile after return or investigate different tiles concurrently; shortages, storage overflow, confirmation and exact-once retries use existing rules. Already-paid legacy investigations retain their one-resident, one-day schedule. Explore sidebar buttons show only the action, FTH$ price and compact crew/week indicators; detailed requirements and unavailable reasons remain in tooltips, accessible descriptions and spending confirmations. Sidebar progress bars are 3px high; recurring buttons target 68–72px and secondary controls 36px on desktop or at least 44px on touch layouts. Recruitment retains its live countdown and progress while active. Other pages keep their detailed controls.
 - **Stacked item inventory** shows identical owned and market-reserved items once with their total quantity and reservation counts. Mixed stacks remain selectable; fully reserved stacks cannot be used. One-copy equipment/activation rules and protected placed/equipped copies remain unchanged. Pending finds are also grouped by quantity. Pagination follows distinct filtered stacks (20 per page), but every owned or reserved copy still consumes one storage slot; storage upgrades add room for 20 copies.
 - Sell any resource or unequipped item for FTH$, then buy resources or items in the marketplace. Trading has no bank requirement; production gates still apply.
 - **Trader-friendly marketplace:** the initially expanded compact grid browses all 81 markets together; Resources and Item marketplace filter the catalog without changing a prepared order. Search, category, owned-only and reset controls work in either grid or table view. Sort by name, buy price or sell price in either direction, or most owned; unavailable quotes remain last, and prices/quantities use physical units. Table headers are keyboard-accessible sort controls. Buy/sell price buttons prepare a spot draft without spending; only the shared confirmation submits a trade. Resource selling is inside the ticket, retaining Owned/Ready-to-collect source selection, 25/50/75/100% presets and exact physical-unit quantity. Its redundant resource picker and slider are hidden only in Marketplace; other selling surfaces retain them. New resource/source or successful sales default to 50%; manual edits persist across refreshes. Metal uses decimal tonnes; percentage quantities round down to whole lots with a one-lot minimum. 100% includes inventories above 10,000 lots. Item sales retain quick amounts, protected equipped/placed copies and storage limits. Local settlement selling still requires a commercial facility; Marketplace does not. Liquidity donations are collapsed separately. Shared confirmation, 2% spot protection, four-decimal FTH$ accounting, reservations and actual-sale charts are unchanged.
@@ -420,6 +430,28 @@ See the [English whitepaper](./public/WHITEPAPER.md) and [Korean whitepaper](./p
 
 ### Items, crafting, and storage
 
+#### Consumable bulk crafting permits
+
+| Permit | Crafting civilization | Decoration inputs | Unused collector inputs | Additional raw materials |
+|---|---|---|---|---|
+| 10 copies | Settlement | Wooden bench, Pioneer banner | Wood 1-week ×1 | 8 Wood, 2 Metal |
+| 20 copies | Neighborhood | Market canopy, Picnic table | Wood 4-week ×1, Metal 1-week ×1 | 16 Wood, 6 Metal |
+| 50 copies | Town | Town information kiosk, Civic pavilion | Metal 4-week ×2, Wood 4-week ×1 | 24 Metal, 2 Oil |
+| 100 copies | City | Decorative tram shelter, Solar pergola | Metal 12-week ×2, Oil 4-week ×1 | 60 Metal, 6 Oil |
+
+Permits are craftable and spot-tradable, not permanent equipment. Each grants
+exactly one batch of its printed size, not an arbitrary smaller batch or a lasting
+unlock. A 100-copy permit cannot replace a 10-copy permit. Click any recipe's Craft
+button to choose a single copy or a matching owned permit, then review the full
+consumption confirmation. No permit is spent on choosing, cancellation or failure.
+The server verifies the exact quantity, ownership, all ingredients, discovery,
+stage and final storage occupancy before consuming anything. The consumed permit
+frees its own slot, so 100 outputs fit in an otherwise empty 100-slot warehouse.
+Bulk crafting uses the same per-recipe two-second cooldown as single crafting;
+changing batch size cannot bypass it. Placed items, escrow and pending finds are
+not usable inputs. Existing reserve catalogs remain pinned; four new markets use
+signed additive authorization without resetting funds, keys or ledger history.
+
 Raw-resource pickup uses individual resource controls, not an aggregate header Claim button. Item overflow finds are still collected separately in Settlement.
 
 Item inventory contains utility equipment, cosmetic decorations, collectibles and consumable collection, exploration and recruitment permits. Owned and pending raw resources remain separate. Each copy uses one slot, including equipped gear and placed decorations; all non-collectible items can occupy multiple slots of the same type. Crafting still requires discovering every recipe resource and owning its ingredients. Automation permits are found or traded, not crafted.
@@ -431,9 +463,38 @@ Item inventory contains utility equipment, cosmetic decorations, collectibles an
 | Lamp | 0.12 t Metal, 3 bbl Oil | 8 tiles |
 | Explorer lantern | 0.2 t Metal, 5 bbl Oil, FTH$4 | 10 tiles |
 
-Investigate and Craft each have a separate **2-real-second minimum interval** between successful requests, regardless of game clock speed. The authoritative API persists per-account `actionReadyAt` deadlines; new request IDs, another tab, reloads and server restarts do not bypass them. A failed or cancelled action starts no cooldown; retries of an already accepted idempotency key return the original receipt without spending twice. Buttons show request activity and a remaining-time progress strip. Batch crafting remains one atomic action, not one delay per copy.
+Nine permanent **cost-saving equipment** recipes combine crafted decorations,
+unused resource-collector permits and raw materials. The crafting panel's
+Cost-saving equipment filter lists exact batch requirements; inventory contains
+one independent equipment slot for **Investigation**, **Exploration** and
+**Attraction (resident recruitment)**. Crafting does not equip these items.
 
-Crafting uses compact cards. Click **Recipe 4/8** (four sufficient ingredient types out of eight required types, for example) to see every raw resource, FTH$ fee and collector permit with owned/required quantities and available/missing states. Counts reflect the selected batch and update with authoritative balances; market reservations, pending finds and active permits are not usable ingredients. Civilization requirements restrict crafting, not trading or placing owned cosmetic items.
+| Activity | 10% discount · Settlement | 25% discount | 50% discount · City |
+|---|---|---|---|
+| Investigation | Survey satchel | Field survey station · Village | Precision survey array |
+| Exploration | Trail supply kit | Expedition outpost kit · Village | Expedition logistics network |
+| Attraction | Settler welcome kit | Community welcome pavilion · Town | Settler hospitality network |
+
+Only the equipped item for that activity applies: owning spare copies or other
+tiers does not stack discounts. Discounts are capped at **50%**, rounded upward
+to the nearest FTH$0.0001, and apply to new manual and automated jobs without
+changing staffing, discovery odds, travel times or already-paid jobs. Investigation
+uses its own discount on 10% of the **undiscounted** concurrent exploration fee
+(minimum FTH$0.10 before equipment), never the exploration equipment discount.
+Equip, replace and unequip are free, server-validated and persistent. Equipped
+copies cannot be sold; spare copies can trade at market spot prices.
+
+Mixed recipes permanently consume only unused owned decoration copies and
+collector permits. A placed decoration's protected copy, market escrow, pending
+finds and active automation timers cannot be consumed. Return a decoration to
+inventory first or use a spare. The entire batch is validated before spending;
+combining items can free slots even when the bag is full. Original reserve catalogs
+and keys remain unchanged; nine pinned equipment markets are added only through
+the existing signed additive authorization process.
+
+Investigation, each individual crafting recipe, each building/construction, resource warehouse, item-storage expansion and settlement-tier upgrade have independent **2-real-second minimum intervals** between successful requests, regardless of game clock speed. For example, `craft:torch` does not block `craft:bench`; `building:housing` does not block `building:cistern`. The cooldown is shared across quantities/levels of the same recipe/building and across alternate routes to the same building. The authoritative API persists per-account `actionReadyAt` deadlines; new request IDs, another tab, reloads and server restarts do not bypass them. A failed or cancelled action starts no cooldown; retries of an already accepted idempotency key return the original receipt without spending twice. Buttons show request activity and a remaining-time progress strip. Batch crafting remains one atomic action, not one delay per copy. Confirmations and server writes remain serialized for safe balance/revision updates, but unrelated buttons are available once the request completes.
+
+Desktop settlement task panels share a wider right-side shell (560–800 px, bounded by the viewport). Crafting and building/upgrade cards use small artwork, visible resource/FTH$ consumption chips, small **Recipe 4/8** links and accessible icon action buttons. Click the recipe link (four sufficient ingredient types out of eight required types, for example) to see every raw resource, FTH$ fee and collector permit with owned/required quantities and available/missing states. Upgrade disclosures also retain exact shortfalls, required civilization tier and next-level benefit previews. Touch screens retain 44 px controls; expanded mobile recipes span both columns. Counts reflect the selected batch and update with authoritative balances; market reservations, pending finds and active permits are not usable ingredients. Civilization requirements restrict crafting, not trading or placing owned cosmetic items.
 
 Item storage progresses **Bag (20 slots) → Carrier (40, 0.5 t Metal + FTH$100) → Crate (60, 1.5 t Metal + FTH$200) → Container (80, 4 t Metal + FTH$300) → Item warehouse (100, 10 t Metal + FTH$400)**. Each price buys the next tier once; there is no upkeep. Each upgrade adds one **20-slot page**. Inventory uses a compact five-column/four-row grid of square, unnumbered slots, including empty and market-reserved slots. Existing saves retain their purchased tier and contents. Storage and recipes spend owned balances only; equipment recipes are settlement supply bundles, not literal handheld-object material bills.
 

@@ -127,13 +127,12 @@ export const publicFeaturePages: readonly PublicFeature[] = [
 ];
 
 export const publicWorldLinks = [
-  { path: '/', label: ['Home', '홈'] as PublicCopy },
-  ...publicFeaturePages.map(({ path, label }) => ({ path, label })),
-  { path: '/community/', label: ['Community', '커뮤니티'] as PublicCopy },
-  { path: '/whitepaper/', label: ['Whitepaper', '백서'] as PublicCopy },
+  ...publicFeaturePages.map(({ visual, label }) => ({ path: `/#${visual}`, label })),
+  { path: '/#community', label: ['Community', '커뮤니티'] as PublicCopy },
   { path: '/account/', label: ['Profile', '프로필'] as PublicCopy },
   { path: '/login/', label: ['Sign in', '로그인'] as PublicCopy },
   { path: '/register/', label: ['Register', '가입'] as PublicCopy },
+  { path: '/login/?switch=1', label: ['Switch account', '계정 전환'] as PublicCopy },
   { path: '/explore/', label: ['Play', '플레이'] as PublicCopy },
 ];
 

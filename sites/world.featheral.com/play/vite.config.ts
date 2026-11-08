@@ -5,25 +5,41 @@ import { readFileSync } from 'node:fs';
 import { resolvePublicSite } from './src/site.ts';
 import { renderWhitepaper } from './src/whitepaper-render.ts';
 import { publicFeatureAt, publicFeaturePages, worldPublicOrigin } from './src/public-feature-content.ts';
-import { renderPublicFeatureHead, renderPublicFeatureBody, renderPublicWorldNav } from './src/public-feature-render.ts';
+import { renderPublicWorldNav } from './src/public-feature-render.ts';
+import { publicHubTarget, renderWorldHub } from './src/world-hub-render.ts';
 
 const proxy = { '/api': 'http://127.0.0.1:8080', '/wallet': 'http://127.0.0.1:8080', '/fth.js': 'http://127.0.0.1:8080', '/shared': 'http://127.0.0.1:8080', '^/account/account\\.(?:js|css)$': 'http://127.0.0.1:8080' };
 export function publicFeaturePagesPlugin(): Plugin {
+  const redirectPublicPage = (req: { url?: string }, res: { statusCode: number; setHeader(name: string, value: string): void; end(): void }, next: () => void): void => {
+    const source = new URL(req.url || '/', 'http://localhost');
+    const target = publicHubTarget(source.pathname);
+    if (!target) { next(); return; }
+    const destination = new URL(target, source.origin);
+    destination.search = source.search;
+    res.statusCode = 301;
+    res.setHeader('Location', `${destination.pathname}${destination.search}${destination.hash}`);
+    res.end();
+  };
   return {
     name: 'featheral-public-feature-pages',
+    configureServer(server) { server.middlewares.use(redirectPublicPage); },
+    configurePreviewServer(server) { server.middlewares.use(redirectPublicPage); },
     transformIndexHtml: {
       order: 'pre',
       handler(html, context) {
+        html = html.replace('<!-- WORLD_HUB -->', renderWorldHub());
         if (html.includes('<!-- WORLD_PUBLIC_NAV -->'))
           html = html.replace('</head>', '<link rel="stylesheet" href="/shared/world-navigation.css" vite-ignore></head>')
             .replace('<nav aria-label="World site"', '<nav class="world-navigation" aria-label="World site"')
             .replace(/<\/nav>(\s*<\/div><\/header>)/, '</nav><div class="world-wallet-controls" data-wallet-controls></div>$1');
         const page = publicFeatureAt(context.path);
         if (!page) return html.includes('<!-- WORLD_PUBLIC_NAV -->') ? html.replace('<!-- WORLD_PUBLIC_NAV -->', renderPublicWorldNav(context.path)) : undefined;
+        const target = publicHubTarget(page.path)!;
         return html
-          .replace('<!-- WORLD_FEATURE_HEAD -->', renderPublicFeatureHead(page))
+          .replace('<!-- WORLD_FEATURE_HEAD -->', `<link rel="canonical" href="${worldPublicOrigin}/"><title>${page.title[0]}</title>`)
           .replace('<!-- WORLD_PUBLIC_NAV -->', renderPublicWorldNav(page.path))
-          .replace('<!-- WORLD_FEATURE_BODY -->', renderPublicFeatureBody(page));
+          .replace('<!-- WORLD_FEATURE_BODY -->', `<h1>${page.label[0]}</h1><p>This content is now part of the World hub.</p><a href="${target}">Continue to ${page.label[0]}</a>`)
+          .replace('src="/src/public-feature.ts"', 'src="/src/public-hub-redirect.ts"');
       },
     },
   };
@@ -38,13 +54,15 @@ export function worldAccountPage(): Plugin {
         let form = readFileSync(resolve('..', 'account', 'form.html'), 'utf8');
         const login = context.path.includes('login');
         const profile = context.path.includes('account');
-        form = form.replace('Join World', login ? 'Sign in to World' : profile ? 'Your World profile' : 'Register for World');
+        form = form.replace('Join World', login ? 'Welcome back to World' : profile ? 'Your World profile' : 'Create your World identity')
+          .replace('data-account-screen="register"', `data-account-screen="${login ? 'login' : profile ? 'profile' : 'register'}"`);
         if (login || profile) form = form.replace('Register with a username and password, or use your own wallet. Your username, avatar and profile description are required and public.',
           login ? 'Sign in to your shared World account to continue to Community or gameplay.' : 'Manage your shared World profile, avatar and encrypted wallet backup.');
         if (login) form = form.replace('data-mode="register" aria-pressed="true"', 'data-mode="register" aria-pressed="false"')
           .replace('data-mode="login" aria-pressed="false"', 'data-mode="login" aria-pressed="true"')
           .replace('id="confirmation"', 'id="confirmation" hidden')
           .replace('name="confirmation" type="password" required', 'name="confirmation" type="password"')
+          .replace('autocomplete="new-password"', 'autocomplete="current-password"')
           .replace('Create built-in wallet</button>', 'Sign in</button>')
           .replace(/(<p class="fine" id="password-note">)[^<]+/, '$1Use your existing World password to unlock your encrypted wallet. No new wallet is created. There is no password reset.');
         return html.replace('<!-- WORLD_ACCOUNT -->', form);
@@ -95,7 +113,7 @@ export function landingSeo(site = resolvePublicSite({ url: worldPublicOrigin, ch
   const robots = `User-agent: *\nAllow: /\nDisallow: /api/\n${site.url ? `Sitemap: ${site.url}/sitemap.xml\n` : ''}`;
   const landingUrl = `${site.url}/`;
   const location = landingUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const sitemap = site.url ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${location}</loc></url>${[...publicFeaturePages.map(page => page.path), '/community/', '/whitepaper/'].map(path => `<url><loc>${site.url}${path}</loc></url>`).join('')}</urlset>\n` : null;
+  const sitemap = site.url ? `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${location}</loc></url>${['/community/', '/whitepaper/'].map(path => `<url><loc>${site.url}${path}</loc></url>`).join('')}</urlset>\n` : null;
   const channels = Object.values(site.channels).filter(Boolean);
   const schema = {
     '@context': 'https://schema.org', '@type': 'WebApplication', name: 'Featheral',
