@@ -91,10 +91,24 @@ export const itemStorage = [
   { name: 'Crate', capacity: inventoryPageSize * 3, metal: 150, dollars: monetaryPolicy.itemStoragePerLevel * 2 },
   { name: 'Container', capacity: inventoryPageSize * 4, metal: 400, dollars: monetaryPolicy.itemStoragePerLevel * 3 },
   { name: 'Item warehouse', capacity: inventoryPageSize * 5, metal: 1000, dollars: monetaryPolicy.itemStoragePerLevel * 4 },
+  { name: 'Item warehouse II', capacity: inventoryPageSize * 6, metal: 2000, dollars: monetaryPolicy.itemStoragePerLevel * 5 },
+  { name: 'Item warehouse III', capacity: inventoryPageSize * 7, metal: 4000, dollars: monetaryPolicy.itemStoragePerLevel * 6 },
+  { name: 'Item warehouse IV', capacity: inventoryPageSize * 8, metal: 8000, dollars: monetaryPolicy.itemStoragePerLevel * 7 },
+  { name: 'Item warehouse V', capacity: inventoryPageSize * 9, metal: 16000, dollars: monetaryPolicy.itemStoragePerLevel * 8 },
+  { name: 'Item warehouse VI', capacity: inventoryPageSize * 10, metal: 32000, dollars: monetaryPolicy.itemStoragePerLevel * 9 },
 ] as const;
 export const visibilityKeys = Object.keys(visibilityItems) as VisibilityItem[];
 export function inventoryUsed(bag: ItemInventory): number {
-  return bag.items.length + (bag.marketReserved?.length ?? 0);
+  return new Set([...bag.items, ...(bag.marketReserved ?? [])]).size;
+}
+export function inventoryFits(bag: ItemInventory, item: ItemId): boolean {
+  return bag.items.includes(item) || Boolean(bag.marketReserved?.includes(item)) || inventoryUsed(bag) < itemStorage[bag.storage].capacity;
+}
+export function collectibleFindAvailable(bag: ItemInventory, item: ExplorationFind): boolean {
+  return !isCollectible(item) || !bag.marketReserved?.includes(item);
+}
+export function canCollectFinds(bag: ItemInventory): boolean {
+  return bag.pending.some(item => collectibleFindAvailable(bag, item) && inventoryFits(bag, item));
 }
 export function itemStacks(items: readonly ItemId[]): { id: ItemId; quantity: number }[] {
   const quantities = new Map<ItemId, number>();
@@ -163,13 +177,17 @@ export function craftingInputs(item: CraftableItem, quantity = 1): Partial<Recor
 export function craftingMaximum(game: Game, bag: ItemInventory, item: CraftableItem): number {
   if (game.stage < craftingStage(item) || !recipeDiscovered(game, item)) return 0;
   const ingredients = craftingIngredients(item);
-  const count = Object.values(ingredients).reduce((sum, amount) => sum + amount, 0);
-  const room = itemStorage[bag.storage].capacity - inventoryUsed(bag);
-  return Math.max(0, Math.min(100, ...(count ? [] : [room]),
+  const maximum = Math.max(0, Math.min(100,
     ...Object.entries(craftingCost(item)).filter(([, amount]) => amount > 0).map(([resource, amount]) =>
       Math.floor((resource === 'dollars' ? game.dollars / 10000 : game.stock[resource as Resource]) / amount)),
     ...Object.entries(ingredients).map(([id, amount]) => Math.floor(sellableItemCount(bag, id as ItemId) / amount))));
+  for (let quantity = maximum; quantity > 0; quantity--) if (craftingFits(bag, item, quantity)) return quantity;
+  return 0;
 }
 export function craftingFits(bag: ItemInventory, item: CraftableItem, quantity: number): boolean {
-  return inventoryUsed(bag) - Object.values(craftingInputs(item, quantity)).reduce((sum, amount) => sum + amount, 0) + quantity <= itemStorage[bag.storage].capacity;
+  const inputs = craftingInputs(item, quantity);
+  const stacks = new Set(bag.marketReserved ?? []);
+  for (const { id, quantity: owned } of itemStacks(bag.items)) if (owned > (inputs[id] ?? 0)) stacks.add(id);
+  stacks.add(item);
+  return stacks.size <= itemStorage[bag.storage].capacity;
 }

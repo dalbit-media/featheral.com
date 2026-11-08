@@ -8,7 +8,7 @@ import { createAccount, accrue, apply, execute, parseCommand, snapshot } from '.
 import { investigationItem, inventory, collectFinds } from './inventory.ts';
 import { worldDayMs, worldWeekMs } from '../src/environment.ts';
 import { explorationCount, explorationQuote, investigationQuote, nextExploration, nextInvestigation, workforceCounts } from '../src/workforce.ts';
-import { itemStorage, inventoryUsed } from '../src/items.ts';
+import { craftableKeys, inventoryUsed } from '../src/items.ts';
 import { terrainAt, terrainDetails } from '../src/engine.ts';
 import { gameConsumption } from '../src/consumption.ts';
 import { SqliteStore } from './store.ts';
@@ -105,9 +105,9 @@ test('investigation rolls have exactly 10 percent item chance and 90/10 low-tier
   }
   for (const roll of [-1, 100, .5, NaN]) assert.throws(() => investigationItem('forest', roll, 0, 0), /Invalid investigation rolls/);
 });
-test('full storage retains investigation permits as pending and collection consumes normal per-copy capacity', () => {
+test('full storage retains new investigation stacks as pending until a distinct slot opens', () => {
   const account = fixture(), bag = inventory(account);
-  bag.items = Array.from({ length: itemStorage[bag.storage].capacity }, () => 'torch');
+  bag.items = craftableKeys.filter(id => id !== 'collection-wood-1').slice(0, 20);
   execute(account, { type: 'investigate', x: 0, y: 0 });
   const team = account.workforce.expeditions[0];
   team.itemFind = 'collection-wood-1';

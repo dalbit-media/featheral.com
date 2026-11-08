@@ -6,7 +6,7 @@ import { createFundedFixtureAccount } from './test-support.ts';
 import { craft, inventory } from './inventory.ts';
 import { SqliteStore } from './store.ts';
 import { bulkCraftingItems, bulkCraftingKeys, craftBatchOptions } from '../src/bulk-crafting.ts';
-import { craftingCost, craftingIngredients, craftingInputs, craftingStage, itemName } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingIngredients, craftingInputs, craftingStage, inventoryUsed, itemName } from '../src/items.ts';
 import type { ItemId } from '../src/items.ts';
 import { craftingPanel } from '../src/inventory-view.ts';
 import { gameConsumption } from '../src/consumption.ts';
@@ -40,10 +40,9 @@ test('four exact batch permits use decorations and collectors, have distinct art
     assert.notEqual(translate(itemName(id), 'ko'), itemName(id));
   }
 });
-test('each exact batch consumes one matching permit and all raw resources, including 100 copies in a 100-slot bag', () => {
+test('each exact batch consumes one matching permit and all raw resources, including 100 copies in one starter slot', () => {
   for (const id of bulkCraftingKeys) {
     const account = fixture(), bag = inventory(account), quantity = bulkCraftingItems[id].quantity;
-    bag.storage = 4;
     bag.items = [id];
     const before = account.game.stock.wood;
     const quote = gameConsumption(snapshot(account), { type: 'craft', item: 'torch', quantity })!;
@@ -52,6 +51,7 @@ test('each exact batch consumes one matching permit and all raw resources, inclu
     craft(account, 'torch', quantity);
     assert.equal(account.game.stock.wood, before - craftingCost('torch', quantity).wood!);
     assert.equal(bag.items.length, quantity);
+    assert.equal(inventoryUsed(bag), 1);
     assert.ok(bag.items.every(item => item === 'torch'));
   }
 });
@@ -76,7 +76,7 @@ test('failed batches retain permits for shortages, capacity, undiscovered resour
     bag.items = ['craft-batch-10'];
     const item = failure === 'ingredients' ? 'survey-satchel' : failure === 'stage' ? 'gazebo' : 'torch';
     if (failure === 'resources') account.game.stock.wood = 0;
-    if (failure === 'capacity') while (bag.items.length < 20) bag.items.push('lamp');
+    if (failure === 'capacity') bag.items = ['craft-batch-10', 'craft-batch-10', ...craftableKeys.filter(id => id !== 'torch' && id !== 'craft-batch-10').slice(0, 19)];
     if (failure === 'discovery') account.game.explored = [];
     if (failure === 'ingredients') {
       bag.storage = 4;
@@ -99,10 +99,10 @@ test('escrow and pending permits do not unlock batches and maximum only includes
   const options = craftBatchOptions(account.game, bag, 'torch');
   assert.deepEqual(options.map(option => option.quantity), [1, 10, 20, 50, 100]);
   assert.equal(options.find(option => option.quantity === 10)!.reason, null);
-  assert.equal(options.find(option => option.quantity === 20)!.reason, 'Item inventory full');
+  assert.equal(options.find(option => option.quantity === 20)!.reason, null);
   assert.equal(options.find(option => option.quantity === 50)!.reason, 'Not enough resources');
   const html = craftingPanel(snapshot(account), () => '', 'utility');
-  assert.match(html, /Maximum available batch: 10/);
+  assert.match(html, /Maximum available batch: 20/);
   assert.doesNotMatch(html, /data-crafting-quantity/);
 });
 test('bulk permit crafting also requires a matching batch permit, counted once in addition to recipe ingredients', () => {

@@ -3,7 +3,7 @@ import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot 
 import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { note } from '../src/engine.ts';
-import { craftableKeys, craftingCost, craftingInputs, inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingInputs, inventoryFits, inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
 import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
@@ -506,7 +506,7 @@ export class Exchange {
       if (side === 'sell') account.game.stock[asset] -= quantity;
     } else {
       if (isCollectible(asset) && (bag.marketReserved?.includes(asset) || (side === 'buy' && (bag.items.includes(asset) || bag.pending.some(item => item === asset))))) throw new ApiError(409, 'This item is already owned or reserved.');
-      if (side === 'buy' && inventoryUsed(bag) + quantity > itemStorage[bag.storage].capacity) throw new ApiError(409, 'Item inventory is full. Upgrade item storage first.');
+      if (side === 'buy' && !inventoryFits(bag, asset)) throw new ApiError(409, 'Item inventory is full. Upgrade item storage first.');
       if (side === 'sell') {
         if (bag.items.filter(item => item === asset).length < quantity) throw new ApiError(409, 'This item is not in your inventory.');
         if (sellableItemCount(bag, asset) < quantity) throw new ApiError(409, 'Unequip or return this item from the map before selling.');

@@ -9,13 +9,14 @@ import { collectorRecipes } from '../src/collector-recipes.ts';
 import type { CollectorBundle } from '../src/collector-recipes.ts';
 import { collectionItemDetails, collectionPolicy } from '../src/collection.ts';
 import { customizationKeys, titleItems } from '../src/customization.ts';
-import { craftingCost, craftingFits, craftingIngredients, craftingMaximum, itemName, itemStorage } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingFits, craftingIngredients, craftingMaximum, itemName } from '../src/items.ts';
 import { marketAssets, marketBasePrice, marketResources } from '../src/market.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { gameConsumption } from '../src/consumption.ts';
 import { ChatArchive } from './chat.ts';
 import { craftingPanel, inventoryPanel } from '../src/inventory-view.ts';
 import { translate } from '../src/i18n.ts';
+import { terrainDetails } from '../src/engine.ts';
 import type { ApiState } from '../src/api-types.ts';
 
 function settled() {
@@ -106,7 +107,8 @@ test('naming permits and title badges are craftable and repeatable expedition fi
     assert.ok(marketAssets.includes(item));
     assert.ok(marketBasePrice(item) > 0);
   }
-  bag.items = Array.from({ length: 20 }, () => 'torch' as const);
+  const find = customizationKeys[Object.keys(terrainDetails).indexOf('forest') % customizationKeys.length];
+  bag.items = craftableKeys.filter(id => id !== find).slice(0, 20);
   findCustomizationItem(account, 'forest'); findCustomizationItem(account, 'forest');
   assert.equal(bag.pending.length, 2); assert.equal(bag.pending[0], bag.pending[1]);
   bag.marketReserved = [bag.pending[0]]; bag.items.splice(0, 3);

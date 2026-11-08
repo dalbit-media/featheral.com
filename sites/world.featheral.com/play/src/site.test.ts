@@ -641,7 +641,7 @@ test('inventory renders 20 compact stack slots per distinct-item page, including
     state.inventory.storage = tier;
     state.inventory.items = items.slice(0, Math.min(21, itemStorage[tier].capacity));
     const before = structuredClone(state);
-    const pages = Math.ceil(state.inventory.items.length / 20);
+    const pages = itemStorage[tier].capacity / 20;
     for (let page = 0; page < pages; page++) {
       const html = inventoryPanel(state, () => '', 'all', 'en', 'settlement', page);
       assert.equal((html.match(/class="inventory-slot(?: empty| reserved)?"/g) ?? []).length, 20);
@@ -657,7 +657,7 @@ test('inventory renders 20 compact stack slots per distinct-item page, including
   const reserved = inventoryPanel(state, () => '', 'all', 'en');
   assert.match(reserved, /inventory-slot reserved[^>]+data-item="bench"[^>]+disabled/);
   assert.equal((reserved.match(/inventory-slot empty/g) ?? []).length, 18);
-  assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', 999), /data-page="0"[^>]+aria-current="page"/);
+  assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', 999), /data-page="1"[^>]+aria-current="page"/);
   assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', -1), /data-page="0"[^>]+aria-current="page"/);
   const filtered = inventoryPanel(state, () => '', 'decoration', 'en');
   assert.doesNotMatch(filtered, /data-action="inventory-select" data-item="torch"/);
@@ -685,7 +685,7 @@ test('inventory stacks owned and reserved copies without changing capacity, one-
   const pending = html.slice(html.indexOf('class="pending-finds"'), html.indexOf('data-detail="inventory-help"'));
   assert.equal((pending.match(/<li>/g) ?? []).length, 2);
   assert.match(pending, /<span>Quantity<\/span>: 2/);
-  assert.equal(inventoryUsed(state.inventory), 9);
+  assert.equal(inventoryUsed(state.inventory), 4);
   assert.deepEqual(state, before);
   const automation = inventoryPanel(state, () => '', 'collectors', 'en');
   assert.equal((automation.match(/data-action="inventory-select"/g) ?? []).length, 1);
@@ -699,9 +699,9 @@ test('inventory stacks owned and reserved copies without changing capacity, one-
     full.inventory.marketReserved = [];
     const panel = inventoryPanel(full, () => '', 'all', 'en');
     assert.equal((panel.match(/data-action="inventory-select"/g) ?? []).length, 1);
-    assert.equal((panel.match(/data-action="inventory-page"/g) ?? []).length, 1);
-    assert.equal(inventoryUsed(full.inventory), itemStorage[storage].capacity);
-    assert.match(panel, new RegExp(`<strong aria-label="Inventory capacity">${itemStorage[storage].capacity} / ${itemStorage[storage].capacity}</strong>`));
+    assert.equal((panel.match(/data-action="inventory-page"/g) ?? []).length, storage + 1);
+    assert.equal(inventoryUsed(full.inventory), 1);
+    assert.match(panel, new RegExp(`<strong aria-label="Inventory capacity">1 / ${itemStorage[storage].capacity}</strong>`));
   }
 });
 test('Explore sidebar prioritizes recurring actions and links to detailed settlement management', () => {

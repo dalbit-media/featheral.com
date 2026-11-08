@@ -8,7 +8,7 @@ import type { Command } from '../src/api-types.ts';
 import { radius, terrainAt, terrainDetails } from '../src/engine.ts';
 import type { Cost } from '../src/engine.ts';
 import { worldWeekMs } from '../src/environment.ts';
-import { decorationItems, inventoryPageSize, itemStorage, visibilityItems } from '../src/items.ts';
+import { craftableKeys, decorationItems, inventoryPageSize, inventoryUsed, itemStorage, visibilityItems } from '../src/items.ts';
 import { craft, collectFinds, findCollectible, inventory } from './inventory.ts';
 import { craftingCost } from '../src/items.ts';
 import { gameConsumption } from '../src/consumption.ts';
@@ -30,11 +30,14 @@ test('batch crafting is atomic, totals confirmation costs and counts reserved sl
   assert.equal(account.game.stock.wood, before.stock.wood - (cost.wood ?? 0));
   assert.equal(account.game.dollars, before.dollars - (cost.dollars ?? 0) * 10000);
   bag.items.push('craft-batch-100');
+  craft(account, 'torch', 100);
+  assert.equal(bag.items.length, 110);
+  assert.equal(inventoryUsed(bag), 1);
+  bag.marketReserved = ['torch', ...craftableKeys.filter(id => id !== 'torch' && id !== 'lamp').slice(0, 19)];
+  craft(account, 'torch');
   const saved = structuredClone(account);
-  assert.throws(() => craft(account, 'torch', 100), /inventory is full/);
+  assert.throws(() => craft(account, 'lamp'), /inventory is full/);
   assert.deepEqual(account, saved);
-  bag.marketReserved = Array.from({ length: itemStorage[bag.storage].capacity - bag.items.length }, () => 'torch');
-  assert.throws(() => craft(account, 'torch'), /inventory is full/);
   bag.marketReserved = [];
   bag.storage = 1;
   bag.items.push('craft-batch-10');
@@ -176,7 +179,7 @@ test('raw resources and resource storage never consume item slots', () => {
 });
 test('starter bags have 20 slots and every existing storage tier gains one additional 20-slot page without losing contents', () => {
   assert.equal(inventoryPageSize, 20);
-  assert.deepEqual(itemStorage.map(tier => tier.capacity), [20, 40, 60, 80, 100]);
+  assert.deepEqual(itemStorage.map(tier => tier.capacity), [20, 40, 60, 80, 100, 120, 140, 160, 180, 200]);
   const account = settled(), bag = inventory(account);
   bag.items = ['torch', 'bench', 'relic-forest']; bag.equipped = 'torch';
   for (let storage = 0; storage < itemStorage.length; storage++) {
@@ -330,9 +333,9 @@ test('item capacity includes equipped gear; metal-only storage tiers do not chan
   const before = snapshot(account);
   assert.throws(() => act(account, { type: 'craft', item: 'torch' }), /full/);
   assert.deepEqual(account.game.stock, before.game.stock);
-  account.game.stock.metal = 2000;
-  account.game.dollars = 2000 * 10000;
-  let metal = 2000;
+  account.game.stock.metal = 100000;
+  account.game.dollars = 10000 * 10000;
+  let metal = 100000;
   for (let i = 1; i < itemStorage.length; i++) {
     const result = act(account, { type: 'item-storage' });
     metal -= itemStorage[i].metal;

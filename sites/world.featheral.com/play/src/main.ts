@@ -17,7 +17,7 @@ import { resourceForecastPanel } from './resource-forecast.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
 import { editableAllocation, emergencyCollection, explorationCount, nextExploration, nextInvestigation, resourceCapacity, workforceCounts } from './workforce.ts';
-import { inventoryPageSize, inventoryUsed, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
+import { canCollectFinds, collectibleFindAvailable, inventoryPageSize, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import { isActivityEquipment, isEquipmentActivity } from './activity-equipment.ts';
 import type { ItemId } from './items.ts';
 import { craftingPanel, inventoryPanel } from './inventory-view.ts';
@@ -776,8 +776,8 @@ function renderSidebar(): void {
   const nextReturn = state.workforce.expeditions.reduce<Expedition | null>((next, team) => !next || team.readyAt < next.readyAt ? team : next, null);
   const upgradeReady = next && canAfford(game, next.cost) && game.population >= next.population
     && (game.stage >= 0 || !isWater(terrainAt(game.position.x, game.position.y, game.seed)));
-  const room = inventoryUsed(bag) < itemStorage[bag.storage].capacity;
-  const collectable = room && bag.pending.some(item => !bag.marketReserved?.includes(item));
+  const collectable = canCollectFinds(bag);
+  const pendingReason = bag.pending.some(item => collectibleFindAvailable(bag, item)) ? 'Item inventory full' : 'Reserved in market';
   replaceContent(root, `
     <div class="explore-summary"><div class="settlement-card"><div class="settlement-card-body"><span class="mini-tag">${game.stage < 0 ? 'UNSETTLED' : stages[game.stage].name.toUpperCase()}</span>
     <div class="sidebar-stats"><span role="img" aria-label="${fmt(game.population)} residents">${icon('people')}<strong>${fmt(game.population)}</strong></span><span role="img" aria-label="${fmt(game.explored.length)} explored tiles">${icon('compass')}<strong>${fmt(game.explored.length)}</strong></span></div>
@@ -792,7 +792,7 @@ function renderSidebar(): void {
       </div>
       <small class="field-fee-note" title="${escape(translate('Next field team fee multiplier', language))}">${translate('Investigate + Explore', language)} <b>${2 ** explorationCount(state.workforce.expeditions)}x</b></small>
       ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
-      ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
+      ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${pendingReason}</p>` : ''}` : ''}`}
     </div>
     <div class="sidebar-status"><span>${state.availableWorkers} ${translate('Available now', language)}</span><small>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</small></div>
     ${nextReturn ? `<div class="sidebar-expeditions"><a href="/settlement/#residents">${translate(`${state.workforce.expeditions.length} field teams active`, language)}</a>${completionMeter(expeditionStartedAt(nextReturn), nextReturn.readyAt, 'Next return')}</div>` : ''}

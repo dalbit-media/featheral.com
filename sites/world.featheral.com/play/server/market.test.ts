@@ -497,7 +497,7 @@ test('crafted item and collectible trading reserves unique slots, protects equip
       findCollectible(s.account, 'meadow');
       findCollectible(s.account, 'water');
     });
-    assert.equal(h.read(a.token).inventory.pending.length, 2);
+    assert.equal(h.read(a.token).inventory.pending.length, 1);
     h.act(a.token, { type: 'cancel', orderId: ask.market.orders[0].id });
     assert.ok(h.read(a.token).inventory.items.includes('bench'));
     const bid = h.act(b.token, { type: 'limit', asset: 'bench', side: 'buy', quantity: 1, price: 95 });
@@ -537,6 +537,25 @@ test('bad quotes, insufficient balances, self orders and malformed payloads cann
     h.store.transaction(a.token, s => assert.throws(() => execute(s.account, { type: 'trade', resource: 'wood', direction: 'buy', amount: 1 }), /marketplace/));
   } finally { h.store.close(); }
 });
+test('full bags buy and reserve repeated copies without consuming additional slots', () => {
+  const h = setup(), buyer = h.create();
+  try {
+    h.store.transaction(buyer.token, session => {
+      inventory(session.account).items = ['torch', ...craftableKeys.filter(id => id !== 'torch' && id !== 'lamp').slice(0, 19)];
+    });
+    const quote = h.read(buyer.token, 'torch', 100).market.quotes.buy;
+    assert.ok(quote.available);
+    const bought = h.act(buyer.token, { type: 'spot', asset: 'torch', side: 'buy', quantity: 100, limitDollars: quote.dollars });
+    assert.equal(bought.inventory.items.filter(id => id === 'torch').length, 101);
+    const bid = h.act(buyer.token, { type: 'limit', asset: 'torch', side: 'buy', quantity: 100, price: .0001 });
+    assert.equal(bid.inventory.marketReserved!.length, 100);
+    assert.throws(() => h.act(buyer.token, { type: 'limit', asset: 'lamp', side: 'buy', quantity: 1, price: .0001 }), /inventory is full/);
+    h.act(buyer.token, { type: 'cancel', orderId: bid.market.orders[0].id });
+    assert.equal(h.read(buyer.token).inventory.items.filter(id => id === 'torch').length, 101);
+    assert.deepEqual(h.read(buyer.token).inventory.marketReserved, []);
+  } finally { h.store.close(); }
+});
+
 test('liquid item quantities fill and cancel independently without losing reserved slots', () => {
   const h = setup(), buyer = h.create(), seller = h.create();
   try {
@@ -561,7 +580,12 @@ test('liquid item quantities fill and cancel independently without losing reserv
     h.act(buyer.token, { type: 'spot', asset: 'torch', side: 'sell', quantity: 2, limitDollars: .0001 });
     assert.equal(h.read(buyer.token).inventory.items.filter(item => item === 'torch').length, 1);
     assert.equal(h.read(buyer.token).inventory.equipped, 'torch');
-    assert.throws(() => h.act(buyer.token, { type: 'limit', asset: 'activity-exploration-1', side: 'buy', quantity: 20, price: .0001 }), /inventory is full/);
+    const stacked = h.act(buyer.token, { type: 'limit', asset: 'activity-exploration-1', side: 'buy', quantity: 20, price: .0001 });
+    assert.equal(stacked.inventory.marketReserved!.filter(id => id === 'activity-exploration-1').length, 20);
+    h.store.transaction(buyer.token, session => {
+      inventory(session.account).items = ['torch', ...craftableKeys.filter(id => id !== 'torch' && id !== 'lamp' && id !== 'activity-exploration-1').slice(0, 18)];
+    });
+    assert.throws(() => h.act(buyer.token, { type: 'limit', asset: 'lamp', side: 'buy', quantity: 1, price: .0001 }), /inventory is full/);
   } finally { h.store.close(); }
 });
 test('collectibles, automation and equipment share demand-driven spot liquidity', () => {
@@ -633,7 +657,7 @@ test('reserved item bids cannot overflow inventory or discard a paid expedition 
       assert.throws(() => craft(s.account, 'planter'), /full/);
       findCollectible(s.account, 'forest');
       assert.deepEqual(inventory(s.account).pending, ['relic-forest']);
-      assert.throws(() => collectFinds(s.account), /full/);
+      assert.throws(() => collectFinds(s.account), /reserved/);
     });
     h.act(a.token, { type: 'cancel', orderId: bid.market.orders[0].id });
     h.store.transaction(a.token, s => { collectFinds(s.account); });

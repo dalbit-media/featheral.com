@@ -3,13 +3,13 @@ import { terrainDetails, terrainResources } from '../src/engine.ts';
 import type { Terrain } from '../src/engine.ts';
 import type { CollectionItem } from '../src/collection.ts';
 import type { ActivityItem } from '../src/automation.ts';
-import { craftingCost, craftingFits, craftingInputs, craftingStage, craftingStageName, craftableItems, decorationItems, decorationSpaces, inventoryUsed, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, sellableItemCount, visibilityItems } from '../src/items.ts';
+import { craftingCost, craftingFits, craftingInputs, craftingStage, craftingStageName, craftableItems, decorationItems, decorationSpaces, collectibleFindAvailable, inventoryFits, isVisibilityItem, itemStorage, placedSlot, recipeDiscovered, sellableItemCount, visibilityItems } from '../src/items.ts';
 import type { Collectible, CraftableItem, DecorationItem, DecorationSlot, ItemId, ItemInventory, VisibilityItem } from '../src/items.ts';
 import type { Account } from './economy.ts';
 import { arrangementError, cellKey, legacySpaceCells, positionEntries, settlementEntityName, settlementPositions } from '../src/settlement-layout.ts';
 import type { GridPosition, SettlementEntity } from '../src/settlement-layout.ts';
 import { collectionDurations } from '../src/collection.ts';
-import { activityKinds, isAutomationItem } from '../src/automation.ts';
+import { activityKinds } from '../src/automation.ts';
 import type { ExplorationFind } from '../src/items.ts';
 import { customizationKeys, customizationName, isCustomizationItem, isTitleItem, namingItems, titleItems } from '../src/customization.ts';
 import type { CustomizationItem } from '../src/customization.ts';
@@ -123,7 +123,7 @@ export function expandInventory(account: Account): string {
 export function findCollectible(account: Account, terrain: Terrain): void {
   const bag = inventory(account), id: Collectible = `relic-${terrain}`;
   if (bag.items.includes(id) || bag.pending.includes(id) || bag.marketSelling?.includes(id)) return;
-  if (!bag.marketReserved?.includes(id) && inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(id);
+  if (collectibleFindAvailable(bag, id) && inventoryFits(bag, id)) bag.items.push(id);
   else bag.pending.push(id);
 }
 export function findCollectionItem(account: Account, terrain: Terrain): void {
@@ -148,12 +148,12 @@ export function investigationItem(terrain: Terrain, chance: number, tier: number
 }
 export function addPermitFind(account: Account, item: CollectionItem | ActivityItem): void {
   const bag = inventory(account);
-  if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
+  if (inventoryFits(bag, item)) bag.items.push(item);
   else bag.pending.push(item);
 }
 export function findCustomizationItem(account: Account, terrain: Terrain): void {
   const bag = inventory(account), item = customizationKeys[Object.keys(terrainDetails).indexOf(terrain) % customizationKeys.length];
-  if (inventoryUsed(bag) < itemStorage[bag.storage].capacity) bag.items.push(item);
+  if (inventoryFits(bag, item)) bag.items.push(item);
   else bag.pending.push(item);
 }
 export function useCustomization(account: Account, item: CustomizationItem, value: string): string {
@@ -176,12 +176,17 @@ export function useCustomization(account: Account, item: CustomizationItem, valu
   return note(account.game, 'Customization applied. One permit consumed.');
 }
 export function collectFinds(account: Account): string {
-  const bag = inventory(account), room = itemStorage[bag.storage].capacity - inventoryUsed(bag);
+  const bag = inventory(account);
   if (!bag.pending.length) throw new GameError('No pending finds to collect.');
-  if (room <= 0) throw new GameError('Item inventory is full. Upgrade item storage first.');
-  const collected = bag.pending.filter(id => isAutomationItem(id) || isCustomizationItem(id) || !bag.marketReserved?.includes(id)).slice(0, room);
-  if (!collected.length) throw new GameError('Pending finds are reserved by open market orders. Cancel the order first.');
-  for (const id of collected) bag.pending.splice(bag.pending.indexOf(id), 1);
-  bag.items.push(...collected);
-  return note(account.game, `Collected ${collected.length} exploration finds into item inventory.`);
+  const eligible = bag.pending.filter(id => collectibleFindAvailable(bag, id));
+  if (!eligible.length) throw new GameError('Pending finds are reserved by open market orders. Cancel the order first.');
+  const remaining: ExplorationFind[] = [];
+  let collected = 0;
+  for (const id of bag.pending) {
+    if (collectibleFindAvailable(bag, id) && inventoryFits(bag, id)) { bag.items.push(id); collected++; }
+    else remaining.push(id);
+  }
+  if (!collected) throw new GameError('Item inventory is full. Upgrade item storage first.');
+  bag.pending = remaining;
+  return note(account.game, `Collected ${collected} exploration finds into item inventory.`);
 }

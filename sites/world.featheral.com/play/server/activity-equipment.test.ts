@@ -6,7 +6,7 @@ import { createFundedFixtureAccount } from './test-support.ts';
 import { craft, equipActivity, inventory } from './inventory.ts';
 import { SqliteStore } from './store.ts';
 import { activityEquipmentBenefit, activityEquipmentDiscount, activityEquipmentItems, discountedActivityCost, equipmentActivities } from '../src/activity-equipment.ts';
-import { craftingCost, craftingIngredients, craftingMaximum, decorationItems, itemStorage, sellableItemCount } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingIngredients, craftingMaximum, decorationItems, inventoryUsed, itemStorage, sellableItemCount } from '../src/items.ts';
 import type { ItemId } from '../src/items.ts';
 import type { Command } from '../src/api-types.ts';
 import { dollarsScale } from '../src/dollars.ts';
@@ -92,7 +92,11 @@ test('placed inputs, market escrow, pending finds, stages and missing resources 
 test('crafting combines inputs even in a full inventory without consuming active timers', () => {
   const account = fixture(), bag = inventory(account);
   supplyRecipe(account, 'survey-satchel');
-  while (bag.items.length < itemStorage[bag.storage].capacity) bag.items.push('torch');
+  for (const item of craftableKeys) {
+    if (inventoryUsed(bag) === itemStorage[bag.storage].capacity) break;
+    if (item !== 'survey-satchel' && !bag.items.includes(item)) bag.items.push(item);
+  }
+  assert.equal(inventoryUsed(bag), itemStorage[bag.storage].capacity);
   account.automationUntil!.wood = start + 5000;
   const timers = structuredClone(account.automationUntil), before = bag.items.length;
   craft(account, 'survey-satchel');
