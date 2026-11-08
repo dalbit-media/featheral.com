@@ -36,6 +36,11 @@ function equipmentLiquidityTargets() {
 }
 
 function bulkCraftingLiquidityTargets() {
+  const { transportPrices } = require("../gold/market-expansion");
+  return Object.fromEntries(Object.entries(transportLiquidityTargets()).filter(([asset]) => !Object.hasOwn(transportPrices, asset)));
+}
+
+function transportLiquidityTargets() {
   const { marketAssets, isLiquidAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
   return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
@@ -102,4 +107,4 @@ function ledgerFunds(ledger, privateKey, reserveEngine = null) {
   };
 }
 
-module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets };
+module.exports = { gameSigningKey, ledgerFunds, SYSTEM_TREASURY_ACCOUNT, liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets, craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets, transportLiquidityTargets };

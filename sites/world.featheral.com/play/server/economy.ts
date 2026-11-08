@@ -27,6 +27,7 @@ import { actionRemaining, actionThrottleMs, timedActionKey } from '../src/action
 import type { TimedAction } from '../src/action-timing.ts';
 import { activityEquipmentItems, isActivityEquipment, isEquipmentActivity } from '../src/activity-equipment.ts';
 import { validCraftingQuantity } from '../src/bulk-crafting.ts';
+import { consumeTransportVoucher, isTransportItem, transportQuote } from '../src/transport-items.ts';
 
 interface LegacyWorkforce {
   crews: Partial<Record<Resource, { workers: number; readyAt: number; weeklyYield: number;
@@ -288,10 +289,14 @@ function beginCycle(account: Account, now: number, access = resourceAccess(accou
   }
 }
 export function collectResource(account: Account, resource: Resource, manual = false): number {
-  const quantity = Math.floor(account.pending[resource] / minute), fee = account.pickupFees?.[resource] ?? 0;
+  const quantity = Math.floor(account.pending[resource] / minute);
+  const bag = inventory(account), quote = transportQuote(account.pickupFees?.[resource] ?? 0, bag);
   if (quantity < 1) throw new ApiError(409, 'No completed resources to collect.');
   if (!Number.isSafeInteger(account.game.stock[resource] + quantity)) throw new ApiError(409, 'Account limit reached.');
-  if (!manual) pay(account.game, { dollars: fee / dollarsScale });
+  if (!manual) {
+    pay(account.game, { dollars: quote.fee / dollarsScale });
+    consumeTransportVoucher(bag, quote.item);
+  }
   account.game.stock[resource] += quantity;
   account.pending[resource] -= quantity * minute;
   if (account.pickupFees) account.pickupFees[resource] = 0;
@@ -394,7 +399,7 @@ export function accrue(account: Account, time: number): void {
         const fees = account.pickupFees ??= empty();
         fees[resource] += (crew.weeklyDollarsCost ?? 0) * dollarsScale;
         if (!Number.isSafeInteger(fees[resource])) throw new ApiError(409, 'Account limit reached.');
-        if ((account.automationUntil?.[resource] ?? 0) >= event && account.game.dollars >= fees[resource]) collectResource(account, resource);
+        if ((account.automationUntil?.[resource] ?? 0) >= event && account.game.dollars >= transportQuote(fees[resource], inventory(account)).fee) collectResource(account, resource);
       } else if (!crew.payOnPickup) {
         if (!Number.isSafeInteger(account.game.stock[resource] + delivery)) throw new ApiError(409, 'Account limit reached.');
         account.game.stock[resource] += delivery;
@@ -472,6 +477,7 @@ function skipSuppliedCycles(account: Account, now: number, event: number): void 
   // Stop before water recovery, permit expiry, insufficient fees or other jobs.
   const work = workforce(account), upkeep = account.settlementUpkeep, water = account.waterUpkeep;
   if (!upkeep || !water || !physicalAt(account, event) || !work.automatic || account.game.population < 4
+    || inventory(account).items.some(isTransportItem)
     || work.expeditions.length || account.recruitment || Object.values(account.activityAutomation ?? {}).some(value => value.enabled)
     || work.crews.water || work.crews.oil || water.readyAt !== event + worldDayMs || upkeep.readyAt !== water.readyAt) return;
   const access = resourceAccess(account.game), cap = capacity(account);
@@ -542,7 +548,11 @@ export function snapshot(account: Account): Snapshot {
       shortage: water.shortage, populationLoss: water.populationLoss } : null,
     settlementUpkeep: account.settlementUpkeep ? { readyAt: supplyTime, paused: Object.values(supplyResources).some(resource => resource.shortage > 0), resources: supplyResources } : null,
     workforce: structuredClone(work), availableWorkers: availableWorkers(account),
-    collection: { fees: Object.fromEntries(resources.map(resource => [resource, (account.pickupFees?.[resource] ?? 0) / dollarsScale])) as Stock,
+    collection: { fees: Object.fromEntries(resources.map(resource => [resource, transportQuote(account.pickupFees?.[resource] ?? 0, bag).fee / dollarsScale])) as Stock,
+      vouchers: Object.fromEntries(resources.flatMap(resource => {
+        const quote = pending[resource] > 0 ? transportQuote(account.pickupFees?.[resource] ?? 0, bag) : null;
+        return quote?.item ? [[resource, quote.item]] : [];
+      })),
       automationUntil: { ...(account.automationUntil ?? empty()) } },
     resourceAccess: resourceAccess(account.game, climateTime(account), !physicalAt(account, account.updatedAt)),
     recruitmentDollars: recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account), account.game) };
@@ -816,9 +826,16 @@ function executeCommand(account: Account, command: Command, realTime: number,
           : 'Pending storage must be at least 50% full to claim.';
         throw new ApiError(409, message);
       }
-      const fee = selected.reduce((sum, resource) => sum + (account.pickupFees?.[resource] ?? 0), 0);
+      const bag = inventory(account), previewBag = { ...bag, items: [...bag.items] };
+      const fees = selected.map(resource => {
+        const quote = transportQuote(account.pickupFees?.[resource] ?? 0, previewBag);
+        consumeTransportVoucher(previewBag, quote.item);
+        return quote;
+      });
+      const fee = fees.reduce((sum, quote) => sum + quote.fee, 0);
       if (!Number.isSafeInteger(fee)) throw new ApiError(409, 'Account limit reached.');
       pay(game, { dollars: fee / dollarsScale });
+      for (const quote of fees) consumeTransportVoucher(bag, quote.item);
       for (const resource of selected) {
         game.stock[resource] += pending[resource];
         account.pending[resource] -= pending[resource] * minute;

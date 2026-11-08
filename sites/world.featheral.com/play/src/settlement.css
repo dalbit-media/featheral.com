@@ -24,6 +24,10 @@
 .action-feedback{font-variant-numeric:tabular-nums;font-size:10px}
 .action-feedback:empty{display:none}
 .button.action-cooling:after{content:"";position:absolute;bottom:0;left:0;width:100%;height:3px;background:#c3e7a0;transform-origin:left;transform:scaleX(var(--action-progress));transition:transform .1s linear}
+.transport-item-art{position:relative}
+.transport-item-art b{position:absolute;right:0;bottom:0;padding:2px 4px;background:#243b30;color:#d6eebd;border-radius:4px;font-size:10px}
+.transport-recommendations{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.transport-recommendations[hidden]{display:none}
 .button.action-working .action-feedback:before{content:"";display:inline-block;width:10px;height:10px;margin-right:5px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:craft-spin .8s linear infinite;vertical-align:middle}
 @keyframes craft-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.button.action-cooling:after{transition:none}.button.action-working .action-feedback:before{animation:none}}

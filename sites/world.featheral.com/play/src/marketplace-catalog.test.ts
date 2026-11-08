@@ -19,11 +19,12 @@ test('price sorting supports both directions and always places missing offers la
     assert.deepEqual(filterMarketCatalog(tickers, state, 'en', 'all', '', sort, false).map(ticker => ticker.asset), ['lamp', 'torch', 'collection-wood-1']);
   assert.deepEqual(tickers, before);
 });
-test('all-item browsing retains all 118 markets and item category never hides resources from the all filter', () => {
+test('all-item browsing retains all 121 markets and item category never hides resources from the all filter', () => {
   const all = marketAssets.map(asset => ({ asset, bid: 1, ask: 2, last: null }));
-  assert.equal(filterMarketCatalog(all, state, 'en', 'all', '', 'name', false).length, 118);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'all', '', 'name', false).length, 121);
   assert.equal(filterMarketCatalog(all, state, 'en', 'resources', '', 'name', false).length, 4);
-  assert.equal(filterMarketCatalog(all, state, 'en', 'items', '', 'name', false).length, 114);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'items', '', 'name', false).length, 117);
+  assert.ok(filterMarketCatalog(all, state, 'en', 'automation', '', 'name', false).some(({ asset }) => asset === 'transport-convoy'));
   const equipment = filterMarketCatalog(all, state, 'en', 'equipment', '', 'name', false);
   assert.equal(equipment.length, 13);
   assert.ok(equipment.some(({ asset }) => asset === 'survey-array'));

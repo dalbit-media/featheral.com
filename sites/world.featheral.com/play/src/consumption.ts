@@ -1,6 +1,6 @@
 import { buildingCosts, diplomacyCosts, recruitmentAmount, stages } from './engine.ts';
 import type { Cost, Resource } from './engine.ts';
-import type { Command, Snapshot } from './api-types.ts';
+import type { CollectionQuote, Command, Snapshot } from './api-types.ts';
 import { craftingCost, craftingIngredients, craftingInputs, itemName, itemStorage } from './items.ts';
 import { isTitleItem } from './customization.ts';
 import { explorationCount, explorationQuote, investigationQuote } from './workforce.ts';
@@ -14,6 +14,10 @@ import { collectionItemDetails } from './collection.ts';
 import { dollarsScale } from './dollars.ts';
 import { activityEquipmentBenefit, activityEquipmentDiscount, isActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
+import { isTransportItem, transportBenefit } from './transport-items.ts';
+import { locale, translate } from './i18n.ts';
+import type { Language } from './i18n.ts';
+import { formatDollars } from './dollars.ts';
 
 export interface ConsumptionAmount { asset: MarketAsset | 'fthg' | 'dollars'; amount: number }
 export interface ConsumptionQuote {
@@ -30,6 +34,31 @@ export interface ConsumptionQuote {
   costLabel?: string;
   notes: string[];
   preciseDollars?: boolean;
+  warning?: string;
+  recommendations?: { label: string; href: string }[];
+}
+export const transportRecommendations = [
+  { label: 'Upgrade Trade hub routes', href: '/settlement/#buildings' },
+  { label: 'Craft transport vouchers', href: '/settlement/#crafting' },
+  { label: 'Buy transport vouchers', href: '/market/?asset=transport-convoy&side=buy' },
+];
+export function claimConsumption(state: Snapshot, resource: Resource, quote: CollectionQuote, language: Language): ConsumptionQuote {
+  const consumption = gameConsumption(state, { type: 'claim', resource })!;
+  consumption.costs = [{ asset: 'dollars', amount: quote.transport }, ...(quote.voucher ? [{ asset: quote.voucher, amount: 1 }] : [])];
+  consumption.preciseDollars = true;
+  const t = (text: string) => translate(text, language);
+  const money = (value: number) => formatDollars(value, locale(language));
+  consumption.notes.push(quote.sellAvailable
+    ? `${t('Current market sell value')}: FTH$ ${money(quote.proceeds)} · ${t('After transport')}: FTH$ ${money(quote.net)}`
+    : t('Market sale quote unavailable. Profit after transport cannot be verified.'));
+  if (quote.sellAvailable && quote.net < 0) consumption.warning = 'Selling this pickup now would lose FTH$ after transport.';
+  if (quote.voucher) consumption.notes.push(transportBenefit(quote.voucher));
+  consumption.notes.push('Sale estimate only. Claim stores resources and does not sell them. Voucher purchase or crafting cost is excluded.');
+  if (consumption.warning || !quote.sellAvailable) {
+    consumption.notes.push('Upgrade Trade hub routes for future deliveries, or craft/buy single-use transport vouchers for up to 50% off pickup fees.');
+    consumption.recommendations = transportRecommendations;
+  }
+  return consumption;
 }
 function amounts(cost: Cost): ConsumptionAmount[] {
   return Object.entries(cost).map(([asset, amount]) => ({ asset: asset as Resource | 'dollars', amount }));
@@ -53,12 +82,15 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
         literalSubject: !isTitleItem(command.item), costs: [{ asset: command.item, amount: 1 }] };
     case 'claim':
       return command.resource ? { ...quote('Collect resources', itemNameForResource(command.resource), { dollars: state.collection?.fees[command.resource] ?? 0 }),
+        costs: [...amounts({ dollars: state.collection?.fees[command.resource] ?? 0 }),
+          ...(state.collection?.vouchers?.[command.resource] ? [{ asset: state.collection.vouchers[command.resource]!, amount: 1 }] : [])],
         receives: [{ asset: command.resource, amount: state.pending[command.resource] }], notes: ['Transport is paid in FTH$ when completed resources are collected.'] } : null;
     case 'collect-sell':
       return { ...quote('Collect and sell', itemNameForResource(command.resource), {}, ['Completed output is sold at marketplace prices. Transport is deducted from the proceeds.',
         'Collect all completed output, sell the selected amount, and store the rest. Full transport is deducted from proceeds.',
         ...(command.resource === 'water' ? ['Selling Water can cause daily shortages. Keep enough Water for your residents.'] : [])]),
-        costs: [{ asset: command.resource, amount: command.quantity }],
+        costs: [{ asset: command.resource, amount: command.quantity }, ...(state.collection?.vouchers?.[command.resource]
+          ? [{ asset: state.collection.vouchers[command.resource]!, amount: 1 }] : [])],
         receives: [{ asset: 'dollars', amount: command.minimumDollars / dollarsScale }], receiveLabel: 'Minimum received' };
     case 'activate-collection':
       return { ...quote('Activate auto-collection', itemName(command.item), {}, ['Consumes one item. Remaining automation time stacks. FTH$ transport is still required.',
@@ -125,7 +157,8 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           ...Object.entries(craftingInputs(command.item, command.quantity)).map(([asset, amount]) => ({ asset: asset as MarketAsset, amount }))],
         receives: [{ asset: command.item, amount: command.quantity ?? 1 }],
         notes: [...(bulkCraftingPermit(command.quantity ?? 1) ? ['Consumes one matching bulk crafting permit for this exact batch. Cancellation or failure consumes nothing.'] : []),
-          ...(isBulkCraftingItem(command.item) ? ['Consumes unused decorations and collector permits permanently. Use this permit when choosing an exact bulk batch after clicking Craft.']
+          ...(isTransportItem(command.item) ? [transportBenefit(command.item)]
+          : isBulkCraftingItem(command.item) ? ['Consumes unused decorations and collector permits permanently. Use this permit when choosing an exact bulk batch after clicking Craft.']
           : isActivityEquipment(command.item) ? [
           'Consumes unused decorations and collector permits permanently. Placed decorations, active timers, pending finds and market escrow cannot be used.',
           `${activityEquipmentBenefit(command.item)}. Equip one item per activity; discounts do not stack.`,

@@ -89,6 +89,7 @@ test('2D maps start closer, repaint on interaction and stop painting unchanged s
       hash: () => .2, radius: () => 3, terrainAt: () => 'grassland', terrainColors: {},
       explorationFringe: () => new Map(), project, unproject, tileWidth, tileHeight,
       drawDiamond() {}, drawHouse() {}, drawTree() {}, drawEnvironment() {}, tileColor: () => '#123456',
+      EnvironmentLayer: class { capture() {} draw() {} },
       settlementPositions: () => ({}), positionEntries: () => [], settlementTerrain: () => 'grassland',
       settlementRadius: 8, cellKey,
     };
@@ -99,7 +100,7 @@ test('2D maps start closer, repaint on interaction and stop painting unchanged s
       ? new Renderer(canvas, canvas, () => state.game, () => {}, () => environment)
       : new Renderer(canvas, () => ({ state, environment, editing: false, selected: null, pending: null }), () => {}, () => {}, 'en', () => {});
     renderer.resize();
-    assert.equal(renderer.zoom, name === 'World' ? 1.55 : 2.1);
+    assert.equal(renderer.zoom, name === 'World' ? 2.1 : 2.4);
     renderer.frame(16);
     const initialPaints = paints;
     assert.ok(initialPaints > 0);
@@ -133,20 +134,21 @@ test('collection readiness uses a visible text badge and game/header controls st
   assert.doesNotMatch(main.slice(main.indexOf('function showClaimFeedback'), main.indexOf('function wireResourceTooltips')), /claim-ring|claim-spark/);
 });
 
-test('calendar animation bounds updates to ten per second and pauses when hidden or reduced-motion', () => {
+test('header calendar updates at most once every five seconds even during frequent renders', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  const code = stripTypeScriptTypes(main.slice(main.indexOf('let clockFrame:'), main.indexOf('function scheduleClockAnimation()')));
+  const start = main.indexOf('  if (!calendar.firstElementChild || performance.now() - clockUpdatedAt');
+  const code = main.slice(start, main.indexOf('  const speed =', start));
   let timestamp = 0, updates = 0;
   const context = {
-    document: { hidden: false }, clockMotion: { matches: false }, state: { serverTime: 0, clockSpeed: 33.6 },
-    performance: { now: () => timestamp }, synchronizedAt: 0, clockCalendar: {},
-    displayServerTime: () => timestamp, updateClockTime: () => { updates++; }, requestAnimationFrame: () => 1,
+    performance: { now: () => timestamp }, calendar: { firstElementChild: {} }, environment: {}, timestamp: 0,
+    updateWeekCalendar: () => { updates++; },
   };
-  const tick = runInNewContext(`${code}; animateClock;`, context);
-  for (timestamp = 0; timestamp < 1000; timestamp += 10) tick(timestamp);
-  assert.equal(updates, 10);
-  context.document.hidden = true; timestamp = 1000; tick(timestamp); assert.equal(updates, 10);
-  context.document.hidden = false; context.clockMotion.matches = true; tick(timestamp); assert.equal(updates, 10);
+  const tick = runInNewContext(`let clockUpdatedAt = -Infinity; () => { ${code} };`, context);
+  for (timestamp = 0; timestamp < 10000; timestamp += 10) tick();
+  assert.equal(updates, 2);
+  timestamp = 10000; tick(); assert.equal(updates, 3);
+  assert.doesNotMatch(main, /animateClock|scheduleClockAnimation/);
+  assert.match(main, /if \(document\.hidden\) return;\s+renderEnvironment\(\)/);
 });
 
 test('deadline refresh includes off-cycle crews and retries without polling hidden or busy views', () => {

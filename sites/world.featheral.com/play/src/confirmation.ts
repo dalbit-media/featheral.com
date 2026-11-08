@@ -135,6 +135,21 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
     : quote.weeks === null ? t('Until filled or cancelled') : quote.weeks ? t(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`) : t('Immediate'));
   dialog.append(details);
   for (const note of quote.notes) dialog.append(element('p', t(note), 'consumption-note'));
+  if (quote.warning) {
+    const warning = element('p', t(quote.warning), 'consumption-warning');
+    warning.setAttribute('role', 'alert');
+    dialog.append(warning);
+  }
+  if (quote.recommendations?.length) {
+    const links = element('nav', undefined, 'transport-recommendations');
+    links.setAttribute('aria-label', t('Reduce transport costs'));
+    for (const recommendation of quote.recommendations) {
+      const link = element('a', t(recommendation.label), 'button');
+      link.href = recommendation.href;
+      links.append(link);
+    }
+    dialog.append(links);
+  }
   dialog.append(element('p', t('Nothing is spent until you confirm.'), 'consumption-note'));
   const actions = element('div', undefined, 'consumption-actions');
   const cancel = element('button', t('Cancel'), 'button');

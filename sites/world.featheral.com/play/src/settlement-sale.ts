@@ -3,7 +3,7 @@ import { readCollection, readMarket, send, sendMarket } from './api.ts';
 import type { ApiState, CollectionQuote } from './api-types.ts';
 import { marketAssetName, marketResources } from './market.ts';
 import type { MarketQuote, MarketResource } from './market.ts';
-import { gameConsumption, marketConsumption } from './consumption.ts';
+import { gameConsumption, marketConsumption, transportRecommendations } from './consumption.ts';
 import { confirmConsumption, confirmationOpen } from './confirmation.ts';
 import { dollarsSlippage, dollarsUnits, formatDollars } from './dollars.ts';
 import { locale, translate } from './i18n.ts';
@@ -44,7 +44,8 @@ export class SettlementSale {
       <p class="resource-sale-total"><span>You get · FTH$</span><strong data-sale-total>—</strong></p>
       <p role="status" data-sale-status></p><div class="resource-sale-actions">
       <button class="button primary" type="submit" data-sale-submit disabled>Review sell</button>
-      <button class="button" type="button" data-sale-refresh>Refresh quote</button></div></form>`;
+      <button class="button" type="button" data-sale-refresh>Refresh quote</button></div>
+      <nav class="transport-recommendations" data-transport-help hidden>${transportRecommendations.map(link => `<a class="button" href="${link.href}">${translate(link.label, language)}</a>`).join('')}</nav></form>`;
     this.controls = new ResourceSaleQuantity(language, () => this.changed());
     this.root.querySelector('[data-sale-controls]')!.append(this.controls.root);
     localize(this.root); this.configure(true);
@@ -97,7 +98,10 @@ export class SettlementSale {
       : t('Only owned resources are sold. Pending resources and escrow are excluded.');
     const reason = message || this.error || (!this.controls.valid
       ? t(this.available() < 1 ? 'No resources available to sell.' : 'Enter a whole trading lot within the available amount.')
+      : this.collection?.sellAvailable && this.collection.net < 0 ? t('Selling this pickup now would lose FTH$ after transport.')
+      : this.collection?.sellAvailable && this.collection.net === 0 ? t('Sale proceeds only cover transport. No FTH$ profit remains.')
       : this.quote && !this.quote.available ? t('Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.') : '');
+    this.root.querySelector<HTMLElement>('[data-transport-help]')!.hidden = this.source !== 'completed' || !this.collection || this.collection.net > 0;
     this.root.querySelector('[data-sale-total]')!.textContent = this.quote?.available ? formatDollars(this.quote.dollars, locale(this.language)) : '—';
     this.root.querySelector('[data-sale-status]')!.textContent = reason;
     const submit = this.root.querySelector<HTMLButtonElement>('[data-sale-submit]')!;

@@ -4,7 +4,8 @@ import type { Environment } from './environment.ts';
 import { decorationDrawing } from './item-art.ts';
 import { decorationItems, isDecorationItem } from './items.ts';
 import type { DecorationItem } from './items.ts';
-import { drawDiamond, drawEnvironment, drawHouse, drawTree, drawWaterFacility, project, tileColor, unproject } from './map-art.ts';
+import { drawDiamond, drawHouse, drawTree, drawWaterFacility, project, tileColor, unproject } from './map-art.ts';
+import { EnvironmentLayer } from './environment-layer.ts';
 import { isWaterFacility } from './water-facilities.ts';
 import { arrangementError, cellKey, positionEntries, settlementEntityName, settlementPositions, settlementRadius, settlementTerrain } from './settlement-layout.ts';
 import type { GridPosition, SettlementEntity } from './settlement-layout.ts';
@@ -18,7 +19,8 @@ export class SettlementMap {
   private width = 0;
   private height = 0;
   private camera = { x: 0, y: 0 };
-  private zoom = 2.1;
+  private zoom = 2.4;
+  private weatherLayer = new EnvironmentLayer();
   private drag: Drag | null = null;
   private hover: GridPosition | null = null;
   private hovered: SettlementEntity | null = null;
@@ -92,7 +94,7 @@ export class SettlementMap {
     requestAnimationFrame(this.frame);
   }
   center(position: GridPosition = { x: 0, y: 0 }): void { this.camera = { ...position }; }
-  scale(amount: number): void { this.zoom = Math.max(.65, Math.min(2.6, this.zoom + amount)); }
+  scale(amount: number): void { this.zoom = Math.max(.65, Math.min(3, this.zoom + amount)); }
   private clamp(value: number): number { return Math.max(-settlementRadius - 2, Math.min(settlementRadius + 2, value)); }
   private cell(x: number, y: number): GridPosition {
     const bounds = this.canvas.getBoundingClientRect(), delta = unproject((x - bounds.left - this.width / 2) / this.zoom, (y - bounds.top - this.height / 2) / this.zoom);
@@ -137,7 +139,10 @@ export class SettlementMap {
     const c = this.ctx, view = this.getState(), { game, inventory } = view.state;
     const hover = view.editing || view.pending || this.drag?.entity ? this.hover : null;
     const renderKey = `${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${view.state.revision}:${this.artworkRevision}:${view.editing}:${view.selected}:${view.pending}:${hover?.x}:${hover?.y}:${this.hovered}:${this.drag?.entity}:${this.drag?.moved}:${view.environment.season}:${view.environment.phase}:${view.environment.weather}:${view.environment.daylight}`;
-    if (renderKey === this.renderKey) return;
+    if (renderKey === this.renderKey) {
+      this.weatherLayer.draw(c, view.environment, this.width, this.height, time);
+      return;
+    }
     this.renderKey = renderKey;
     const positions = settlementPositions(game, inventory);
     const occupants = new Map(positionEntries(positions).map(([id, position]) => [cellKey(position), id]));
@@ -193,6 +198,7 @@ export class SettlementMap {
       c.fillStyle = '#142c24ed'; c.fillRect(screen.x - width / 2, screen.y - 100, width, 24); c.fillStyle = '#e5ecd6'; c.textAlign = 'center'; c.fillText(label, screen.x, screen.y - 84, width - 12);
     }
     c.restore();
-    drawEnvironment(c, view.environment, this.width, this.height, time, true);
+    this.weatherLayer.capture(this.canvas);
+    this.weatherLayer.draw(c, view.environment, this.width, this.height, time);
   };
 }

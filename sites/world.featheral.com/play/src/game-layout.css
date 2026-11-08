@@ -11,6 +11,11 @@
 @media(prefers-reduced-motion:no-preference){
   #app .button.action-cooling:after{transition:transform .1s linear!important}
   #app .button.action-working .action-feedback:before{animation:craft-spin .8s linear infinite!important}
+  #app .completion-meter::after{transition:transform 1s linear!important}
+  #app .clock-day-fill,#app .clock-season::before{transition:transform 5s linear!important}
+  #app .resource-progress>div,#app .population-health-meter i{transition:width .6s ease!important}
+  #app progress::-webkit-progress-value{transition:width .6s ease!important}
+  #app progress::-moz-progress-bar{transition:width .6s ease!important}
 }
 #app .topbar button,#app .topbar button:hover,#app .topbar button:focus-visible{border:0;box-shadow:none}
 #app .topbar #resource-bar{border:0}

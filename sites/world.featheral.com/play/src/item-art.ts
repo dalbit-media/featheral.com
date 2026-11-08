@@ -9,6 +9,7 @@ import { isCustomizationItem, isTitleItem } from './customization.ts';
 import { activityEquipmentItems, isActivityEquipment } from './activity-equipment.ts';
 import type { ActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, isBulkCraftingItem } from './bulk-crafting.ts';
+import { isTransportItem, transportItems } from './transport-items.ts';
 
 const activityEquipmentDrawings: Record<ActivityEquipment, string> = {
   'survey-satchel': '<path d="M19 24V17a13 13 0 0 1 26 0v7" fill="none" stroke="#dec18b" stroke-width="4"/><path d="M12 22h40v35H12Z" fill="#ad8059"/><path d="M12 22h40l-7 17H19Z" fill="#d2af76"/><circle cx="32" cy="39" r="5" fill="#82c4ad"/><path d="m21 48 6 4 7-5 9 5" fill="none" stroke="#eadcaa" stroke-width="2"/>',
@@ -69,6 +70,7 @@ export function itemArt(id: ItemId): string {
     return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M13 7h32l8 8v43H13Z" fill="${color}"/><path d="M45 7v10h8M21 23h24m-24 8h16m-16 8h24" fill="none" stroke="#314b41" stroke-width="3"/><path d="m31 44 8-4 8 4v8l-8 5-8-5Z" fill="#426e5d"/><path d="m34 47 5 5 6-8" fill="none" stroke="#e4edca" stroke-width="2"/></svg><b>×${recipe.quantity}</b></div>`;
   }
   if (isActivityEquipment(id)) return `<div class="item-art activity-equipment-art"><svg viewBox="0 0 64 64" aria-hidden="true">${activityEquipmentDrawings[id]}</svg><b>−${activityEquipmentItems[id].discount}%</b></div>`;
+  if (isTransportItem(id)) return `<div class="item-art transport-item-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 24h39v24H10Z" fill="${id === 'transport-cart' ? '#ad8059' : id === 'transport-wagon' ? '#739f8b' : '#91b9c6'}"/><path d="M10 24 5 15m44 27h10" fill="none" stroke="#dec18b" stroke-width="4"/><circle cx="18" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><circle cx="44" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><path d="M17 30h25m-25 8h25" stroke="#e5dbad" stroke-width="2"/></svg><b>-${transportItems[id].discount}%</b></div>`;
   if (isCollectionItem(id)) return `<div class="item-art collection-item-art">${icon(collectionItemDetails(id).resource === 'all' ? 'warehouse' : collectionItemDetails(id).resource)}<b>${collectionItemDetails(id).weeks}w</b></div>`;
   if (isCustomizationItem(id)) return `<div class="item-art collection-item-art">${icon(isTitleItem(id) ? 'spark' : id === 'permit-region-name' ? 'world' : 'home')}</div>`;
   if (isActivityItem(id)) {

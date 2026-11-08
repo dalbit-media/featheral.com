@@ -14,6 +14,7 @@ import type { CollectorBundle } from './collector-recipes.ts';
 import { activityEquipmentItems, isActivityEquipment } from './activity-equipment.ts';
 import type { EquippedActivities } from './activity-equipment.ts';
 import { bulkCraftingItems, bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
+import { transportItems, isTransportItem } from './transport-items.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
@@ -55,7 +56,7 @@ export const decorationItems = {
   skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
 } satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {
@@ -139,7 +140,7 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   return resources.every(resource => found.has(resource as Resource));
 }
 export function craftingStage(item: CraftableItem): number {
-  return isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
+  return isTransportItem(item) ? transportItems[item].stage : isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
 }
 export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;
@@ -150,7 +151,7 @@ export function craftingCost(item: CraftableItem, quantity = 1): Cost {
     [resource, (resource === 'dollars' ? Math.max(1, amount / 10) : Math.ceil(amount / 10)) * quantity]));
 }
 export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
-  const ingredients = isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
+  const ingredients = isTransportItem(item) ? transportItems[item].ingredients : isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
     : Object.hasOwn(collectorRecipes, item) ? collectorRecipes[item as CollectorBundle].ingredients : {};
   return Object.fromEntries(Object.entries(ingredients).map(([id, count]) => [id, count * quantity]));
 }

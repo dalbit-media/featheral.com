@@ -10,6 +10,7 @@ import type { ActivityItem, ActivityKind } from './automation.ts';
 import type { Customization, CustomizationItem } from './customization.ts';
 import type { ActionReadyAt } from './action-timing.ts';
 import type { ActivityEquipment, EquipmentActivity } from './activity-equipment.ts';
+import type { TransportItem } from './transport-items.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
@@ -70,7 +71,7 @@ export interface Snapshot {
   actionReadyAt?: ActionReadyAt;
   customization?: Customization;
   physicalVersion?: 1;
-  collection?: { fees: Stock; automationUntil: Stock };
+  collection?: { fees: Stock; automationUntil: Stock; vouchers?: Partial<Record<Resource, TransportItem>> };
   activityAutomation?: Record<ActivityKind, { until: number; enabled: boolean; nextAt: number; reason: string | null }>;
   fthg: number;
   dollars: number;
@@ -97,6 +98,7 @@ export interface Snapshot {
 }
 export interface CollectionQuote {
   resource: Resource; quantity: number; transport: number; proceeds: number; net: number; available: boolean;
+  sellAvailable?: boolean; voucher?: TransportItem; discount?: number;
 }
 export interface CollectionResponse extends ApiState { collectionQuote: CollectionQuote }
 export interface ResourceAccess {

@@ -44,6 +44,7 @@ const craftedSeedPrices: Partial<Record<ItemId, number>> = Object.freeze({
   'trail-kit': 500, 'trail-outpost': 1800, 'trail-network': 5500,
   'welcome-kit': 450, 'welcome-pavilion': 2200, 'welcome-network': 4800,
   'craft-batch-10': 350, 'craft-batch-20': 850, 'craft-batch-50': 1800, 'craft-batch-100': 3500,
+  'transport-cart': 120, 'transport-wagon': 300, 'transport-convoy': 650,
 });
 export function marketBasePrice(asset: MarketAsset): number {
   // Reserve genesis pins this seed price; trading floors must not change it.

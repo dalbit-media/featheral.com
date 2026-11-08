@@ -12,6 +12,7 @@ import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { poolPayment, poolPaymentUnits } from '../src/pool-pricing.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import type { CollectionQuote, Command } from '../src/api-types.ts';
+import { consumeTransportVoucher, transportQuote } from '../src/transport-items.ts';
 
 interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
@@ -263,21 +264,24 @@ export class Exchange {
     if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > completed) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
     const steps = quantity ? this.plan(owner, resource, 'sell', quantity, realTime) : [];
     const total = steps.reduce((sum, step) => sum + step.dollars, 0);
-    const fee = account.pickupFees?.[resource] ?? 0;
+    const transport = transportQuote(account.pickupFees?.[resource] ?? 0, inventory(account)), fee = transport.fee;
     if (!Number.isSafeInteger(total)) throw new ApiError(409, 'Market pool limit reached.');
     return { ...snapshot(account), collectionQuote: { resource, quantity, transport: fee / dollarsScale,
       proceeds: total / dollarsScale, net: (total - fee) / dollarsScale,
+      sellAvailable: quantity > 0 && total > 0 && steps.reduce((sum, step) => sum + step.quantity, 0) === quantity,
+      ...(transport.item ? { voucher: transport.item, discount: transport.discount } : {}),
       available: quantity > 0 && total > fee && steps.reduce((sum, step) => sum + step.quantity, 0) === quantity } };
   }
   collectSell(owner: string, account: Account, command: Extract<Command, { type: 'collect-sell' }>, now: number, realTime: number): string {
     const completed = Math.floor(account.pending[command.resource] / 60000), quantity = command.quantity;
     if (quantity > completed) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
-    const fee = account.pickupFees?.[command.resource] ?? 0;
+    const bag = inventory(account), transport = transportQuote(account.pickupFees?.[command.resource] ?? 0, bag), fee = transport.fee;
     if (!Number.isSafeInteger(command.minimumDollars + fee)) throw new ApiError(409, 'Account limit reached.');
     if (!Number.isSafeInteger(account.game.stock[command.resource] + completed)) throw new ApiError(409, 'Account limit reached.');
     account.game.stock[command.resource] += completed;
     this.processOrder(owner, account, { type: 'spot', asset: command.resource, side: 'sell', quantity, limitDollars: command.minimumDollars + fee }, now, realTime);
     account.game.dollars -= fee;
+    consumeTransportVoucher(bag, transport.item);
     account.pending[command.resource] -= completed * 60000;
     if (account.pickupFees) account.pickupFees[command.resource] = 0;
     this.check(account);

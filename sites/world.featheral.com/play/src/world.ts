@@ -1,7 +1,8 @@
 import { hash, radius, terrainAt, terrainResources } from './engine.ts';
 import type { Game, Stock, Terrain } from './engine.ts';
 import type { Environment } from './environment.ts';
-import { drawDiamond, drawEnvironment, drawHouse, drawTree, explorationFringe, project, terrainColors as colors, tileColor, tileHeight, tileWidth, unproject } from './map-art.ts';
+import { drawDiamond, drawHouse, drawTree, explorationFringe, project, terrainColors as colors, tileColor, tileHeight, tileWidth, unproject } from './map-art.ts';
+import { EnvironmentLayer } from './environment-layer.ts';
 
 interface WorldTile { sx: number; sy: number; visible: boolean; clarity: number }
 export function emergencyTiles<T extends { x: number; y: number; visible: boolean; terrain: Terrain }>(
@@ -26,7 +27,8 @@ export class World {
   private width = 0;
   private height = 0;
   private camera = { x: 0, y: 0 };
-  private zoom = 1.8;
+  private zoom = 2.1;
+  private weatherLayer = new EnvironmentLayer();
   private drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null;
   private known = new Set<string>();
   private fringe = new Map<string, number>();
@@ -88,7 +90,7 @@ export class World {
     requestAnimationFrame(this.frame);
   }
   center(settlement = false): void { this.camera = { ...(settlement ? this.game().home ?? this.game().position : this.game().position) }; }
-  scale(amount: number): void { this.zoom = Math.max(0.65, Math.min(2.2, this.zoom + amount)); }
+  scale(amount: number): void { this.zoom = Math.max(0.65, Math.min(2.6, this.zoom + amount)); }
   private tileColor(terrain: Terrain, variant: number): string {
     return tileColor(terrain, variant, this.environment().season);
   }
@@ -129,7 +131,10 @@ export class World {
     const environment = this.environment();
     const pending = this.pending();
     const renderKey = `${this.collectLabel()}:${Object.values(pending).map(value => value >= 1).join()}:${g.bank}:${this.width}:${this.height}:${this.camera.x}:${this.camera.y}:${this.zoom}:${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${g.stage}:${radius(g)}:${this.known.size}:${environment.season}:${environment.phase}:${environment.weather}:${environment.daylight}`;
-    if (renderKey === this.renderKey) return;
+    if (renderKey === this.renderKey) {
+      this.weatherLayer.draw(c, environment, this.width, this.height, time);
+      return;
+    }
     this.renderKey = renderKey;
     c.clearRect(0, 0, this.width, this.height);
     c.fillStyle = '#111d18'; c.fillRect(0, 0, this.width, this.height);
@@ -236,7 +241,8 @@ export class World {
     const fog = c.createRadialGradient(this.width / 2, this.height / 2, this.width * 0.12, this.width / 2, this.height / 2, Math.max(this.width, this.height) * 0.64);
     fog.addColorStop(0, '#0b151000'); fog.addColorStop(0.65, '#0b151045'); fog.addColorStop(1, '#0a100eed');
     c.fillStyle = fog; c.fillRect(0, 0, this.width, this.height);
-    this.drawEnvironment(time);
+    this.weatherLayer.capture(this.canvas);
+    this.weatherLayer.draw(c, environment, this.width, this.height, time);
     const minimapKey = `${g.seed}:${g.position.x}:${g.position.y}:${g.home?.x}:${g.home?.y}:${this.known.size}:${this.environment().season}`;
     if (this.minimapKey !== minimapKey) {
       this.drawMinimap(g); this.minimapKey = minimapKey;
@@ -257,9 +263,6 @@ export class World {
     fog.restore();
     this.ctx.save();
     this.ctx.drawImage(this.fogCanvas, -32, -32); this.ctx.restore();
-  }
-  private drawEnvironment(time: number): void {
-    drawEnvironment(this.ctx, this.environment(), this.width, this.height, time, true);
   }
   private drawMinimap(g: Game): void {
     const c = this.mini;

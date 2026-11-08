@@ -6,13 +6,14 @@ import './pages.css';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
-import { connect, readMarket, refresh, send } from './api.ts';
+import { connect, readCollection, readMarket, refresh, send } from './api.ts';
 import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
 import { ScreenPreview } from './screen-preview.ts';
 import { World } from './world.ts';
 import { claimCooldownMs, defaultClockSpeed, displayServerTime, environmentAt, serverClockStaleMs, serverSyncIntervalMs, worldDayMs, worldWeekMs } from './environment.ts';
-import { compactServerCountdown, completionProgress, environmentDetails, updateClockTime, updateWeekCalendar } from './environment-view.ts';
+import { compactServerCountdown, completionProgress, environmentDetails, updateWeekCalendar } from './environment-view.ts';
+import { resourceForecastPanel } from './resource-forecast.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
 import { editableAllocation, emergencyCollection, explorationCount, nextExploration, nextInvestigation, resourceCapacity, workforceCounts } from './workforce.ts';
@@ -40,7 +41,7 @@ import { gamePage, primaryGamePageKeys, gamePages } from './game-pages.ts';
 import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
-import { gameConsumption } from './consumption.ts';
+import { claimConsumption, gameConsumption } from './consumption.ts';
 import { chooseCraftBatch, confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
@@ -362,12 +363,25 @@ async function act(command: Command, recenter = false): Promise<boolean> {
         command = { ...command, quantity };
       }
     }
-    const quote = gameConsumption(state, command);
-    if (quote && command.type !== 'claim') {
+    let quote = gameConsumption(state, command);
+    if (command.type === 'claim' && command.resource) {
+      const result = await readCollection(command.resource);
+      synchronize(result);
+      render();
+      quote = claimConsumption(state, command.resource, result.collectionQuote, language);
+    }
+    if (quote) {
       if (!await confirmConsumption(quote, language)) return false;
       synchronize(await refresh());
       render();
-      if (JSON.stringify(gameConsumption(state, command)) !== JSON.stringify(quote)) {
+      let updatedQuote = gameConsumption(state, command);
+      if (command.type === 'claim' && command.resource) {
+        const result = await readCollection(command.resource);
+        synchronize(result);
+        render();
+        updatedQuote = claimConsumption(state, command.resource, result.collectionQuote, language);
+      }
+      if (JSON.stringify(updatedQuote) !== JSON.stringify(quote)) {
         toast('Requirements changed. Review the updated costs and try again.', true);
         return false;
       }
@@ -448,6 +462,7 @@ function synchronize(next: ApiState): void {
   game = state.game;
   synchronizedAt = performance.now();
 }
+let clockUpdatedAt = -Infinity;
 function renderEnvironment(): void {
   const elapsed = performance.now() - synchronizedAt;
   const timestamp = displayServerTime(state.serverTime, elapsed, state.clockSpeed);
@@ -456,7 +471,10 @@ function renderEnvironment(): void {
   document.querySelector<HTMLElement>('#clock-sync-status')!.hidden = !syncPaused;
   document.querySelector('.server-clock')!.classList.toggle('sync-paused', syncPaused);
   const calendar = document.querySelector<HTMLElement>('#world-time')!;
-  updateWeekCalendar(calendar, environment, timestamp);
+  if (!calendar.firstElementChild || performance.now() - clockUpdatedAt >= 5000) {
+    updateWeekCalendar(calendar, environment, timestamp);
+    clockUpdatedAt = performance.now();
+  }
   const speed = document.querySelector<HTMLElement>('#clock-speed')!;
   speed.hidden = state.clockSpeed === 1;
   speed.textContent = state.clockSpeed === defaultClockSpeed ? translate('5 MIN / WEEK', language) : `${state.clockSpeed}x`;
@@ -764,7 +782,7 @@ function renderSidebar(): void {
     <div class="explore-summary"><div class="settlement-card"><div class="settlement-card-body"><span class="mini-tag">${game.stage < 0 ? 'UNSETTLED' : stages[game.stage].name.toUpperCase()}</span>
     <div class="sidebar-stats"><span role="img" aria-label="${fmt(game.population)} residents">${icon('people')}<strong>${fmt(game.population)}</strong></span><span role="img" aria-label="${fmt(game.explored.length)} explored tiles">${icon('compass')}<strong>${fmt(game.explored.length)}</strong></span></div>
     ${next ? `<div class="next-stage"><span>${icon('arrow')} ${next.name}</span>${next.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} ${icon('people')}</span>` : ''}</div>${next.population ? meter(game.population, next.population, `Residents for ${next.name}`) : requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed)))}` : '<div class="complete-label">Capital complete</div>'}</div></div>
-    </div><div class="explore-upkeep">${waterUpkeepPanel(true)}</div>
+    </div><div class="explore-upkeep">${resourceForecastPanel(state, language)}</div>
     <div class="sidebar-primary-actions" role="group" aria-label="Frequent actions">
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
@@ -1540,37 +1558,6 @@ if (settlementPage && !visitingSettlement) settlementSale = new SettlementSale((
   next => { if (next.revision >= state.revision) { synchronize(next); render(); } }, toast, language);
 render();
 mountWorldChat();
-const clockCalendar = document.querySelector<HTMLElement>('#world-time')!;
-const clockMotion = matchMedia('(prefers-reduced-motion: reduce)');
-let clockFrame: number | undefined;
-let clockDrawnAt = -1;
-let clockUpdatedAt = -Infinity;
-function animateClock(frameTime: number): void {
-  clockFrame = undefined;
-  if (document.hidden || clockMotion.matches) return;
-  const timestamp = displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed);
-  if (frameTime - clockUpdatedAt >= 100 && timestamp !== clockDrawnAt) {
-    updateClockTime(clockCalendar, timestamp);
-    clockDrawnAt = timestamp;
-    clockUpdatedAt = frameTime;
-  }
-  clockFrame = requestAnimationFrame(animateClock);
-}
-function scheduleClockAnimation(): void {
-  if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
-  clockFrame = undefined;
-  clockDrawnAt = -1;
-  clockUpdatedAt = -Infinity;
-  if (!document.hidden && !clockMotion.matches) clockFrame = requestAnimationFrame(animateClock);
-}
-clockMotion.addEventListener('change', scheduleClockAnimation);
-document.addEventListener('visibilitychange', scheduleClockAnimation);
-window.addEventListener('pageshow', scheduleClockAnimation);
-window.addEventListener('pagehide', () => {
-  if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
-  clockFrame = undefined;
-});
-scheduleClockAnimation();
 if (marketPage) marketplace = new Marketplace(document.querySelector<HTMLElement>('#marketplace-content')!, () => state,
   next => { if (next.revision >= state.revision) { synchronize(next); render(); } }, toast, language);
 if (bankPage) new WalletPage(document.querySelector<HTMLElement>('#bank-content')!, async () => { await syncProduction(); });

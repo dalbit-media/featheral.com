@@ -89,20 +89,53 @@ explicit navigation font, size, weight and touch-target styles.
 
 World public statistics appear once below the hero, not in the site header. The header retains site navigation and the wallet control.
 
-Explorer and settlement cameras start at 1.8x and 2.1x respectively; wheel and
-button zoom remain available. Both 2D maps repaint only when their scene, camera,
-viewport, selection, artwork or environment changes. Settlement drawing culls
-off-screen cells. Decorative weather, water and character motion is static, and
+Explorer and settlement cameras start at 2.1x and 2.4x respectively; wheel and
+button zoom remain available. Both 2D maps cache terrain until their scene, camera,
+viewport, selection, artwork or environment changes. Rain, snow and storms animate
+over the cached scene at up to 30 fps; reduced motion keeps precipitation still.
+Settlement drawing culls off-screen cells. Water and character motion is static, and
 game button/scroll transitions and pickup particles are removed to prioritize
 responsive panning and interaction. Collection-ready header resources use a
 high-contrast **Collect** badge and pending quantity; existing pickup fees,
 disabled-state explanations and server authorization are unchanged. Header
 buttons are borderless, retaining keyboard focus outlines.
 
-The Explore sidebar uses one fixed-height row of three icon-based vertical
-consumption meters for Water, Wood heating and Metal repair. Hover/focus exposes
-the daily amount and shortage reason; each meter links directly to buying that
-resource. Detailed demand remains in the settlement production panel.
+Paid pickup now reviews the full-output live market sell value and transport fee
+before spending. If selling now would return less than transport, the review
+warns explicitly but still allows a paid claim into inventory. Missing market
+liquidity shows an unavailable estimate, never a fabricated profit. The review
+links to Trade hub route upgrades (future deliveries only), crafting, and buying
+transport vouchers. Collect-and-sell still requires positive net proceeds and
+shows loss/break-even reasons separately from missing liquidity.
+
+Three single-use vouchers reduce one resource's pickup fee: **Handcart (10%,
+stage 0)**, **Freight wagon (25%, stage 2)** and **Shared convoy (50%, stage 4)**.
+They use unused decorations and collector permits plus the shared reduced
+resource/FTH$ crafting charges (minimum FTH$1 per copy). The strongest owned
+voucher is used automatically for paid claims, collect-and-sell and automatic
+collection; one voucher per resource pickup, no stacking. Free map pickups and
+zero-fee pickups consume none. Fees round upward to the nearest 0.0001 FTH$.
+Quotes include the voucher, and failed transactions/cancellations spend none;
+receipts replay without consuming again. Escrowed/pending items are unavailable.
+Voucher crafting/purchase cost is excluded from the pickup-sale estimate, so
+vouchers do not guarantee profit. All three items can be bought/sold in spot
+markets; the prior 118-market export and older catalogs remain unchanged, and the
+121-market catalog uses signed append-only authorization without resetting keys,
+balances, genesis or ledger history.
+
+| Voucher | Item ingredients |
+| --- | --- |
+| Handcart · 10% | Log seat ×1, Wood 1-week collector ×1 |
+| Freight wagon · 25% | Wooden bench ×1, Market canopy ×1, Metal 1-week collector ×1 |
+| Shared convoy · 50% | Town information kiosk ×1, Garden boardwalk ×1, Wood 4-week collector ×1 |
+
+The Explore sidebar shows four-week reserve-depletion charts for Water, Wood
+heating and Metal repair, with weekly consumption and approximate weeks left.
+Warnings highlight reserves at or below one week, and critical shortages below
+one day or when the server reports a shortage. Each row links to buying that
+resource. Forecasts use owned stock and current authoritative weekly demand,
+excluding pending/future collections, crafting and trades; climate and population
+can change demand. The sidebar scrolls on shorter screens so warnings stay reachable.
 
 Population management separates **Gathering now**, **Exploring now** and
 **Available now**; their sum is the total population. Available residents are
@@ -235,7 +268,7 @@ expedition deadline arrives. Hidden pages do not poll or paint maps.
 - **Manual population allocation:** use the +/- buttons, release a resource slider, or enter an exact count directly, even while auto mode is on; saving an edit switches to manual mode. Exact counts save when editing finishes or Enter is pressed. Requests are serialized, with rapid edits coalesced to the latest committed value while other requests finish. Sliders and number fields stay synchronized through server refreshes. Saving and failed-save states are visible; failed drafts remain available with a Retry action. Limits are rechecked against the latest server state, preserving active explorers, the two-resident exploration reserve and other saved assignments; invalid or newly out-of-range drafts show an error instead of being silently applied. Paid crews and weekly deadlines are unchanged.
 - **Explore quick actions and countdowns:** Explore and Recruit share one two-column row in the desktop sidebar and always-visible mobile action panel. The sidebar no longer duplicates Claim; use the resource header or Settlement → Production instead. Recruitment, the next returning expedition, individual expeditions and active gathering crews show completion bars, percentages and compact game-time countdowns. Recruitment displays the arriving batch size instead of its already-paid cost. Bars derive from persisted deadlines and fixed job durations (including two-/three-week expeditions), advance on the authoritative clock, freeze after the existing stale-sync cutoff, and show “Awaiting server confirmation” at 100% without granting arrivals, discoveries or resources locally.
 - Sidebar action costs use a high-contrast spending panel with the resource name and a larger amount. Disabled actions keep their costs readable, with insufficient resources highlighted; active recruitment still hides its already-paid cost. Construction and other existing cost chips are unchanged.
-- Explore Water upkeep is a compact 44px row with daily litres, an animated game-day progress bar/countdown, and accessible Buy Water/Water facilities icons. Shortage warnings remain visible below the row; reduced-motion preferences disable the animation. Detailed Water upkeep cards elsewhere retain their fixed height. Timers use compact server-time `mm:ss` (or `h:mm:ss`), with full timing in the accessible label; “Confirming” at zero still waits for the server. Daily consumption, clock speed and stale-sync behavior are unchanged.
+- Explore upkeep uses weekly reserve-depletion charts with low-supply warnings and direct marketplace links. Detailed Water upkeep cards elsewhere retain their fixed height. Timers use compact server-time `mm:ss` (or `h:mm:ss`), with full timing in the accessible label; “Confirming” at zero still waits for the server. Daily consumption, clock speed and stale-sync behavior are unchanged.
 - **Mobile navigation and Account:** five primary tabs keep Explore, Settlement, Market, Communicate and Federation easy to reach. The avatar beside the game clock opens a right-side account pane, full-screen on mobile, with the available FTHG balance, language and world-condition display settings. Activity and the Field guide open as subviews inside that same pane, with a Back to account control; the underlying game page and URL remain unchanged. Activity keeps search and snapshot/recovery exports, and the guide keeps all chapters, screenshots, search and reading progress. Guide chapter links scroll only the pane, without changing game hashes. Account drafts and scroll position survive returning from these views. Dedicated Journal/Help URLs remain available for existing links. FTHG balance counters are no longer duplicated in the shared header or Marketplace heading; order costs and affordability checks remain unchanged. Display preferences are local to the browser.
 - **Wallet / withdrawal preparation only:** Account can request a connection to an injected EVM browser wallet and reacts to account, network and disconnect events. It never requests signatures, transfers tokens, authenticates the game account, or stores wallet credentials. Withdrawal inputs accept positive multiples of **1,000 FTHG**, capped by the authoritative available balance (excluding escrow); fractional remainders stay in the game. Actual withdrawals are explicitly unavailable and the submit button stays disabled, even with a valid amount and connected wallet. No FTHG is deducted. A payout network, token, conversion policy and service must be configured before real withdrawals can be implemented.
 - **Phone-first layout:** all five resource/currency controls remain visible, including undiscovered Oil. Compact balances retain exact accessible values. Population health and full resource/population management open in responsive dialogs without leaving the page. Settlement's existing dock, collapsible marketplace catalog, sticky chat composer, account pane and safe-area navigation remain intact. Spending confirmations show transport and protected sale proceeds; wallet limitations and server authority are unchanged.
@@ -253,7 +286,7 @@ expedition deadline arrives. Hidden pages do not poll or paint maps.
 - **Unified resource header and population management:** Wood, Water, Metal, Oil and FTH$ share one flat strip on desktop and mobile. Resource buttons directly collect completed output and show owned stock, storage bars and ready-output badges. One separate **Resource settings** button opens the last-used resource or FTH$ view; its persistent selector switches between all four resources and treasury without closing the dialog. Individual resource settings remain available in production and crew panels. FTH$ also opens resource-sale funding directly. The population-health control visualizes total, active and unallocated residents, warns below a one-week Water reserve or two available explorers, and opens the same full population manager used in Settlement.
 
 - Resource panels show completed output, FTH$ pickup fees, full-week progress and active automation expiry. Daily Water consumption is separate from transport.
-- The shared header shows **Year · Week / 52 · weekday · HH:mm**, day/night lighting, week progress and four season ticks. **5 MIN / WEEK** identifies the default continuous pace. One game day takes about 42.86 real seconds; a season takes 65 minutes and a year 4 hours 20 minutes. Existing game-time deadlines remain intact. Calendar and daily upkeep fills animate transforms rather than width/height; calendar visuals update at most ten times per second and markup changes only at calendar boundaries. Both maps skip hidden/disconnected/zero-sized canvases, cap ambient drawing at 20 fps and raise drag drawing to 60 fps; reduced motion uses still effects at 5 fps. The minimap redraws only when exploration, position, home or season changes. UI transitions use brief transform/opacity feedback, visible focus and reduced-motion alternatives.
+- The shared header shows **Year · Week / 52 · weekday · HH:mm**, day/night lighting, week progress and four season ticks. **5 MIN / WEEK** identifies the default continuous pace. One game day takes about 42.86 real seconds; a season takes 65 minutes and a year 4 hours 20 minutes. Existing game-time deadlines remain intact. Header calendar updates are limited to once every five real seconds, with smooth transform-based fills; work countdowns still update every second independently. Work, storage, population and native progress bars transition smoothly unless reduced motion is requested. Both maps skip hidden/disconnected/zero-sized canvases, preserve interaction redraws and animate precipitation over cached terrain. The minimap redraws only when exploration, position, home or season changes. Visible keyboard focus remains available.
 - The header population-health control shows **total**, **active**, and **unallocated** residents with an activity bar and healthy/warning/critical indicators. Tap it to open the same recruitment, allocation and exploration manager used in Settlement. Health accounts for Water supply and available explorer capacity. Counts come only from the authoritative state; simulated neighbors do not contribute. Federation/global totals remain available on their relevant pages and through the API, including inactive settlements in the global aggregate. Recruitment countdowns use the synchronized server clock, freeze when synchronization is stale, and always submit to server validation.
 - A visible **Population** heading groups aligned population icons. **Active** and **Idle** counts describe your settlement only: active means residents gathering or exploring, while idle is the server-confirmed `availableWorkers` count, including reserved explorers. Pending recruits are excluded until arrival; queued allocations and unfunded workers are not counted as active work. Exact totals and definitions are available in the settlement population tooltip and accessible label. Narrow screens retain these details in a compact population row.
 - Simulated weather changes on three-server-minute windows (about 5.36 real seconds at 33.6x). Temperature, seasonal terrain colors and day/night lighting follow the same server-time model; reduced motion keeps precipitation still. New work locks its climate-adjusted yield at dispatch.
