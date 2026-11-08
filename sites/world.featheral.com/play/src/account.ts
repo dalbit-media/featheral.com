@@ -25,6 +25,8 @@ declare global {
     FeatheralWorldAccount: {
       requireProfile(): Promise<boolean>;
       request(path: string, input?: object): Promise<unknown>;
+      snapshot(): { account: string | null; complete: boolean } | null;
+      url(returnTo?: string): string;
     };
     FeatheralProfile: {
       mount(button: HTMLButtonElement, options: { panelRoot: HTMLElement; walletUrl: string; primaryCurrency: string; profileUrl: string; ethereumProvider: boolean }): Promise<void>;
@@ -77,16 +79,23 @@ export class AccountPane {
     identity.className = 'account-section';
     identity.innerHTML = '<h3>Settlement identity</h3><p data-custom-settlement data-no-localize></p><p data-custom-region data-no-localize></p><p data-custom-title></p><a class="button" href="/settlement/#inventory">Use naming permits and title badges</a>';
     this.dialog.querySelector('.account-profile')!.after(identity);
+    const switchAccount = document.createElement('a');
+    switchAccount.className = 'button wide';
+    switchAccount.textContent = this.t('Switch account');
+    const switchUrl = new URL('/account/', location.origin);
+    switchUrl.searchParams.set('switch', '1'); switchUrl.searchParams.set('returnTo', location.href);
+    switchAccount.href = switchUrl.href;
+    identity.append(switchAccount);
     this.walletReady = window.FeatheralProfile.mount(this.dialog.querySelector<HTMLButtonElement>('[data-world-profile-button]')!,
       { panelRoot: this.dialog, primaryCurrency: 'fthDollar', walletUrl: '/wallet/', profileUrl: '/account/', ethereumProvider: true });
     window.addEventListener('featheral:wallet', () => {
       this.updateBalance(0, locale(language)); void this.loadProfile(false);
       const linked = this.snapshot().fundWallet;
-      if (needsWalletSigner(this.snapshot()) && linked && window.FeatheralProfile.snapshot().account.toLowerCase() !== linked) void this.stopFundAccess();
+      if (!window.FeatheralWorldAccount && needsWalletSigner(this.snapshot()) && linked && window.FeatheralProfile.snapshot().account.toLowerCase() !== linked) void this.stopFundAccess();
     });
     window.addEventListener('featheral:embedded-wallet', event => {
       if (event instanceof CustomEvent && typeof event.detail === 'string'
-        && needsWalletSigner(this.snapshot()) && event.detail.toLowerCase() !== this.snapshot().fundWallet) void this.stopFundAccess();
+        && !window.FeatheralWorldAccount && needsWalletSigner(this.snapshot()) && event.detail.toLowerCase() !== this.snapshot().fundWallet) void this.stopFundAccess();
     });
     this.dialog.querySelector('[data-fund-wallet-revoke]')!.addEventListener('click', () => { void this.stopFundAccess(); });
     localize(this.dialog);

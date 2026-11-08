@@ -164,7 +164,7 @@ const worldAccounts = reader ? null : require("../services/identity/world-accoun
     if (wallet && wallet.toLowerCase() !== address.toLowerCase()) {
       token = store.create().token; wallet = null;
     }
-    if (!wallet) store.linkWallet(token, address, false, true);
+    if (!wallet) store.linkWallet(token, address, false, store.walletWorldView(address)?.mode !== "legacy-direct");
     const owner = store.chatSession(token).owner, profile = cms.database.profiles.get(address);
     store.chat.syncWorldProfile(owner, address, profile.username, Date.now());
     const current = res.getHeader("Set-Cookie");

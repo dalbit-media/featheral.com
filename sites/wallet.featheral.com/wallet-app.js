@@ -1005,6 +1005,20 @@ async function mountFeatheralWallet(context) {
       await endLocalSession(login.token);
       throw new Error("Wallet connection cancelled or changed. Start again.");
     }
+    const world = window.FeatheralWorldAccount;
+    if (context && world && location.hostname.startsWith("world.")
+      && world.snapshot()?.account?.toLowerCase() !== address.toLowerCase()) {
+      try {
+        await world.signInWallet(address, async message => {
+          if (!await review(message, "Switch World settlement")) throw new Error("World account switch cancelled.");
+          if (!current()) throw new Error("Wallet changed while connecting. Start again.");
+          return sign(message);
+        });
+      } catch (error) {
+        await endLocalSession(login.token);
+        throw error;
+      }
+    }
     token = login.token;
   }
   function downloadBackup(record) {
@@ -1132,6 +1146,9 @@ async function mountFeatheralWallet(context) {
       returnedAddress = accounts[0] || null;
       if (returnedAddress) storage.setItem(ACTIVE_ACCOUNT, returnedAddress); else storage.removeItem(ACTIVE_ACCOUNT);
       sendRequest = null; reset(); refresh().catch(status);
+      if (window.FeatheralWorldAccount && location.hostname.startsWith("world.")
+        && returnedAddress?.toLowerCase() !== window.FeatheralWorldAccount.snapshot()?.account?.toLowerCase())
+        status(new Error("Wallet selected. Connect this wallet to switch its World settlement."));
     };
     const disconnected = () => {
       if (provider !== browserProvider || builtInActive || !interactive) return;

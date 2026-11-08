@@ -18,6 +18,13 @@ Media registration and editing also happen on World, with one shared public
 profile. Existing guest settlements and wallet balances are preserved: restoring
 a wallet-owned game moves no funds and refuses to discard guest money.
 
+Each wallet owns its own settlement. Use **Account → Switch account** to sign in
+with another World username/password, or connect and approve another wallet in
+the World wallet panel. A public wallet selection alone is not a sign-in. Once
+the authenticated World account changes, gameplay reloads and restores that
+wallet's settlement, inventory and existing fund mode. Switching back restores
+the previous settlement; no settlement is deleted and no funds are transferred.
+
 Keep your password and an encrypted wallet backup. There is no password reset.
 The original registration username remains the password sign-in name after a
 public profile rename. Server account sessions expire after seven days; no

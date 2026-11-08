@@ -134,16 +134,32 @@ test("World settlement bootstrap restores wallet-owned settlements without chang
     const first = await run(original, owner);
     assert.equal(first.next, original);
     assert.equal(store.walletContext(first.next).fundMode, "separate");
+    store.transaction(first.next, session => { session.account.customization = { settlementName: "Wallet A settlement" }; session.account.game.stock.wood = 11; });
     const restored = await run(null, owner);
     assert.equal(store.walletContext(restored.next).fundAccountId, first.result.accountId);
     assert.equal(store.chatSession(restored.next).owner, store.chatSession(first.next).owner);
     const legacyToken = store.create().token;
     store.linkWallet(legacyToken, other);
+    store.transaction(legacyToken, session => { session.account.customization = { settlementName: "Wallet B settlement" }; session.account.game.stock.wood = 29; });
     await run(legacyToken, other);
     assert.equal(store.walletContext(legacyToken).fundMode, "legacy-direct");
     const switched = await run(legacyToken, owner);
     assert.equal(store.walletContext(switched.next).fundAccountId, first.result.accountId);
     assert.equal(store.walletContext(legacyToken).fundWallet, other);
+    assert.equal(store.read(switched.next, session => session.account.customization.settlementName), "Wallet A settlement");
+    assert.equal(store.read(switched.next, session => session.account.game.stock.wood), 11);
+    const switchedBack = await run(switched.next, other);
+    assert.equal(store.read(switchedBack.next, session => session.account.customization.settlementName), "Wallet B settlement");
+    assert.equal(store.read(switchedBack.next, session => session.account.game.stock.wood), 29);
+    assert.equal(store.walletContext(switchedBack.next).fundMode, "legacy-direct");
+    assert.equal(store.walletContext(legacyToken).fundMode, "legacy-direct");
+    const backToA = await run(switchedBack.next, owner);
+    assert.equal(store.read(backToA.next, session => session.account.customization.settlementName), "Wallet A settlement");
+    assert.equal(store.read(backToA.next, session => session.account.game.stock.wood), 11);
+    const newWallet = Wallet.createRandom().address.toLowerCase(), fresh = await run(backToA.next, newWallet);
+    assert.equal(store.walletContext(fresh.next).fundWallet, newWallet);
+    assert.equal(store.read(fresh.next, session => session.account.customization?.settlementName), undefined);
+    assert.equal(store.read((await run(fresh.next, owner)).next, session => session.account.customization.settlementName), "Wallet A settlement");
     const guest = store.create().token, guestAccount = store.walletContext(guest).fundAccountId;
     balances.set(guestAccount, "1000000000000000000");
     await assert.rejects(run(guest, owner), /guest has World funds/);
@@ -175,6 +191,48 @@ test("World profile completeness and World-owned setup are enforced without modi
   const game = fs.readFileSync(path.join(root, "sites/world.featheral.com/play/src/main.ts"), "utf8");
   assert.match(game, /requireProfile\(\)/);
   assert.match(game, /request\('\/game', \{\}\)/);
+});
+
+test("World wallet switching requires the selected wallet's signature and publishes the new identity rather than a public wallet selection", async () => {
+  const vm = require("node:vm"), { ethers } = require("ethers");
+  const first = Wallet.createRandom(), second = Wallet.createRandom();
+  let signedIn = first.address, challengeAddress = "", loginCount = 0;
+  const events = [], requests = [];
+  const window = {
+    addEventListener() {},
+    dispatchEvent: event => events.push(event.detail),
+    FeatheralProfile: { setWorldSession() {} },
+  };
+  const context = vm.createContext({
+    window, location: { hostname: "world.localhost", origin: "http://world.localhost:8080", port: "8080", href: "http://world.localhost:8080/" },
+    URL, AbortSignal, CustomEvent, ethers, console,
+    fetch: async (url, options) => {
+      requests.push({ url, body: options.body && JSON.parse(options.body) });
+      if (url.endsWith("/challenge")) {
+        challengeAddress = JSON.parse(options.body).address;
+        return Response.json({ id: "challenge", message: "Sign in to World as " + challengeAddress });
+      }
+      if (url.endsWith("/wallet-login")) {
+        assert.equal(ethers.verifyMessage("Sign in to World as " + challengeAddress, JSON.parse(options.body).signature), challengeAddress);
+        signedIn = challengeAddress; loginCount++;
+        return Response.json({ account: signedIn });
+      }
+      assert.ok(url.endsWith("/session"));
+      return Response.json({ account: signedIn, complete: true, csrf: "ab".repeat(32) });
+    },
+  });
+  vm.runInContext(fs.readFileSync(path.join(root, "shared/world-account.js"), "utf8"), context);
+  const world = window.FeatheralWorldAccount;
+  await world.refresh();
+  assert.equal(world.snapshot().account, first.address);
+  await assert.rejects(world.signInWallet(second.address, () => first.signMessage("Sign in to World as " + second.address)), /does not match/);
+  assert.equal(loginCount, 0); assert.equal(world.snapshot().account, first.address);
+  await world.signInWallet(second.address, message => second.signMessage(message));
+  assert.equal(world.snapshot().account, second.address);
+  assert.equal(events.at(-1).account, second.address); assert.equal(loginCount, 1);
+  await world.signInWallet(first.address, message => first.signMessage(message));
+  assert.equal(world.snapshot().account, first.address); assert.equal(loginCount, 2);
+  assert.equal(requests.filter(request => request.url.endsWith("/wallet-login")).length, 2);
 });
 
 test("Media keeps public browsing but requires a complete World session for writes and refuses profile setup", async t => {

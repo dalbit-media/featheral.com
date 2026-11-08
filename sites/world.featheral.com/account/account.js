@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id), world = window.FeatheralWorldAccount;
   const query = new URLSearchParams(location.search);
-  let mode = "register", pending = null, editor = null, busy = false, approvalRequest = null;
+  let mode = "register", pending = null, editor = null, busy = false, approvalRequest = null, displayedAccount = null;
   window.addEventListener("beforeunload", event => { if (pending) { event.preventDefault(); event.returnValue = ""; } });
   function report(error) {
     console.error("World account:", error);
@@ -46,7 +46,9 @@
   async function showSession() {
     const session = world.snapshot();
     if (!session?.account) return;
+    displayedAccount = session.account;
     $("sign-out").hidden = false;
+    $("switch-account").hidden = !!query.get("approve");
     $("account-name").hidden = false; $("account-name").textContent = session.profile?.username || session.account;
     $("account-title").textContent = "Your World account";
     if (!editor) await loadEditor(session.account);
@@ -112,10 +114,21 @@
     const provider = wallets.find(wallet => typeof wallet?.request === "function");
     if (!provider) throw new Error("Install or enable an Ethereum wallet, or register with a username and password.");
     const address = (await provider.request({ method: "eth_requestAccounts" }))[0];
-    const challenge = await world.request("/challenge", { action: "sign-in", address });
-    const signature = await provider.request({ method: "personal_sign", params: [hex(challenge.message), address] });
-    await world.request("/wallet-login", { id: challenge.id, signature });
-    await world.refresh(); await showSession();
+    await world.signInWallet(address, message => provider.request({ method: "personal_sign", params: [hex(message), address] }));
+    await showSession();
+  });
+  $("switch-account").onclick = () => {
+    if (busy) return;
+    pending = null; editor = null;
+    $("profile-editor").replaceChildren(); $("profile").hidden = true; $("sign-in").hidden = false;
+    $("finish-registration").hidden = true; $("switch-account").hidden = true;
+    $("continue").hidden = true; $("backup").hidden = true;
+    document.querySelector('[data-mode="login"]').click();
+    status("Sign in with another World account or connect its wallet. Existing settlements and funds stay separate.");
+  };
+  window.addEventListener("featheral:world-session", event => {
+    if (!busy && !pending && displayedAccount && event.detail?.account
+      && event.detail.account.toLowerCase() !== displayedAccount.toLowerCase()) void showSession().catch(report);
   });
   $("sign-out").onclick = () => void perform(async () => {
     await world.request("/logout", {}); pending = null; location.replace("/account/");
@@ -168,6 +181,7 @@
   });
   void (async () => {
     await world.refresh(); await showSession();
+    if (query.has("switch") && world.snapshot()?.account && !query.get("approve")) $("switch-account").click();
     if (!world.snapshot()?.account) status("Register or sign in to set up your World profile.");
     if (query.get("approve")) {
       const parent = new URL(query.get("parentOrigin"));

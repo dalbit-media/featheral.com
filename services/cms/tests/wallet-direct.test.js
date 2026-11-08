@@ -7,6 +7,40 @@ const embed = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/embed.
 const app = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/wallet-app.js'), 'utf8');
 const address = '0x' + '11'.repeat(20), other = '0x' + '22'.repeat(20), signature = '0x' + 'ab'.repeat(65);
 const tick = () => new Promise(setImmediate);
+test('World contextual wallet authorization also signs in the selected settlement, without switching standalone wallet identities', async () => {
+  const source = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/wallet-app.js'), 'utf8');
+  const start = source.indexOf('  async function authorizeSession(address) {');
+  const end = source.indexOf('  function downloadBackup(', start);
+  for (const onWorld of [true, false]) {
+    const selected = '0x2222222222222222222222222222222222222222', messages = [], switches = [];
+    const context = vm.createContext({
+      epoch: 1, contextEpoch: 1, owner: selected, token: '', builtInActive: false,
+      context: { visible: () => true },
+      location: { hostname: onWorld ? 'world.localhost' : 'dollar.localhost' },
+      window: { location: { hostname: onWorld ? 'world.localhost' : 'dollar.localhost' },
+        FeatheralWorldAccount: { snapshot: () => ({ account: '0x1111111111111111111111111111111111111111' }),
+          async signInWallet(address, signMessage) { switches.push(address); assert.equal(await signMessage('World sign-in'), 'signature'); } } },
+      api: async route => route === '/challenge' ? { message: 'Wallet sign-in' } : { token: 'native-wallet-session' },
+      review: async () => true, sign: async message => { messages.push(message); return 'signature'; },
+      endLocalSession: async () => {},
+    });
+    vm.runInContext(source.slice(start, end), context);
+    await context.authorizeSession(selected);
+    assert.equal(context.token, 'native-wallet-session');
+    assert.deepEqual(switches, onWorld ? [selected] : []);
+    assert.deepEqual(messages, onWorld ? ['Wallet sign-in', 'World sign-in'] : ['Wallet sign-in']);
+    if (onWorld) {
+      context.token = '';
+      const ended = [];
+      context.endLocalSession = async token => ended.push(token);
+      context.window.FeatheralWorldAccount.signInWallet = async () => { throw new Error('World switch rejected'); };
+      await assert.rejects(context.authorizeSession(selected), /World switch rejected/);
+      assert.equal(context.token, '');
+      assert.deepEqual(ended, ['native-wallet-session']);
+    }
+  }
+});
+
 test('loading a second wallet script reuses the native wallet instead of replacing its active context', () => {
   let applied = 0;
   const existing = { apply: () => applied++ };

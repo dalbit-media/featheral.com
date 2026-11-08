@@ -27,6 +27,7 @@ import { isSettlementTask, settlementDockTasks, settlementTaskFromHash, settleme
 import type { SettlementTask } from './settlement-ui.ts';
 import { Marketplace } from './marketplace.ts';
 import { federationPanel } from './federation-view.ts';
+import { watchWorldIdentity } from './world-identity.ts';
 import { SettlementSale } from './settlement-sale.ts';
 import { Inbox, SettlementChat } from './inbox.ts';
 import { isWaterFacility, waterProductionMultiplier } from './water-facilities.ts';
@@ -95,6 +96,10 @@ const escape = (s: string): string => s.replace(/[&<>"']/g, c => ({ '&': '&amp;'
 let state: ApiState;
 try {
   if (!await window.FeatheralWorldAccount.requireProfile()) throw new Error('Complete your World profile before playing.');
+  const identity = window.FeatheralWorldAccount.snapshot();
+  if (!identity?.account) throw new Error('Sign in to your World account before playing.');
+  watchWorldIdentity(window, identity.account,
+    () => location.reload(), () => location.replace(window.FeatheralWorldAccount.url()));
   await window.FeatheralWorldAccount.request('/game', {});
   state = await connect();
 } catch (error) {

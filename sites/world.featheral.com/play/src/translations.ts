@@ -7,6 +7,8 @@ export const korean: Record<string, string> = {
   'One identity for World and Media': '월드와 미디어에서 사용하는 하나의 계정',
   'Join World': '월드 가입',
   'Your World account': '내 월드 계정',
+  'Switch account': '계정 전환',
+  'Sign in with another World account or connect its wallet. Existing settlements and funds stay separate.': '다른 월드 계정으로 로그인하거나 해당 지갑을 연결하세요. 기존 정착지와 자금은 각각 유지됩니다.',
   'Signed in to World. World and Media share this profile.': '월드에 로그인했습니다. 월드와 미디어에서 이 프로필을 사용합니다.',
   'Register with a username and password, or use your own wallet. Your username, avatar and profile description are required and public.': '사용자 이름과 비밀번호로 가입하거나 기존 지갑을 사용하세요. 사용자 이름, 아바타, 프로필 소개는 필수이며 공개됩니다.',
   'Loading your World account…': '월드 계정을 불러오는 중…',

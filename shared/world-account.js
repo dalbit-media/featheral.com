@@ -56,6 +56,18 @@
     destination.searchParams.set("returnTo", returnTo);
     return destination.href;
   }
+  async function signInWallet(address, signMessage) {
+    if (!onWorld) throw new Error("Switch your World account on World.");
+    if (!ethers.isAddress(address) || typeof signMessage !== "function") throw new Error("Choose a valid wallet.");
+    if (refreshing) await refreshing;
+    const challenge = await request("/challenge", { action: "sign-in", address });
+    const signature = await signMessage(challenge.message);
+    if (ethers.verifyMessage(challenge.message, signature).toLowerCase() !== address.toLowerCase())
+      throw new Error("World signature does not match the requesting account.");
+    await request("/wallet-login", { id: challenge.id, signature });
+    if (refreshing) await refreshing;
+    return refresh();
+  }
   function review(message, passwordRequired) {
     return new Promise((resolve, reject) => {
       const dialog = document.createElement("dialog"); dialog.className = "world-sign-dialog";
@@ -142,7 +154,7 @@
     },
   };
   window.FeatheralWorldAccount = {
-    refresh, request, url, provider, snapshot: () => current,
+    refresh, request, url, provider, snapshot: () => current, signInWallet,
     setSigner: value => { signer = value; },
     async requireProfile() {
       const session = await refresh();
