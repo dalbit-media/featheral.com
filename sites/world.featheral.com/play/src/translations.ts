@@ -1,4 +1,6 @@
 export const korean: Record<string, string> = {
+  'wk': '주',
+  'Cooldown': '대기',
   'Investigations use two idle residents for one game week on known land. They cost 10% of the concurrent Explore route fee and have a 10% chance of a low-tier permit.': '조사는 발견한 지역에서 미배치 주민 2명이 게임 시간 1주 동안 진행합니다. 동시 탐험 배수를 적용한 경로 비용의 10%가 들며 10% 확률로 낮은 등급의 이용권을 발견합니다.',
   'Investigate known land: two residents, one game week, 10% item chance.': '발견한 지역 조사: 주민 2명, 게임 시간 1주, 아이템 발견 확률 10%.',
   'Investigation requires two available residents.': '조사에는 미배치 주민 2명이 필요합니다.',

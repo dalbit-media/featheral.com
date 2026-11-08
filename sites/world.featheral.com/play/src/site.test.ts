@@ -875,12 +875,12 @@ test('Weather overlay explains real climate modifiers with signed and color-code
 });
 test('Explore menu uses compact responsive action grids rather than scrolling or clipping controls', () => {
   const css = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
-  assert.match(css, /#app\.explore-page #sidebar-content\{display:grid;gap:12px;overflow:visible/);
+  assert.match(css, /#app\.explore-page #sidebar-content\{display:grid;gap:8px;overflow:visible/);
   assert.match(css, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css, /#app\.explore-page \.sidebar-action-row\{display:contents\}/);
   assert.match(css, /\.quick-action-cost,#app\.explore-page \[data-invite-cost\]\{display:flex/);
   assert.doesNotMatch(css, /\[data-invite-label\]\{display:none\}/);
-  assert.match(css, /\.quick-action-status\{font-size:10px/);
+  assert.match(css, /\.quick-action-duration\{display:flex/);
   assert.doesNotMatch(css, /overflow:(auto|scroll|hidden)/);
 });
 test('Chat uses a speech bubble and reports unread messages while collapsed without counting history or own messages', () => {
@@ -1078,7 +1078,7 @@ test('shared recruitment controls show a one-week queue and wait for server-conf
   assert.match(timer, /Awaiting server confirmation/);
   assert.match(main, /meter\.value = progress\.percent/);
   assert.match(main, /progress\.percent === 100/);
-  assert.match(main, /data-invite-duration>1 game week/);
+  assert.match(main, /data-invite-duration>\$\{primary \? `1 \$\{translate\('wk', language\)\}` : '1 game week'\}/);
   assert.match(main, /completionMeter\(recruitment\.startedAt, recruitment\.readyAt, 'Recruitment progress', true\)/);
   assert.doesNotMatch(main, /10 server min|ten-server-minute/);
 });
@@ -1096,7 +1096,7 @@ test('sidebar spending is labeled with resource names and remains readable on di
   assert.match(css, /\.sidebar-action-row \[data-invite-cost\]\[hidden\]\{display:none\}/);
 });
 
-test('Investigate, Explore and Invite cards disclose duration, price, requirements and blocked reasons on small screens', () => {
+test('compact field cards preserve price, duration and accessible requirements without explanatory rows', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
   assert.match(main, /state\.availableWorkers < 2 \? 'Needs 2 idle residents'/);
@@ -1104,14 +1104,27 @@ test('Investigate, Explore and Invite cards disclose duration, price, requiremen
   assert.match(main, /fieldActionReason\(quote, 'No nearby destination'\)/);
   assert.match(main, /Next field team fee multiplier/);
   assert.match(main, /2 \*\* explorationCount\(state\.workforce\.expeditions\)/);
-  assert.match(main, /data-invite-status/);
+  assert.match(main, /button\.setAttribute\('aria-description', translate/);
+  assert.match(main, /function fieldDuration\(weeks: number\)/);
+  assert.match(main, /fieldDuration\(1\)/);
+  assert.match(main, /fieldDuration\(quote\.weeks\)/);
+  const sidebar = main.slice(main.indexOf('function renderSidebar()'), main.indexOf('function renderCommunityPage()'));
+  assert.doesNotMatch(sidebar, /quick-action-status|Known land · 10% item chance/);
+  assert.match(sidebar, /aria-description=/);
   assert.match(main, /expedition\.startedAt \?\? expedition\.readyAt/);
   assert.match(main, /icon\('search'\)/);
   assert.notEqual(icon('search'), icon('compass'));
   const compact = css.slice(css.indexOf('@media(max-width:650px) and (max-height:740px),'));
   assert.doesNotMatch(compact, /quick-action-cost[^}]*display:none/);
   assert.doesNotMatch(compact, /quick-action-duration[^}]*display:none/);
-  assert.match(compact, /min-height:88px/);
+  assert.match(compact, /min-height:68px/);
+  assert.match(css, /\.sidebar progress\{height:3px/);
+  assert.match(css, /\.explore-upkeep \.upkeep-meters\{height:48px/);
+  assert.match(css, /\.vertical-consumption \.completion-meter\{[^}]*transform:none/);
+  assert.match(css, /\[data-invite-duration\]\[hidden\]\{display:none\}/);
+  assert.match(css, /\.sidebar \.completion-meter::after\{height:3px/);
+  assert.match(css, /\.sidebar-secondary-actions>\.button\{[^}]*min-height:36px/);
+  assert.match(compact, /\.sidebar-secondary-actions>\.button\{padding:4px;min-height:44px/);
   for (const label of ['Needs 2 idle residents', 'Discover new land', 'Grow population', 'Next field team fee multiplier'])
     assert.notEqual(translate(label, 'ko'), label);
 });

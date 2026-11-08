@@ -475,8 +475,9 @@ function renderRecruitment(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-action="invite"]').forEach(button => {
     button.disabled = game.stage < 0 || !!recruitment || remaining > 0 || stale || !!upkeepPauseReason() || state.dollars < state.recruitmentDollars;
     button.title = upkeepPauseReason() || 'Pay FTH$ upfront. Residents arrive after one game week. One batch at a time; no automatic repeat.';
-    button.querySelector('[data-invite-label]')!.textContent = stale ? 'Sync paused' : recruitment && !remaining ? 'Awaiting server confirmation'
-      : recruitment ? 'Recruiting' : remaining ? 'Recruitment cooldown' : 'Invite';
+    const compact = button.classList.contains('sidebar-recruitment');
+    button.querySelector('[data-invite-label]')!.textContent = stale ? 'Sync paused' : recruitment && !remaining ? compact ? 'Confirming' : 'Awaiting server confirmation'
+      : recruitment ? 'Recruiting' : remaining ? compact ? 'Cooldown' : 'Recruitment cooldown' : 'Invite';
     button.setAttribute('aria-label', stale ? 'Invite residents, server sync required' : recruitment
       ? `Recruiting ${recruitment.population} residents, ready in ${remaining} server seconds`
       : remaining ? `Invite residents, ready in ${remaining} server seconds` : 'Invite residents');
@@ -484,10 +485,9 @@ function renderRecruitment(): void {
     button.querySelector<HTMLElement>('[data-invite-cost]')!.hidden = !!recruitment;
     button.querySelector<HTMLElement>('[data-invite-duration]')!.hidden = !!recruitment;
     if (!recruitment) button.querySelector<HTMLElement>('[data-invite-duration]')!.textContent = remaining
-      ? completionProgress(state.inviteReadyAt - worldWeekMs, state.inviteReadyAt, displayServerTime(state.serverTime, elapsed, state.clockSpeed)).countdown : '1 game week';
-    const status = button.querySelector<HTMLElement>('[data-invite-status]');
-    if (status) status.textContent = stale ? 'Sync paused' : upkeepPauseReason() || (recruitment ? 'Recruiting'
-      : remaining ? 'Recruitment cooldown' : state.dollars < state.recruitmentDollars ? 'Not enough FTH$' : 'Grow population');
+      ? completionProgress(state.inviteReadyAt - worldWeekMs, state.inviteReadyAt, displayServerTime(state.serverTime, elapsed, state.clockSpeed)).countdown : compact ? `1 ${translate('wk', language)}` : '1 game week';
+    button.setAttribute('aria-description', translate(stale ? 'Sync paused' : upkeepPauseReason() || (recruitment ? 'Recruiting'
+      : remaining ? 'Recruitment cooldown' : state.dollars < state.recruitmentDollars ? 'Not enough FTH$' : 'Grow population'), language));
     localize(button);
   });
 }
@@ -733,10 +733,10 @@ function renderSidebar(): void {
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
       ${investigationButton(true)}
-      <button class="button primary wide sidebar-expedition" data-action="explore" title="${escape(translate(exploreReason || 'Discover new land', language))}" ${exploreReason ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">2 ${translate('residents', language)} · ${translate(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`, language)}</small>` : ''}<small class="quick-action-status">${translate(exploreReason || 'Discover new land', language)}</small></button>
+      <button class="button primary wide sidebar-expedition" data-action="explore" title="${escape(translate(exploreReason || 'Discover new land', language))}" aria-description="${escape(translate(exploreReason || 'Discover new land', language))}" ${exploreReason ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span>${fieldDuration(quote.weeks)}` : ''}</button>
       ${recruitmentButton(true)}
       </div>
-      <small class="field-fee-note">${translate('Next field team fee multiplier', language)}: <b>${2 ** explorationCount(state.workforce.expeditions)}x</b> · ${translate('Investigate + Explore', language)}</small>
+      <small class="field-fee-note" title="${escape(translate('Next field team fee multiplier', language))}">${translate('Investigate + Explore', language)} <b>${2 ** explorationCount(state.workforce.expeditions)}x</b></small>
       ${state.dollars === 0 ? `<a class="button primary wide" href="/settlement/#production">${icon('warehouse')} Collect and sell</a>` : ''}
       ${bag.pending.length ? `<button class="button primary wide" data-action="collect-items" ${collectable ? '' : 'disabled'}>${icon('layers')} Collect finds <b>${bag.pending.length}</b></button>${!collectable ? `<p class="fineprint">${room ? 'Reserved in market' : 'Item inventory full'}</p>` : ''}` : ''}`}
     </div>
@@ -755,13 +755,16 @@ function fieldActionReason(quote: { dollars: number } | null, noDestination: str
   return game.stage < 0 ? 'Establish a settlement first' : upkeepPauseReason() || (!quote ? noDestination
     : state.availableWorkers < 2 ? 'Needs 2 idle residents' : state.dollars < quote.dollars ? 'Not enough FTH$' : null);
 }
+function fieldDuration(weeks: number): string {
+  return `<small class="quick-action-duration" aria-label="${escape(translate('residents', language))}: 2 · ${escape(translate(`${weeks} game week${weeks === 1 ? '' : 's'}`, language))}">${icon('people')} 2 · ${weeks} ${translate('wk', language)}</small>`;
+}
 function investigationButton(compact = false): string {
   const quote = nextInvestigation(game, state.workforce.expeditions);
   const reason = fieldActionReason(quote, 'No known destination available');
   const details = compact
-    ? `<span class="quick-action-heading">${icon('search')}<span>Investigate</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span><small class="quick-action-duration">2 ${translate('residents', language)} · ${translate('1 game week', language)}</small>` : ''}<small class="quick-action-status">${translate(reason || 'Known land · 10% item chance', language)}</small>`
+    ? `<span class="quick-action-heading">${icon('search')}<span>Investigate</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span>${fieldDuration(1)}` : ''}`
     : `${icon('search')} <span>Investigate</span> · 2 ${translate('residents', language)} · ${translate('1 game week', language)} ${quote ? costChips({ dollars: quote.dollars }) : ''}`;
-  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" title="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" ${reason ? 'disabled' : ''}>${details}</button>`;
+  return `<button class="button${compact ? ' wide sidebar-investigation' : ''}" data-action="investigate" title="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" aria-description="${escape(translate(reason || 'Investigate known land: two residents, one game week, 10% item chance.', language))}" ${reason ? 'disabled' : ''}>${details}</button>`;
 }
 function renderCommunityPage(): void {
   const root = document.querySelector<HTMLElement>('#community-content')!;
@@ -1043,7 +1046,7 @@ function completionMeter(startedAt: number, readyAt: number, label: string, comp
 }
 function recruitmentButton(primary = false): string {
   const recruitment = state.recruitment;
-  return `<button class="button${primary ? ' primary wide sidebar-recruitment' : ''}" data-action="invite" ${game.stage < 0 ? 'disabled' : ''}><span class="quick-action-heading">${icon('people')}<span data-invite-label>Invite</span></span><span data-invite-cost>${costChips({ dollars: state.recruitmentDollars }, primary)}</span><small data-invite-duration>1 game week</small>${recruitment ? `<span class="quick-action-batch">+${fmt(recruitment.population)} ${icon('people')}</span>${completionMeter(recruitment.startedAt, recruitment.readyAt, 'Recruitment progress', true)}` : ''}${primary ? '<small class="quick-action-status" data-invite-status>Grow population</small>' : ''}</button>`;
+  return `<button class="button${primary ? ' primary wide sidebar-recruitment' : ''}" data-action="invite" ${game.stage < 0 ? 'disabled' : ''}><span class="quick-action-heading">${icon('people')}<span data-invite-label>Invite</span></span><span data-invite-cost>${costChips({ dollars: state.recruitmentDollars }, primary)}</span><small data-invite-duration>${primary ? `1 ${translate('wk', language)}` : '1 game week'}</small>${recruitment ? `<span class="quick-action-batch">+${fmt(recruitment.population)} ${icon('people')}</span>${completionMeter(recruitment.startedAt, recruitment.readyAt, 'Recruitment progress', true)}` : ''}</button>`;
 }
 function progressionPanel(): string {
   const next = stages[game.stage + 1];
