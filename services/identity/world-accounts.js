@@ -191,9 +191,6 @@ function createWorldAccounts({ sqlite, file, profiles, bootstrapGame, forwardedO
           || encrypted.cipher !== "aes-128-ctr" || !params || !Number.isSafeInteger(params.n) || params.n < 131072 || params.n > 1048576
           || !Number.isInteger(Math.log2(params.n)) || params.r !== 8 || params.p !== 1 || params.dklen !== 32)
           throw fail(400, "Encrypted wallet backup does not match this account.");
-        const profile = profiles.get(record.address);
-        if (!completeProfile(profile) || profile.username.toLowerCase() !== record.username.toLowerCase())
-          throw fail(409, "Save your username, avatar and description in World before registering.");
         const salt = crypto.randomBytes(32).toString("hex"), passwordHash = await derive(input.password, salt);
         try {
           db.prepare("INSERT INTO world_password_accounts VALUES(?,?,?,?,?)").run(record.username, record.address, salt, passwordHash.toString("hex"), input.keystore);

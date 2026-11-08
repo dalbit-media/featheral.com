@@ -107,6 +107,46 @@ test("World password registration stores only hashed credentials and encrypted w
   assert.equal((await call("wallet-login", { id: externalChallenge.data.id, signature: await external.signMessage(externalChallenge.data.message) })).status, 401);
 });
 
+test("an existing wallet enables password login before profile setup and restores the same key on another device", async t => {
+  const accounts = createWorldAccounts({ sqlite, file: ":memory:", profiles: { get: () => null },
+    bootstrapGame() { throw new Error("Incomplete profile must not start gameplay"); } });
+  const server = http.createServer(async (req, res) => { if (!await accounts.handle(req, res)) { res.writeHead(404); res.end(); } });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); accounts.close(); });
+  const call = (route, body, cookie = "", csrf = "") => new Promise((resolve, reject) => {
+    const request = http.request({ hostname: "127.0.0.1", port: server.address().port, path: "/api/world-account/" + route,
+      method: "POST", headers: { Host: "world.localhost", Origin: "http://world.localhost", Cookie: cookie,
+        "Content-Type": "application/json", "X-CSRF-Token": csrf } }, response => {
+      let text = ""; response.on("data", chunk => text += chunk);
+      response.on("end", () => resolve({ status: response.statusCode, data: JSON.parse(text),
+        cookie: response.headers["set-cookie"]?.[0].split(";")[0] || cookie }));
+    });
+    request.on("error", reject); request.end(JSON.stringify(body));
+  });
+  const wallet = Wallet.createRandom(), password = "existing-wallet-password-42", username = "ExistingWallet";
+  const keystore = await wallet.encrypt(password);
+  const walletChallenge = await call("challenge", { action: "sign-in", address: wallet.address });
+  const connected = await call("wallet-login", { id: walletChallenge.data.id, signature: await wallet.signMessage(walletChallenge.data.message) });
+  assert.equal(connected.data.walletType, "external");
+  const challenge = await call("challenge", { action: "register", address: wallet.address, username, keystore }, connected.cookie);
+  const registered = await call("register", { id: challenge.data.id, signature: await wallet.signMessage(challenge.data.message), password, keystore }, connected.cookie);
+  assert.equal(registered.status, 200, registered.data.error);
+  assert.equal(registered.data.account, wallet.address);
+  assert.equal(registered.data.loginUsername, username);
+  assert.equal(registered.data.walletType, "built-in");
+  assert.equal(registered.data.complete, false);
+  assert.equal((await call("game", {}, registered.cookie, registered.data.csrf)).status, 403);
+  assert.throws(() => accounts.authorizeMedia(registered.data.csrf, wallet.address), /profile/);
+  const otherDevice = await call("login", { username, password });
+  assert.equal(otherDevice.status, 200);
+  assert.equal(otherDevice.data.account, wallet.address);
+  assert.equal(otherDevice.data.keystore, keystore);
+  assert.equal((await Wallet.fromEncryptedJson(otherDevice.data.keystore, password)).address, wallet.address);
+  assert.equal((await call("login", { username, password: "incorrect password" })).status, 401);
+  const duplicate = await call("challenge", { action: "register", address: wallet.address, username, keystore });
+  assert.equal((await call("register", { id: duplicate.data.id, signature: await wallet.signMessage(duplicate.data.message), password, keystore })).status, 409);
+});
+
 test("World settlement bootstrap restores wallet-owned settlements without changing legacy funds or moving guest money", async () => {
   const { SqliteStore } = require("../../../sites/world.featheral.com/play/server/store.ts");
   const vm = require("node:vm");

@@ -143,6 +143,11 @@ Older name/avatar signatures remain valid and preserve an existing bio.
 
 World owns registration and profile setup at `/account/`. A username and password
 (12-256 characters) create a built-in Ethereum-compatible wallet in the browser.
+If a built-in wallet is already selected on World and its encrypted backup is
+stored in that browser, signup reuses it: enter a username and the existing wallet
+password to enable login without creating a second wallet. Credentials can be
+registered before completing the public profile; gameplay and Media still
+require that profile. The existing encrypted backup and wallet address are preserved.
 The server stores a salted scrypt password hash and the password-encrypted
 keystore, never a plaintext password, recovery phrase or private key. Signing in
 on another device downloads and decrypts that backup locally. External-wallet

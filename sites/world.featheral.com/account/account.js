@@ -3,6 +3,23 @@
   const $ = id => document.getElementById(id), world = window.FeatheralWorldAccount;
   const query = new URLSearchParams(location.search);
   let mode = "register", pending = null, editor = null, busy = false, approvalRequest = null, displayedAccount = null;
+  const vault = new FeatheralVault.Vault({ getItem: key => localStorage.getItem(key) });
+  const passwordNote = $("password-note").textContent;
+  function connectedBuiltInWallet() {
+    const record = vault.read();
+    const address = world.snapshot()?.account || localStorage.getItem("featheral-wallet-public-account") || localStorage.getItem("featheral-wallet-active-account");
+    return record && typeof address === "string" && record.address.toLowerCase() === address.toLowerCase() ? record : null;
+  }
+  function updateCredentials() {
+    const existing = mode === "register" && connectedBuiltInWallet();
+    $("confirmation").hidden = mode === "login" || !!existing;
+    $("credentials").elements.confirmation.required = mode === "register" && !existing;
+    $("credentials").elements.password.autocomplete = mode === "login" || existing ? "current-password" : "new-password";
+    $("credentials-submit").textContent = mode === "login" ? "Sign in" : existing ? "Enable username login" : "Create built-in wallet";
+    $("password-note").textContent = existing
+      ? "Use your existing built-in wallet password. Your username and password will sign in to this same wallet on any device. No new wallet is created and no funds move."
+      : passwordNote;
+  }
   window.addEventListener("beforeunload", event => { if (pending) { event.preventDefault(); event.returnValue = ""; } });
   function report(error) {
     console.error("World account:", error);
@@ -51,8 +68,21 @@
     $("switch-account").hidden = !!query.get("approve");
     $("account-name").hidden = false; $("account-name").textContent = session.profile?.username || session.account;
     $("account-title").textContent = "Your World account";
+    if (!session.loginUsername && connectedBuiltInWallet() && !query.get("approve")) {
+      mode = "register";
+      document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option.dataset.mode === mode)));
+      $("profile").hidden = true; $("sign-in").hidden = false;
+      $("continue").hidden = true; $("backup").hidden = true;
+      if (!$("credentials").elements.username.value) $("credentials").elements.username.value = session.profile?.username || "";
+      updateCredentials();
+      status("Your built-in wallet is connected. Set a username and use its existing password to enable World login.");
+      return;
+    }
+    $("sign-in").hidden = true;
     if (!editor) await loadEditor(session.account);
     else await editor.load(session.account, true);
+    if (!session.profile?.username && session.loginUsername)
+      $("profile-editor").querySelector('[name="username"]').value = session.loginUsername;
     $("continue").hidden = !session.complete || !!query.get("approve");
     $("continue").textContent = new URL(allowedReturn(query.get("returnTo"))).hostname.startsWith("media.") ? "Continue to Media" : "Continue to World";
     $("backup").hidden = session.walletType !== "built-in";
@@ -71,10 +101,7 @@
     if (busy) return;
     mode = button.dataset.mode;
     document.querySelectorAll("[data-mode]").forEach(option => option.setAttribute("aria-pressed", String(option === button)));
-    $("confirmation").hidden = mode === "login";
-    $("credentials").elements.confirmation.required = mode === "register";
-    $("credentials").elements.password.autocomplete = mode === "register" ? "new-password" : "current-password";
-    $("credentials-submit").textContent = mode === "register" ? "Create built-in wallet" : "Sign in";
+    updateCredentials();
   });
   $("credentials").onsubmit = event => {
     event.preventDefault();
@@ -88,8 +115,22 @@
         await world.refresh(); world.setSigner(signer);
         form.reset(); await showSession();
       } else {
-        if (password !== form.elements.confirmation.value) throw new Error("Passwords do not match.");
+        const existing = connectedBuiltInWallet();
+        if (!existing && password !== form.elements.confirmation.value) throw new Error("Passwords do not match.");
         if (password.length < 12) throw new Error("Use a password of at least 12 characters.");
+        if (existing) {
+          status("Unlocking your existing built-in wallet for World login…");
+          try {
+            await vault.unlock(password);
+            const selected = connectedBuiltInWallet();
+            if (!selected || selected.address !== existing.address || selected.keystore !== existing.keystore
+              || vault.signer.address.toLowerCase() !== existing.address.toLowerCase())
+              throw new Error("Wallet changed during signup. Retry with the selected wallet.");
+            await register({ signer: vault.signer, keystore: existing.keystore, password, username });
+            form.reset();
+          } finally { vault.lock(); form.elements.password.value = ""; }
+          return;
+        }
         status("Creating and encrypting your built-in wallet…");
         const signer = ethers.Wallet.createRandom(), keystore = await signer.encrypt(password);
         pending = { signer, keystore, password, username };
@@ -99,15 +140,17 @@
       }
     });
   };
-  $("finish-registration").onclick = () => void perform(async () => {
-    if (!pending) throw new Error("Create a built-in wallet first.");
+  async function register(record) {
     status("Finishing World registration…");
-    const record = pending;
     const challenge = await world.request("/challenge", { action: "register", address: record.signer.address, username: record.username, keystore: record.keystore });
     const signature = await record.signer.signMessage(challenge.message);
     await world.request("/register", { id: challenge.id, signature, password: record.password, keystore: record.keystore });
     await world.refresh(); world.setSigner(record.signer);
     pending = null; $("finish-registration").hidden = true; await showSession();
+  }
+  $("finish-registration").onclick = () => void perform(async () => {
+    if (!pending) throw new Error("Create a built-in wallet first.");
+    await register(pending);
   });
   $("external").onclick = () => void perform(async () => {
     const wallets = window.ethereum?.providers || [window.ethereum];
@@ -127,9 +170,10 @@
     status("Sign in with another World account or connect its wallet. Existing settlements and funds stay separate.");
   };
   window.addEventListener("featheral:world-session", event => {
-    if (!busy && !pending && displayedAccount && event.detail?.account
-      && event.detail.account.toLowerCase() !== displayedAccount.toLowerCase()) void showSession().catch(report);
+    if (!busy && !pending && event.detail?.account
+      && (!displayedAccount || event.detail.account.toLowerCase() !== displayedAccount.toLowerCase())) void showSession().catch(report);
   });
+  window.addEventListener("focus", () => { if (!busy && !pending) { try { updateCredentials(); } catch (error) { report(error); } } });
   $("sign-out").onclick = () => void perform(async () => {
     await world.request("/logout", {}); pending = null; location.replace("/account/");
   });
@@ -182,7 +226,7 @@
   void (async () => {
     await world.refresh(); await showSession();
     if (query.has("switch") && world.snapshot()?.account && !query.get("approve")) $("switch-account").click();
-    if (!world.snapshot()?.account) status("Register or sign in to set up your World profile.");
+    if (!world.snapshot()?.account) { updateCredentials(); status("Register or sign in to set up your World profile."); }
     if (query.get("approve")) {
       const parent = new URL(query.get("parentOrigin"));
       if (!/^[a-f0-9]{32}$/.test(query.get("approve")) || !window.opener

@@ -12,8 +12,14 @@ preserve the runtime URLs and classic-script ordering without build warnings.
 
 Register or sign in on `/account/` before playing. Username/password registration
 creates a password-encrypted built-in wallet with a server-stored encrypted backup
-for cross-device access; connecting an external wallet is an alternative. An
-uploaded avatar, valid username and nonblank profile description are required.
+for cross-device access; connecting an external wallet is an alternative. If the
+selected wallet already has a built-in encrypted backup on World in this browser,
+signup asks only for a username and its existing wallet password. It unlocks and
+reuses that same wallet and backup without overwriting local storage or moving
+funds. Password login is enabled immediately, including on another device.
+Credential registration does not require a finished public profile; an
+uploaded avatar, valid username and nonblank profile description are still
+required before gameplay and Media writes.
 Media registration and editing also happen on World, with one shared public
 profile. Existing guest settlements and wallet balances are preserved: restoring
 a wallet-owned game moves no funds and refuses to discard guest money.
