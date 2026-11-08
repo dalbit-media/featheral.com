@@ -14,7 +14,7 @@ function worldResource(site, pathname) {
     if (["/docs", "/ledger", "/news"].some(prefix => pathname === prefix || pathname.startsWith(prefix + "/"))
       || ["/app.js", "/app.css", "/play-launch.js"].includes(pathname))
       return { redirect: "media", pathname };
-    if (["/wallet-sync.html", "/wallet-sync.js", "/world-funds.html", "/world-funds.js", "/world-funds.css"].includes(pathname))
+    if (["/wallet-sync.html", "/wallet-sync.js", "/wallet-sync-frame.html", "/wallet-sync-frame.js", "/world-funds.html", "/world-funds.js", "/world-funds.css"].includes(pathname))
       return { directory: "world.featheral.com", pathname };
     return { directory: path.join("world.featheral.com", "play", "dist"), pathname };
   }

@@ -380,7 +380,67 @@ async function mountFeatheralWallet(context) {
     else $("world-status").textContent = "World account sync returned an invalid account.";
     history.replaceState(null, "", location.pathname + location.search);
   }
+  // World and wallet are same-site; a hidden World frame returns only the public ledger account for the player's session.
+  let worldDiscovery = null, worldDiscoveredAt = 0, worldSyncState = "pending";
+  function discoverWorldAccount(force = false) {
+    if (worldDiscovery) return worldDiscovery;
+    if (!force && Date.now() - worldDiscoveredAt < 15000) return Promise.resolve(false);
+    if (typeof nativeDocument.body?.append !== "function" || typeof nativeDocument.createElement !== "function"
+      || typeof globalThis.crypto?.getRandomValues !== "function") return Promise.resolve(false);
+    const frame = nativeDocument.createElement("iframe");
+    if (typeof frame?.remove !== "function" || typeof frame.addEventListener !== "function" || typeof frame.setAttribute !== "function") return Promise.resolve(false);
+    worldDiscovery = new Promise(resolve => {
+      const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(byte => byte.toString(16).padStart(2, "0")).join("");
+      let timer, settled = false;
+      const finish = state => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer); window.removeEventListener("message", receive); frame.remove();
+        const changed = state.account ? state.account !== worldAccount : state.sync !== worldSyncState && !worldAccount;
+        if (state.account) {
+          worldAccount = state.account;
+          try { storage.setItem("featheral-world-account", state.account); } catch (error) { console.error("World account storage:", error); }
+        }
+        worldSyncState = state.sync;
+        worldDiscovery = null; worldDiscoveredAt = Date.now(); resolve(changed);
+      };
+      const receive = event => {
+        if (event.origin !== worldOrigin || event.source !== frame.contentWindow
+          || event.data?.type !== "featheral:world-account" || event.data.nonce !== nonce) return;
+        if (event.data.signedOut) finish({ sync: "signed-out" });
+        else if (/^0x[0-9a-f]{64}$/.test(event.data.accountId || "")) finish({ sync: "linked", account: event.data.accountId });
+        else {
+          console.warn("World account sync:", event.data.error || "invalid account");
+          finish({ sync: "error" });
+        }
+      };
+      window.addEventListener("message", receive);
+      frame.hidden = true; frame.tabIndex = -1; frame.title = "World account link";
+      frame.setAttribute("aria-hidden", "true");
+      frame.addEventListener("load", () => frame.contentWindow?.postMessage({ type: "featheral:world-account-request", nonce }, worldOrigin), { once: true });
+      frame.src = worldOrigin + "/wallet-sync-frame.html";
+      timer = globalThis.setTimeout(() => finish({ sync: "error" }), 10000);
+      nativeDocument.body.append(frame);
+      cleanup.push(() => finish({ sync: worldSyncState }));
+    });
+    return worldDiscovery;
+  }
+  function syncWorldAccount(force = false) {
+    if (worldDiscovery && !force) return;
+    discoverWorldAccount(force).then(changed => {
+      if (!changed) return;
+      if (busy) refreshQueued = true;
+      else refresh().catch(status);
+    }, status);
+  }
   async function refreshWorld(current) {
+    if (!worldAccount && !publicAddress()) {
+      $("world-balance").textContent = { "signed-out": "Not signed in", error: "Unavailable" }[worldSyncState] || "Connecting…";
+      $("world-status").textContent = {
+        "signed-out": "Open World once in this browser. Your World account then links here automatically.",
+        error: "World account could not be reached. It retries automatically, or use Sync World account.",
+      }[worldSyncState] || "Linking your World account automatically. No funds move.";
+    }
     if (!worldAccount || publicAddress()) return;
     try {
       const response = await fetch(`/api/v1/notes/fth/accounts/${worldAccount}`, { cache: "no-store" });
@@ -519,6 +579,7 @@ async function mountFeatheralWallet(context) {
   }
   async function refresh() {
     const current = ++epoch;
+    syncWorldAccount();
     if (marketWarning && $("status").textContent === marketWarning) $("status").textContent = "";
     marketWarning = "";
     clearPortfolio();
@@ -588,6 +649,8 @@ async function mountFeatheralWallet(context) {
         : "Included in the total portfolio. Gameplay funds stay separate; transfers require approval in World.";
       if (!data.world.duplicate) appendEstimates($("world-status"), worldValue, data.portfolio?.worldUsdValue, data.portfolio);
     } else if (data.worldError) { $("world-balance").textContent = "Unavailable"; $("world-status").textContent = data.worldError; }
+    else if (worldSyncState === "signed-out") { $("world-balance").textContent = "Not signed in"; $("world-status").textContent = "Open World once in this browser. Your World account then links here automatically."; }
+    else if (worldSyncState === "pending") { $("world-balance").textContent = "Connecting…"; $("world-status").textContent = "Linking your World account automatically. No funds move."; }
     else { $("world-balance").textContent = "Not linked"; $("world-status").textContent = "No World gameplay account is linked to this wallet."; }
     $("address").value = owner; $("address").placeholder = "Not connected";
     let addressStatus = !token ? interactive ? "Connected" : "Read-only" : "Authorized";
@@ -1100,8 +1163,8 @@ async function mountFeatheralWallet(context) {
       else refresh().catch(status);
     } catch (error) { status(error); }
   });
-  listen(window, "focus", () => { if (!busy && !document.hidden) refresh().catch(status); });
-  document.addEventListener("visibilitychange", () => { if (!busy && !document.hidden) refresh().catch(status); });
+  listen(window, "focus", () => { if (!busy && !document.hidden) { syncWorldAccount(true); refresh().catch(status); } });
+  document.addEventListener("visibilitychange", () => { if (!busy && !document.hidden) { syncWorldAccount(true); refresh().catch(status); } });
   let visibleRefreshPending = false;
   async function refreshVisible() {
     if (busy || visibleRefreshPending || document.hidden || !(token || worldAccount || publicAddress())) return;

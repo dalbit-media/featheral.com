@@ -500,6 +500,8 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
         return res.end("Not found");
       }
+      if (site === "world" && p === "/wallet-sync-frame.html")
+        res.setHeader("Content-Security-Policy", `frame-ancestors ${hostname.endsWith("localhost") ? "http://localhost:* http://*.localhost:*" : "https://featheral.com https://*.featheral.com"}; default-src 'self'; object-src 'none'; base-uri 'none'`);
       res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
       res.end(data);
     });

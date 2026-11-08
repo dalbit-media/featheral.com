@@ -124,3 +124,88 @@ test('reader wallet panels use explicit public World accounts and preserve unava
     else { assert.equal(context.worldFunds.available, '12345'); assert.equal(context.worldFunds.accountId, account); assert.equal(context.worldFunds.duplicate, false); assert.equal(errors.length, 0); }
   }
 });
+
+function frameHarness(hostname, response) {
+  const listeners = [], replies = [], parent = { postMessage: (data, target) => replies.push({ data, target }) };
+  const window = { addEventListener: (type, fn) => type === 'message' && listeners.push(fn) };
+  window.parent = parent;
+  const fetches = [];
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'sites/world.featheral.com/wallet-sync-frame.js'), 'utf8'), {
+    window, URL, location: { hostname }, console: { error() {} },
+    fetch: async (url, options) => { fetches.push({ url, options }); return response; },
+  });
+  const send = async (event) => { await listeners[0]({ source: parent, ...event }); };
+  return { send, replies, fetches, parent };
+}
+const nonce = 'ab'.repeat(16);
+test('World account frame answers only Featheral parents with the public account and no funds data', async () => {
+  const ok = { status: 200, ok: true, json: async () => ({ accountId: account, balance: '5', csrf }) };
+  const frame = frameHarness('world.featheral.com', ok);
+  await frame.send({ origin: 'https://evil.example', data: { type: 'featheral:world-account-request', nonce } });
+  await frame.send({ origin: 'https://wallet.featheral.com.evil.example', data: { type: 'featheral:world-account-request', nonce } });
+  await frame.send({ origin: 'https://wallet.featheral.com', data: { type: 'featheral:world-account-request', nonce: 'short' } });
+  await frame.send({ origin: 'https://wallet.featheral.com', source: {}, data: { type: 'featheral:world-account-request', nonce } });
+  assert.equal(frame.fetches.length, 0); assert.equal(frame.replies.length, 0);
+  await frame.send({ origin: 'https://wallet.featheral.com', data: { type: 'featheral:world-account-request', nonce } });
+  assert.equal(frame.fetches[0].url, '/api/dollar/game/wallet/balance');
+  assert.equal(frame.fetches[0].options.credentials, 'same-origin');
+  assert.deepEqual(JSON.parse(JSON.stringify(frame.replies)), [{ data: { type: 'featheral:world-account', nonce, accountId: account }, target: 'https://wallet.featheral.com' }]);
+
+  const signedOut = frameHarness('world.featheral.com', { status: 401, ok: false, json: async () => ({ error: 'Sign in' }) });
+  await signedOut.send({ origin: 'https://featheral.com', data: { type: 'featheral:world-account-request', nonce } });
+  assert.deepEqual({ ...signedOut.replies[0].data }, { type: 'featheral:world-account', nonce, accountId: null, signedOut: true });
+
+  const invalid = frameHarness('world.featheral.com', { status: 200, ok: true, json: async () => ({ accountId: 'bad' }) });
+  await invalid.send({ origin: 'https://notes.featheral.com', data: { type: 'featheral:world-account-request', nonce } });
+  assert.match(invalid.replies[0].data.error, /invalid account/);
+
+  const foreign = frameHarness('world.example.com', ok);
+  await foreign.send({ origin: 'https://wallet.featheral.com', data: { type: 'featheral:world-account-request', nonce } });
+  assert.equal(foreign.fetches.length, 0); assert.match(foreign.replies[0].data.error, /canonical/);
+});
+test('World account frame is routed as a World file and framable only by Featheral origins', () => {
+  const { worldResource } = require('../../../scripts/site-routing');
+  for (const file of ['/wallet-sync-frame.html', '/wallet-sync-frame.js'])
+    assert.deepEqual(worldResource('world', file), { directory: 'world.featheral.com', pathname: file });
+  const serve = fs.readFileSync(path.join(root, 'scripts/serve.js'), 'utf8');
+  assert.match(serve, /p === "\/wallet-sync-frame\.html"[\s\S]{0,200}frame-ancestors[\s\S]{0,120}https:\/\/featheral\.com https:\/\/\*\.featheral\.com/);
+  const html = fs.readFileSync(path.join(root, 'sites/world.featheral.com/wallet-sync-frame.html'), 'utf8');
+  assert.match(html, /src="\/wallet-sync-frame\.js"/); assert.match(html, /noindex/);
+});
+test('wallet discovers the World account through a nonce-bound hidden World frame and ignores spoofed replies', () => {
+  const source = fs.readFileSync(path.join(root, 'sites/wallet.featheral.com/wallet-app.js'), 'utf8');
+  const body = source.slice(source.indexOf('  function discoverWorldAccount('), source.indexOf('  function syncWorldAccount('));
+  let messageListener = null, appended = null, loadListener = null, removed = false;
+  const posts = [], saved = new Map();
+  const contentWindow = { postMessage: (data, target) => posts.push({ data, target }) };
+  const frame = {
+    contentWindow, setAttribute() {}, remove: () => { removed = true; },
+    addEventListener: (type, fn) => { if (type === 'load') loadListener = fn; },
+  };
+  const context = vm.createContext({
+    worldOrigin: 'https://world.featheral.com', worldAccount: null, worldSyncState: 'pending',
+    worldDiscovery: null, worldDiscoveredAt: 0, cleanup: [], crypto: globalThis.crypto, Uint8Array, Date, Promise, console, setTimeout, clearTimeout,
+    storage: { setItem: (key, value) => saved.set(key, value) },
+    window: { addEventListener: (type, fn) => { messageListener = fn; }, removeEventListener() {} },
+    nativeDocument: { body: { append: node => { appended = node; } }, createElement: () => frame },
+  });
+  vm.runInContext(body + '; globalThis.discover = discoverWorldAccount;', context);
+  const result = context.discover(true);
+  assert.equal(appended, frame); assert.equal(frame.src, 'https://world.featheral.com/wallet-sync-frame.html');
+  loadListener();
+  const request = posts[0];
+  assert.equal(request.target, 'https://world.featheral.com');
+  assert.match(request.data.nonce, /^[0-9a-f]{32}$/);
+  const reply = { type: 'featheral:world-account', nonce: request.data.nonce, accountId: account };
+  messageListener({ origin: 'https://evil.example', source: contentWindow, data: reply });
+  messageListener({ origin: 'https://world.featheral.com', source: {}, data: reply });
+  messageListener({ origin: 'https://world.featheral.com', source: contentWindow, data: { ...reply, nonce: 'cd'.repeat(16) } });
+  assert.equal(context.worldAccount, null); assert.equal(removed, false);
+  messageListener({ origin: 'https://world.featheral.com', source: contentWindow, data: reply });
+  return result.then(changed => {
+    assert.equal(changed, true); assert.equal(removed, true);
+    assert.equal(vm.runInContext('worldAccount', context), account);
+    assert.equal(vm.runInContext('worldSyncState', context), 'linked');
+    assert.equal(saved.get('featheral-world-account'), account);
+  });
+});
