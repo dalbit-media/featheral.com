@@ -1,11 +1,16 @@
 {
   "id": "/",
   "name": "Featheral App",
-  "short_name": "Featheral",
-  "description": "Foundation insider workspace",
+  "short_name": "Featheral App",
+  "description": "Missions, team collaboration, learning and reviewed contribution rewards for a decentralized organization.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "shortcuts": [
+    { "name": "My missions", "url": "/#missions" },
+    { "name": "Team inbox", "url": "/#inbox" },
+    { "name": "Contribution rewards", "url": "/#rewards" }
+  ],
   "background_color": "#0d131b",
   "theme_color": "#111820",
   "icons": [{ "src": "/shared/logo-app.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]

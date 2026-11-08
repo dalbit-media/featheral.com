@@ -38,8 +38,15 @@ export interface DollarFunds {
   depositState?(payment: FundPayment): 'missing' | 'conflict' | 'accepted';
   transfer?(payment: FundPayment & { signature: string }): Promise<unknown>;
 }
-export const gameFundAccount = (kind: 'pool' | 'escrow' | 'guest', name: string): string =>
-  `0x${createHash('sha256').update(`featheral:dollar:game:${kind}:${name}`).digest('hex')}`;
+const fundAccountIds = new Map<string, string>();
+export const gameFundAccount = (kind: 'pool' | 'escrow' | 'guest', name: string): string => {
+  const key = `${kind}:${name}`, existing = fundAccountIds.get(key);
+  if (existing) return existing;
+  const account = `0x${createHash('sha256').update(`featheral:dollar:game:${key}`).digest('hex')}`;
+  if (fundAccountIds.size >= 10000) fundAccountIds.clear();
+  fundAccountIds.set(key, account);
+  return account;
+};
 export const walletFundAccount = (address: string): string => `0x${'0'.repeat(24)}${address.slice(2).toLowerCase()}`;
 
 export class GameFunds {
@@ -58,6 +65,22 @@ export class GameFunds {
     this.migrateLegacyRequests();
     db.exec('CREATE TABLE IF NOT EXISTS world_fund_requests (owner TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner,id))');
     db.exec('CREATE TABLE IF NOT EXISTS fund_guest_moves (token TEXT PRIMARY KEY)');
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE name='sessions' AND type='table'").get()) db.exec(`CREATE TABLE IF NOT EXISTS fund_session_balances (owner TEXT PRIMARY KEY, dollars INTEGER, fthg INTEGER);
+      CREATE TRIGGER IF NOT EXISTS fund_session_insert AFTER INSERT ON sessions BEGIN
+        INSERT OR REPLACE INTO fund_session_balances VALUES(NEW.id,json_extract(NEW.data,'$.account.game.dollars'),json_extract(NEW.data,'$.account.fthg'));
+      END;
+      CREATE TRIGGER IF NOT EXISTS fund_session_update AFTER UPDATE OF data ON sessions BEGIN
+        UPDATE fund_session_balances SET dollars=json_extract(NEW.data,'$.account.game.dollars'),fthg=json_extract(NEW.data,'$.account.fthg')
+          WHERE owner=NEW.id AND (dollars IS NOT json_extract(NEW.data,'$.account.game.dollars') OR fthg IS NOT json_extract(NEW.data,'$.account.fthg'));
+      END;
+      CREATE TRIGGER IF NOT EXISTS fund_session_delete AFTER DELETE ON sessions BEGIN
+        DELETE FROM fund_session_balances WHERE owner=OLD.id;
+      END;
+      CREATE TRIGGER IF NOT EXISTS fund_session_rekey AFTER UPDATE OF id ON sessions WHEN OLD.id!=NEW.id BEGIN
+        UPDATE fund_session_balances SET owner=NEW.id,dollars=json_extract(NEW.data,'$.account.game.dollars'),fthg=json_extract(NEW.data,'$.account.fthg') WHERE owner=OLD.id;
+      END;
+      INSERT OR REPLACE INTO fund_session_balances SELECT id,json_extract(data,'$.account.game.dollars'),json_extract(data,'$.account.fthg') FROM sessions;
+      DELETE FROM fund_session_balances WHERE owner NOT IN (SELECT id FROM sessions)`);
     this.recover();
   }
   private migrateLegacyRequests(): void {
@@ -155,18 +178,23 @@ export class GameFunds {
   }
   sync(): void {
     this.recover();
-    for (const row of this.db.prepare('SELECT id,data FROM sessions').all()) {
-      const session = JSON.parse(String(row.data)) as Session;
-      const value = this.units(this.account(String(row.id)));
-      if (session.account.game.dollars !== value || session.account.fthg !== 0) {
+    const readSession = this.db.prepare('SELECT data FROM sessions WHERE id=?');
+    const writeSession = this.db.prepare('UPDATE sessions SET data=? WHERE id=?');
+    for (const row of this.db.prepare(`SELECT s.owner AS id,w.address,w.mode,s.dollars,s.fthg
+      FROM fund_session_balances s LEFT JOIN fund_wallets w ON w.owner=s.owner`).all()) {
+      const fundAccount = row.address && row.mode === 'legacy-direct' ? walletFundAccount(String(row.address)) : gameFundAccount('guest', String(row.id));
+      const value = this.units(fundAccount);
+      if (row.dollars !== value || row.fthg !== 0) {
+        const session = JSON.parse(String(readSession.get(row.id!)!.data)) as Session;
         session.account.game.dollars = value;
         session.account.fthg = 0;
         session.account.revision++;
-        this.db.prepare('UPDATE sessions SET data=? WHERE id=?').run(JSON.stringify(session), row.id!);
+        writeSession.run(JSON.stringify(session), row.id!);
       }
     }
-    this.db.exec("UPDATE public_totals SET dollars=(SELECT COALESCE(SUM(json_extract(data,'$.account.game.dollars')),0) FROM sessions) WHERE id=1");
-    for (const row of this.db.prepare('SELECT asset FROM market_pools').all()) {
+    this.db.exec("UPDATE public_totals SET dollars=(SELECT COALESCE(SUM(dollars),0) FROM fund_session_balances) WHERE id=1");
+    const updatePool = this.db.prepare('UPDATE market_pools SET dollars=? WHERE asset=?');
+    for (const row of this.db.prepare('SELECT asset,dollars FROM market_pools').all()) {
       const asset = String(row.asset), seed = this.ledger.poolSeed?.(asset);
       if (seed && !this.db.prepare('SELECT 1 FROM fund_pool_seeds WHERE asset=?').get(asset)) {
         this.db.exec('BEGIN IMMEDIATE');
@@ -176,7 +204,8 @@ export class GameFunds {
           this.db.exec('COMMIT');
         } catch (error) { this.db.exec('ROLLBACK'); throw error; }
       }
-      this.db.prepare('UPDATE market_pools SET dollars=? WHERE asset=?').run(this.units(gameFundAccount('pool', String(row.asset))), row.asset!);
+      const dollars = this.units(gameFundAccount('pool', asset));
+      if (Number(row.dollars) !== dollars) updatePool.run(dollars, asset);
     }
     for (const [account, amount] of this.balances()) {
       if (this.units(account) !== amount) throw new ApiError(503, 'Dollar gameplay escrow requires reconciliation.');
@@ -199,8 +228,9 @@ export class GameFunds {
   }
   balances(): Map<string, number> {
     const result = new Map<string, number>();
-    for (const row of this.db.prepare("SELECT id,json_extract(data,'$.account.game.dollars') AS dollars FROM sessions").all())
-      result.set(this.account(String(row.id)), Number(row.dollars));
+    for (const row of this.db.prepare(`SELECT s.owner AS id,w.address,w.mode,s.dollars
+      FROM fund_session_balances s LEFT JOIN fund_wallets w ON w.owner=s.owner`).all())
+      result.set(row.address && row.mode === 'legacy-direct' ? walletFundAccount(String(row.address)) : gameFundAccount('guest', String(row.id)), Number(row.dollars));
     for (const row of this.db.prepare('SELECT asset,dollars FROM market_pools').all())
       result.set(gameFundAccount('pool', String(row.asset)), Number(row.dollars));
     if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name='federation_vaults'").get())

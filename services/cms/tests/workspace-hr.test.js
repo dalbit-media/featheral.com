@@ -34,6 +34,22 @@ test("a current read-only snapshot preserves HR records and disables evaluations
   assert.equal(replica.hr.timer, undefined);
   assert.deepEqual(replica.org(), before);
 });
+test("checklists migrate additively and a pre-checklist read-only snapshot requires source initialization", t => {
+  const notes = new Notes(":memory:"), creation = new Creation(notes, {});
+  t.after(() => notes.close());
+  new Workspace(notes, creation.markets);
+  notes.db.exec("ALTER TABLE work_missions DROP COLUMN todos");
+  const records = notes.db.prepare("SELECT id,title,status,revision FROM work_missions ORDER BY id").all();
+  notes.db.readOnlyReplica = true; notes.db.exec("PRAGMA query_only=ON");
+  t.mock.method(console, "warn", () => {});
+  const replica = new Workspace(notes, creation.markets);
+  assert.throws(() => replica.hr.assertReady(), { status: 503 });
+  notes.db.exec("PRAGMA query_only=OFF"); notes.db.readOnlyReplica = false;
+  const writer = new Workspace(notes, creation.markets);
+  writer.hr.assertReady();
+  assert.deepEqual(notes.db.prepare("SELECT id,title,status,revision FROM work_missions ORDER BY id").all(), records);
+  assert.ok(notes.db.prepare("SELECT todos FROM work_missions").all().every(row => row.todos === "[]"));
+});
 function fixture(t) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, {}), profiles = new Map();
   let now = Date.UTC(2026, 10, 2, 12);

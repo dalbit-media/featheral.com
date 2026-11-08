@@ -11,6 +11,51 @@ import type { DollarFunds, FundPayment, FundTransaction } from './funds.ts';
 import { createHash } from 'node:crypto';
 import { Wallet, parseUnits, verifyMessage } from 'ethers';
 import { transferMessage } from '../../../../services/fth-ledger/transfer.js';
+import { createAccount } from './economy.ts';
+
+test('fund balance projections migrate, follow every session write and roll back atomically', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    db.exec(`CREATE TABLE sessions(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+      CREATE TABLE public_totals(id INTEGER PRIMARY KEY,dollars INTEGER);
+      INSERT INTO public_totals VALUES(1,0);
+      CREATE TABLE market_pools(asset TEXT PRIMARY KEY,units INTEGER,dollars INTEGER);
+      CREATE TABLE market_orders(owner TEXT,price INTEGER,remaining INTEGER,side TEXT,status TEXT)`);
+    const account = createAccount(Date.now());
+    account.game.dollars = 10000;
+    const session = { csrf: 'fixture', expires: Date.now() + 10000, account };
+    db.prepare('INSERT INTO sessions VALUES(?,?)').run('existing', JSON.stringify(session));
+    const balances = new Map<string, string>([[gameFundAccount('guest', 'existing'), '1000000000000000000']]);
+    const funds = new GameFunds(db, {
+      available: id => balances.get(id) ?? '0', supply: () => '1000000000000000000',
+      prepare: () => { throw new Error('Unexpected fund movement'); }, commit: () => { throw new Error('Unexpected settlement'); },
+    });
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'existing')), 10000);
+    db.exec('BEGIN IMMEDIATE');
+    db.exec("UPDATE sessions SET data=json_set(data,'$.account.game.dollars',20000) WHERE id='existing'");
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'existing')), 20000);
+    db.exec('ROLLBACK');
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'existing')), 10000);
+    db.exec("UPDATE sessions SET id='renamed',data=json_set(data,'$.account.game.dollars',30000) WHERE id='existing'");
+    assert.equal(funds.balances().has(gameFundAccount('guest', 'existing')), false);
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'renamed')), 30000);
+    db.exec("UPDATE sessions SET id='existing',data=json_set(data,'$.account.game.dollars',10000) WHERE id='renamed'");
+    db.prepare('INSERT INTO sessions VALUES(?,?)').run('new', JSON.stringify({ ...session, account: createAccount(Date.now()) }));
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'new')), 0);
+    balances.set(gameFundAccount('guest', 'existing'), '2000000000000000000');
+    funds.sync();
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'existing')), 20000);
+    assert.equal(db.prepare("SELECT json_extract(data,'$.account.game.dollars') AS dollars FROM sessions WHERE id='existing'").get()!.dollars, 20000);
+    assert.equal(db.prepare('SELECT dollars FROM public_totals').get()!.dollars, 20000);
+    db.exec("DELETE FROM sessions WHERE id='new'");
+    assert.equal(funds.balances().has(gameFundAccount('guest', 'new')), false);
+    const address = `0x${'1'.repeat(40)}`;
+    db.prepare('INSERT INTO fund_wallets VALUES(?,?,?)').run('existing', address, 'legacy-direct');
+    assert.equal(funds.balances().get(walletFundAccount(address)), 20000);
+    db.exec("UPDATE fund_wallets SET mode='separate'");
+    assert.equal(funds.balances().get(gameFundAccount('guest', 'existing')), 20000);
+  } finally { db.close(); }
+});
 
 test('only legacy direct-wallet sessions require a connected signer for gameplay', () => {
   assert.equal(needsWalletSigner({ fundWallet: null }), false);

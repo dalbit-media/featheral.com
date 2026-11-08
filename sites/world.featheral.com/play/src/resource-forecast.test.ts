@@ -18,7 +18,7 @@ test('depletion forecasts show weekly reserve drawdown and warn at one week or l
   }
 });
 
-test('sidebar charts use owned reserves and authoritative weekly demand with clear localized warnings', () => {
+test('reserve charts use owned reserves and authoritative weekly demand with clear localized warnings', () => {
   const account = createAccount(0);
   account.game = { ...newGame(), stage: 0, population: 12 };
   const state = snapshot(account);
@@ -42,12 +42,18 @@ test('sidebar charts use owned reserves and authoritative weekly demand with cle
   assert.equal(resourceForecastPanel(state, 'en'), '');
 });
 
-test('reserve charts remain reachable on small screens and progress transitions override static UI rules', () => {
-  const layout = readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8');
+test('header opens reserve charts in management dialog instead of explore sidebar and retains resource settings', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  assert.match(main, /case 'acquisition-management': openManagement\('reserves'\)/);
+  assert.match(main, /data-action="acquisition-management" aria-label="Reserve forecast"/);
+  assert.match(main, /<option value="reserves">Reserve forecast<\/option>/);
+  assert.match(main, /management === 'reserves'\) \{\s+replaceContent\(root, resourceForecastPanel\(state, language\)/);
+  assert.doesNotMatch(main, /class="explore-upkeep"/);
+  assert.equal((main.match(/resourceForecastPanel\(state, language\)/g) ?? []).length, 1);
+  assert.match(main, /view === 'funds' \|\| view === 'reserves' \|\| isResource\(view\)/);
+});
+test('progress transitions override static UI rules', () => {
   const game = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
-  assert.match(layout, /#app\.explore-page #sidebar-content>\.explore-upkeep\{display:block;grid-column:1\/-1\}/);
-  assert.match(layout, /max-height:min\(45dvh,/);
-  assert.match(layout, /#app\.explore-page #sidebar-content>\.explore-upkeep\{order:3\}/);
   const motion = game.slice(game.indexOf('@media(prefers-reduced-motion:no-preference)'), game.indexOf('#app .topbar button'));
   assert.match(motion, /\.completion-meter::after\{transition:transform 1s linear!important/);
   assert.match(motion, /\.clock-day-fill,#app \.clock-season::before\{transition:transform 5s linear!important/);

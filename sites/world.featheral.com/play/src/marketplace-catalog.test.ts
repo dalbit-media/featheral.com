@@ -4,6 +4,8 @@ import { createAccount, snapshot } from '../server/economy.ts';
 import { filterMarketCatalog, formatPriceChange, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort } from './marketplace-catalog.ts';
 import { marketAssets } from './market.ts';
+import { activeMarketAnalysis, marketAnalysisDuration, marketRarity } from './market-analysis.ts';
+import type { MarketAnalysis } from './market-analysis.ts';
 
 const state = snapshot(createAccount(1000000));
 const tickers = [
@@ -67,4 +69,40 @@ test('change sorting ranks gainers and losers and always keeps markets without s
   assert.deepEqual(order('change24h-low'), ['torch', 'lamp', 'wood']);
   assert.deepEqual(order('change7d-high'), ['torch', 'lamp', 'wood']);
   assert.deepEqual(order('change7d-low'), ['lamp', 'torch', 'wood']);
+});
+const report: MarketAnalysis = { generatedAt: state.serverTime, expiresAt: state.serverTime + marketAnalysisDuration, fee: 100,
+  items: [{ item: 'lamp', craftingFee: 1, ingredients: [], cost: 80, revenue: 90, profit: 10 },
+    { item: 'torch', craftingFee: 1, ingredients: [], cost: 5, revenue: 3, profit: -2 }] };
+test('paid profit and full-cost sorts use report values, keep unavailable items last and never expose expired analysis', () => {
+  const order = (sort: CatalogSort) => filterMarketCatalog(tickers, state, 'en', 'all', '', sort, false, report).map(ticker => ticker.asset);
+  assert.deepEqual(order('profit-high'), ['lamp', 'torch', 'collection-wood-1']);
+  assert.deepEqual(order('profit-low'), ['torch', 'lamp', 'collection-wood-1']);
+  assert.deepEqual(order('craft-cost-low'), ['torch', 'lamp', 'collection-wood-1']);
+  assert.deepEqual(order('craft-cost-high'), ['lamp', 'torch', 'collection-wood-1']);
+  for (const view of ['grid', 'table'] as const) {
+    const paid = renderMarketCatalog(tickers, state, 'lamp', view, 'en', false, 'profit-high', report);
+    assert.match(paid, /Total craft cost/); assert.match(paid, /data-profit="positive"/); assert.match(paid, /data-profit="negative"/);
+    const expired = renderMarketCatalog(tickers, state, 'lamp', view, 'en', false, 'name', report, report.expiresAt);
+    assert.doesNotMatch(expired, /catalog-analysis|Estimated profit|Total craft cost/);
+    assert.doesNotMatch(renderMarketCatalog(tickers, state, 'lamp', view, 'en', false), /catalog-analysis/);
+  }
+  assert.equal(activeMarketAnalysis(report, report.generatedAt - 1), null);
+  assert.ok(activeMarketAnalysis(report, report.expiresAt - 1));
+  assert.equal(activeMarketAnalysis(report, report.expiresAt), null);
+});
+test('dynamic rarity uses exact quantity boundaries, labels zero unavailable and sorts scarcity with unknowns last', () => {
+  for (const [quantity, rarity] of [[0, 'unavailable'], [1, 'legendary'], [9, 'legendary'], [10, 'epic'], [49, 'epic'],
+    [50, 'rare'], [199, 'rare'], [200, 'uncommon'], [999, 'uncommon'], [1000, 'common']] as const)
+    assert.equal(marketRarity(quantity), rarity);
+  for (const quantity of [undefined, -1, 0.1, NaN, Infinity]) assert.equal(marketRarity(quantity), 'unknown');
+  const quantities = tickers.map((ticker, i) => ({ ...ticker, availableQuantity: [1000, 9, 50][i] }));
+  assert.deepEqual(filterMarketCatalog(quantities, state, 'en', 'all', '', 'rarity-high', false).map(row => row.asset), ['torch', 'collection-wood-1', 'lamp']);
+  assert.deepEqual(filterMarketCatalog(quantities, state, 'en', 'all', '', 'quantity-high', false).map(row => row.asset), ['lamp', 'collection-wood-1', 'torch']);
+  const unavailable = quantities.map(ticker => ticker.asset === 'torch' ? { ...ticker, availableQuantity: 0 } : ticker);
+  assert.deepEqual(filterMarketCatalog(unavailable, state, 'en', 'all', '', 'rarity-high', false).map(row => row.asset), ['collection-wood-1', 'lamp', 'torch']);
+  for (const view of ['grid', 'table'] as const) {
+    const html = renderMarketCatalog(quantities, state, 'lamp', view, 'en', false);
+    assert.match(html, /data-rarity="legendary"/); assert.match(html, /Legendary · Available 9/);
+    assert.match(renderMarketCatalog(quantities, state, 'lamp', view, 'ko', false), /전설/);
+  }
 });

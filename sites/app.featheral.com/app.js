@@ -1,8 +1,10 @@
 "use strict";
 (() => {
   const $ = id => document.getElementById(id);
-  const state = { me: null, channel: null, channels: [], members: [], missions: [], messages: new Map(), view: "inbox", document: null,
-    config: null, polling: false, sending: false, draftRequest: null, mission: null, experience: null, interests: [] };
+  const state = { me: null, channel: null, channels: [], members: [], missions: [], messages: new Map(), view: "overview", document: null,
+    config: null, polling: false, sending: false, draftRequest: null, mission: null, experience: null, interests: [],
+    missionFilter: "mine", missionsLoaded: false, missionsRefreshedAt: 0, missionTodos: [], todoDefinitionsEditable: false, todoEditable: false,
+    compensationKey: "", overviewKey: "" };
   let quizRetryTimer;
   const short = value => `..${value.slice(-5)}`;
   const node = (tag, content, className) => {
@@ -38,15 +40,50 @@
     const element = node("button", label); element.type = "button"; action(element, callback); return element;
   }
   function link(site, path = "/") { return window.FeatheralSites.url(site, path); }
-  function show(view) {
+  const mobileNavigation = window.matchMedia("(max-width: 900px)");
+  function setMenu(open, restoreFocus = true) {
+    const visible = open && mobileNavigation.matches && state.me?.member?.status === "active";
+    $("workspace-navigation").classList.toggle("is-open", visible);
+    $("workspace-navigation").inert = mobileNavigation.matches && !visible;
+    $("menu-backdrop").hidden = !visible;
+    $("menu-toggle").setAttribute("aria-expanded", String(visible));
+    document.body.classList.toggle("menu-open", visible);
+    $("main-content").inert = visible;
+    document.querySelector(".app-header").inert = visible;
+    document.querySelector(".app-tabs").inert = visible;
+    if (visible) requestAnimationFrame(() => {
+      if ($("menu-toggle").getAttribute("aria-expanded") === "true") $("menu-close").focus();
+    });
+    else if (restoreFocus && mobileNavigation.matches) $("menu-toggle").focus();
+  }
+  $("menu-toggle").addEventListener("click", () => setMenu($("menu-toggle").getAttribute("aria-expanded") !== "true"));
+  for (const id of ["menu-close", "menu-backdrop"]) $(id).addEventListener("click", () => setMenu(false));
+  mobileNavigation.addEventListener("change", () => setMenu(false, false));
+  document.addEventListener("keydown", event => {
+    if ($("menu-toggle").getAttribute("aria-expanded") !== "true") return;
+    if (event.key === "Escape") { event.preventDefault(); setMenu(false); }
+    if (event.key === "Tab") {
+      const choices = [...$("workspace-navigation").querySelectorAll("button:not([disabled])")];
+      const first = choices[0], last = choices.at(-1);
+      if (!$("workspace-navigation").contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first).focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  });
+  function show(view, updateUrl = true) {
+    if (!["overview", "missions", "inbox", "people", "learning", "rewards", "account"].includes(view)) return;
     state.view = view;
     for (const section of document.querySelectorAll(".view")) section.hidden = section.id !== view;
     for (const tab of document.querySelectorAll("[data-view]")) {
       if (tab.dataset.view === view) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");
     }
-    if (view === "account") void loadMe().catch(status);
-    if (view === "missions") void loadMissions().catch(status);
+    if (view === "account" && updateUrl) void loadMe().catch(status);
+    setMenu(false, false);
+    if (updateUrl) history.replaceState(null, "", `#${view === "inbox" && state.channel ? "inbox/" + state.channel : view}`);
+    if ((view === "missions" || view === "overview") && (updateUrl || !state.missionsLoaded)) void loadMissions().catch(status);
     if (view === "learning") renderLearning();
+    if (view === "rewards") renderCompensation();
+    $("main-content").focus({ preventScroll: true });
   }
   for (const tab of document.querySelectorAll("[data-view]")) tab.addEventListener("click", () => show(tab.dataset.view));
   async function signIn() {
@@ -62,10 +99,12 @@
     catch (error) { status(error); } finally { submit.disabled = false; }
   });
   async function loadMe() {
+    const previouslyActive = state.me?.member?.status === "active";
     state.me = await api("/me");
     state.me.learning.receivedAt = Date.now();
     const { member, profile, address, silver } = state.me, active = member?.status === "active";
     $("onboarding").hidden = active; $("workspace").hidden = !active;
+    $("menu-toggle").hidden = !active;
     $("signin").hidden = true; $("signup").hidden = false;
     $("signup-title").textContent = profile?.username || "Complete your World profile";
     $("signup-status").textContent = !profile ? "Complete your public profile on World, then return here. App uses the same name, avatar, bio and wallet."
@@ -104,22 +143,41 @@
       const admin = node("a", "Open assigned Admin workspace"); admin.href = link("admin", "/#/intranet"); $("identity").append(admin);
     }
     $("silver-balance").textContent = `${silver.toLocaleString()} FTHS`;
+    $("header-member").textContent = profile?.username || short(address);
+    $("sidebar-identity").replaceChildren(node("strong", profile?.username || short(address)),
+      node("small", `${member.level} / ${member.role}`),
+      node("small", state.me.org.teams.find(team => team.id === member.team)?.name || member.team));
     const directory = await api("/directory"); state.members = directory.members;
     renderPeople();
     renderOrganization();
+    renderProposal();
+    renderOverview();
     $("new-mission").hidden = !["lead", "manager", "director"].includes(member.role);
     await loadChannels();
     const requested = location.hash.match(/^#inbox\/([a-zA-Z0-9_-]+)$/)?.[1];
     if (!state.channel && requested && state.channels.some(channel => channel.id === requested)) await openChannel(requested);
+    await loadMissions();
+    if (!previouslyActive) {
+      const route = requested ? "inbox" : location.hash.slice(1) || state.view;
+      show(["overview", "missions", "inbox", "people", "learning", "rewards", "account"].includes(route) ? route : "overview", false);
+    }
   }
   function clearPrivate() {
     if (call) cleanupCall();
     state.channel = null; state.channels = []; state.members = []; state.missions = []; state.messages.clear();
     state.document = null; state.mission = null; state.config = null; state.draftRequest = null;
-    for (const id of ["messages", "channels", "mission-list", "people-list", "org-chart", "identity", "call-people"]) $(id).replaceChildren();
+    state.missionsLoaded = false; state.missionTodos = []; state.view = "overview";
+    state.compensationKey = ""; state.overviewKey = "";
+    setMenu(false, false);
+    $("menu-toggle").hidden = true;
+    $("header-member").textContent = "";
+    for (const id of ["messages", "channels", "mission-list", "people-list", "org-chart", "identity", "call-people",
+      "sidebar-identity", "workspace-metrics", "next-missions", "workspace-eligibility", "reward-summary", "reward-record", "mission-todos",
+      "member-compensation"]) $(id).replaceChildren();
     for (const id of ["document-dialog", "mission-dialog", "call-picker"]) if ($(id).open) $(id).close();
     for (const id of ["document-body", "mission-evidence", "mission-title", "mission-body", "message", "attachment"]) $(id).value = "";
     $("attachment-name").textContent = ""; $("silver-balance").textContent = ""; $("conversation").hidden = true;
+    $("mission-search").value = ""; $("mission-count").textContent = ""; $("mission-load-status").textContent = "";
   }
   function renderPreferences(reset = false) {
     const learning = state.me.learning;
@@ -239,6 +297,9 @@
   }
   function renderCompensation() {
     if (!state.me) return;
+    const key = JSON.stringify([state.me.address, state.me.member?.status, state.me.silver, state.me.compensation]);
+    if (key === state.compensationKey) return;
+    state.compensationKey = key;
     const active = state.me.member?.status === "active", root = $(active ? "member-compensation" : "visitor-compensation");
     $(active ? "visitor-compensation" : "member-compensation").replaceChildren(); root.replaceChildren();
     const pay = state.me.compensation;
@@ -252,7 +313,93 @@
     card.append(node("p", pay.configured ? `Configured weekly base: ${pay.base.toLocaleString()} FTHS. Incentive per approved task: ${pay.incentivePerTask.toLocaleString()} FTHS. Evaluated after the cycle closes.` : "Reward amounts are not configured for this cycle. No FTHS will be issued; completion and membership rules still apply.", "fine"));
     for (const record of pay.history) card.append(node("p", `${new Date(record.period).toISOString().slice(0, 10)} / ${record.accomplished}/${record.assigned} approved / Base ${record.base} + incentive ${record.incentive} = ${record.total} FTHS / ${record.qualified ? "membership retained" : "returned to visitor"}${record.configured ? "" : " / policy unconfigured"}`, "fine"));
     root.append(card);
+    if (active) {
+      $("reward-record").replaceChildren(card.cloneNode(true));
+      const summary = $("reward-summary"); summary.replaceChildren(node("h2", `${state.me.silver.toLocaleString()} FTHS earned balance`),
+        node("p", eligibilityText(pay)), node("p", "Existing weekly evaluation rules are unchanged. No manual payout is enabled from this workspace.", "fine"));
+      renderOverview();
+    }
   }
+  function eligibilityText(pay) {
+    if (!pay.assigned) return "No assigned tasks this week. Membership is retained; no salary record is created.";
+    const qualified = pay.accomplished * 100 > pay.assigned * pay.threshold;
+    const remaining = Math.max(0, Math.floor(pay.assigned * pay.threshold / 100) + 1 - pay.accomplished);
+    return `${pay.accomplished}/${pay.assigned} independently approved. ${qualified ? "Above the weekly base threshold."
+      : `${remaining} more approval${remaining === 1 ? "" : "s"} needed to exceed ${pay.threshold}%.`}
+      ${pay.configured ? "Amounts are evaluated after the cycle closes, not on submission." : "This cycle is unconfigured: no FTHS will be issued."}`;
+  }
+  function managesMission(mission) {
+    const member = state.me.member;
+    return member.role === "director" || member.division === mission.division
+      && (member.role === "manager" || member.role === "lead" && member.team === mission.team);
+  }
+  function missionTodos(mission) { return typeof mission.todos === "string" ? JSON.parse(mission.todos) : mission.todos || []; }
+  function renderOverview() {
+    if (state.me?.member?.status !== "active") return;
+    const key = JSON.stringify([state.me.address, state.me.profile?.username, state.me.member, state.me.compensation,
+      state.missionsLoaded, state.missions.map(mission => [mission.id, mission.title, mission.status, mission.assignee, mission.team])]);
+    if (key === state.overviewKey) return;
+    state.overviewKey = key;
+    $("workspace-greeting").textContent = `Welcome, ${state.me.profile?.username || short(state.me.address)}`;
+    const own = state.missions.filter(mission => mission.assignee === state.me.address && !["done", "cancelled"].includes(mission.status));
+    const reviews = state.missions.filter(mission => mission.status === "review" && mission.assignee !== state.me.address && managesMission(mission));
+    const metrics = $("workspace-metrics"); metrics.replaceChildren();
+    for (const [value, label] of [[state.missionsLoaded ? own.length : "—", "Active missions"],
+      [state.missionsLoaded ? reviews.length : "—", "Awaiting your review"],
+      [`${state.me.compensation.accomplished}/${state.me.compensation.assigned}`, "Weekly approved"],
+      [state.me.member.level, "Learning level"]]) {
+      const card = node("div", undefined, "metric"); card.append(node("strong", String(value)), node("small", label)); metrics.append(card);
+    }
+    $("mission-count").textContent = state.missionsLoaded && own.length ? String(own.length) : "";
+    const next = $("next-missions"); next.replaceChildren();
+    for (const mission of [...reviews, ...own].slice(0, 4)) {
+      const row = node("div", undefined, "next-mission");
+      row.append(node("strong", mission.title), node("small", `${statusLabel(mission.status)} / ${mission.team}`),
+        button(mission.status === "review" && mission.assignee !== state.me.address ? "Review evidence" : "Continue", () => editMission(mission)));
+      next.append(row);
+    }
+    if (!next.children.length) next.append(node("p", state.missionsLoaded ? "You are up to date. Find an available team mission or continue learning." : "Mission data is not available yet. Open Missions to load or retry.", "fine"));
+    $("workspace-eligibility").replaceChildren(node("p", eligibilityText(state.me.compensation)));
+  }
+  function renderProposal() {
+    const plan = window.FeatheralOrgSetup, root = $("org-proposal"); root.replaceChildren();
+    const notice = node("div", undefined, "proposal-notice");
+    notice.append(node("strong", "Proposed operating model / fictional personnel"),
+      node("p", "Every Demo persona, experience and skillset below is an illustrative staffing target. No accounts, positions or permissions are created. Actual members are in the Actual organization tab."));
+    root.append(notice);
+    const rules = node("ul"); for (const principle of plan.principles) rules.append(node("li", principle)); root.append(rules);
+    function personaCard(persona, title) {
+      const card = node("article", undefined, "card proposal-person");
+      card.append(node("small", "FICTIONAL PLACEHOLDER"), node("h3", title), node("strong", persona.name),
+        node("p", persona.experience, "fine"), node("p", `Skills: ${persona.skills}`, "fine"), node("p", `Focus: ${persona.focus}`));
+      return card;
+    }
+    root.append(personaCard(plan.coordination, plan.coordination.role));
+    const divisions = node("div", undefined, "proposal-divisions");
+    for (const division of plan.divisions) {
+      const section = node("details", undefined, "proposal-division"); section.open = division.id === state.me.member.division;
+      section.append(node("summary", `${division.name} / ${division.teams.length} delivery teams`),
+        personaCard({ ...division, name: division.persona }, "Proposed division manager"));
+      const teams = node("div", undefined, "proposal-teams");
+      for (const [id, name, alias, years, skills, focus] of division.teams) {
+        const card = personaCard({ name: alias, experience: `Illustrative ${years}`, skills, focus }, `${name} / proposed lead`);
+        card.append(node("p", `Team: ${division.id}-${id}. Lean pod: lead + 1–3 contributors; shared quality/reliability specialist and learning mentor.`, "fine"));
+        teams.append(card);
+      }
+      section.append(teams); divisions.append(section);
+    }
+    root.append(divisions, node("h2", "Progression at every level"));
+    const levels = node("div", undefined, "level-path");
+    for (const [level, label, focus] of plan.levels) {
+      const card = node("article", undefined, "card"); card.append(node("strong", `${level} / ${label}`), node("p", focus, "fine")); levels.append(card);
+    }
+    root.append(levels, node("h2", "Delivery cadence"), node("p", plan.cadence),
+      node("p", "Cross-division squads: Identity & trust (Wallet / App / Admin); Commerce & rewards (Pay / Silver / Exchange / Dollar); World-building (World / Media / Learning); Reliability & evidence (DB / Ledger / Gold / Stats). Each squad has one accountable division owner and uses existing scoped missions.", "fine"));
+  }
+  for (const choice of document.querySelectorAll("[data-org-view]")) choice.addEventListener("click", () => {
+    $("org-proposal").hidden = choice.dataset.orgView !== "proposal"; $("org-live").hidden = choice.dataset.orgView !== "live";
+    for (const tab of document.querySelectorAll("[data-org-view]")) tab.setAttribute("aria-pressed", String(tab === choice));
+  });
   function renderOrganization() {
     const root = $("org-chart"); root.replaceChildren();
     const positions = state.me.org.positions;
@@ -392,25 +539,72 @@
     $("document-body").value = state.document.body; $("document-status").textContent = `Revision ${state.document.revision}`;
   });
   async function loadMissions() {
-    const owner = state.me?.address, data = await api("/missions");
+    const owner = state.me?.address;
+    let data;
+    $("mission-load-status").textContent = "Loading latest missions…"; $("retry-missions").hidden = true;
+    try { data = await api("/missions"); }
+    catch (error) {
+      if (state.me?.address === owner) {
+        $("mission-load-status").textContent = `Missions could not be refreshed: ${error.message}${state.missionsLoaded ? " Showing last loaded records." : ""}`;
+        $("retry-missions").hidden = false;
+      }
+      throw error;
+    }
     if (state.me?.address !== owner || state.me?.member?.status !== "active") return;
-    state.missions = data.missions;
+    const changed = !state.missionsLoaded || JSON.stringify(state.missions) !== JSON.stringify(data.missions);
+    state.missions = data.missions; state.missionsLoaded = true; state.missionsRefreshedAt = Date.now();
     $("agenda-access").textContent = `Your level: ${state.me.member.level} / Division: ${state.me.member.division}. Higher-level agendas and private team resources remain gated.`;
+    $("mission-load-status").textContent = "";
+    if (changed) renderMissions();
+    renderOverview();
+  }
+  const statusLabel = value => ({ draft: "Brief", ready: "Ready", in_progress: "In progress", review: "Awaiting review", done: "Approved", cancelled: "Cancelled" })[value] || value;
+  function renderMissions() {
     $("mission-list").replaceChildren();
-    for (const mission of state.missions) {
-      const card = node("article", undefined, "card");
-      card.append(node("small", `${mission.status.replace("_", " ")} / ${mission.team} / ${mission.min_level}`), node("h2", mission.title),
-        node("p", mission.body), node("small", mission.assignee ? `Assigned: ${personName(mission.assignee)}` : "Not assigned"),
-        button("Open mission", () => editMission(mission)));
+    const search = $("mission-search").value.trim().toLowerCase();
+    const visible = state.missions.filter(mission => {
+      const filter = state.missionFilter;
+      return (!search || `${mission.title} ${mission.body} ${mission.team}`.toLowerCase().includes(search))
+        && (filter === "all" || filter === "mine" && mission.assignee === state.me.address && !["done", "cancelled"].includes(mission.status)
+          || filter === "available" && !mission.assignee && mission.status === "ready" && mission.team === state.me.member.team
+          || filter === "review" && mission.status === "review" && mission.assignee !== state.me.address && managesMission(mission)
+          || filter === "done" && mission.status === "done");
+    });
+    for (const mission of visible) {
+      const card = node("article", undefined, `card mission-card status-${mission.status}`);
+      const heading = node("div", undefined, "mission-card-heading");
+      heading.append(node("span", statusLabel(mission.status), `status-chip ${mission.status}`), node("small", mission.min_level));
+      const todos = missionTodos(mission), completed = todos.filter(todo => todo.done).length;
+      card.append(heading, node("h2", mission.title), node("p", mission.body, "mission-brief"),
+        node("small", mission.team), node("small", mission.assignee ? `Assigned: ${personName(mission.assignee)}` : "Not assigned"));
+      if (todos.length) {
+        const progress = node("progress"); progress.max = todos.length; progress.value = completed;
+        progress.setAttribute("aria-label", `${completed} of ${todos.length} todos complete`);
+        card.append(node("p", `${completed}/${todos.length} todos complete`, "fine"), progress);
+      }
+      const controls = node("div", undefined, "mission-card-actions");
+      controls.append(button(mission.status === "review" && mission.assignee !== state.me.address && managesMission(mission)
+        ? "Review evidence" : mission.assignee === state.me.address ? "Continue mission" : "View mission", () => editMission(mission)));
       if (!mission.assignee && mission.status === "ready" && mission.team === state.me.member.team)
-        card.append(button("Take this task", async () => {
+        controls.append(button("Take mission", async () => {
           if (!confirm("Assign this task to you for this week's completion evaluation? Only approved completion counts.")) return;
-          await api(`/missions/${mission.id}/claim`, { revision: mission.revision }); await loadMe(); await loadMissions();
+          await api(`/missions/${mission.id}/claim`, { revision: mission.revision }); await loadMe();
+          state.missionFilter = "mine"; updateMissionFilters(); renderMissions();
         }));
+      card.append(controls);
       $("mission-list").append(card);
     }
-    if (!data.missions.length) $("mission-list").append(node("p", "Your team has no missions yet. Ask your lead for a brief.", "fine"));
+    if (!visible.length) $("mission-list").append(node("p", "No missions match this view. Check Available or Division, or ask your team lead for a brief.", "empty-state"));
   }
+  function updateMissionFilters() {
+    for (const choice of document.querySelectorAll("[data-mission-filter]"))
+      choice.setAttribute("aria-pressed", String(choice.dataset.missionFilter === state.missionFilter));
+  }
+  for (const choice of document.querySelectorAll("[data-mission-filter]")) choice.addEventListener("click", () => {
+    state.missionFilter = choice.dataset.missionFilter; updateMissionFilters(); renderMissions();
+  });
+  $("mission-search").addEventListener("input", renderMissions);
+  action($("retry-missions"), loadMissions);
   function fillSelect(element, values, selected) {
     element.replaceChildren(...values.map(([value, name]) => {
       const option = node("option", name); option.value = value; option.selected = value === selected; return option;
@@ -437,24 +631,78 @@
       || mission?.assignee === state.me.address && ["division", "team", "assignee"].includes(field);
     $("mission-title").value = mission?.title || ""; $("mission-body").value = mission?.body || "";
     $("mission-evidence").value = mission?.evidence || "";
+    $("mission-dialog-title").textContent = mission ? "Mission / " + statusLabel(mission.status) : "Create mission";
+    state.missionTodos = mission ? missionTodos(mission).map(todo => ({ ...todo })) : [];
+    state.todoDefinitionsEditable = manager && (!mission || mission.assignee !== state.me.address) && editable;
+    state.todoEditable = editable;
+    renderMissionTodos();
     fillSelect($("mission-division"), state.me.org.divisions.map(division => [division.id, division.name]), mission?.division || member.division);
     missionTeamOptions(mission?.team || member.team, mission?.assignee || "");
     fillSelect($("mission-min_level"), state.me.org.levels.map(level => [level, level]), mission?.min_level || "learning");
-    const states = manager && mission?.assignee !== state.me.address ? state.me.org.states : ["ready", "in_progress", "review"];
+    const states = manager && mission?.assignee !== state.me.address ? [...state.me.org.states]
+      : ({ ready: ["ready", "in_progress"], in_progress: ["in_progress", "review"], review: ["review", "in_progress"] })[mission?.status] || [mission?.status || "draft"];
     if (mission && !states.includes(mission.status)) states.push(mission.status);
-    fillSelect($("mission-status"), states.map(value => [value, value.replace("_", " ")]), mission?.status || "draft");
+    fillSelect($("mission-status"), states.map(value => [value, statusLabel(value)]), mission?.status || "draft");
     $("mission-status").disabled = !editable; $("mission-evidence").disabled = !editable; $("save-mission").hidden = !editable;
+    $("mission-workflow").textContent = "Checklist completion is self-reported progress. Review requires all todos and evidence. A different scoped manager approves the outcome; only approval counts toward weekly rewards.";
+    const next = $("mission-next-actions"); next.replaceChildren();
+    const transition = mission?.assignee === state.me.address
+      ? ({ ready: ["in_progress", "Start mission"], in_progress: ["review", "Submit for review"], review: ["in_progress", "Continue revisions"] })[mission.status]
+      : manager && mission?.status === "review" ? ["done", "Approve completion"] : null;
+    if (editable && transition) {
+      next.append(button(transition[1], () => {
+        $("mission-status").value = transition[0]; $("mission-form").requestSubmit();
+      }));
+      if (manager && mission?.status === "review" && mission.assignee !== state.me.address)
+        next.append(button("Request revisions", () => { $("mission-status").value = "in_progress"; $("mission-form").requestSubmit(); }));
+    }
     $("mission-error").textContent = ""; $("mission-dialog").showModal();
   }
   action($("new-mission"), () => editMission());
   $("close-mission").addEventListener("click", () => $("mission-dialog").close());
+  $("mission-dialog").addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); $("mission-dialog").close(); }
+  });
+  function renderMissionTodos() {
+    const root = $("mission-todos"); root.replaceChildren();
+    $("add-mission-todo").hidden = !state.todoDefinitionsEditable;
+    $("add-mission-todo").disabled = state.missionTodos.length >= 24;
+    for (const todo of state.missionTodos) {
+      const row = node("div", undefined, "mission-todo"), check = node("input");
+      check.type = "checkbox"; check.checked = todo.done; check.disabled = !state.todoEditable;
+      check.setAttribute("aria-label", `Complete ${todo.label || "todo"}`);
+      check.addEventListener("change", () => { todo.done = check.checked; });
+      const label = node("input"); label.value = todo.label; label.maxLength = 240; label.required = true;
+      label.disabled = !state.todoDefinitionsEditable; label.setAttribute("aria-label", "Todo requirement");
+      label.addEventListener("input", () => { todo.label = label.value; check.setAttribute("aria-label", `Complete ${todo.label || "todo"}`); });
+      row.append(check, label);
+      if (state.todoDefinitionsEditable) row.append(button("Remove", () => {
+        state.missionTodos = state.missionTodos.filter(entry => entry !== todo); renderMissionTodos();
+      }));
+      root.append(row);
+    }
+    if (!state.missionTodos.length) root.append(node("p", "No checklist specified. The mission brief and evidence remain the acceptance criteria.", "fine"));
+  }
+  action($("add-mission-todo"), () => {
+    if (!state.todoDefinitionsEditable || state.missionTodos.length >= 24) return;
+    state.missionTodos.push({ id: crypto.randomUUID(), label: "", done: false }); renderMissionTodos();
+    $("mission-todos").lastElementChild.querySelector('input[aria-label="Todo requirement"]').focus();
+  });
   $("mission-form").addEventListener("submit", async event => {
-    event.preventDefault(); const submit = $("mission-form").querySelector("button.primary"); submit.disabled = true;
+    event.preventDefault(); const submit = $("save-mission");
+    if (submit.disabled) return;
+    submit.disabled = true;
     try {
       const input = Object.fromEntries(["title", "body", "division", "team", "assignee", "status", "evidence", "min_level"].map(field => [field, $("mission-" + field).value]));
+      input.todos = state.missionTodos.map(todo => ({ ...todo }));
+      if (["review", "done"].includes(input.status) && (input.todos.some(todo => !todo.done) || !input.evidence.trim()))
+        throw new Error("Complete every todo and provide evidence before review or approval.");
       if (state.mission) input.revision = state.mission.revision;
       await api(`/missions${state.mission ? "/" + state.mission.id : ""}`, input, state.mission ? "PUT" : "POST");
-      $("mission-dialog").close(); await loadMe(); await loadMissions();
+      $("mission-dialog").close(); await loadMe();
+      $("status").textContent = input.status === "review" ? "Mission submitted for independent review. Submission does not unlock rewards."
+        : input.status === "done" ? "Mission completion approved. The weekly contribution record has been updated." : "Mission progress saved.";
+      $("status").hidden = false;
     } catch (error) { $("mission-error").textContent = error.message; status(error); } finally { submit.disabled = false; }
   });
   async function config() { return state.config ||= await api("/config"); }
@@ -635,7 +883,10 @@
       if (latest.member?.status !== "active") { cleanupCall(); state.channel = null; state.messages.clear(); await loadMe(); return; }
       state.me = latest; renderCompensation();
       await pollCall();
-      if (!document.hidden) { await loadChannels(); await loadMessages(); }
+      if (!document.hidden) {
+        await loadChannels(); await loadMessages();
+        if (["missions", "overview"].includes(state.view) && Date.now() - state.missionsRefreshedAt >= 30000) await loadMissions();
+      }
     } catch (error) {
       status(error);
       if ([401, 403].includes(error.status)) {
@@ -647,9 +898,11 @@
   window.addEventListener("hashchange", () => {
     const key = location.hash.match(/^#inbox\/([a-zA-Z0-9_-]+)$/)?.[1];
     if (key && state.channels.some(channel => channel.id === key)) { show("inbox"); void openChannel(key).catch(status); }
+    else if (state.me?.member?.status === "active") show(location.hash.slice(1), false);
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void tick(); });
   setInterval(() => void tick(), 3000);
+  setMenu(false, false);
   const hasWorldHandoff = new URL(location.href).searchParams.has("worldAppSignIn");
   void (async () => {
     const url = new URL(location.href), code = url.searchParams.get("worldAppSignIn");

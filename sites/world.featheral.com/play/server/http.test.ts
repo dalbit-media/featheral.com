@@ -15,6 +15,55 @@ import { dollarsScale } from '../src/dollars.ts';
 import { automateFixtureCollections, fundFixtureFromReserves, fundFixtureResources } from './test-support.ts';
 
 const origin = 'http://127.0.0.1:5173';
+test('verified owners sharing an IP have independent quotas and forged cookies cannot create an identity', async () => {
+  const store = new SqliteStore(':memory:'), identities = Array.from({ length: 300 }, () => store.create());
+  const server = createApi(store, origin);
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    const url = `http://127.0.0.1:${address.port}/api/state`;
+    const read = async (token: string) => {
+      const response = await fetch(url, { headers: { Cookie: `terra-dev=${token}` } });
+      await response.arrayBuffer();
+      return response.status;
+    };
+    for (let offset = 0; offset < identities.length; offset += 50)
+      assert.ok((await Promise.all(identities.slice(offset, offset + 50).map(identity => read(identity.token)))).every(status => status === 200));
+    for (let index = 0; index < 239; index++) assert.equal(await read(identities[0]!.token), 200);
+    assert.equal(await read(identities[0]!.token), 429);
+    assert.equal(await read('f'.repeat(64)), 401);
+    assert.equal(await read(identities[1]!.token), 200);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close();
+  }
+});
+
+test('linked session aliases share the canonical owner quota', async t => {
+  const store = new SqliteStore(':memory:'), first = store.create(), alias = store.create();
+  const resolve = store.chatSession.bind(store);
+  const canonical = resolve(first.token).owner;
+  t.mock.method(store, 'chatSession', (token: string) => ({ ...resolve(token), owner: canonical }));
+  const server = createApi(store, origin);
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    assert.ok(address && typeof address !== 'string');
+    for (let index = 0; index < 241; index++) {
+      const response = await fetch(`http://127.0.0.1:${address.port}/api/state`,
+        { headers: { Cookie: `terra-dev=${index % 2 ? alias.token : first.token}` } });
+      await response.arrayBuffer();
+      assert.equal(response.status, index < 240 ? 200 : 429);
+    }
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close();
+  }
+});
+
 test('item actions use authoritative inventory, strict payloads, durable retry receipts and rollback', async () => {
   let time = 1000000;
   const store = new SqliteStore(':memory:', () => time), identity = store.create();
@@ -548,6 +597,7 @@ test('development API exposes one accelerated game clock with baseline rules and
     time += 1;
     state = await (await fetch(`${base}/state`, { headers: { Cookie: cookie } })).json() as ApiState;
     assert.equal(state.serverTime, start + worldWeekMs);
+    assert.equal(state.game.population, 12);
     assert.equal(state.pending.wood, 0);
     assert.equal(state.game.stock.wood, yieldWood);
     assert.deepEqual(state.environment, environmentAt(state.serverTime));
@@ -571,8 +621,9 @@ test('development API exposes one accelerated game clock with baseline rules and
     time += worldWeekMs / 20 - 1;
     assert.equal((await action({ type: 'invite' })).status, 409);
     time += 1;
+    state = await (await fetch(`${base}/state`, { headers: { Cookie: cookie } })).json() as ApiState;
     state = await (await action({ type: 'invite' })).json() as ApiState;
-    assert.equal(state.game.population, 12 + firstArrivals);
+    assert.equal(state.game.population, 13 + firstArrivals);
     assert.equal(state.recruitment!.population * 50, state.recruitmentDollars);
     assert.equal(state.inviteReadyAt - state.serverTime, worldWeekMs);
   } finally {

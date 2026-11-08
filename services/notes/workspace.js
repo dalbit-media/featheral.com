@@ -36,6 +36,7 @@ class Workspace {
       CREATE TABLE IF NOT EXISTS work_messages(id INTEGER PRIMARY KEY,channel TEXT NOT NULL,author TEXT NOT NULL,
         request TEXT NOT NULL,body TEXT NOT NULL,file TEXT,at INTEGER NOT NULL,UNIQUE(author,request));
       CREATE INDEX IF NOT EXISTS work_messages_channel ON work_messages(channel,id);
+      CREATE INDEX IF NOT EXISTS work_dm_address ON work_dm(address,channel);
       CREATE TABLE IF NOT EXISTS work_reads(address TEXT NOT NULL,channel TEXT NOT NULL,message INTEGER NOT NULL,PRIMARY KEY(address,channel));
       CREATE TABLE IF NOT EXISTS work_files(id TEXT PRIMARY KEY,channel TEXT NOT NULL,owner TEXT NOT NULL,name TEXT NOT NULL,
         bytes BLOB NOT NULL,size INTEGER NOT NULL,at INTEGER NOT NULL);
@@ -223,10 +224,14 @@ class Workspace {
   }
   channels(owner) {
     const member = this.active(owner);
-    return this.db.prepare("SELECT * FROM work_channels ORDER BY scope,name").all().filter(row => this.canChannel(member, row))
-      .map(row => ({ ...row, peer: row.scope === "dm" ? this.db.prepare("SELECT address FROM work_dm WHERE channel=? AND address!=?").get(row.id, owner)?.address : null,
-        unread: this.db.prepare(`SELECT COUNT(*) AS n FROM work_messages WHERE channel=? AND author!=? AND id>
-        COALESCE((SELECT message FROM work_reads WHERE address=? AND channel=?),0)`).get(row.id, owner, owner, row.id).n }));
+    return this.db.prepare(`SELECT c.*,
+      CASE WHEN c.scope='dm' THEN (SELECT address FROM work_dm WHERE channel=c.id AND address!=? LIMIT 1) ELSE NULL END AS peer,
+      (SELECT COUNT(*) FROM work_messages m WHERE m.channel=c.id AND m.author!=? AND m.id>
+        COALESCE((SELECT message FROM work_reads WHERE address=? AND channel=c.id),0)) AS unread
+      FROM work_channels c WHERE c.scope='foundation' OR c.scope='division' AND c.scope_id=?
+        OR c.scope='team' AND c.scope_id=? OR c.scope='dm' AND EXISTS
+        (SELECT 1 FROM work_dm WHERE channel=c.id AND address=?)
+      ORDER BY c.scope,c.name`).all(owner, owner, owner, member.division, member.team, owner);
   }
   direct(owner, value) {
     this.active(owner); const other = address(value); this.active(other);
@@ -245,9 +250,13 @@ class Workspace {
   messages(owner, key, after = 0) {
     this.channel(owner, key);
     if (!Number.isSafeInteger(after) || after < 0) throw fail(400, "Invalid message cursor.");
-    const rows = after ? this.db.prepare("SELECT * FROM work_messages WHERE channel=? AND id>? ORDER BY id LIMIT 100").all(key, after)
-      : this.db.prepare("SELECT * FROM work_messages WHERE channel=? ORDER BY id DESC LIMIT 100").all(key).reverse();
-    return rows.map(row => ({ ...row, attachment: row.file ? this.db.prepare("SELECT id,name,size FROM work_files WHERE id=?").get(row.file) : null }));
+    const rows = this.db.prepare(`SELECT m.*,f.id AS attachment_id,f.name AS attachment_name,f.size AS attachment_size
+      FROM work_messages m LEFT JOIN work_files f ON f.id=m.file WHERE m.channel=? ${after ? 'AND m.id>?' : ''}
+      ORDER BY m.id ${after ? 'ASC' : 'DESC'} LIMIT 100`).all(...(after ? [key, after] : [key]));
+    if (!after) rows.reverse();
+    return rows.map(({ attachment_id, attachment_name, attachment_size, ...row }) => ({
+      ...row, attachment: attachment_id == null ? null : { id: attachment_id, name: attachment_name, size: attachment_size },
+    }));
   }
   send(owner, key, input) {
     this.channel(owner, key);
@@ -318,12 +327,13 @@ class Workspace {
     return member.role === "director" || member.division === mission.division
       && (member.role === "manager" || member.role === "lead" && member.team === mission.team);
   }
+  missionView(mission) { return { ...mission, todos: JSON.parse(mission.todos) }; }
   missions(owner) {
     const member = this.active(owner);
     return this.db.prepare(`SELECT * FROM work_missions WHERE ?='director' OR division=? AND
       CASE min_level WHEN 'orientation' THEN 0 WHEN 'learning' THEN 1 WHEN 'practitioner' THEN 2
         WHEN 'mentor' THEN 3 WHEN 'steward' THEN 4 ELSE 5 END <= ? ORDER BY at DESC LIMIT 1000`)
-      .all(member.role, member.division, LEVELS.indexOf(member.level));
+      .all(member.role, member.division, LEVELS.indexOf(member.level)).map(mission => this.missionView(mission));
   }
   saveMission(owner, input, key, admin = false) {
     this.hr.settleDue();
@@ -358,24 +368,36 @@ class Workspace {
       mission = { title: text(input.title, "Title", 160), body: text(input.body, "Mission brief", 6000), division, team, assignee, min_level };
     } else {
       const transitions = { ready: ["in_progress"], in_progress: ["review"], review: ["in_progress"] };
-      if (!transitions[previous.status]?.includes(status)) throw fail(403, "Submit work for review; a manager must approve completion.");
+      if (!transitions[previous.status] || status !== previous.status && !transitions[previous.status].includes(status))
+        throw fail(403, "Submit work for review; a manager must approve completion.");
       mission = previous;
     }
     const evidence = input.evidence === undefined ? previous?.evidence || "" : typeof input.evidence === "string" && input.evidence.length <= 6000 ? input.evidence : null;
     if (evidence === null || ["review", "done"].includes(status) && !evidence.trim()) throw fail(400, "Provide completion evidence before review or approval.");
+    const savedTodos = previous ? JSON.parse(previous.todos) : [];
+    const todos = input.todos === undefined ? savedTodos : input.todos;
+    if (!Array.isArray(todos) || todos.length > 24 || todos.some(todo => !todo || typeof todo !== "object"
+      || Object.keys(todo).sort().join() !== "done,id,label" || typeof todo.id !== "string" || !/^[a-zA-Z0-9_-]{1,80}$/.test(todo.id)
+      || typeof todo.label !== "string" || !todo.label.trim() || todo.label.length > 240 || typeof todo.done !== "boolean")
+      || new Set(todos.map(todo => todo.id)).size !== todos.length) throw fail(400, "Provide up to 24 valid task checklist entries.");
+    if (previous && (!manager || previous.assignee === owner && !admin)
+      && (todos.length !== savedTodos.length || todos.some((todo, index) => todo.id !== savedTodos[index].id || todo.label !== savedTodos[index].label)))
+      throw fail(403, "Only a different scoped manager can change checklist requirements.");
+    if (["review", "done"].includes(status) && todos.some(todo => !todo.done))
+      throw fail(400, "Complete every checklist entry before submitting for review or approval.");
     if (!admin && status === "done" && mission.assignee === owner) throw fail(403, "A different manager must approve your completed work.");
     if (!admin && previous?.assignee === owner && (status === "cancelled" || mission.assignee !== owner))
       throw fail(403, "A different manager must cancel or reassign your own task.");
     const missionId = key || crypto.randomUUID(), revision = (previous?.revision || 0) + 1;
     return this.atomic(() => {
-      this.db.prepare(`INSERT INTO work_missions(id,title,body,division,team,assignee,status,evidence,revision,at,min_level)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+      this.db.prepare(`INSERT INTO work_missions(id,title,body,division,team,assignee,status,evidence,revision,at,min_level,todos)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
         title=excluded.title,body=excluded.body,division=excluded.division,team=excluded.team,assignee=excluded.assignee,
-        status=excluded.status,evidence=excluded.evidence,revision=excluded.revision,at=excluded.at,min_level=excluded.min_level`)
-        .run(missionId, mission.title, mission.body, mission.division, mission.team, mission.assignee, status, evidence, revision, this.now(), mission.min_level);
+        status=excluded.status,evidence=excluded.evidence,revision=excluded.revision,at=excluded.at,min_level=excluded.min_level,todos=excluded.todos`)
+        .run(missionId, mission.title, mission.body, mission.division, mission.team, mission.assignee, status, evidence, revision, this.now(), mission.min_level, JSON.stringify(todos));
       this.hr.updateAssignment(previous, this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(missionId));
       this.audit(owner, "mission.save", missionId, { status, revision });
-      return this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(missionId);
+      return this.missionView(this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(missionId));
     });
   }
   grant(actor, input) {
@@ -469,7 +491,7 @@ class Workspace {
   admin(includeFinancial = true) {
     this.hr.settleDue();
     return { org: this.org(), members: this.db.prepare("SELECT * FROM work_members ORDER BY at DESC LIMIT 1000").all(),
-      missions: this.db.prepare("SELECT * FROM work_missions ORDER BY at DESC LIMIT 1000").all(),
+      missions: this.db.prepare("SELECT * FROM work_missions ORDER BY at DESC LIMIT 1000").all().map(mission => this.missionView(mission)),
       ...(includeFinancial ? { grants: this.db.prepare("SELECT * FROM work_grants ORDER BY at DESC LIMIT 100").all(),
         audit: this.db.prepare("SELECT * FROM work_audit ORDER BY id DESC LIMIT 100").all(), silver: this.silver(),
         payroll: this.db.prepare("SELECT * FROM work_payroll WHERE status!='no_assignments' ORDER BY period DESC LIMIT 1000").all(),

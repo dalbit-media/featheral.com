@@ -22,6 +22,7 @@ function configureServer(server, settings) {
   const update = () => {
     server.requestTimeout = settings.value.requestTimeoutSeconds * 1000;
     server.headersTimeout = Math.min(60000, server.requestTimeout);
+    server.keepAliveTimeout = Math.min(60000, server.requestTimeout);
   };
   update();
   settings.listeners.add(update);

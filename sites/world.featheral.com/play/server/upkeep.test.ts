@@ -54,11 +54,16 @@ test('bounded prefix sums match daily bills across season/cycle boundaries and l
     assert.throws(() => settlementConsumptionForDays(resource, 12, first, .5), RangeError);
   }
   const account = settled(100), online = structuredClone(account), offline = structuredClone(account);
-  for (let day = 1; day <= 400; day++) accrue(online, worldEpoch + day * worldDayMs);
+  const billed = { wood: 0, metal: 0 };
+  for (let day = 1; day <= 400; day++) {
+    for (const resource of ['wood', 'metal'] as const)
+      billed[resource] += Math.round(settlementConsumptionForDays(resource, online.game.population, worldEpoch + day * worldDayMs, 1) * 10000);
+    accrue(online, worldEpoch + day * worldDayMs);
+  }
   accrue(offline, worldEpoch + 400 * worldDayMs);
   assert.deepEqual(offline, online);
   for (const resource of ['wood', 'metal'] as const) {
-    const required = settlementConsumptionForDays(resource, 100, worldEpoch + worldDayMs, 400);
+    const required = billed[resource] / 10000;
     assert.equal(offline.game.stock[resource], account.game.stock[resource] - Math.floor(required));
     assert.ok(Number.isSafeInteger(offline.game.stock[resource]));
   }

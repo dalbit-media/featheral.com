@@ -22,6 +22,43 @@ function fixture(t) {
   }
   return { notes, creation, workspace, profiles, members, member, advance: (ms = 1100) => { now += ms; } };
 }
+test("large channel and attachment reads keep scoped results with bounded SQL preparation", async t => {
+  const { workspace, notes, member } = fixture(t), alice = await member(0), bob = await member(1);
+  const channel = notes.db.prepare("INSERT INTO work_channels VALUES (?,?,?,?)");
+  const message = notes.db.prepare("INSERT INTO work_messages(channel,author,request,body,file,at) VALUES (?,?,?,?,?,?)");
+  for (let index = 0; index < 100; index++) {
+    channel.run(`visible-${index}`, `Visible ${index}`, "foundation", "");
+    message.run(`visible-${index}`, alice, `own-${index}`, "Own", null, Date.now());
+    message.run(`visible-${index}`, bob, `other-${index}`, "Other", null, Date.now());
+  }
+  for (let index = 0; index < 1000; index++)
+    channel.run(`hidden-${index}`, `Hidden ${index}`, "team", "unrelated-team");
+  const direct = workspace.direct(alice, bob);
+  notes.db.prepare("INSERT INTO work_files VALUES (?,'foundation',?,'brief.txt',?,4,?)")
+    .run("fixture-file", bob, Buffer.from("work"), Date.now());
+  for (let index = 0; index < 120; index++)
+    message.run("foundation", bob, `attachment-${index}`, String(index), index % 2 ? "fixture-file" : null, Date.now());
+  const prepare = notes.db.prepare.bind(notes.db);
+  let preparations = 0;
+  t.mock.method(notes.db, "prepare", sql => { preparations++; return prepare(sql); });
+  const channels = workspace.channels(alice);
+  assert.ok(preparations <= 3, `${preparations} preparations for channel listing`);
+  assert.equal(channels.filter(row => row.id.startsWith("visible-")).length, 100);
+  assert.ok(channels.filter(row => row.id.startsWith("visible-")).every(row => row.unread === 1));
+  assert.ok(!channels.some(row => row.id.startsWith("hidden-")));
+  assert.equal(channels.find(row => row.id === direct.id).peer, bob);
+  preparations = 0;
+  const messages = workspace.messages(alice, "foundation");
+  assert.ok(preparations <= 4, `${preparations} preparations for 100 messages`);
+  assert.equal(messages.length, 100);
+  assert.equal(messages[0].body, "20");
+  assert.equal(messages[99].body, "119");
+  assert.equal(messages[0].attachment, null);
+  assert.deepEqual(messages[99].attachment, { id: "fixture-file", name: "brief.txt", size: 4 });
+  assert.ok(workspace.messages(alice, "foundation", messages[0].id).every(row => row.id > messages[0].id));
+  workspace.read(alice, "foundation", messages[99].id);
+  assert.equal(workspace.channels(alice).find(row => row.id === "foundation").unread, 0);
+});
 test("Silver registration persists its definition without minting supply, funding a pool or enabling reaction rewards", t => {
   const { workspace, notes, creation } = fixture(t);
   assert.equal(workspace.silver().supply, 0);
@@ -167,6 +204,67 @@ test("FTHS trades execute against conserved native balances and feed Exchange hi
   assert.equal(workspace.silver().supply, before);
   assert.equal(creation.markets.history("FTHS").candles.length, 1);
   assert.equal(creation.markets.account(owner).trades[0].symbol, "FTHS");
+});
+test("mission todos persist progress, preserve requirements and gate independent review without issuing rewards", async t => {
+  const { workspace, notes, member, creation } = fixture(t);
+  const lead = await member(0, "lead"), contributor = await member(1), outsider = await member(2, "manager", "community");
+  const todos = [{ id: "mobile", label: "Verify mobile layout", done: false }, { id: "evidence", label: "Attach test evidence", done: false }];
+  let mission = workspace.saveMission(lead, { title: "Mobile workspace", body: "Deliver reviewed mobile UX", division: "engineering",
+    team: "engineering-general", assignee: contributor, status: "ready", todos });
+  assert.deepEqual(mission.todos, todos);
+  assert.deepEqual(workspace.missions(contributor).find(row => row.id === mission.id).todos, todos);
+  assert.deepEqual(workspace.admin().missions.find(row => row.id === mission.id).todos, todos);
+  const update = (status, values = {}) => ({ revision: mission.revision, status, ...values });
+  assert.throws(() => workspace.saveMission(contributor, update("ready", { todos: [] }), mission.id), { status: 403 });
+  assert.throws(() => workspace.saveMission(contributor, update("ready", { todos: [{ ...todos[0], label: "Skip verification" }, todos[1]] }), mission.id), { status: 403 });
+  assert.throws(() => workspace.saveMission(outsider, { ...mission, status: "in_progress" }, mission.id), { status: 404 });
+  mission = workspace.saveMission(contributor, update("ready", { todos: [{ ...todos[0], done: true }, todos[1]] }), mission.id);
+  assert.equal(mission.status, "ready", "saving checkbox progress does not require a status transition");
+  const reopened = new Workspace(notes, creation.markets);
+  assert.equal(reopened.missions(contributor).find(row => row.id === mission.id).todos[0].done, true);
+  assert.throws(() => workspace.saveMission(contributor, { revision: mission.revision - 1, status: "in_progress" }, mission.id), { status: 409 });
+  mission = workspace.saveMission(contributor, update("in_progress"), mission.id);
+  assert.throws(() => workspace.saveMission(contributor, update("review", { evidence: "Tests passed" }), mission.id), /every checklist/);
+  assert.throws(() => workspace.saveMission(lead, { ...mission, status: "done", evidence: "Reviewed" }, mission.id), /every checklist/);
+  assert.throws(() => workspace.saveMission(contributor, update("review", { todos: todos.map(todo => ({ ...todo, done: true })) }), mission.id), /evidence/);
+  mission = workspace.saveMission(contributor, update("review", { evidence: "Test run and screenshots attached", todos: todos.map(todo => ({ ...todo, done: true })) }), mission.id);
+  assert.throws(() => workspace.saveMission(contributor, update("done"), mission.id), { status: 403 });
+  mission = workspace.saveMission(lead, { ...mission, status: "done" }, mission.id);
+  assert.equal(mission.status, "done");
+  assert.equal(notes.balance(contributor, "FTHS"), 0);
+  assert.equal(workspace.hr.compensation(contributor).accomplished, 1);
+});
+test("mission checklist validation rejects malformed entries and self-managed requirement removal", async t => {
+  const { workspace, member } = fixture(t);
+  const lead = await member(0, "lead");
+  const input = { title: "Verify", body: "Verify evidence", division: "engineering", team: "engineering-general", assignee: lead, status: "ready" };
+  for (const todos of ["[]", [{ id: "a", label: "", done: false }], [{ id: "a", label: "Test", done: 1 }],
+    [{ id: "a", label: "Test", done: false, extra: true }], Array.from({ length: 25 }, (_, i) => ({ id: String(i), label: "Test", done: false })),
+    [{ id: "a", label: "Test", done: false }, { id: "a", label: "Duplicate", done: false }]]) {
+    assert.throws(() => workspace.saveMission(lead, { ...input, todos }), { status: 400 });
+  }
+  const mission = workspace.saveMission(lead, { ...input, todos: [{ id: "a", label: "Test", done: false }] });
+  assert.throws(() => workspace.saveMission(lead, { ...mission, todos: [] }, mission.id), { status: 403 });
+});
+test("mission checklist and revision survive reopening an isolated writable database", async t => {
+  t.mock.method(require("../../operations/replica"), "readReplica", () => null);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "featheral-mission-todos-")), file = path.join(directory, "notes.sqlite");
+  let notes;
+  t.after(() => { notes?.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  notes = new Notes(file);
+  let creation = new Creation(notes, {}), workspace = new Workspace(notes, creation.markets,
+    () => ({ username: "Checklist fixture", avatar: "https://example.test/avatar.png", bio: "Isolated test account." }));
+  const owner = "0x" + "1".repeat(40);
+  await workspace.apply(owner, { motivation: "Verify persistent checklist", experience: "building", interests: ["engineering"] });
+  workspace.setMember("fixture", owner, { status: "active", role: "contributor", level: "learning", division: "engineering", team: "engineering-general" });
+  let mission = workspace.saveMission("fixture", { title: "Persistent delivery", body: "Verify restart", division: "engineering",
+    team: "engineering-general", assignee: owner, status: "ready", todos: [{ id: "restart", label: "Restart verification", done: false }] }, null, true);
+  mission = workspace.saveMission(owner, { revision: mission.revision, status: "ready", todos: [{ id: "restart", label: "Restart verification", done: true }] }, mission.id);
+  notes.close(); notes = new Notes(file); creation = new Creation(notes, {}); workspace = new Workspace(notes, creation.markets);
+  const restored = workspace.missions(owner).find(row => row.id === mission.id);
+  assert.deepEqual(restored.todos, mission.todos);
+  assert.equal(restored.revision, mission.revision);
+  assert.equal(notes.balance(owner, "FTHS"), 0);
 });
 test("call invitations and media signaling require both participants, consent and current channel access", async t => {
   const { workspace, member, advance } = fixture(t), alice = await member(0), bob = await member(1), other = await member(2);

@@ -64,9 +64,9 @@ test('auto recruitment pays each batch once, respects housing fees and stops new
   assert.equal(activated.recruitment!.population, cost / 50);
   assert.equal(account.game.dollars, before - cost * dollarsScale);
   accrue(account, activated.recruitment!.readyAt - 1);
-  assert.equal(account.game.population, 12);
+  assert.equal(account.game.population, 13, 'natural growth precedes the paid arrival');
   accrue(account, activated.recruitment!.readyAt);
-  assert.equal(account.game.population, 12 + cost / 50);
+  assert.equal(account.game.population, 13 + cost / 50);
   assert.equal(account.recruitment, null);
   assert.equal(account.game.dollars, before - cost * dollarsScale);
 });
@@ -134,7 +134,7 @@ test('resuming preserves expiry, waits for the current batch and then starts the
   const resumed = act(account, resume);
   assert.equal(resumed.activityAutomation!.attraction.until, first.activityAutomation!.attraction.until);
   assert.equal(resumed.activityAutomation!.attraction.nextAt, first.recruitment!.readyAt);
-  const population = 12 + first.recruitment!.population;
+  const population = 13 + first.recruitment!.population;
   const cost = recruitmentDollars(population, 0, first.recruitment!.readyAt), dollars = account.game.dollars;
   accrue(account, first.recruitment!.readyAt);
   assert.equal(account.game.population, population);

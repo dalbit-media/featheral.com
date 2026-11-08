@@ -161,7 +161,7 @@ test('shortages preserve paid crews and expeditions without granting early disco
   assert.deepEqual(account.game.explored, known);
   assert.equal(snapshot(account).pending.water, 0);
 });
-test('offline upkeep matches incremental settlement, preserves residents and bulk-skips funded idle days', () => {
+test('offline upkeep matches incremental settlement, gradually loses undersupplied residents and bulk-skips idle days', () => {
   const original = manual(emptyAllocation());
   original.game.stock.water = 1260 * 3 + 100;
   const one = structuredClone(original), stepped = structuredClone(original);
@@ -173,16 +173,17 @@ test('offline upkeep matches incremental settlement, preserves residents and bul
   for (let day = 0; day < 100; day++) accrue(stepped, due + day * worldDayMs);
   accrue(stepped, target);
   assert.deepEqual(snapshot(one), snapshot(stepped));
-  assert.equal(one.game.population, 12);
+  assert.equal(one.game.population, 0);
   const funded = manual(emptyAllocation()), before = funded.game.stock.water;
   const fundedDue = snapshot(funded).waterUpkeep!.readyAt;
   accrue(funded, fundedDue + 1000000 * worldDayMs);
-  assert.equal(funded.game.population, 12);
-  assert.equal(funded.game.stock.water, before - waterConsumptionForDays(12, fundedDue, 1000001));
+  assert.equal(funded.game.population, 0);
+  assert.ok(funded.game.stock.water >= 0 && funded.game.stock.water < before, 'consumption stops after population reaches zero');
 });
 test('legacy saves receive a fresh full upkeep day without retroactive consumption', () => {
   const account = manual(emptyAllocation());
   delete account.waterUpkeep;
+  delete account.populationCycle;
   account.game.stock.water = 180;
   const now = account.updatedAt + 10000 * worldWeekMs;
   accrue(account, now);
@@ -290,13 +291,13 @@ test('boosted automatic Water gathering sustains weekly population consumption w
   for (let week = 0; week < 12; week++) {
     const due = snapshot(account).workforce.cycleAt;
     accrue(account, due);
-    assert.equal(account.game.population, 12, `population in week ${week + 1}`);
+    assert.equal(account.game.population, 13 + week, `natural population growth in week ${week + 1}`);
     assert.equal(snapshot(account).waterUpkeep!.lastPopulationLoss, 0);
     if (snapshot(account).pending.water >= Math.ceil(resourceCapacity(snapshot(account).capacity, 'water') / 2)) act(account, { type: 'claim', resource: 'water' }, due);
     assert.ok(account.game.stock.water >= waterRequirement(12), `next bill funded in week ${week + 1}`);
   }
-  assert.ok((snapshot(account).workforce.crews.water?.workers ?? 0) <= 10);
-  assert.ok(Object.values(snapshot(account).workforce.crews).reduce((sum, crew) => sum + crew.workers, 0) <= 10);
+  assert.ok((snapshot(account).workforce.crews.water?.workers ?? 0) <= Math.floor(account.game.population / 2));
+  assert.ok(Object.values(snapshot(account).workforce.crews).reduce((sum, crew) => sum + crew.workers, 0) <= Math.floor(account.game.population / 2));
 });
 test('one work week is exactly seven world days and 168 server minutes', () => {
   assert.equal(worldWeekMs, worldDayMs * 7);
@@ -810,20 +811,22 @@ test('recruitment pays FTH$ upfront but adds residents only at the exact one-wee
   assert.deepEqual(result.recruitment, { population: arrivals, startedAt: result.serverTime, readyAt: result.serverTime + worldWeekMs });
   assert.equal(arrivals, recruitmentAmount(12, 0, result.serverTime));
   assert.equal(result.inviteReadyAt - result.serverTime, worldWeekMs);
+  accrue(account, result.inviteReadyAt - 1);
   assert.throws(() => act(account, { type: 'invite' }, result.inviteReadyAt - 1), /Recruitment ready/);
-  assert.equal(account.game.population, 12);
+  assert.equal(account.game.population, 13);
   accrue(account, result.inviteReadyAt);
-  assert.equal(account.game.population, 12 + arrivals);
+  assert.equal(account.game.population, 13 + arrivals);
   assert.equal(snapshot(account).recruitment, null);
   assert.equal(snapshot(account).inviteReadyAt, 0);
   accrue(account, result.inviteReadyAt + worldWeekMs * 100);
-  assert.equal(account.game.population, 12 + arrivals);
+  assert.ok(account.game.population > 13 + arrivals, 'natural growth continues without repeating the paid batch');
+  const population = account.game.population;
   assert.equal(snapshot(account).recruitmentDollars, recruitmentDollars(account.game.population, 0, account.updatedAt));
   const second = act(account, { type: 'invite' });
   const secondArrivals = second.recruitment!.population;
-  assert.equal(account.game.population, 12 + arrivals);
+  assert.equal(account.game.population, population);
   accrue(account, second.inviteReadyAt);
-  assert.equal(account.game.population, 12 + arrivals + secondArrivals);
+  assert.equal(account.game.population, population + Math.max(1, Math.floor(population * .01)) + secondArrivals);
 });
 test('recruitment survives idle-cycle fast-forward, completes once offline, and never grants early workforce or production', () => {
   const account = manual(emptyAllocation());
@@ -894,10 +897,10 @@ test('legacy instant recruitment retains joined residents without fabricating a 
   account.inviteReadyAt = account.updatedAt + 600000;
   assert.equal(snapshot(account).recruitment, null);
   accrue(account, account.updatedAt + worldWeekMs * 10);
-  assert.equal(account.game.population, 30);
+  assert.equal(account.game.population, 40, 'ten natural arrivals are independent of paid recruitment');
   assert.equal(snapshot(account).recruitment, null);
   const result = act(account, { type: 'invite' });
-  assert.equal(account.game.population, 30);
+  assert.equal(account.game.population, 40);
   assert.equal(result.inviteReadyAt - result.serverTime, worldWeekMs);
 });
 test('recruitment rejects an overflowing future population before charging metal', () => {
@@ -921,6 +924,7 @@ test('real-time claim and action limits remain independent of accelerated game t
   account.pending.wood = 50 * minute;
   apply(account, envelope(account, { type: 'claim' }), due, start + 10000);
   account.pending.water = 100 * minute;
+  accrue(account, due + worldWeekMs);
   assert.throws(() => apply(account, envelope(account, { type: 'claim' }), due + worldWeekMs, start + 10499), /half a second/);
 });
 test('reject forged costs, tile assignments, timestamps, invalid quantities and instant gathering', () => {

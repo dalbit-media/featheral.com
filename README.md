@@ -21,6 +21,34 @@ All frontend source lives under `sites/`, named by its public hostname. Common a
 
 Services are named by ownership: `database`, `gold`, `notes` (including Dollar and game funds), `identity`, `wallet`, `pay`, `media`, `cms`, and `operations`. Admin screen modules live in `sites/admin.featheral.com/pages/`. The redundant Dollar API wrapper and empty social placeholder pages have been removed; tests, migration tooling and private data are retained.
 
+### Concurrent API capacity
+
+Run `node --experimental-strip-types scripts/performance-smoke.cjs` from the
+repository root (Node 22.18+). This opt-in fixture opens 1,000 authenticated
+loopback connections and sends 1,000 requests at 50 requests/second, failing on
+any unsuccessful response, missing connection or p95 latency of 500 ms or more.
+It exercises real World/App handlers, 1,000 established settlements, all market
+pools, 30 fills and one sell order per asset, 100 channels with 10,000 messages,
+and 100 missions. The workload is 60% World state, 20% market, 10% App channels,
+5% App missions and 5% non-financial World home actions.
+
+Full World fund reconciliation remains enabled. A transactionally maintained
+SQLite projection avoids reparsing every settlement JSON during balance scans;
+only immutable deterministic fund account IDs are memoized, never balances or
+quotes. Marketplace and App reads batch SQL preparation; attachment reads join
+metadata. Gateway special-page file reads are asynchronous. Keep-alive lasts up
+to 60 seconds, bounded by the saved request timeout, matching normal polling.
+Authenticated World quotas are per verified canonical owner, so shared-IP users
+do not exhaust one another's quota; anonymous/session limits remain IP-based.
+
+The fixture uses disposable in-memory databases and an in-memory ledger adapter;
+it never starts the live gateway or writes production financial data. Results
+are local diagnostics, **not production capacity certification**: deployment
+hardware, disk persistence, ledger signing/recovery, TLS, gateway middleware,
+SSE, trading and paid actions require a separate staging load test. Preserve the
+single authoritative financial writer; do not add independent writer processes
+or weaken reconciliation to raise throughput.
+
 Header title links return to the current site's landing page. Foundation, Gold, Dollar, Silver, Stats, World and Media share an identical compact family bar with exactly those seven links in that order and the same 11px text, spacing and layout. Readable foreground and panel colors follow each site's theme, with the current page marked in bold. Other sites retain their current-site and same-currency links alongside the family links. Every non-embedded site has the full core-site hierarchy in its footer, including cross-currency destinations and Admin.
 
 The seven family sites align header contents and page containers to a shared 1280px width, with 24px side gutters (16px on mobile) and padded site headers. The top family bar links Foundation, Gold, Dollar, Silver, World and Media; Stats keeps the family layout but is linked from the footer's Tools group (its own bar still shows it as the current site). Links to World's Explore game (`/explore/`, `/play/`) use ordinary same-tab navigation. Only links explicitly marked `data-game-window` request a centered, chrome-free popup (up to 1600×1000); modifier-clicks and blocked popups fall back to normal navigation. World game pages (Explore, Settlement, Market, Inbox, Federation and the other `#app` pages) are full-viewport apps: they omit the family bar, ecosystem footer and family layout. Their topbar carries `data-no-central-wallet`, so the shared wallet loader adds no header button; the game uses its own FTH$ chip and account menu instead. On desktop the Explore and Settlement maps fill the whole area beside the rail; Market, Inbox, Federation and guide pages share one content width (`--game-content-width`, 1680px) so headings and panels line up. Media retains its feed columns inside that container. Active family links use themed foreground and button colors so they stay readable on light and dark backgrounds.
@@ -161,6 +189,22 @@ persistence belong to Notes, not Gold or Ethereum.
 Browser push requires VAPID configuration; reliable cross-network calls need a
 configured TURN relay. See [workspace administration and setup](services/cms/README.md#foundation-intranet).
 These additions are application services, not deployment of a new L3 blockchain.
+
+App is a mobile-first standalone organization workspace with a desktop sidebar,
+keyboard-accessible mobile drawer, bottom shortcuts and a mission-first dashboard.
+Members filter assigned/available missions; scoped managers have an independent
+review queue. Mission checklists (up to 24 todos) persist with revision-controlled
+updates. Assignees can save progress without changing status, complete the checklist
+and submit evidence; all todos and evidence are required for review/approval.
+Only a different scoped manager can change an assignee's checklist requirements or
+approve their completion. Existing weekly compensation rules remain unchanged:
+the reward view reports real FTHS balances and approval eligibility, without adding
+manual payouts or connecting mission completion to staking unlocks.
+The proposed organization covers all five divisions and site teams, with explicitly
+fictional Demo personnel, illustrative experience/skills, shared specialists and
+cross-division delivery squads. It is separate from the actual member directory and
+creates no accounts, membership, roles or permissions. PWA shortcuts open missions,
+inbox and reward records; private API responses and attachments remain uncached.
 
 App and World reuse the same `shared/world-profile.js` editor, rendered from the
 versioned JSON UX model at `GET /api/v1/world/profile/ui`. Username, resized avatar

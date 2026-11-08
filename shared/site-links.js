@@ -29,8 +29,8 @@
   }
 
   function apply(root = document) {
-    const standalone = current === "x";
-    if (standalone) document.body.dataset.standalone = "x";
+    const standalone = current === "x" || current === "app";
+    if (standalone) document.body.dataset.standalone = current;
     const embedded = document.body.dataset.embedded === "true"
       || current === "wallet" && new URL(window.location.href).searchParams.get("embedded") === "1";
     const main = root.querySelector?.("main");
@@ -58,7 +58,7 @@
       delete document.body.dataset.familyLayout;
       for (const chrome of document.querySelectorAll(".eco-bar, .eco-footer")) chrome.remove();
     }
-    if (familySites.includes(current) && !game) document.body.dataset.familyLayout = "true";
+    if (familySites.includes(current) && !game && !standalone) document.body.dataset.familyLayout = "true";
     if (!document.querySelector('link[data-site-navigation], link[href="/shared/site-links.css"]')) {
       const style = document.createElement("link"); style.rel = "stylesheet"; style.href = "/shared/site-links.css";
       style.dataset.siteNavigation = "true"; document.head.append(style);

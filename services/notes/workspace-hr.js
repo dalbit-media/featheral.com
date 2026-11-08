@@ -32,7 +32,7 @@ class WorkspaceHR {
       const tables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
       this.schemaReady = ["work_enrollment", "work_learning", "work_admin_access", "work_positions", "work_pay_policy",
         "work_assignments", "work_payroll", "work_paid_missions"].every(name => tables.has(name))
-        && this.db.prepare("PRAGMA table_info(work_missions)").all().some(row => row.name === "min_level");
+        && ["min_level", "todos"].every(column => this.db.prepare("PRAGMA table_info(work_missions)").all().some(row => row.name === column));
       if (!this.schemaReady) console.warn("Featheral App HR is unavailable on this read-only replica. Initialize the workspace on the writable source and sync a fresh database snapshot.");
       return;
     }
@@ -53,6 +53,7 @@ class WorkspaceHR {
     if (!this.db.readOnlyReplica) {
       const columns = new Set(this.db.prepare("PRAGMA table_info(work_missions)").all().map(row => row.name));
       if (!columns.has("min_level")) this.db.exec("ALTER TABLE work_missions ADD COLUMN min_level TEXT NOT NULL DEFAULT 'learning'");
+      if (!columns.has("todos")) this.db.exec("ALTER TABLE work_missions ADD COLUMN todos TEXT NOT NULL DEFAULT '[]'");
       this.work.atomic(() => {
         this.db.prepare("UPDATE work_members SET status='visitor' WHERE status='pending'").run();
         this.db.prepare("INSERT OR IGNORE INTO work_positions VALUES ('foundation',NULL,'Foundation coordination','operations','','director','Coordinate governance, divisions and ecosystem priorities.')").run();
@@ -224,7 +225,7 @@ class WorkspaceHR {
         const assigned = this.db.prepare("SELECT * FROM work_missions WHERE id=?").get(key);
         this.track(assigned);
         this.work.audit(owner, "mission.claim", key, { period: weekStart(this.work.now()) });
-        return assigned;
+        return this.work.missionView(assigned);
       });
   }
   revoke(owner) {

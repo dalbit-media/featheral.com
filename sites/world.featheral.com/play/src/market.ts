@@ -7,6 +7,7 @@ import { monetaryPolicy } from './monetary-policy.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, automationItems, isActivityItem } from './automation.ts';
 import { dollarsScale } from './dollars.ts';
+import type { MarketAnalysis } from './market-analysis.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -67,6 +68,7 @@ export interface HalfSaleQuote {
 }
 export interface HalfSaleResponse extends ApiState { halfSale: HalfSaleQuote }
 export type MarketCommand =
+  | { type: 'profit-analysis' }
   | { type: 'fund-pool'; asset: MarketAsset; quantity: number; dollars: number }
   | { type: 'sell-half'; sales: HalfSaleOrder[] }
   | { type: 'spot'; asset: MarketAsset; side: MarketSide; quantity: number; limitDollars: number }
@@ -83,7 +85,8 @@ export interface MarketFill {
 export interface MarketQuote { quantity: number; dollars: number; available: boolean }
 export interface MarketSnapshot {
   asset: MarketAsset; quantity: number;
-  tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null; change24h?: number | null; change7d?: number | null }[];
+  tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null; change24h?: number | null; change7d?: number | null; availableQuantity?: number }[];
+  analysis?: MarketAnalysis | null;
   bids: { price: number; quantity: number }[]; asks: { price: number; quantity: number }[];
   quotes: { buy: MarketQuote; sell: MarketQuote };
   history: MarketFill[]; trades: MarketFill[]; orders: MarketOrder[];

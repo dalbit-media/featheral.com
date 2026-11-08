@@ -191,14 +191,12 @@
 .reserve-chart-axis{display:flex;justify-content:space-between;color:var(--muted);font-size:9px}
 .reserve-forecast p{margin:6px 0 0;color:var(--muted);font-size:9px;line-height:1.4}
 #app.explore-page .sidebar{max-height:calc(100dvh - var(--scene-top) - var(--canvas-footer) - var(--layout-gap));overflow:auto;scrollbar-width:thin}
-#app.explore-page #sidebar-content>.explore-upkeep{display:block;grid-column:1/-1}
 @media(max-width:650px),(max-height:500px){
   .reserve-chart{height:20px}
   .reserve-forecast-row{padding:3px 0}
 }
 @media(max-width:650px){
   #app.explore-page .sidebar{max-height:min(45dvh,calc(100dvh - var(--scene-top) - var(--canvas-footer) - var(--layout-gap) - 72px))}
-  #app.explore-page #sidebar-content>.explore-upkeep{order:3}
 }
 @media(max-width:650px){
   #app.explore-page:has(.weather-effects[open]) .sidebar{display:none}

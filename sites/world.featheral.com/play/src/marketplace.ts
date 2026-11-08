@@ -2,7 +2,7 @@ import { readMarket, sendMarket } from './api.ts';
 import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
-import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from './items.ts';
+import { craftingStageName, inventoryUsed, isCollectible, isCraftableItem, itemStorage, sellableItemCount } from './items.ts';
 import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketAssets, marketPriceAvailable, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit } from './market.ts';
 import type { MarketAsset, MarketCommand, MarketFill, MarketResponse, MarketSide } from './market.ts';
 import { locale, translate } from './i18n.ts';
@@ -16,6 +16,8 @@ import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 import { SettlementSale } from './settlement-sale.ts';
 import { ResourceSaleQuantity } from './resource-sale-quantity.ts';
+import { activeMarketAnalysis, marketAnalysisFee } from './market-analysis.ts';
+import type { MarketAnalysis } from './market-analysis.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
@@ -39,6 +41,7 @@ export class Marketplace {
   private notify: (message: string, error?: boolean) => void;
   private language: Language;
   private data: MarketResponse | null = null;
+  private receivedAt = 0;
   private asset: MarketAsset = 'metal';
   private side: MarketSide = 'sell';
   private mode: 'spot' | 'limit' = 'spot';
@@ -81,6 +84,13 @@ export class Marketplace {
     navigation.setAttribute('aria-label', 'Marketplace section');
     navigation.innerHTML = '<button type="button" class="button" data-market-section="all">All items</button><button type="button" class="button" data-market-section="resources">Resources</button><button type="button" class="button" data-market-section="items">Item marketplace</button>';
     root.querySelector('.exchange-heading')!.after(navigation);
+    const analysis = document.createElement('section'); analysis.className = 'market-analysis-access';
+    analysis.innerHTML = `<div><h2>${translate('Latest profit analysis', language)}</h2><p data-market-analysis-status role="status">${translate('Loading prices...', language)}</p></div><button type="button" class="button" data-market-analysis disabled>${translate('Get profit analysis', language)} · FTH$${marketAnalysisFee}</button><details><summary>${translate('Analysis and rarity rules', language)}</summary><p>${translate('One full-market snapshot costs FTH$100 and expires after one game day. Each refresh is charged; normal trading quotes remain free.', language)}</p><p>${translate('Profit is one-copy sale proceeds minus the crafting fee and executable purchase costs of every ingredient. The report fee is separate; prices are not reserved. Unavailable quotes are not estimated.', language)}</p><p>${translate('Rarity uses purchasable funded-pool stock and other players’ active sell offers: Legendary 1–9, Epic 10–49, Rare 50–199, Uncommon 200–999, Common 1,000+. Zero is unavailable, not legendary. This is market availability, not worldwide supply.', language)}</p></details>`;
+    navigation.after(analysis);
+    analysis.querySelector<HTMLButtonElement>('[data-market-analysis]')!.addEventListener('click', () => void this.execute({ type: 'profit-analysis' }));
+    const breakdown = document.createElement('div');
+    breakdown.dataset.marketAnalysisBreakdown = '';
+    root.querySelector('[data-market-order-title]')!.after(breakdown);
     root.querySelector('.exchange-heading')!.append(root.querySelector('.market-bank-link')!);
     const seller = document.createElement('div');
     seller.dataset.marketResourceSale = '';
@@ -111,7 +121,10 @@ export class Marketplace {
     root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Names & titles', this.language), 'customization'));
     root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Item marketplace', this.language), 'items'));
     const sortSelect = root.querySelector<HTMLSelectElement>('[data-market-sort]')!;
-    for (const [value, label] of [['name-desc', 'Name Z-A'], ['buy-high', 'Highest buy price'], ['sell-low', 'Lowest sell price']])
+    for (const [value, label] of [['name-desc', 'Name Z-A'], ['buy-high', 'Highest buy price'], ['sell-low', 'Lowest sell price'],
+      ['profit-high', 'Highest profit'], ['profit-low', 'Lowest profit'], ['craft-cost-low', 'Lowest total craft cost'], ['craft-cost-high', 'Highest total craft cost'],
+      ['rarity-high', 'Rarest market items'], ['rarity-low', 'Most common market items'], ['quantity-low', 'Least available'], ['quantity-high', 'Most available'],
+      ['stage-low', 'Lowest crafting tier'], ['stage-high', 'Highest crafting tier']])
       sortSelect.add(new Option(translate(label, this.language), value));
     const clear = document.createElement('button'); clear.type = 'button'; clear.className = 'button';
     clear.dataset.marketClear = ''; clear.textContent = translate('Reset filters', this.language);
@@ -279,6 +292,7 @@ export class Marketplace {
   }
   private instrument(): void {
     const economyOpen = this.root.querySelector<HTMLDetailsElement>('[data-resource-economy]')?.open ?? false;
+    const analysisOpen = this.root.querySelector<HTMLDetailsElement>('.market-analysis-breakdown')?.open ?? false;
     const ticker = this.data?.market.tickers.find(ticker => ticker.asset === this.asset);
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
     const price = ticker ? this.side === 'buy' ? ticker.ask : ticker.bid : 0;
@@ -290,6 +304,10 @@ export class Marketplace {
       <p>${translate('Baseline output per worker/week', this.language)}: ${this.fmt(economy.weeklyProduction)} · ${this.money(economy.weeklyProduction * price)} FTH$</p>
       <p>${translate('Baseline upkeep per resident/week', this.language)}: ${this.fmt(economy.dailyConsumption * 7)} · ${this.money(economy.dailyConsumption * 7 * price)} FTH$</p>
       <small>${translate('Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.', this.language)}</small></details>` : '';
+    const analysis = isCraftableItem(this.asset) ? this.analysis()?.items.find(item => item.item === this.asset) : undefined;
+    const analysisValue = (value: number | null) => value === null ? translate('Quote unavailable', this.language) : `FTH$ ${value.toLocaleString(locale(this.language), { maximumFractionDigits: 4 })}`;
+    const breakdown = analysis ? `<details class="market-analysis-breakdown" ${analysisOpen ? 'open' : ''}><summary>${translate('Craft profit breakdown', this.language)}</summary><p>${translate('Required tier', this.language)}: ${translate(isCraftableItem(this.asset) ? craftingStageName(this.asset) : '', this.language)}</p><dl><div><dt>${translate('Crafting fee', this.language)}</dt><dd>${analysisValue(analysis.craftingFee)}</dd></div>${analysis.ingredients.map(input => `<div><dt>${this.name(input.asset)} × ${formatResourceAmount(input.asset, input.quantity, locale(this.language))}</dt><dd>${analysisValue(input.dollars)}</dd></div>`).join('')}<div><dt>${translate('Total craft cost', this.language)}</dt><dd>${analysisValue(analysis.cost)}</dd></div><div><dt>${translate('Sale proceeds', this.language)}</dt><dd>${analysisValue(analysis.revenue)}</dd></div><div><dt>${translate('Estimated profit', this.language)}</dt><dd>${analysisValue(analysis.profit)}</dd></div></dl></details>` : '';
+    this.root.querySelector('[data-market-analysis-breakdown]')!.innerHTML = breakdown;
     this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2>${reference}<p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p>${ticker ? `<div class="catalog-changes instrument-changes">${renderPriceChange(ticker, '24h', this.language, true)}${renderPriceChange(ticker, '7d', this.language, true)}</div>` : ''}</div><span class="exchange-venue">Players + game shop</span>`;
     if (!this.priceEdited && ticker) {
       const value = marketPriceAvailable(price) ? price : marketPriceFloor(this.asset);
@@ -310,8 +328,21 @@ export class Marketplace {
     const scrollTop = list.scrollTop, scrollLeft = list.scrollLeft;
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
     const focusedColumn = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.catalogColumn : undefined;
-    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
-    const markup = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending, this.sort);
+    const report = this.analysis(), now = this.analysisTime();
+    if (!report && /^(profit|craft-cost)-/.test(this.sort)) {
+      this.sort = 'name'; this.root.querySelector<HTMLSelectElement>('[data-market-sort]')!.value = this.sort;
+    }
+    this.root.querySelectorAll<HTMLOptionElement>('[data-market-sort] option').forEach(option => {
+      if (/^(profit|craft-cost)-/.test(option.value)) option.disabled = !report;
+    });
+    const button = this.root.querySelector<HTMLButtonElement>('[data-market-analysis]')!;
+    button.disabled = this.pending || this.state().dollars < marketAnalysisFee || this.state().game.stage < 0;
+    button.textContent = `${translate(report ? 'Refresh analysis' : 'Get profit analysis', this.language)} · FTH$${marketAnalysisFee}`;
+    this.root.querySelector('[data-market-analysis-status]')!.textContent = report
+      ? `${translate('Snapshot time', this.language)}: ${new Date(report.generatedAt).toLocaleString(locale(this.language), { timeZone: 'UTC' })} UTC · ${translate('Expires in', this.language)} ${Math.ceil((report.expiresAt - now) / 60000)} ${translate('game hours', this.language)}`
+      : translate(this.data.market.analysis ? 'Analysis expired. Purchase a new latest-quote report.' : 'Profit analysis is locked. FTH$100 grants one game day of access.', this.language);
+    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly, report, now);
+    const markup = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending, this.sort, report, now);
     if (markup !== this.catalogMarkup) {
       list.innerHTML = markup; localize(list); this.catalogMarkup = markup;
     }
@@ -323,6 +354,10 @@ export class Marketplace {
     if (focusedAsset) this.root.querySelector<HTMLButtonElement>(`[data-market-asset="${focusedAsset}"]${focusedSide ? `[data-market-quick-side="${focusedSide}"]` : ':not([data-market-quick-side])'}`)?.focus({ preventScroll: true });
     if (focusedColumn) list.querySelector<HTMLButtonElement>(`[data-catalog-column="${focusedColumn}"]`)?.focus({ preventScroll: true });
   }
+  private analysisTime(): number {
+    return this.data ? this.data.serverTime + Math.floor(Math.max(0, Date.now() - this.receivedAt) * this.data.clockSpeed) : 0;
+  }
+  private analysis(): MarketAnalysis | null { return activeMarketAnalysis(this.data?.market.analysis, this.analysisTime()); }
   private preview(): void {
     const resources = isMarketResource(this.asset), resourceSpotSale = resources && this.side === 'sell' && this.mode === 'spot';
     const resourceLimitSale = resources && this.side === 'sell' && this.mode === 'limit';
@@ -430,17 +465,17 @@ export class Marketplace {
   }
   private async refresh(): Promise<void> {
     const quantity = this.quantity();
-    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > (this.side === 'sell' ? marketSaleQuantityLimit(this.asset) : marketQuantityLimit(this.asset))) { this.fresh = false; this.preview(); return; }
+    if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > (this.side === 'sell' ? marketSaleQuantityLimit(this.asset) : marketQuantityLimit(this.asset))) { this.fresh = false; this.catalog(); this.instrument(); this.preview(); return; }
     const sequence = ++this.sequence, asset = this.asset;
     try {
       const data = await readMarket(asset, quantity);
       if (sequence !== this.sequence || asset !== this.asset || quantity !== this.quantity()) return;
-      this.data = data; this.fresh = true; this.update(data); this.paint();
+      this.data = data; this.receivedAt = Date.now(); this.fresh = true; this.update(data); this.paint();
       this.root.querySelector('[data-market-status]')!.textContent = translate('Prices update every 5 seconds.', this.language);
       this.root.querySelector<HTMLButtonElement>('[data-market-refresh]')!.hidden = true;
     } catch (error) {
       if (sequence !== this.sequence) return;
-      this.fresh = false; this.preview();
+      this.fresh = false; this.catalog(); this.instrument(); this.preview();
       this.root.querySelector('[data-market-status]')!.textContent = translate(error instanceof Error ? error.message : 'Connection failed.', this.language);
       this.root.querySelector<HTMLButtonElement>('[data-market-refresh]')!.hidden = false;
     }
@@ -454,8 +489,10 @@ export class Marketplace {
       const quote = marketConsumption(command);
       if (quote && !await confirmConsumption(quote, this.language)) return;
       const response = await sendMarket(this.state(), command);
+      this.data = response; this.receivedAt = Date.now();
       this.update(response);
-      this.notify(command.type === 'cancel' ? 'Offer cancelled. Unused items or FTH$ returned.'
+      this.notify(command.type === 'profit-analysis' ? 'Latest profit analysis purchased. Access expires after one game day.'
+        : command.type === 'cancel' ? 'Offer cancelled. Unused items or FTH$ returned.'
         : command.type === 'fund-pool' ? 'Market liquidity funded from existing assets and FTH$.'
         : command.type === 'limit' ? 'Offer placed. Check My offers for updates.'
           : command.type !== 'sell-half' && command.side === 'buy' ? 'Purchase complete.' : 'Sale complete.');

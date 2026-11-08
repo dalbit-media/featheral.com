@@ -45,6 +45,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
   );
   const cookie = secure ? '__Host-terra' : 'terra-dev';
   const limits = new Map<string, { start: number; count: number; sessions: number; chat: number }>();
+  let nextLimitCleanup = 0;
   const chat = new ChatHub(store.chat, Date.now, (owner, room) => { store.chatDirectory.authorize(owner, room, Date.now()); });
   const reply = (response: ServerResponse, status: number, body: unknown, publicStats = false): void => {
     response.writeHead(status, { 'Content-Type': 'application/json',
@@ -61,25 +62,31 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       const worldRoute = path === '/api/session' || path.startsWith('/api/chat');
       if ((scope === 'world' && !worldRoute) || (scope === 'dollar' && worldRoute)) throw new ApiError(404, 'This API does not own that operation.');
       const address = request.socket.remoteAddress ?? 'unknown', now = Date.now();
-      for (const [key, value] of limits) if (now - value.start >= 60000) limits.delete(key);
-      let limit = limits.get(address);
+      if (now >= nextLimitCleanup) {
+        for (const [key, value] of limits) if (now - value.start >= 60000) limits.delete(key);
+        nextLimitCleanup = now + 1000;
+      }
+      const token = request.headers.cookie?.split(';').map(s => s.trim()).find(s => s.startsWith(`${cookie}=`))?.slice(cookie.length + 1) ?? '';
+      if (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin' && request.headers['sec-fetch-site'] !== 'none') throw new ApiError(403, 'Cross-site requests are not allowed.');
+      if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) throw new ApiError(403, 'Origin rejected.');
+      if (request.method === 'POST' && !allowedOrigins.has(request.headers.origin ?? '')) throw new ApiError(403, 'Exact Origin required.');
+      // Only verified canonical owners get independent quotas; forged cookies cannot create buckets.
+      const key = token && path !== '/api/session' && path !== '/api/stats' ? `owner:${store.chatSession(token).owner}` : `ip:${address}`;
+      let limit = limits.get(key);
+      if (limit && now - limit.start >= 60000) { limits.delete(key); limit = undefined; }
       if (!limit) {
         if (limits.size >= 10000) throw new ApiError(503, 'Request capacity reached.');
-        limit = { start: now, count: 0, sessions: 0, chat: 0 }; limits.set(address, limit);
+        limit = { start: now, count: 0, sessions: 0, chat: 0 }; limits.set(key, limit);
       }
       const chatUrl = new URL(request.url ?? '/', origin);
       const chatPath = chatUrl.pathname;
       const chatRoute = ['/api/chat', '/api/chat/events', '/api/chat/profile', '/api/chat/messages', '/api/chat/ping', '/api/chat/directory', '/api/chat/visit'].includes(chatPath);
       if (chatRoute ? ++limit.chat > 10000 : ++limit.count > 240) throw new ApiError(429, 'Too many requests. Wait one minute.');
-      if (request.headers['sec-fetch-site'] && request.headers['sec-fetch-site'] !== 'same-origin' && request.headers['sec-fetch-site'] !== 'none') throw new ApiError(403, 'Cross-site requests are not allowed.');
-      if (request.headers.origin && !allowedOrigins.has(request.headers.origin)) throw new ApiError(403, 'Origin rejected.');
-      if (request.method === 'POST' && !allowedOrigins.has(request.headers.origin ?? '')) throw new ApiError(403, 'Exact Origin required.');
       if (request.url === '/api/stats') {
         if (request.method !== 'GET') throw new ApiError(405, 'Method not allowed.');
         reply(response, 200, { ...store.publicTotals(), updatedAt: now }, true);
         return;
       }
-      const token = request.headers.cookie?.split(';').map(s => s.trim()).find(s => s.startsWith(`${cookie}=`))?.slice(cookie.length + 1) ?? '';
       if (['/api/wallet/funds', '/api/wallet/funds/prepare', '/api/wallet/funds/complete', '/api/wallet/funds/authorization', '/api/wallet/funds/cancel'].includes(path)) {
         if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
         if (path === '/api/wallet/funds') {

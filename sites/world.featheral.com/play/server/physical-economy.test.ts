@@ -36,7 +36,8 @@ test('daily polling and annual offline catch-up preserve climate jobs, paid arri
   for (let day = 1; day <= 364; day++) accrue(online, start + day * worldDayMs);
   accrue(offline, start + 364 * worldDayMs);
   assert.deepEqual(offline, online);
-  assert.equal(offline.game.population, 12 + arrivals);
+  assert.ok(arrivals > 0);
+  assert.ok(offline.game.population > 0 && offline.game.population < 12 + arrivals, 'annual supply deficits gradually reduce population');
   assert.ok(offline.game.stock.wood > 0 && offline.game.stock.metal > 0);
   assert.ok(offline.game.dollars < account.game.dollars);
   assert.equal(offline.workforce!.expeditions.length, 0);

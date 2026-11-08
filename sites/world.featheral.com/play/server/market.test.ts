@@ -13,11 +13,48 @@ import { inventory, craft, findCollectible, collectFinds } from './inventory.ts'
 import { Exchange, parseMarketCommand } from './market.ts';
 import { isLiquidAsset, isMarketResource, marketAssets, marketPriceFloor, marketResources } from '../src/market.ts';
 import { createFundedFixtureAccount } from './test-support.ts';
-import { dollarsScale } from '../src/dollars.ts';
+import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { terrainDetails } from '../src/engine.ts';
 import type { MarketAsset, MarketCommand, MarketResponse } from '../src/market.ts';
 import { fundFixtureFromReserves, seedFixturePools } from './test-support.ts';
+import { craftableKeys, craftingCost, craftingInputs } from '../src/items.ts';
+import { marketAnalysisDuration, marketAnalysisFee } from '../src/market-analysis.ts';
+
+test('catalog reads batch SQL preparation and preserve active prices, owned escrow and fill trends', t => {
+  const db = sqlite.open(':memory:'), now = 2000000000;
+  try {
+    db.exec('CREATE TABLE sessions(id TEXT PRIMARY KEY,expires INTEGER,data TEXT)');
+    const account = createFundedFixtureAccount(now), exchange = new Exchange(db);
+    for (const [owner, expiry] of [['reader', now + 10000], ['maker', now + 10000], ['expired', now - 1]] as const)
+      db.prepare('INSERT INTO sessions VALUES(?,?,?)').run(owner, expiry, JSON.stringify({ account }));
+    const offer = db.prepare("INSERT INTO market_orders(owner,asset,side,price,quantity,remaining,status,createdAt) VALUES (?,?,'sell',?,20,20,'open',?)");
+    const fill = db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,?,'players','reader','maker')");
+    for (const asset of marketAssets) {
+      const floor = dollarsUnits(marketPriceFloor(asset));
+      offer.run('reader', asset, floor * 3, now);
+      offer.run('maker', asset, floor * 2, now);
+      offer.run('expired', asset, floor, now);
+      offer.run('maker', asset, 0, now);
+      fill.run(asset, floor * 2, floor * 2, now - 10 * 86400000);
+      fill.run(asset, floor * 4, floor * 4, now);
+    }
+    const prepare = db.prepare.bind(db), statements: string[] = [];
+    t.mock.method(db, 'prepare', (sql: string) => { statements.push(sql); return prepare(sql); });
+    const result = exchange.read('reader', account, now, now, 'wood', 1).market;
+    assert.equal(result.tickers.length, marketAssets.length);
+    assert.ok(statements.length < 40, `Compiled ${statements.length} statements for ${marketAssets.length} assets`);
+    for (const ticker of result.tickers) {
+      const floor = marketPriceFloor(ticker.asset);
+      assert.equal(ticker.bid, 0);
+      assert.equal(ticker.ask, dollarsUnits(floor) * 2 / dollarsScale);
+      assert.equal(ticker.availableQuantity, 20);
+      assert.equal(ticker.last, dollarsUnits(floor) * 4 / dollarsScale);
+      assert.equal(ticker.change24h, 100);
+      assert.equal(ticker.change7d, 100);
+    }
+  } finally { db.close(); }
+});
 
 function setup(path = ':memory:', seeded = true, excluded: readonly MarketAsset[] = []) {
   let time = 1000000;
@@ -45,6 +82,121 @@ function setup(path = ':memory:', seeded = true, excluded: readonly MarketAsset[
   const act = (token: string, command: MarketCommand) => post(token, request(token, command));
   return { store, create, read, request, post, act, advance: (amount: number) => { time += amount; } };
 }
+test('profit analysis charges exactly FTH$100 once, persists, expires at one game day and never changes trading prices', () => {
+  const h = setup(), user = h.create(), other = h.create();
+  try {
+    const before = h.read(user.token), pools = h.store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all();
+    assert.equal(before.market.analysis, null);
+    const body = h.request(user.token, { type: 'profit-analysis' }), purchased = h.post(user.token, body);
+    assert.equal(purchased.dollars, before.dollars - marketAnalysisFee);
+    const report = purchased.market.analysis!;
+    assert.equal(report.items.length, craftableKeys.length);
+    assert.equal(report.expiresAt - report.generatedAt, marketAnalysisDuration);
+    assert.equal(report.fee, 100);
+    assert.deepEqual(h.store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all(), pools);
+    assert.equal(h.read(other.token).market.analysis, null, 'reports are owner-private');
+    const duplicate = h.post(user.token, body);
+    assert.deepEqual(duplicate.market.analysis, report);
+    assert.equal(h.read(user.token).dollars, purchased.dollars, 'retry cannot charge twice');
+    new Exchange(h.store.db);
+    assert.deepEqual(h.read(user.token).market.analysis, report, 'saved reports survive exchange reconstruction');
+    h.advance(report.expiresAt - h.store.read(user.token, (_session, now) => now) - 1);
+    assert.ok(h.read(user.token).market.analysis, 'valid until exact expiry boundary');
+    h.advance(1);
+    assert.equal(h.read(user.token).market.analysis, null);
+    assert.equal(h.post(user.token, body).market.analysis, null, 'receipt replay cannot bypass expiry');
+    assert.equal(h.read(user.token).dollars, purchased.dollars);
+    assert.throws(() => h.post(user.token, { ...body, command: { type: 'cancel', orderId: 1 } }), /Idempotency/);
+    const refreshed = h.act(user.token, { type: 'profit-analysis' });
+    assert.equal(refreshed.dollars, purchased.dollars - 100);
+    assert.ok(refreshed.market.analysis!.generatedAt > report.generatedAt);
+    assert.equal(refreshed.market.history.length, 0, 'analysis never executes a trade');
+  } finally { h.store.close(); }
+});
+test('profit analysis uses executable full-quantity buy quotes for every ingredient and one-copy sale proceeds', () => {
+  const h = setup(), user = h.create();
+  try {
+    const report = h.act(user.token, { type: 'profit-analysis' }).market.analysis!;
+    const item = 'transport-cart', analysis = report.items.find(row => row.item === item)!;
+    assert.equal(analysis.craftingFee, craftingCost(item).dollars);
+    assert.ok(analysis.ingredients.some(row => row.asset === 'collection-wood-1'), 'consumed collectible replacement is included');
+    for (const input of analysis.ingredients) {
+      const quote = h.read(user.token, input.asset, input.quantity).market.quotes.buy;
+      assert.equal(input.dollars, quote.available ? quote.dollars : null);
+    }
+    const cost = dollarsScale * analysis.craftingFee + analysis.ingredients.reduce((sum, input) => sum + Math.round(input.dollars! * dollarsScale), 0);
+    assert.equal(analysis.cost, cost / dollarsScale);
+    assert.equal(analysis.revenue, h.read(user.token, item).market.quotes.sell.dollars);
+    assert.equal(analysis.profit, (Math.round(analysis.revenue! * dollarsScale) - cost) / dollarsScale);
+    assert.equal(analysis.ingredients.find(row => row.asset === 'collection-wood-1')!.quantity, craftingInputs(item)['collection-wood-1']);
+    const multiple = report.items.flatMap(row => row.ingredients).find(input => input.quantity > 1 && input.dollars !== null)!;
+    assert.ok(multiple, 'full-market report includes multi-copy ingredient quotes');
+    const buy = h.read(user.token, multiple.asset, multiple.quantity).market.quotes.buy;
+    assert.equal(multiple.dollars, buy.dollars);
+    assert.notEqual(multiple.dollars, h.read(user.token, multiple.asset, 1).market.quotes.buy.dollars * multiple.quantity, 'full-quantity slippage is not ask times quantity');
+  } finally { h.store.close(); }
+});
+test('aborting an analysis transaction rolls back the fee, report, revision and retry receipt', () => {
+  const h = setup(), user = h.create();
+  try {
+    const body = h.request(user.token, { type: 'profit-analysis' });
+    const before = h.store.read(user.token, session => structuredClone(session.account));
+    assert.throws(() => h.store.transaction(user.token, (session, now, realTime, exchange, owner) => {
+      exchange.action(owner, session, body, now, realTime);
+      throw new Error('Fixture abort before commit');
+    }), /Fixture abort/);
+    assert.deepEqual(h.store.read(user.token, session => session.account), before);
+    assert.equal(h.read(user.token).market.analysis, null);
+    assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM market_receipts').get()!.n, 0);
+    assert.equal(h.post(user.token, body).dollars, before.game.dollars / dollarsScale - 100);
+  } finally { h.store.close(); }
+});
+test('analysis rejects forged prices, insufficient funds and wholly unavailable quotes without charging or saving', () => {
+  for (const command of [{ type: 'profit-analysis', fee: 0 }, { type: 'profit-analysis', duration: 999999 }, { type: 'profit-analysis', items: [] }])
+    assert.throws(() => parseMarketCommand(command), /Invalid profit analysis/);
+  const h = setup(), user = h.create();
+  try {
+    h.store.transaction(user.token, session => { session.account.game.dollars = 99 * dollarsScale; });
+    const before = h.store.read(user.token, session => structuredClone(session.account));
+    assert.throws(() => h.act(user.token, { type: 'profit-analysis' }), /Not enough FTH/);
+    assert.deepEqual(h.store.read(user.token, session => session.account), before);
+    assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM market_analysis').get()!.n, 0);
+  } finally { h.store.close(); }
+  const missing = setup(':memory:', false), player = missing.create();
+  try {
+    const dollars = missing.read(player.token).dollars;
+    assert.throws(() => missing.act(player.token, { type: 'profit-analysis' }), /No fee was charged/);
+    assert.equal(missing.read(player.token).dollars, dollars);
+    assert.equal(missing.read(player.token).market.analysis, null);
+  } finally { missing.store.close(); }
+});
+test('partially unavailable analysis reports null values instead of inventing ingredient prices or profits', () => {
+  const h = setup(), user = h.create();
+  try {
+    h.store.db.prepare('UPDATE market_pools SET dollars=0 WHERE asset=?').run('collection-wood-1');
+    const row = h.act(user.token, { type: 'profit-analysis' }).market.analysis!.items.find(item => item.item === 'transport-cart')!;
+    assert.equal(row.cost, null); assert.equal(row.profit, null);
+    assert.equal(row.ingredients.find(input => input.asset === 'collection-wood-1')!.dollars, null);
+    assert.ok(row.revenue! > 0);
+  } finally { h.store.close(); }
+});
+test('dynamic market quantity counts real purchasable stock and other active sell escrow, not virtual depth or self offers', () => {
+  const h = setup(), buyer = h.create(), seller = h.create();
+  try {
+    const amount = () => h.read(buyer.token, 'torch').market.tickers.find(row => row.asset === 'torch')!.availableQuantity!;
+    const pool = h.store.db.prepare('SELECT units FROM market_pools WHERE asset=?').get('torch')!;
+    const initial = amount();
+    assert.ok(initial <= Number(pool.units), 'virtual depth does not become available item inventory');
+    h.store.transaction(seller.token, session => { inventory(session.account).items.push('torch', 'torch'); });
+    const offer = h.act(seller.token, { type: 'limit', asset: 'torch', side: 'sell', quantity: 2, price: 1000000 });
+    assert.equal(amount(), initial + 2);
+    assert.equal(h.read(seller.token, 'torch').market.tickers.find(row => row.asset === 'torch')!.availableQuantity, initial);
+    h.act(seller.token, { type: 'cancel', orderId: offer.market.orders[0].id });
+    assert.equal(amount(), initial);
+    h.store.db.prepare('UPDATE market_pools SET dollars=0 WHERE asset=?').run('torch');
+    assert.equal(amount(), 0, 'unfunded inventory is not purchasable');
+  } finally { h.store.close(); }
+});
 test('owner fill history uses buyer and seller indexes after repeated schema initialization', () => {
   const db = sqlite.open(':memory:');
   try {
@@ -564,5 +716,16 @@ test('market HTTP routes require session, exact origin, CSRF, strict commands an
     h.advance(1000);
     h.store.transaction(a.token, (s, now) => assert.throws(() => apply(s.account, { id: randomUUID(), revision: s.account.revision,
       command: { type: 'trade', resource: 'wood', direction: 'buy', amount: 1 } }, now), /marketplace/));
+    const analysis = { id: randomUUID(), revision: result.revision, command: { type: 'profit-analysis' } };
+    assert.equal((await post(analysis, 'bad')).status, 403);
+    assert.equal((await fetch(`${base}/market/actions`, { method: 'POST', headers: { Origin: 'http://127.0.0.1:5173',
+      'Content-Type': 'application/json', 'X-CSRF-Token': a.csrf }, body: JSON.stringify(analysis) })).status, 401);
+    assert.equal((await post({ ...analysis, revision: state.revision })).status, 409);
+    assert.equal(h.read(a.token).dollars, result.dollars, 'rejected analysis requests never charge');
+    assert.equal(h.read(a.token).market.analysis, null);
+    const paid = await post(analysis); assert.equal(paid.status, 200);
+    const paidResult = await paid.json() as MarketResponse;
+    assert.equal(paidResult.dollars, result.dollars - 100);
+    assert.deepEqual(await (await post(analysis)).json(), paidResult, 'HTTP receipt retry is charged once');
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); h.store.close(); }
 });

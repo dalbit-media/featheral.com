@@ -396,14 +396,14 @@ const server = http.createServer(async (req, res) => {
         const file = channels[url.pathname];
         if (file.endsWith(".html")) res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
         res.writeHead(200, { "Content-Type": types[path.extname(file)], "Cache-Control": "no-store" });
-        const content = fs.readFileSync(file);
+        const content = await fs.promises.readFile(file);
         return res.end(file.endsWith(".html") ? content.toString().replace('href="/conversion/"', 'href="/gold-channel/"') : content);
       }
     }
     if (["/shared/wallet-profile.js", "/shared/wallet-profile.css"].includes(url.pathname)) {
       if (site !== "wallet") return redirect(res, siteUrl(req, "wallet", url.pathname), 302);
       res.writeHead(200, { "Content-Type": types[path.extname(url.pathname)], "Cache-Control": "no-store" });
-      return res.end(fs.readFileSync(path.join(walletRoot, path.basename(url.pathname))));
+      return res.end(await fs.promises.readFile(path.join(walletRoot, path.basename(url.pathname))));
     }
     if (url.pathname.startsWith("/shared/wallet/")) {
       const name = url.pathname.slice("/shared/wallet/".length);
@@ -412,7 +412,7 @@ const server = http.createServer(async (req, res) => {
       const file = name === "ethers.js" ? path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js") : path.join(walletRoot, name);
       if (name.endsWith(".html")) res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
       res.writeHead(200, { "Content-Type": types[path.extname(file)], "Cache-Control": "no-store" });
-      return res.end(fs.readFileSync(file));
+      return res.end(await fs.promises.readFile(file));
     }
     if (url.pathname.startsWith("/api/creation/")) return cms(req, res);
     if (site === "wallet" || url.pathname.startsWith("/api/wallet/accounts/") || url.pathname === "/api/wallet/ui") {
@@ -452,21 +452,21 @@ const server = http.createServer(async (req, res) => {
           res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
         }
         res.writeHead(200, { "Content-Type": types[path.extname(assets[url.pathname])], "Cache-Control": "no-store" });
-        return res.end(fs.readFileSync(path.join(walletRoot, assets[url.pathname])));
+        return res.end(await fs.promises.readFile(path.join(walletRoot, assets[url.pathname])));
       }
       if (site === "wallet" && url.pathname === "/fth.js") {
         res.writeHead(200, { "Content-Type": types[".js"], "Cache-Control": "no-store" });
-        return res.end(fs.readFileSync(path.join(sitesRoot, "dollar.featheral.com", "fth.js")));
+        return res.end(await fs.promises.readFile(path.join(sitesRoot, "dollar.featheral.com", "fth.js")));
       }
       if (site === "wallet" && url.pathname === "/ethers.js") {
         res.writeHead(200, { "Content-Type": types[".js"], "Cache-Control": "public, max-age=86400" });
-        return res.end(fs.readFileSync(path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js")));
+        return res.end(await fs.promises.readFile(path.join(root, "node_modules", "ethers", "dist", "ethers.umd.min.js")));
       }
       if (site === "wallet" && url.pathname.startsWith("/shared/")) {
         const file = path.resolve(root, "." + url.pathname);
         if (!file.startsWith(path.join(root, "shared") + path.sep)) { res.writeHead(404); return res.end("Not found"); }
         res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
-        return res.end(fs.readFileSync(file));
+        return res.end(await fs.promises.readFile(file));
       }
       if (["/wallet/wallet.js", "/wallet/staking.js"].includes(url.pathname))
         return redirect(res, siteUrl(req, "wallet", url.pathname.replace("/wallet/", "/ethereum/")), 301);
@@ -474,11 +474,11 @@ const server = http.createServer(async (req, res) => {
     if (!["wallet", "admin"].includes(site)) {
       if (["/wallet", "/wallet/"].includes(url.pathname)) {
         res.writeHead(200, { "Content-Type": types[".html"], "Cache-Control": "no-store" });
-        return res.end(fs.readFileSync(path.join(walletRoot, "host.html"), "utf8"));
+        return res.end(await fs.promises.readFile(path.join(walletRoot, "host.html"), "utf8"));
       }
       if (url.pathname === "/wallet-host.js") {
         res.writeHead(200, { "Content-Type": types[path.extname(url.pathname)], "Cache-Control": "no-store" });
-        return res.end(fs.readFileSync(path.join(walletRoot, "wallet-host.js")));
+        return res.end(await fs.promises.readFile(path.join(walletRoot, "wallet-host.js")));
       }
       if (["/wallet-app.js", "/wallet-app.css"].includes(url.pathname)) {
         return redirect(res, siteUrl(req, "wallet", url.pathname), 301);

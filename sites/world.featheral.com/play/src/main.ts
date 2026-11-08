@@ -122,8 +122,7 @@ let environment = state.environment;
 let busy = false;
 let pendingTimedAction: TimedAction | null = null;
 let journalQuery = '';
-let management: Resource | 'population' | 'funds' | null = null;
-let lastResourceManagement: Resource | 'funds' = 'wood';
+let management: Resource | 'population' | 'funds' | 'reserves' | null = null;
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.classList.toggle('settlement-page', settlementPage);
 app.classList.toggle('marketplace-page', marketPage || bankPage);
@@ -151,7 +150,7 @@ app.innerHTML = `
       <strong id="world-time"></strong>
     </div>
     <div id="resource-bar" class="resource-bar" aria-label="Resource inventory"></div>
-    <button type="button" class="resource-manager-button" data-action="acquisition-management" aria-label="Resource settings" title="Resource settings" aria-haspopup="dialog" aria-controls="management-dialog">${icon('settings')}<span>Resource settings</span></button>
+    <button type="button" class="resource-manager-button" data-action="acquisition-management" aria-label="Reserve forecast" title="Reserve forecast" aria-haspopup="dialog" aria-controls="management-dialog">${icon('settings')}<span>Reserve forecast</span></button>
     <button class="population-health" data-action="population-management" aria-controls="management-dialog" aria-haspopup="dialog">
       ${icon('people')}<span class="population-health-total"><small>Population</small><strong data-population-total>0</strong></span>
       <span class="population-health-work"><span><i class="population-status active"></i><small>Busy now</small><strong data-population-active>0</strong></span><span><i class="population-status idle"></i><small>Available now</small><strong data-population-idle>0</strong></span><span class="population-health-meter"><i></i></span></span>
@@ -187,7 +186,7 @@ app.innerHTML = `
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="management-dialog" class="management-dialog" aria-labelledby="management-title">
     <header><h2 id="management-title"></h2><button class="button" data-action="close-management" aria-label="Close">${icon('close')}</button></header>
-    <div class="management-resource-switcher" hidden><label for="management-resource">Resource settings</label><select id="management-resource" data-management-resource>${resources.map(resource => `<option value="${resource}">${names[resource]}</option>`).join('')}<option value="funds">FTH$ treasury</option></select></div>
+    <div class="management-resource-switcher" hidden><label for="management-resource">Resource settings</label><select id="management-resource" data-management-resource><option value="reserves">Reserve forecast</option>${resources.map(resource => `<option value="${resource}">${names[resource]}</option>`).join('')}<option value="funds">FTH$ treasury</option></select></div>
     <div class="management-content"></div>
   </dialog>
 `;
@@ -709,7 +708,7 @@ function renderResources(): void {
       <section class="resource-weekly"><h4>${key === 'water' ? 'Resource flow' : '1 game week'}</h4><dl>
         <div><dt>${key === 'water' ? 'Collection / week' : 'Collection'}</dt><dd class="${rate ? 'resource-inflow' : 'resource-flow-zero'}">${rate ? '+' : ''}${resourceFmt(key, rate)}</dd></div>
         <div><dt>${key === 'water' ? 'Consumption / day' : 'FTH$ transport / week'}</dt><dd class="${consumption ? 'resource-outflow' : 'resource-flow-zero'}">${consumption ? '&minus;' : ''}${key === 'water' ? resourceFmt(key, consumption) : `${fmt(consumption)} FTH$`}</dd></div>
-      </dl></section>${waterRisk ? '<p class="water-shortage-text">Water shortage pauses advanced activity, not residents.</p>' : ''}${status ? `<p>${status}</p>` : ''}`;
+      </dl></section>${waterRisk ? '<p class="water-shortage-text">Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.</p>' : ''}${status ? `<p>${status}</p>` : ''}`;
   }
 }
 function populationManagement(): string {
@@ -718,13 +717,15 @@ function populationManagement(): string {
 function renderManagement(): void {
   if (!management) return;
   const root = managementDialog.querySelector('.management-content')!;
-  const title = management === 'population' ? 'Population management' : management === 'funds' ? 'FTH$ treasury' : names[management];
-  managementDialog.dataset.view = management === 'population' || management === 'funds' ? management : 'resource';
+  const title = management === 'population' ? 'Population management' : management === 'funds' ? 'FTH$ treasury' : management === 'reserves' ? 'Reserve forecast' : names[management];
+  managementDialog.dataset.view = management === 'population' || management === 'funds' || management === 'reserves' ? management : 'resource';
   managementDialog.querySelector('#management-title')!.textContent = translate(title, language);
   managementDialog.querySelector<HTMLElement>('.management-resource-switcher')!.hidden = management === 'population';
   if (management !== 'population') managementDialog.querySelector<HTMLSelectElement>('#management-resource')!.value = management;
   if (management === 'population') {
     replaceContent(root, populationManagement());
+  } else if (management === 'reserves') {
+    replaceContent(root, resourceForecastPanel(state, language) || '<p class="notice">Establish a settlement first</p>');
   } else if (management === 'funds') {
     replaceContent(root, `<div class="treasury-balance">${icon('dollars')}<strong>${formatDollars(state.dollars, languageLocale)}</strong><small>FTH$</small></div>
       <p class="fineprint">Sell resources regularly to fund transport, recruitment and upgrades.</p>
@@ -754,7 +755,6 @@ function renderManagement(): void {
 }
 function openManagement(view: NonNullable<typeof management>): void {
   management = view;
-  if (view !== 'population') lastResourceManagement = view;
   render();
   if (!managementDialog.open) managementDialog.showModal();
 }
@@ -782,7 +782,7 @@ function renderSidebar(): void {
     <div class="explore-summary"><div class="settlement-card"><div class="settlement-card-body"><span class="mini-tag">${game.stage < 0 ? 'UNSETTLED' : stages[game.stage].name.toUpperCase()}</span>
     <div class="sidebar-stats"><span role="img" aria-label="${fmt(game.population)} residents">${icon('people')}<strong>${fmt(game.population)}</strong></span><span role="img" aria-label="${fmt(game.explored.length)} explored tiles">${icon('compass')}<strong>${fmt(game.explored.length)}</strong></span></div>
     ${next ? `<div class="next-stage"><span>${icon('arrow')} ${next.name}</span>${next.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} ${icon('people')}</span>` : ''}</div>${next.population ? meter(game.population, next.population, `Residents for ${next.name}`) : requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed)))}` : '<div class="complete-label">Capital complete</div>'}</div></div>
-    </div><div class="explore-upkeep">${resourceForecastPanel(state, language)}</div>
+    </div>
     <div class="sidebar-primary-actions" role="group" aria-label="Frequent actions">
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
@@ -1023,12 +1023,13 @@ function waterUpkeepPanel(compact = false): string {
     if (!use) return '';
     const readyAt = resource === 'water' ? upkeep.readyAt : state.settlementUpkeep!.readyAt;
     const label = `${translate(resource === 'water' ? 'Daily Water' : resource === 'wood' ? 'Wood heating' : 'Metal repairs', language)}: ${resourceFmt(resource, use.dailyConsumption)}/${translate('game day', language)}`;
-    const detail = use.shortage ? `${label}. ${translate('Supply shortage pauses advanced activity, not residents or buildings.', language)}` : label;
+    const detail = use.shortage ? `${label}. ${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}` : label;
     return `<a class="upkeep-meter${use.shortage ? ' shortage' : ''}" href="/market/?asset=${resource}&amp;side=buy" title="${escape(detail)}" aria-label="${escape(detail)}">${icon(resource)}<span class="vertical-consumption">${completionMeter(readyAt - worldDayMs, readyAt, label, true)}</span><strong>${resourceFmt(resource, use.dailyConsumption)}</strong><small>/${translate('game day', language)}${use.shortage ? ' !' : ''}</small></a>`;
   }).join('')}<a class="upkeep-manage" href="/settlement/#production" aria-label="${escape(translate('Manage production', language))}">${icon('settings')}</a></div>`;
   return `<div class="notice water-upkeep" role="status"><div class="water-upkeep-heading"><strong>Daily Water</strong>${costChips({ water: upkeep.dailyConsumption })}</div>
     <div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>
-    <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Water shortage pauses advanced activity, not residents.</p>' : ''}</div>
+    <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.</p>' : ''}</div>
+    ${state.populationCycle ? `<div class="water-upkeep-countdown"><span>${translate('Next population update', language)}</span><strong data-ready-at="${state.populationCycle.readyAt}" data-compact-time></strong></div><p class="fineprint">${translate('Fully supplied settlements grow 1% per game week, minimum one resident. Shortages reduce population by up to 5% per week; fractional losses carry forward. Below half the current tier requirement, settlements downgrade while keeping buildings and items.', language)}</p><p class="fineprint">${translate('Last weekly population change', language)}: ${state.populationCycle.lastChange > 0 ? '+' : ''}${fmt(state.populationCycle.lastChange)}</p>` : ''}
     <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>${settlementUpkeepPanel()}`;
 }
 function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal'): string {
@@ -1045,7 +1046,7 @@ function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal'): string
       ${compact ? completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)
         : `<p class="fineprint">${translate(explanation, language)}</p><div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>`}
       <a href="/market/?asset=${resource}&amp;side=buy">${icon('plus')}${translate(resource === 'wood' ? 'Buy Wood' : 'Buy Metal', language)}</a>
-      ${use.shortage ? `<small role="status">${translate('Supply shortage pauses advanced activity, not residents or buildings.', language)}</small>` : ''}</div>`;
+      ${use.shortage ? `<small role="status">${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}</small>` : ''}</div>`;
   }).join('');
 }
 function crewAllocationLimit(resource: Resource): number {
@@ -1091,7 +1092,7 @@ function workforcePanel(): string {
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
     <p class="fineprint">Every crew needs active residents and a full game week. Collect each resource to pay FTH$ transport for all workers. Auto-collection requires an active resource-specific item. Full storage pauses new work.</p>
-    <p class="fineprint">Residents consume Water, Wood for heating and Metal for repairs each game day. Climate changes demand. Shortages pause new exploration and recruitment without deleting residents or paid jobs.</p>
+    <p class="fineprint">Residents consume Water, Wood for heating and Metal for repairs each game day. Climate changes demand. Shortages pause new exploration and recruitment and gradually reduce population; paid jobs remain.</p>
     </details></details>
     <p class="fineprint"><span>Transport on next pickup</span>: ${costChips({ dollars: transport })} · <span>Next allocation</span>: <span data-ready-at="${work.cycleAt}"></span></p>
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
@@ -1243,7 +1244,7 @@ async function saveCrewAssignments(): Promise<void> {
 app.addEventListener('change', event => {
   if (event.target instanceof HTMLSelectElement && event.target.hasAttribute('data-management-resource')) {
     const view = event.target.value;
-    if (view === 'funds' || isResource(view)) openManagement(view);
+    if (view === 'funds' || view === 'reserves' || isResource(view)) openManagement(view);
     else toast('Invalid resource selection.', true);
     return;
   }
@@ -1304,7 +1305,7 @@ app.addEventListener('click', event => {
     }
     case 'population-management': openManagement('population'); break;
     case 'funds-management': openManagement('funds'); break;
-    case 'acquisition-management': openManagement(lastResourceManagement); break;
+    case 'acquisition-management': openManagement('reserves'); break;
     case 'resource-management': {
       const resource = resources.find(key => key === target.dataset.resource);
       if (resource) openManagement(resource);

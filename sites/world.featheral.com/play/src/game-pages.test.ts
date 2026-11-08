@@ -13,6 +13,13 @@ test('all nine game routes resolve directory and built entry URLs', () => {
   }
   for (const path of ['/', '/constructor/', '/unknown/']) assert.equal(gamePage(path), 'world');
 });
+test('crafting shares the chat bottom anchor and can cover the mobile header without blocking uncovered controls', () => {
+  const css = readFileSync(new URL('./world-chat.css', import.meta.url), 'utf8');
+  assert.match(css, /#app\.has-world-chat \.settlement-task-panel:has\(\[data-task="crafting"\]\)\{top:auto;bottom:calc\(var\(--canvas-footer\) \+ var\(--layout-gap\)\);height:auto;max-height:calc\(100dvh - var\(--scene-top\) - var\(--canvas-footer\) - var\(--layout-gap\)\)/);
+  assert.match(css, /@media\(max-width:900px\)\{\s*#app\.has-world-chat \.settlement-view:has\(\[data-task="crafting"\]\)\{z-index:7;pointer-events:none\}/);
+  assert.match(css, /\.settlement-task-panel:has\(\[data-task="crafting"\]\)\{max-height:calc\(100dvh - var\(--canvas-footer\) - var\(--layout-gap\)\*2\);pointer-events:auto\}/);
+  assert.match(css, /\.settlement-view:has\(\[data-task="crafting"\]\) \.settlement-dock\{pointer-events:auto\}/);
+});
 test('community and guide routes have Korean-first refreshable production entries', () => {
   const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
   for (const key of ['communicate', 'federation', 'journal', 'help', 'bank', 'contacts']) {

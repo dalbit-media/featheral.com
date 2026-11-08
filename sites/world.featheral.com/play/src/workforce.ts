@@ -32,7 +32,7 @@ export function emergencyCollection(pending: Stock, fees: Stock, dollars: number
 export function workforceCounts(population: number, work: Pick<Workforce, 'crews' | 'expeditions'>) {
   const gathering = Object.values(work.crews).reduce((sum, crew) => sum + crew.workers, 0);
   const exploring = work.expeditions.reduce((sum, expedition) => sum + expedition.workers, 0);
-  return { gathering, exploring, available: population - gathering - exploring,
+  return { gathering, exploring, available: Math.max(0, population - gathering - exploring),
     assignmentCapacity: Math.max(0, population - Math.max(2, exploring)) };
 }
 export function editableAllocation(work: Pick<Workforce, 'automatic' | 'crews' | 'allocation'>): Stock {

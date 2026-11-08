@@ -146,3 +146,9 @@
   #app.has-world-chat .settlement-task-panel,#app.has-world-chat .settlement-task-panel:has(.inventory-panel){left:auto;right:var(--layout-gap);width:min(clamp(560px,48vw,800px),calc(100% - var(--canvas-rail) - var(--layout-gap)*2))}
   #app.has-world-chat .settlement-task-body{padding:16px}
 }
+#app.has-world-chat .settlement-task-panel:has([data-task="crafting"]){top:auto;bottom:calc(var(--canvas-footer) + var(--layout-gap));height:auto;max-height:calc(100dvh - var(--scene-top) - var(--canvas-footer) - var(--layout-gap))}
+@media(max-width:900px){
+  #app.has-world-chat .settlement-view:has([data-task="crafting"]){z-index:7;pointer-events:none}
+  #app.has-world-chat .settlement-task-panel:has([data-task="crafting"]){max-height:calc(100dvh - var(--canvas-footer) - var(--layout-gap)*2);pointer-events:auto}
+  #app.has-world-chat .settlement-view:has([data-task="crafting"]) .settlement-dock{pointer-events:auto}
+}

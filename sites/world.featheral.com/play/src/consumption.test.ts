@@ -8,6 +8,15 @@ import { translate } from './i18n.ts';
 import { dollarsSlippage } from './dollars.ts';
 import { explorationQuote, nextExploration } from './workforce.ts';
 
+test('profit analysis confirmation states the fixed fee, expiry, replacement costs and explicit refresh charge', () => {
+  const quote = marketConsumption({ type: 'profit-analysis' })!;
+  assert.deepEqual(quote.costs, [{ asset: 'dollars', amount: 100 }]);
+  assert.match(quote.notes.join(' '), /one game day/);
+  assert.match(quote.notes.join(' '), /every ingredient/);
+  assert.match(quote.notes.join(' '), /report fee is separate/);
+  assert.match(quote.notes.join(' '), /Each explicit refresh costs FTH\$100/);
+});
+
 function fixture() {
   const account = createAccount(1000000);
   account.game.seed = 1542;

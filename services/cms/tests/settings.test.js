@@ -779,9 +779,11 @@ test("saved HTTP limits enforce exact byte boundaries and live timeout updates w
   const server = new EventEmitter();
   configureServer(server, settings);
   assert.equal(server.requestTimeout, 30000); assert.equal(server.headersTimeout, 30000);
+  assert.equal(server.keepAliveTimeout, 30000);
   settings.value.requestTimeoutSeconds = 120;
   for (const listener of settings.listeners) listener();
   assert.equal(server.requestTimeout, 120000); assert.equal(server.headersTimeout, 60000);
+  assert.equal(server.keepAliveTimeout, 60000);
   server.emit("close");
   assert.equal(settings.listeners.size, 0);
 });

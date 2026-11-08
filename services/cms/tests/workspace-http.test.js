@@ -63,6 +63,28 @@ async function fixture(t, env = {}, prepareNotes = () => {}) {
   }
   return { notes, creation, workspace, call, login, profiles, deliveries, handoffs, setPermissions: value => { permissions = value; } };
 }
+test("App mission API persists todos, rejects incomplete submissions and requires another reviewer", async t => {
+  const f = await fixture(t), lead = await f.login(undefined, "lead"), contributor = await f.login(undefined, "contributor");
+  const input = { title: "Mobile delivery", body: "Verify all acceptance criteria", division: "engineering", team: "engineering-general",
+    assignee: contributor.owner, status: "ready", todos: [{ id: "verify", label: "Verify mobile behavior", done: false }] };
+  const created = await f.call("/missions", input, { cookie: lead.cookie });
+  assert.equal(created.status, 200);
+  let mission = created.body;
+  const update = async (status, extras = {}, cookie = contributor.cookie) =>
+    f.call(`/missions/${mission.id}`, { ...mission, status, ...extras }, { cookie, method: "PUT" });
+  let result = await update("in_progress"); assert.equal(result.status, 200); mission = result.body;
+  assert.equal((await update("review", { evidence: "Test evidence" })).status, 400);
+  result = await update("in_progress", { todos: [{ ...input.todos[0], done: true }], evidence: "Test evidence" });
+  assert.equal(result.status, 200); mission = result.body;
+  const listed = (await f.call("/missions", undefined, { cookie: contributor.cookie })).body.missions.find(row => row.id === mission.id);
+  assert.deepEqual(listed.todos, [{ ...input.todos[0], done: true }]);
+  result = await update("review"); assert.equal(result.status, 200); mission = result.body;
+  assert.equal((await update("done")).status, 403);
+  result = await update("done", {}, lead.cookie); assert.equal(result.status, 200);
+  assert.equal(f.notes.balance(contributor.owner, "FTHS"), 0);
+  const compensation = (await f.call("/compensation", undefined, { cookie: contributor.cookie })).body;
+  assert.equal(compensation.accomplished, 1);
+});
 test("World App handoff shares identity, is origin-bound and single-use, and quizzes enforce Retry-After", async t => {
   const f = await fixture(t), wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
   f.profiles.set(owner, { username: "WorldMember", avatar: "https://example.test/avatar.png", bio: "Shared public bio." });

@@ -3,7 +3,7 @@ import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot 
 import type { Account } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { note } from '../src/engine.ts';
-import { inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingInputs, inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
 import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
@@ -13,6 +13,8 @@ import { poolPayment, poolPaymentUnits } from '../src/pool-pricing.ts';
 import { monetaryPolicy } from '../src/monetary-policy.ts';
 import type { CollectionQuote, Command } from '../src/api-types.ts';
 import { consumeTransportVoucher, transportQuote } from '../src/transport-items.ts';
+import { activeMarketAnalysis, marketAnalysisDuration, marketAnalysisFee } from '../src/market-analysis.ts';
+import type { MarketAnalysis } from '../src/market-analysis.ts';
 
 interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
@@ -31,6 +33,10 @@ function orderRow(row: Record<string, unknown>): Order {
 }
 export function parseMarketCommand(value: unknown): MarketCommand {
   const c = object(value);
+  if (c.type === 'profit-analysis') {
+    if (Object.keys(c).join() !== 'type') throw new ApiError(400, 'Invalid profit analysis command.');
+    return { type: 'profit-analysis' };
+  }
   if (c.type === 'fund-pool') {
     if (Object.keys(c).sort().join() !== 'asset,dollars,quantity,type' || !isMarketAsset(c.asset) || !isLiquidAsset(c.asset)
       || !positive(c.quantity, marketQuantityLimit(c.asset))) throw new ApiError(400, 'Invalid pool funding command.');
@@ -106,6 +112,8 @@ export class Exchange {
   constructor(db: SqliteDatabase, clockSpeed = 1) {
     this.db = db;
     this.clockSpeed = clockSpeed;
+    db.exec(`CREATE TABLE IF NOT EXISTS market_analysis (owner TEXT PRIMARY KEY, generatedAt INTEGER NOT NULL,
+      expiresAt INTEGER NOT NULL, data TEXT NOT NULL)`);
     db.exec(`CREATE TABLE IF NOT EXISTS market_pools (asset TEXT PRIMARY KEY, units INTEGER NOT NULL, dollars INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS market_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, asset TEXT NOT NULL,
       side TEXT NOT NULL, price INTEGER NOT NULL, quantity INTEGER NOT NULL, remaining INTEGER NOT NULL, status TEXT NOT NULL, createdAt INTEGER NOT NULL);
@@ -199,15 +207,29 @@ export class Exchange {
     }
     return steps;
   }
-  private priceChange(asset: MarketAsset, now: number, realDays: number, last: number): number | null {
+  private priceChange(asset: MarketAsset, now: number, realDays: number, last: number,
+    before: ReturnType<SqliteDatabase['prepare']>, after: ReturnType<SqliteDatabase['prepare']>): number | null {
     // Fill times use the accelerated server clock; convert the real-day window into server time.
     const cutoff = now - realDays * 86400000 * this.clockSpeed;
-    const reference = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time <= ? ORDER BY time DESC, id DESC LIMIT 1').get(asset, cutoff)
-      ?? this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time > ? ORDER BY time ASC, id ASC LIMIT 1').get(asset, cutoff);
+    const reference = before.get(asset, cutoff) ?? after.get(asset, cutoff);
     const base = Number(reference?.price);
     return Number.isFinite(base) && base > 0 ? (last - base) / base * 100 : null;
   }
   read(owner: string, account: Account, now: number, realTime: number, asset: MarketAsset, quantity: number): ExchangeResult {
+    const pools = new Map(this.db.prepare('SELECT * FROM market_pools').all().map(row => [String(row.asset), row]));
+    const depths = new Map(this.db.prepare('SELECT * FROM market_resource_depth').all().map(row => [String(row.asset), row]));
+    const pinDepth = this.db.prepare('INSERT OR IGNORE INTO market_resource_depth VALUES(?,?,?)');
+    const floors = marketAssets.map(asset => `('${asset}',${dollarsUnits(marketPriceFloor(asset))})`).join(',');
+    const offers = new Map(this.db.prepare(`WITH floors(asset,floor) AS (VALUES ${floors})
+      SELECT o.asset,MAX(CASE WHEN side='buy' THEN price END) AS bid,MIN(CASE WHEN side='sell' THEN price END) AS ask,
+        SUM(CASE WHEN side='sell' AND owner!=? THEN remaining ELSE 0 END) AS quantity
+      FROM market_orders o JOIN sessions s ON s.id=o.owner JOIN floors f ON f.asset=o.asset
+      WHERE status='open' AND s.expires>? AND price>=f.floor GROUP BY o.asset`)
+      .all(owner, realTime).map(row => [String(row.asset), row]));
+    const latest = new Map(this.db.prepare(`SELECT p.asset,f.price FROM market_pools p LEFT JOIN market_fills f ON
+      f.id=(SELECT id FROM market_fills WHERE asset=p.asset ORDER BY id DESC LIMIT 1)`).all().map(row => [String(row.asset), row.price]));
+    const before = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time <= ? ORDER BY time DESC, id DESC LIMIT 1');
+    const after = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? AND time > ? ORDER BY time ASC, id ASC LIMIT 1');
     const level = (side: MarketSide) => this.db.prepare(`SELECT price, SUM(remaining) AS quantity FROM market_orders o
       JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = ? AND status = 'open' AND s.expires > ? AND price >= ?
       GROUP BY price ORDER BY price ${side === 'buy' ? 'DESC' : 'ASC'} LIMIT 12`).all(asset, side, realTime, dollarsUnits(marketPriceFloor(asset)))
@@ -222,19 +244,28 @@ export class Exchange {
         venue: row.venue === 'players' ? 'players' : 'system', ...(row.buyer !== undefined ? { side: row.buyer === owner ? 'buy' as const : 'sell' as const } : {}) }));
     const market: MarketSnapshot = {
       asset, quantity, bids: level('buy'), asks: level('sell'), quotes: { buy: quote('buy'), sell: quote('sell') },
+      analysis: this.analysis(owner, now),
       tickers: marketAssets.map(asset => {
-        const pool = this.pool(asset), last = this.db.prepare('SELECT price FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 1').get(asset);
+        const row = pools.get(asset)!;
+        const pool: Pool = { units: Number(row.units), dollars: Number(row.dollars) };
+        const depth = depths.get(asset);
+        if (depth) { pool.depthUnits = BigInt(String(depth.units)); pool.depthDollars = BigInt(String(depth.dollars)); }
+        else if (isLiquidAsset(asset) && pool.units > 0 && pool.dollars > 0) {
+          pool.depthUnits = BigInt(pool.units) * 9n; pool.depthDollars = BigInt(pool.dollars) * 9n;
+          pinDepth.run(asset, pool.depthUnits.toString(), pool.depthDollars.toString());
+        }
+        const last = latest.get(asset), offer = offers.get(asset);
         const pooled = isLiquidAsset(asset) && pool.dollars > 0;
         const floor = dollarsUnits(marketPriceFloor(asset));
-        const bid = this.db.prepare(`SELECT MAX(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'buy' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
-        const ask = this.db.prepare(`SELECT MIN(price) AS price FROM market_orders o JOIN sessions s ON s.id = o.owner WHERE asset = ? AND side = 'sell' AND status = 'open' AND s.expires > ? AND price >= ?`).get(asset, realTime, floor);
         const poolBid = pooled && poolSideAvailable(pool, 'sell', floor) ? poolCost(pool, 'sell', 1) : 0;
         const poolAsk = pooled && poolSideAvailable(pool, 'buy', floor) ? poolCost(pool, 'buy', 1) : 0;
-        return { asset, bid: Math.max(poolBid >= floor ? poolBid : 0, Number(bid?.price ?? 0)) / dollarsScale,
-          ask: Math.min(poolAsk >= floor ? poolAsk : Number.MAX_SAFE_INTEGER, Number(ask?.price ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
-          last: last ? Number(last.price) / dollarsScale : null,
-          change24h: last ? this.priceChange(asset, now, 1, Number(last.price)) : null,
-          change7d: last ? this.priceChange(asset, now, 7, Number(last.price)) : null };
+        const availableQuantity = Number(offer?.quantity ?? 0) + (poolAsk >= floor ? Math.max(0, pool.units - (pool.depthUnits ? 0 : 1)) : 0);
+        if (!Number.isSafeInteger(availableQuantity) || availableQuantity < 0) throw new ApiError(409, 'Market quantity exceeds safe limits.');
+        return { asset, bid: Math.max(poolBid >= floor ? poolBid : 0, Number(offer?.bid ?? 0)) / dollarsScale,
+          ask: Math.min(poolAsk >= floor ? poolAsk : Number.MAX_SAFE_INTEGER, Number(offer?.ask ?? Number.MAX_SAFE_INTEGER)) / dollarsScale,
+          availableQuantity, last: last == null ? null : Number(last) / dollarsScale,
+          change24h: last == null ? null : this.priceChange(asset, now, 1, Number(last), before, after),
+          change7d: last == null ? null : this.priceChange(asset, now, 7, Number(last), before, after) };
       }),
       history: fills(this.db.prepare('SELECT id, asset, quantity, dollars, price, time, venue FROM market_fills WHERE asset = ? ORDER BY id DESC LIMIT 120').all(asset)).reverse(),
       trades: fills(this.db.prepare('SELECT * FROM market_fills WHERE buyer = ? OR seller = ? ORDER BY id DESC LIMIT 30').all(owner, owner)),
@@ -243,6 +274,41 @@ export class Exchange {
         .map(row => { const { owner: _owner, ...order } = orderRow(row); return { ...order, price: order.price / dollarsScale }; }),
     };
     return { ...snapshot(account), market };
+  }
+  private analysis(owner: string, now: number): MarketAnalysis | null {
+    const row = this.db.prepare('SELECT data FROM market_analysis WHERE owner=? AND generatedAt<=? AND expiresAt>?').get(owner, now, now);
+    return row ? activeMarketAnalysis(JSON.parse(String(row.data)) as MarketAnalysis, now) : null;
+  }
+  private purchaseAnalysis(owner: string, account: Account, now: number, realTime: number): void {
+    const fee = dollarsUnits(marketAnalysisFee);
+    if (account.game.dollars < fee) throw new ApiError(409, 'Not enough FTH$ for profit analysis.');
+    const quote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
+      const steps = this.plan(owner, asset, side, quantity, realTime);
+      const units = steps.reduce((sum, step) => sum + step.dollars, 0);
+      return steps.reduce((sum, step) => sum + step.quantity, 0) === quantity && units > 0 && Number.isSafeInteger(units) ? units : null;
+    };
+    const report: MarketAnalysis = { generatedAt: now, expiresAt: now + marketAnalysisDuration, fee: marketAnalysisFee,
+      items: craftableKeys.map(item => {
+        const recipe = craftingCost(item), craftingFee = dollarsUnits(recipe.dollars ?? 0);
+        const inputs = new Map<MarketAsset, number>();
+        for (const [asset, quantity] of [...Object.entries(recipe).filter(([asset]) => asset !== 'dollars'), ...Object.entries(craftingInputs(item))]) {
+          if (!isMarketAsset(asset)) throw new ApiError(409, 'Crafting ingredient has no market.');
+          if (quantity && quantity > 0) inputs.set(asset, (inputs.get(asset) ?? 0) + quantity);
+        }
+        const ingredients = [...inputs].map(([asset, quantity]) => ({ asset, quantity, units: quote(asset, 'buy', quantity) }));
+        const total = craftingFee + ingredients.reduce((sum, input) => sum + (input.units ?? 0), 0);
+        const cost = ingredients.every(input => input.units !== null) && Number.isSafeInteger(total) ? total : null;
+        const revenue = quote(item, 'sell', 1);
+        return { item, craftingFee: craftingFee / dollarsScale,
+          ingredients: ingredients.map(({ asset, quantity, units }) => ({ asset, quantity, dollars: units === null ? null : units / dollarsScale })),
+          cost: cost === null ? null : cost / dollarsScale, revenue: revenue === null ? null : revenue / dollarsScale,
+          profit: cost === null || revenue === null ? null : (revenue - cost) / dollarsScale };
+      }) };
+    if (!Number.isSafeInteger(report.expiresAt)) throw new ApiError(409, 'Server clock out of range.');
+    if (!report.items.some(item => item.profit !== null)) throw new ApiError(409, 'Profit analysis is unavailable because ingredient or sale liquidity is missing. No fee was charged.');
+    this.db.prepare(`INSERT INTO market_analysis VALUES (?,?,?,?) ON CONFLICT(owner) DO UPDATE SET
+      generatedAt=excluded.generatedAt,expiresAt=excluded.expiresAt,data=excluded.data`).run(owner, report.generatedAt, report.expiresAt, JSON.stringify(report));
+    account.game.dollars -= fee;
   }
   halfQuote(owner: string, account: Account, realTime: number): Snapshot & { halfSale: HalfSaleQuote } {
     const sales = marketResources.flatMap(asset => {
@@ -294,7 +360,8 @@ export class Exchange {
     if (receipt) {
       if (receipt.request !== request) throw new ApiError(409, 'Idempotency key already used for a different request.');
       const saved = JSON.parse(String(receipt.result)) as ExchangeResult;
-      return { ...saved, waterUpkeep: restoreSnapshotUpkeep(saved, account, now) };
+      return { ...saved, market: { ...saved.market, analysis: activeMarketAnalysis(saved.market.analysis, now) },
+        waterUpkeep: restoreSnapshotUpkeep(saved, account, now) };
     }
     const command = parseMarketCommand(body.command);
     if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
@@ -303,7 +370,10 @@ export class Exchange {
     accrue(account, now);
     if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
     let asset: MarketAsset;
-    if (command.type === 'cancel') {
+    if (command.type === 'profit-analysis') {
+      asset = 'wood';
+      this.purchaseAnalysis(owner, account, now, realTime);
+    } else if (command.type === 'cancel') {
       const row = this.db.prepare("SELECT * FROM market_orders WHERE id = ? AND owner = ? AND status = 'open'").get(command.orderId, owner);
       if (!row) throw new ApiError(409, 'Open order not found.');
       const order = orderRow(row);
@@ -328,7 +398,8 @@ export class Exchange {
     }
     this.check(account);
     account.revision++; account.lastActionAt = realTime;
-    const message = note(account.game, command.type === 'cancel' ? 'Market order cancelled. Escrow returned.'
+    const message = note(account.game, command.type === 'profit-analysis' ? 'Latest profit analysis purchased. Access expires after one game day.'
+      : command.type === 'cancel' ? 'Market order cancelled. Escrow returned.'
       : command.type === 'fund-pool' ? 'Existing FTH$ and owned assets donated to market liquidity.'
         : command.type === 'sell-half' ? 'Half of your owned resources sold for FTH$.' : 'Market order processed.');
     const result = { ...this.read(owner, account, now, realTime, asset, 1), message };
