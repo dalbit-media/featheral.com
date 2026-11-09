@@ -252,7 +252,6 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app .exchange-instrument{grid-column:1;grid-row:2}
 #app .exchange-chart-card{grid-column:1;grid-row:3}
 #app .exchange-order-book{grid-column:1;grid-row:4}
-#app .market-chart{min-height:90px;max-height:140px}
 #app .market-chart-empty{min-height:90px;padding:12px}
 #app .exchange-book{margin-top:8px;gap:10px}
 #app .exchange-pool{margin-top:8px;padding:10px;gap:5px}

@@ -19,8 +19,8 @@ import { ResourceSaleQuantity, salePercentages, saleQuantity } from './resource-
 import { buyingBudgetUnits, isMarketPercentage } from './market-buy-quantity.ts';
 import type { BuyQuantityRequest, MarketPercentage } from './market-buy-quantity.ts';
 
-import { chartIntervals, priceHistoryChart } from './market-chart.ts';
-import type { ChartInterval, ChartStyle } from './market-chart.ts';
+import { MarketChartView } from './market-chart-view.ts';
+import './market-chart.css';
 export { priceHistoryChart } from './market-chart.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
@@ -45,9 +45,7 @@ export class Marketplace {
   private catalogMarkup = '';
   private priceEdited = false;
   private quantityPercent: MarketPercentage | null = null;
-  private chartInterval: ChartInterval = 'auto';
-  private chartStyle: ChartStyle = 'candles';
-  private chartMarkup = '';
+  private chart: MarketChartView;
   private pending = false;
   private fresh = false;
   private sequence = 0;
@@ -63,7 +61,7 @@ export class Marketplace {
       <a class="market-bank-link" id="gold" href="/bank/">Wallet and staking ${icon('chevron')}</a>
       <div class="exchange-layout"><aside class="exchange-catalog"><details class="exchange-catalog-choice" data-market-catalog><summary><span class="catalog-current"><span>Trading item</span><strong data-market-selected>${this.name(this.asset)}</strong></span><span class="catalog-current-price" data-market-selected-price></span>${icon('chevron')}</summary><div class="exchange-catalog-body"><div class="catalog-filters"><label class="exchange-search">Search items<input type="search" data-market-search placeholder="Search items"></label><label>Category<select data-market-category><option value="all">All items</option><option value="resources">Resources</option><option value="equipment">Lighting</option><option value="decorations">Decorations</option><option value="collectibles">Collectibles</option></select></label><label>Sort by<select data-market-sort><option value="name">Name</option><option value="buy-low">Lowest buy price</option><option value="sell-high">Highest sell price</option><option value="owned">Most owned</option><option value="change24h-high">Top 24h gainers</option><option value="change24h-low">Top 24h losers</option><option value="change7d-high">Top 7d gainers</option><option value="change7d-low">Top 7d losers</option></select></label></div><div class="catalog-toolbar"><label class="catalog-owned-filter"><input type="checkbox" data-market-owned>Owned only</label><span class="catalog-count"><strong data-market-count>0</strong> <span>Markets</span> · <span>Prices in FTH$</span></span><div class="catalog-view-switch" role="group" aria-label="Market view"><button type="button" data-market-view="grid" aria-pressed="${this.catalogView === 'grid'}">Grid</button><button type="button" data-market-view="table" aria-pressed="${this.catalogView === 'table'}">Table</button></div></div><div class="exchange-assets" data-market-assets tabindex="0" role="region" aria-label="Tradable markets"></div></div></details><div class="catalog-status-row"><p class="exchange-catalog-status" data-market-status role="status">Loading prices...</p><button class="button" type="button" data-market-refresh hidden>Retry</button></div></aside>
       <div class="exchange-main"><section class="exchange-card exchange-instrument"><div data-market-instrument></div></section>
-      <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span></div><div class="chart-toolbar"><div class="catalog-view-switch" role="group" aria-label="Candle interval">${chartIntervals.map(interval => `<button type="button" data-chart-interval="${interval}" aria-pressed="${interval === this.chartInterval}">${translate(interval === 'auto' ? 'Auto' : interval, this.language)}</button>`).join('')}</div><div class="catalog-view-switch" role="group" aria-label="Chart style"><button type="button" data-chart-style="candles" aria-pressed="true">Candles</button><button type="button" data-chart-style="line" aria-pressed="false">Line</button></div></div><div data-market-chart></div></section>
+      <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span></div><div data-market-chart></div></section>
       <div class="exchange-trading"><section class="exchange-card exchange-order-book"><h2>Player offers</h2><div data-market-book></div></section>
       <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" inputmode="decimal" min="1" max="10000" step="1" required value="1" aria-describedby="market-quantity-help"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount">${salePercentages.map(percent => `<button type="button" data-market-percent="${percent}" aria-pressed="false">${percent}%</button>`).join('')}</div><p id="market-quantity-help" data-market-quantity-help class="fineprint"></p><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>All items use demand-driven spot prices and player offers. One equipped or placed copy is protected; spare copies can be sold. Identical owned and waiting items share one bag slot. Collectibles trade one at a time.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
       <section class="exchange-card exchange-history-card"><h2>My offers</h2><div data-market-orders></div></section><section class="exchange-card exchange-history-card"><h2>Recent purchases and sales</h2><div data-market-trades></div></section></div></div>`;
@@ -120,13 +118,7 @@ export class Marketplace {
     clear.dataset.marketClear = ''; clear.textContent = translate('Reset filters', this.language);
     root.querySelector('.catalog-toolbar')!.append(clear);
     root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = true;
-    const inspection = (event: Event): void => {
-      const candle = event.target instanceof Element ? event.target.closest('[data-chart-candle]') : null;
-      if (candle) this.root.querySelector<HTMLElement>('[data-chart-inspection]')!.textContent = candle.getAttribute('aria-label');
-    };
-    root.addEventListener('pointerover', inspection);
-    root.addEventListener('pointerdown', inspection);
-    root.addEventListener('focusin', inspection);
+    this.chart = new MarketChartView(root.querySelector<HTMLElement>('.exchange-chart-card')!, this.language);
     this.configureQuantity();
     root.querySelectorAll<HTMLButtonElement>('[data-market-side]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSide === this.side)));
     root.addEventListener('input', event => {
@@ -189,9 +181,6 @@ export class Marketplace {
         if (sort) { this.sort = sort; this.root.querySelector<HTMLSelectElement>('[data-market-sort]')!.value = sort; this.catalog(); }
       }
       if (button.dataset.marketView === 'grid' || button.dataset.marketView === 'table') { this.catalogView = button.dataset.marketView; this.catalog(); }
-      const interval = chartIntervals.find(value => value === button.dataset.chartInterval);
-      if (interval) { this.chartInterval = interval; this.paint(); }
-      if (button.dataset.chartStyle === 'candles' || button.dataset.chartStyle === 'line') { this.chartStyle = button.dataset.chartStyle; this.paint(); }
       if (button.hasAttribute('data-market-refresh')) void this.refresh();
       if (this.pending || confirmationOpen()) return;
       if (isMarketAsset(button.dataset.marketAsset)) {
@@ -201,7 +190,7 @@ export class Marketplace {
         if (button.dataset.marketQuickSide === 'buy' || button.dataset.marketQuickSide === 'sell') { this.side = button.dataset.marketQuickSide; this.mode = 'spot'; }
         this.configureQuantity(true);
         this.catalog(); this.preview();
-        this.root.querySelector('[data-market-chart]')!.innerHTML = '<p class="fineprint">Loading prices...</p>';
+        this.chart.update([], this.asset);
         this.root.querySelector('[data-market-book]')!.innerHTML = '<p class="fineprint">Loading prices...</p>';
         localize(this.root);
         this.rememberSelection(); void this.refresh();
@@ -439,8 +428,6 @@ export class Marketplace {
   }
   private paint(): void {
     if (!this.data || this.data.market.asset !== this.asset) return;
-    const historyOpen = this.root.querySelector<HTMLDetailsElement>('.market-chart-data')?.open ?? false;
-    const historyFocused = document.activeElement?.matches('.market-chart-data summary') ?? false;
     const focusedOrder = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.marketCancel : undefined;
     const focusedLevel = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.marketLevel : undefined;
     const focusedPrice = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.marketLevelPrice : undefined;
@@ -454,17 +441,7 @@ export class Marketplace {
     });
     const market = this.data.market;
     this.balances();
-    this.root.querySelectorAll<HTMLButtonElement>('[data-chart-interval]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.chartInterval === this.chartInterval)));
-    this.root.querySelectorAll<HTMLButtonElement>('[data-chart-style]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.chartStyle === this.chartStyle)));
-    const focusedCandle = document.activeElement?.getAttribute('data-chart-candle');
-    const chart = this.root.querySelector<HTMLElement>('[data-market-chart]')!;
-    const chartMarkup = priceHistoryChart(market.history, this.language, this.chartInterval, this.chartStyle);
-    if (chartMarkup !== this.chartMarkup || !chart.querySelector('.market-chart, .market-chart-empty')) {
-      chart.innerHTML = chartMarkup; this.chartMarkup = chartMarkup;
-      if (focusedCandle) chart.querySelector<SVGElement>(`[data-chart-candle="${focusedCandle}"]`)?.focus({ preventScroll: true });
-    }
-    const historyDetails = this.root.querySelector<HTMLDetailsElement>('.market-chart-data');
-    if (historyDetails) historyDetails.open = historyOpen;
+    this.chart.update(market.history, this.asset);
     const levels = (side: 'bids' | 'asks') => `<div class="${side}"><h3>${side === 'bids' ? 'Buying' : 'Selling'}</h3><table><thead><tr><th>Price each</th><th>Amount</th></tr></thead><tbody>${market[side].map(level => `<tr><td><button type="button" class="book-price" data-market-level="${side === 'bids' ? 'sell' : 'buy'}" data-market-level-price="${level.price}" ${this.pending ? 'disabled' : ''}>${this.price(level.price)}</button></td><td>${this.fmt(level.quantity)}</td></tr>`).join('') || '<tr><td colspan="2">No offers yet.</td></tr>'}</tbody></table></div>`;
     const quotedAmount = this.fresh && market.quantity === this.quantity();
     const pricing = 'All assets use cost/effect-based starting prices, scarcity-sized pools and a 1% spread. Sale liquidity converts available origin FTHG at the active Gold rate. After origin exhaustion, only remaining pool funds and player bids pay for sales.';
@@ -478,7 +455,6 @@ export class Marketplace {
     for (const { section, left, top } of scrollPositions) {
       this.root.querySelector(`[data-market-${section}] .market-table-scroll`)?.scrollTo(left, top);
     }
-    if (historyFocused) this.root.querySelector<HTMLElement>('.market-chart-data summary')?.focus({ preventScroll: true });
     if (focusedOrder) this.root.querySelector<HTMLButtonElement>(`[data-market-cancel="${focusedOrder}"]`)?.focus({ preventScroll: true });
     for (const { side, left, top } of bookScroll) this.root.querySelector(`.exchange-book .${side}`)?.scrollTo(left, top);
     if (focusedLevel && focusedPrice) this.root.querySelector<HTMLButtonElement>(`[data-market-level="${focusedLevel}"][data-market-level-price="${focusedPrice}"]`)?.focus({ preventScroll: true });

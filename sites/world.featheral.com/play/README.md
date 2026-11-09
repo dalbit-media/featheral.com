@@ -83,8 +83,19 @@ rarity and crafting tier; grid and sortable-table views share the same results.
 
 Price history defaults to OHLC candles with volume bars and a closing-price
 line alternative. Auto groups the available history into roughly 40 candles;
-1h, 4h and 1d intervals use the game clock in UTC. Hover or keyboard-focus a
-candle for its open, high, low, close and volume. Only the latest 120 executed
+5m, 15m, 1h, 4h and 1d intervals use the game clock in UTC. The chart spans the
+full marketplace width, appears before the mobile order ticket, and can open
+in a fullscreen dialog (Escape or Close restores focus). Its axes use actual
+panel dimensions so labels do not shrink with the screen.
+
+Use 1D/1W/1M/All ranges, drag to pan, pinch or Ctrl/Command-scroll to zoom,
+or use the navigation buttons. Normal scrolling remains page scrolling.
+Arrow keys/Home/End inspect candles; +/- zoom. A crosshair exposes candle
+time and OHLC/volume details. Volume and 5/20-candle moving averages are
+optional; averages use recorded candles, not fabricated empty intervals,
+and require a complete period. Ranges end at the latest recorded trade,
+not wall-clock time. Zoom and pan survive price refreshes; Reset restores
+all available history. Only the latest 120 executed
 trades are available; missing intervals stay empty, not fabricated or carried
 forward. This is a trade-history chart, not a guaranteed complete time series.
 
