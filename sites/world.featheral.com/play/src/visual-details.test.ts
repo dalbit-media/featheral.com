@@ -31,6 +31,10 @@ test('inventory pins equipped stacks first, keeps filters and pages, and provide
     assert.equal((html.match(/data-equipped="true"/g) ?? []).length, 4);
     assert.equal((html.match(/class="inventory-equipped-label"/g) ?? []).length, 4);
     assert.doesNotMatch(html, /activity-equipment-slots/);
+    assert.doesNotMatch(html, /inventory-hint/);
+    const filters = [...html.matchAll(/data-action="inventory-filter"[^>]*>(.*?)<\/button>/g)];
+    assert.equal(filters.length, 8);
+    assert.ok(filters.every(match => match[1].includes('class="icon ') && match[1].includes('<span>')));
     for (const id of slots) {
       assert.ok(html.includes(`data-inventory-preview="inventory-preview-${id}"`));
       assert.ok(html.includes(`id="inventory-preview-${id}" popover="auto"`));
@@ -44,6 +48,15 @@ test('inventory pins equipped stacks first, keeps filters and pages, and provide
     assert.doesNotMatch(decorations, /data-equipped="true"/);
   }
   assert.deepEqual(state, before);
+});
+
+test('master merchant is selectable with its full details and review action', () => {
+  const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
+  state.inventory.items = ['merchant-charter'];
+  const html = inventoryPanel(state, () => '', 'bulk', 'en', 'settlement', 0, 'merchant-charter');
+  assert.match(html, /data-action="inventory-select" data-item="merchant-charter"/);
+  assert.match(html, /data-action="auto-craft"/);
+  assert.ok(html.includes(itemDescription('merchant-charter').effect));
 });
 
 test('settlement tier badge shows the exact civilization stage even with a custom settlement name', () => {

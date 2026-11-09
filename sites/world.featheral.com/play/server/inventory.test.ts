@@ -13,8 +13,46 @@ import { craft, collectFinds, findCollectible, inventory } from './inventory.ts'
 import { craftingCost } from '../src/items.ts';
 import { gameConsumption } from '../src/consumption.ts';
 import { cellKey, legacySpaceCells, settlementPositions } from '../src/settlement-layout.ts';
+import { craftingMaximum } from '../src/items.ts';
+import { createAccount as createNewAccount } from './economy.ts';
+import { marketBasePrice } from '../src/market.ts';
 
 const start = 1000000;
+test('starter recipes craft at zero dollars with materials, preserve reserve seeds and retain other fees', () => {
+  const account = createNewAccount(start);
+  account.game.stage = 0;
+  account.game.seed = 1542;
+  account.game.dollars = 0;
+  account.game.stock = { wood: 20, water: 20, metal: 20, oil: 20 };
+  for (let x = -10; x <= 10; x++) for (let y = -10; y <= 10; y++) account.game.explored.push(`${x},${y}`);
+  const bag = inventory(account);
+  for (const item of ['fire', 'torch', 'logseat', 'flowerbed'] as const) {
+    const cost = craftingCost(item), before = structuredClone(account.game.stock);
+    assert.equal(cost.dollars, 0);
+    assert.equal(craftingCost(item, 10).dollars, 0);
+    assert.ok(craftingMaximum(account.game, bag, item) > 0);
+    const quote = gameConsumption(snapshot(account), { type: 'craft', item })!;
+    assert.ok(quote.costs.every(entry => entry.asset !== 'dollars' || entry.amount === 0));
+    craft(account, item);
+    assert.ok(bag.items.includes(item));
+    assert.equal(account.game.dollars, 0);
+    for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
+      assert.equal(account.game.stock[resource], before[resource] - (cost[resource] ?? 0));
+  }
+  assert.equal(bag.equipped, 'torch');
+  assert.equal(marketBasePrice('fire'), 112);
+  assert.equal(marketBasePrice('torch'), 192);
+  assert.ok((craftingCost('lamp').dollars ?? 0) > 0);
+  assert.ok((craftingCost('bench').dollars ?? 0) > 0);
+  const before = structuredClone(account);
+  assert.throws(() => craft(account, 'lamp'), /Not enough resources/);
+  assert.deepEqual(account, before);
+  account.game.stock.wood = 0;
+  const noMaterials = structuredClone(account);
+  assert.equal(craftingMaximum(account.game, bag, 'torch'), 0);
+  assert.throws(() => craft(account, 'torch'), /Not enough resources/);
+  assert.deepEqual(account, noMaterials);
+});
 test('batch crafting is atomic, totals confirmation costs and counts reserved slots', () => {
   const account = settled(), bag = inventory(account);
   account.game.stock = { wood: 10000, water: 10000, metal: 10000, oil: 10000 };

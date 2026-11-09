@@ -229,6 +229,8 @@ test('starting balance is a hard fee ceiling even when sales create more funds; 
   try {
     h.store.transaction(h.user.token, session => {
       session.account.game.dollars = 15 * dollarsScale;
+      session.account.game.stock.wood = 0;
+      session.account.game.stock.water = 0;
       const bag = inventory(session.account);
       bag.items = [merchantCharter, 'craft-batch-10', 'craft-batch-10', 'craft-batch-10'];
       bag.marketReserved = ['craft-batch-100'];

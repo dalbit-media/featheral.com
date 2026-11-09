@@ -1110,8 +1110,8 @@ function renderSettlement(): void {
     ${pendingPlacement ? `<div class="placement-prompt" role="status"><span>${translate(`Choose an empty land cell for ${settlementEntityName(pendingPlacement.entity)}.`, language)}</span><button class="button" data-action="cancel-placement">Cancel placement</button></div>` : ''}
     <section class="settlement-task-panel" id="settlement-task-panel" role="region" aria-labelledby="settlement-task-title" ${settlementTask ? '' : 'hidden'}>
       <header class="settlement-task-heading"><h2 id="settlement-task-title" tabindex="-1">${icon(settlementTasks[settlementTask ?? 'overview'].icon)}${settlementTasks[settlementTask ?? 'overview'].label}</h2><button class="task-close" data-action="close-settlement-task" aria-label="Close settlement panel">${icon('close')}</button></header>
-      ${settlementSectionNavigation(settlementTask, language)}
-      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}"><p class="settlement-task-description">${translate(settlementTasks[settlementTask ?? 'overview'].description, language)}</p>${content}</div>
+      ${settlementTask === 'inventory' ? '' : settlementSectionNavigation(settlementTask, language)}
+      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}">${settlementTask === 'inventory' ? '' : `<p class="settlement-task-description">${translate(settlementTasks[settlementTask ?? 'overview'].description, language)}</p>`}${content}</div>
     </section>
     <nav class="settlement-dock" aria-label="Settlement actions">${settlementDockTasks.map(task => {
       const badge = task === 'inventory' ? state.inventory.pending.length : 0;

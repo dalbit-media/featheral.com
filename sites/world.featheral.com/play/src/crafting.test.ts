@@ -40,7 +40,7 @@ test('30 decorations cover all nine civilization levels with distinct artwork, r
     assert.match(itemArt(id), /<svg viewBox="0 0 64 64"/);
     assert.doesNotMatch(decorationDrawing(id), /undefined|NaN/);
     assert.notEqual(translate(itemName(id), 'ko'), itemName(id));
-    assert.ok(Object.values(decorationItems[id].cost).every(amount => Number.isSafeInteger(amount) && amount > 0));
+    assert.ok(Object.entries(decorationItems[id].cost).every(([resource, amount]) => Number.isSafeInteger(amount) && (resource === 'dollars' ? amount >= 0 : amount > 0)));
     assert.deepEqual(parseCommand({ type: 'craft', item: id, quantity: 10 }), { type: 'craft', item: id, quantity: 10 });
   }
   assert.equal(Object.hasOwn(decorationItems.fountain.cost, 'wood'), false);
@@ -94,7 +94,7 @@ test('collector recipe 4/8 discloses usable copies only, excluding market escrow
   assert.match(recipe, /Metal auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
   assert.match(recipe, /Oil auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
 });
-test('every crafting recipe charges FTH$ per copy without mutating recipes or reserve seed prices', () => {
+test('only four starter recipes waive FTH$ per copy without mutating recipes or reserve seed prices', () => {
   const recipes = structuredClone(craftableItems);
   const prices = craftableKeys.map(marketBasePrice);
   const state = fixture();
@@ -102,8 +102,9 @@ test('every crafting recipe charges FTH$ per copy without mutating recipes or re
   assert.doesNotThrow(() => craftingPanel(state, () => '', 'all'));
   for (const item of craftableKeys) {
     const cost = craftingCost(item);
-    assert.ok(cost.dollars! >= 1, item);
-    assert.equal(cost.dollars, Math.max(1, withDollarFee(craftableItems[item].cost).dollars / 10), item);
+    const starter = ['fire', 'torch', 'logseat', 'flowerbed'].includes(item);
+    assert.ok(starter ? cost.dollars === 0 : cost.dollars! >= 1, item);
+    assert.equal(cost.dollars, starter ? 0 : Math.max(1, withDollarFee(craftableItems[item].cost).dollars / 10), item);
     for (const quantity of [1, 10, 20, 50, 100]) {
       const expectedDollars = dollarsUnits(cost.dollars!) * quantity / dollarsScale;
       assert.equal(craftingCost(item, quantity).dollars, expectedDollars);
@@ -119,7 +120,7 @@ test('every crafting recipe charges FTH$ per copy without mutating recipes or re
         assert.ok(Number.isSafeInteger(cost[resource as keyof typeof cost]));
       }
   }
-  assert.equal(craftingCost('logseat').dollars, 2.4);
+  assert.equal(craftingCost('logseat').dollars, 0);
   assert.equal(craftingCost('bench').dollars, 10);
   assert.equal(craftingCost('collector-wood-4').dollars, 1);
   assert.equal(craftingCost('lantern').dollars, 1);
@@ -137,6 +138,13 @@ test('server requires the shared crafting fee for every recipe and spends nothin
     bag.items = Object.entries(craftingIngredients(item)).flatMap(([id, count]) => Array.from({ length: count }, () => id as typeof bag.items[number]));
     inventory(account);
     const fee = craftingCost(item).dollars!;
+    if (fee === 0) {
+      account.game.dollars = 0;
+      assert.ok(craftingMaximum(account.game, bag, item) > 0, item);
+      craft(account, item);
+      assert.equal(account.game.dollars, 0, item);
+      continue;
+    }
     account.game.dollars = fee * 10000 - 1;
     assert.equal(craftingMaximum(account.game, bag, item), 0, item);
     const before = structuredClone(account);

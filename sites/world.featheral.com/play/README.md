@@ -111,6 +111,17 @@ The grid fills the panel width. Hover or keyboard-focus a slot for a bounded
 item-detail popover; tap to inspect and select an owned item for its ordinary
 actions. Reserved-only stacks can be inspected without making them usable.
 Escape or clicking outside dismisses the popover.
+Previews are bounded to the space above or below the slot and never intercept
+pointer clicks. Select an item to read its full details below the grid.
+The inventory panel uses compact icon filters and omits the redundant section
+tabs; the settlement dock still provides navigation.
+
+## Dollar-free starter crafting
+
+Starter crafting at the first settlement tier needs no FTH$ for the Campfire
+kit (2 Wood), Torch (1 Wood), Log seat (1 Wood), or Wildflower bed (1 Wood,
+2 Water). Material discovery, inventory capacity and bulk-permit requirements
+still apply. Other crafting fees and all reserve-market seed prices are unchanged.
 
 ## Master Merchant Charter
 

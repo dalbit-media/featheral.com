@@ -19,8 +19,8 @@ import { squadItems } from './exploration-squads.ts';
 import { autoCraftingItems, isAutoCraftingItem } from './auto-crafting.ts';
 
 export const visibilityItems = {
-  fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
-  torch: { name: 'Torch', radius: 6, cost: withDollarFee({ wood: 8 }), symbol: 'sun' },
+  fire: { name: 'Campfire kit', radius: 5, cost: { wood: 15, dollars: 0 }, symbol: 'sun' },
+  torch: { name: 'Torch', radius: 6, cost: { wood: 8, dollars: 0 }, symbol: 'sun' },
   lamp: { name: 'Lamp', radius: 8, cost: withDollarFee({ metal: 12, oil: 3 }), symbol: 'sun' },
   lantern: { name: 'Explorer lantern', radius: 10, cost: { metal: 20, oil: 5, dollars: 4 }, symbol: 'spark' },
 } satisfies Record<string, { name: string; radius: number; cost: Cost; symbol: string }>;
@@ -32,8 +32,8 @@ export const decorationItems = {
   fountain: { name: 'Courtyard fountain', stage: 0, cost: { metal: 60, water: 40 } },
   boardwalk: { name: 'Garden boardwalk', stage: 0, cost: { wood: 45, metal: 6 } },
   canopy: { name: 'Market canopy', stage: 0, cost: { wood: 36, metal: 8 } },
-  logseat: { name: 'Log seat', stage: 0, cost: { wood: 6 } },
-  flowerbed: { name: 'Wildflower bed', stage: 0, cost: { wood: 4, water: 12 } },
+  logseat: { name: 'Log seat', stage: 0, cost: { wood: 6, dollars: 0 } },
+  flowerbed: { name: 'Wildflower bed', stage: 0, cost: { wood: 4, water: 12, dollars: 0 } },
   fence: { name: 'Picket fence', stage: 1, cost: { wood: 18, metal: 2 } },
   birdhouse: { name: 'Birdhouse', stage: 1, cost: { wood: 10, metal: 1 } },
   trellis: { name: 'Vine trellis', stage: 1, cost: { wood: 22, water: 8 } },
@@ -162,10 +162,11 @@ export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;
 }
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
-  const cost = withDollarFee(craftableItems[item].cost);
+  const recipeCost: Cost = craftableItems[item].cost;
+  const cost = withDollarFee(recipeCost);
   return Object.fromEntries(Object.entries(cost).map(([resource, amount]) =>
     [resource, resource === 'dollars'
-      ? Math.round(Math.max(1, amount / 10) * quantity * monetaryPolicy.scale) / monetaryPolicy.scale
+      ? Math.round((recipeCost.dollars === 0 ? 0 : Math.max(1, amount / 10)) * quantity * monetaryPolicy.scale) / monetaryPolicy.scale
       : Math.ceil(amount / 10) * quantity]));
 }
 export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
