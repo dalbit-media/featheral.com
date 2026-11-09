@@ -9,7 +9,10 @@
     svg.setAttribute("aria-label", "Executed-trade candlesticks and volume. Scroll to zoom, drag to pan.");
     root.replaceChildren(info, svg);
     const value = ratio => Number(ratio.numerator) / Number(ratio.denominator);
-    const number = n => n.toLocaleString(undefined, { maximumSignificantDigits: 7 });
+    const number = n => {
+      const digits = ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[history.currency];
+      return n.toLocaleString(undefined, digits === undefined ? { maximumSignificantDigits: 7 } : { maximumFractionDigits: digits });
+    };
     const add = (tag, attrs, text) => {
       const node = document.createElementNS(ns, tag);
       for (const [key, val] of Object.entries(attrs)) node.setAttribute(key, val);

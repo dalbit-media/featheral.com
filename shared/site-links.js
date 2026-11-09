@@ -1,5 +1,28 @@
 "use strict";
 
+// Animations stay paused (see site-links.css) until the page, its fonts and any app marked
+// with html[data-app-loading] have finished loading.
+(() => {
+  const root = document.documentElement;
+  if (!root || !root.classList || root.classList.contains("fth-ready")) return;
+  const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame : callback => setTimeout(callback, 16);
+  const loaded = document.readyState === "complete" ? Promise.resolve()
+    : new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+  const fonts = document.fonts ? document.fonts.ready.catch(() => {}) : Promise.resolve();
+  const app = () => new Promise(resolve => {
+    if (!root.hasAttribute("data-app-loading") || typeof MutationObserver !== "function") return resolve();
+    setTimeout(resolve, 15000);
+    const observer = new MutationObserver(() => {
+      if (!root.hasAttribute("data-app-loading")) { observer.disconnect(); resolve(); }
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ["data-app-loading"] });
+  });
+  Promise.all([loaded, fonts]).then(app).then(() => frame(() => frame(() => {
+    root.classList.add("fth-ready");
+    document.dispatchEvent(new Event("featheral:ready"));
+  })));
+})();
+
 // Cross-site links for the Featheral hosts. Works on production (gold.featheral.com) and local
 // development (gold.localhost:8080) by swapping only the first host label and keeping protocol/port.
 (() => {

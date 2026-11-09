@@ -15,7 +15,11 @@ window.FeatheralAdminControllers.bridge = (root, kit) => {
   let busy = false;
   let generation = 0;
   let abi;
-  const units = (value) => ethers.formatUnits(value, 18);
+  const units = (value) => {
+    const rounded = (BigInt(value) + 5n * 10n ** 13n) / 10n ** 14n;
+    const fraction = (rounded % 10000n).toString().padStart(4, "0").replace(/0+$/, "") || "0";
+    return `${rounded / 10000n}.${fraction}`;
+  };
   const errorText = (error) => error.shortMessage || error.message || String(error);
 
   function amount(id) {

@@ -49,7 +49,7 @@
     const text = (Number(whole) + Number(abs % ONE) / 1e18).toLocaleString("en-US", { maximumFractionDigits: digits });
     return negative ? `−${text}` : text;
   }
-  const fth = (raw, digits = 2) => `${amount(raw, digits)} FTH$`;
+  const fth = (raw, digits = 2) => `${amount(raw, Math.min(digits, 2))} FTH$`;
   const money = (value) => value.toLocaleString("en-US", { style: "currency", currency: "USD", ...(value > 0 && value < 0.01 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 2 }) });
   const fresh = (time, maxAge) => Number.isFinite(Date.parse(time))
     && Date.parse(time) >= Date.now() - maxAge && Date.parse(time) <= Date.now() + 30000;

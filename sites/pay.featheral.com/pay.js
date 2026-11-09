@@ -6,6 +6,11 @@
     $("status").textContent = message; $("status").dataset.error = String(error);
     if (error) console.error("Featheral Pay:", message);
   };
+  const displayAmount = raw => {
+    const rounded = (BigInt(raw) + 5n * 10n ** 15n) / 10n ** 16n;
+    const fraction = (rounded % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    return rounded === 0n ? "<0.01" : `${rounded / 100n}${fraction ? "." + fraction : ""}`;
+  };
   function invalidate() {
     revision++; current = null; cardRequest = null;
     $("request-result").hidden = true; $("empty-request").hidden = false;
@@ -41,7 +46,7 @@
       const reusable = await getRequest(new URLSearchParams({ to: request.to, name: request.name, currency: "FTH$" }));
       if (version !== revision) return;
       $("request-name").textContent = request.name || "FTH$ payment request";
-      $("request-amount").textContent = request.amount ? `${request.amount} FTH$` : "Choose your amount in the wallet";
+      $("request-amount").textContent = request.amount ? `${displayAmount(request.baseUnits)} FTH$` : "Choose your amount in the wallet";
       $("recipient").textContent = request.to;
       $("pay-wallet").href = request.payers.wallet;
       $("pay-dollar").href = request.payers.dollar;

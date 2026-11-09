@@ -1,3 +1,4 @@
+html:not(.fth-ready) *:not(.page-transition-spinner),html:not(.fth-ready) *::before,html:not(.fth-ready) *::after{animation-play-state:paused!important;transition:none!important}
 .eco-bar:not([data-family-ready]){visibility:hidden}
 .eco-bar[data-family-ready]{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:4px;margin:0;padding:6px 12px;border-bottom:1px solid var(--line,#dce2e8);background:var(--panel,#fff);font:11px/1.5 system-ui,sans-serif;letter-spacing:normal;text-transform:none}
 .eco-bar[data-family-ready] a{display:inline-block;margin:0;padding:4px 10px;color:var(--txt,var(--text,#202631));background:transparent;text-decoration:none;border-radius:20px;font:inherit;font-size:inherit}

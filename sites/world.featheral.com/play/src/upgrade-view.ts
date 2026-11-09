@@ -30,7 +30,7 @@ function upgradeCard(state: ApiState, card: UpgradeCard, language: Language): st
   const entries = Object.entries(card.cost ?? {}).filter(([, amount]) => amount > 0);
   const owned = (asset: string) => asset === 'dollars' ? state.dollars : state.game.stock[asset as Resource];
   const missing = entries.some(([asset, amount]) => owned(asset) < amount);
-  const amount = (asset: string, value: number) => asset === 'dollars' ? `${value.toLocaleString(loc, { maximumFractionDigits: 4 })} FTH$` : formatResourceAmount(asset, value, loc);
+  const amount = (asset: string, value: number) => asset === 'dollars' ? `${value.toLocaleString(loc, { maximumFractionDigits: 2 })} FTH$` : formatResourceAmount(asset, value, loc);
   const label = complete ? card.maximum === 1 ? 'Built' : 'Maximum level' : locked ? 'Locked' : missing ? 'Missing supplies' : card.level ? 'Ready to upgrade' : 'Ready to build';
   const button = card.level ? 'Review upgrade' : 'Review build';
   const eligible = !locked && !missing && Boolean(card.cost);

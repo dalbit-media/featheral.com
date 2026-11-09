@@ -5,6 +5,12 @@
     const value = BigInt(raw), fraction = (value % scale).toString().padStart(18, "0").replace(/0+$/, "");
     return `${value / scale}${fraction ? "." + fraction : ""}`;
   };
+  const display = raw => {
+    const value = BigInt(raw), rounded = (value + 5n * 10n ** 15n) / 10n ** 16n;
+    if (value > 0n && rounded === 0n) return "<0.01";
+    const fraction = (rounded % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    return `${(rounded / 100n).toLocaleString()}${fraction ? "." + fraction : ""}`;
+  };
   const amountUnits = text => {
     if (typeof text !== "string" || !/^\d{1,60}(?:\.\d{1,18})?$/.test(text.trim())) throw new Error("Enter a positive FTH$ amount with up to 18 decimals.");
     const [whole, fraction = ""] = text.trim().split(".");
@@ -22,7 +28,7 @@
       <form data-wf="form"><div class="wf-directions" role="group" aria-label="Transfer direction"><button type="button" data-wf="deposit" aria-pressed="true">Deposit to game</button><button type="button" data-wf="withdraw" aria-pressed="false">Withdraw to wallet</button></div>
       <label>FTH$ amount<span class="wf-amount"><input data-wf="amount" inputmode="decimal" required placeholder="0.00" aria-label="FTH$ transfer amount" autocomplete="off"><button type="button" data-wf="max">Max</button></span></label>
       <p data-wf="preview" class="wf-note" data-no-localize></p><button type="submit" data-wf="submit">Review deposit</button></form>
-      <section data-wf="review" class="wf-review" hidden aria-label="Review exact transfer"><h4>Review transfer</h4><p data-wf="summary" data-no-localize></p><p class="wf-note">Only this amount moves to your linked account. No gas, minting or Ethereum transaction.</p><button type="button" data-wf="approve">Approve and transfer</button><button type="button" data-wf="back">Back</button></section>
+      <section data-wf="review" class="wf-review" hidden aria-label="Review transfer"><h4>Review transfer</h4><p data-wf="summary" data-no-localize></p><p class="wf-note">Only this amount moves to your linked account. No gas, minting or Ethereum transaction.</p><button type="button" data-wf="approve">Approve and transfer</button><button type="button" data-wf="back">Back</button></section>
       <p data-wf="status" role="status" aria-live="polite"></p><div data-wf="pending"></div><details><summary>Recent transfers</summary><div data-wf="activity"></div></details>`;
     const $ = name => root.querySelector(`[data-wf="${name}"]`);
     let view, direction = "deposit", prepared = null, busy = false, submitting = false, refreshing = null, disposed = false, controller;
@@ -59,8 +65,8 @@
       try {
         const amount = amountUnits($("amount").value), game = BigInt(view.available), wallet = BigInt(view.walletAvailable);
         const source = direction === "deposit" ? wallet : game;
-        $("preview").textContent = amount > source ? `Available: ${exact(source)} FTH$. Enter a smaller amount.`
-          : `After transfer: Game ${exact(direction === "deposit" ? game + amount : game - amount)} · Wallet ${exact(direction === "deposit" ? wallet - amount : wallet + amount)} FTH$`;
+        $("preview").textContent = amount > source ? `Available: ${display(source)} FTH$. Enter a smaller amount.`
+          : `After transfer: Game ${display(direction === "deposit" ? game + amount : game - amount)} · Wallet ${display(direction === "deposit" ? wallet - amount : wallet + amount)} FTH$`;
       } catch (error) { $("preview").textContent = error.message; }
     }
     const button = (label, run) => {
@@ -68,8 +74,8 @@
       control.onclick = () => void run().catch(report); return control;
     };
     function paint() {
-      $("world").textContent = `${exact(view.available)} FTH$`;
-      $("wallet").textContent = view.walletAvailable === null ? "Not linked" : `${exact(view.walletAvailable)} FTH$`;
+      $("world").textContent = `${display(view.available)} FTH$`;
+      $("wallet").textContent = view.walletAvailable === null ? "Not linked" : `${display(view.walletAvailable)} FTH$`;
       $("address").textContent = view.wallet ? `Linked wallet: ${view.wallet}` : "Your existing guest funds remain in World.";
       $("mode").textContent = view.mode === "separate" ? "Balances sync automatically; moving funds requires your approval. Gameplay spends only the game budget."
         : view.mode === "legacy-direct" ? "Game and wallet already use the same balance. Do not count it twice. Keep this mode, or explicitly enable a separate budget."
@@ -81,10 +87,10 @@
       for (const item of view.requests) {
         if (item.status === "complete") {
           const row = document.createElement("p");
-          row.textContent = `${item.parameters.direction === "deposit" ? "Deposited" : "Withdrew"} ${exact(item.parameters.amount)} FTH$ · ${new Date(item.at).toLocaleString()}`;
+          row.textContent = `${item.parameters.direction === "deposit" ? "Deposited" : "Withdrew"} ${display(item.parameters.amount)} FTH$ · ${new Date(item.at).toLocaleString()}`;
           $("activity").append(row);
         } else if (item.status !== "cancelled") {
-          $("pending").append(button(`${item.status === "paying" ? "Check settlement" : "Review pending"} · ${exact(item.parameters.amount)} FTH$ ${item.parameters.direction}`, async () => {
+          $("pending").append(button(`${item.status === "paying" ? "Check settlement" : "Review pending"} · ${display(item.parameters.amount)} FTH$ ${item.parameters.direction}`, async () => {
             if (busy) return;
             await review(item);
           }));
@@ -141,7 +147,7 @@
       busy = true; controls();
       try {
         prepared = item.status === "prepared" ? await api("funds/prepare", { id: item.id, ...item.parameters }) : item;
-        $("summary").textContent = `${prepared.parameters.direction === "deposit" ? "Dollar wallet → Game budget" : "Game budget → Dollar wallet"}: ${exact(prepared.parameters.amount)} FTH$\nWallet: ${prepared.wallet}`;
+        $("summary").textContent = `${prepared.parameters.direction === "deposit" ? "Dollar wallet → Game budget" : "Game budget → Dollar wallet"}: ${display(prepared.parameters.amount)} FTH$\nWallet: ${prepared.wallet}`;
         $("approve").textContent = prepared.status === "paying" ? "Check and finish settlement" : "Approve and transfer";
         $("review").hidden = false;
       } finally { busy = false; controls(); }

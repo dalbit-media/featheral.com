@@ -25,7 +25,7 @@
       stat("Transfer volume", fth(s.transferVolume, 0), `${count(s.transfers)} wallet-signed transfers`),
       stat("Bridge credits", count(s.credits), "FTHG → FTH$ conversions and staking rewards"),
       stat("Withdrawals", count(s.settlements), `${count(s.pendingRedemptions)} pending · ${fth(s.reserved, 0)} reserved`),
-      stat("Price est.", usd(window.FTH.ONE), `1 FTH$ at ${state.rate.toLocaleString("en-US")} FTH$ / FTHG`),
+      stat("Price est.", usd(window.FTH.ONE), `1 FTH$ at ${state.rate.toLocaleString("en-US", { maximumFractionDigits: 2 })} FTH$ / FTHG`),
     );
     $("heroTip").textContent = `Layer 3 · block #${count(s.height)} · ${short(s.tipHash, 10, 6)}`;
     $("signingInfo").textContent = s.signedBlocks ? "Ed25519 writer signature S over each block hash (enabled on this node)" : "Ed25519 writer signature S over each block hash (not configured on this node)";

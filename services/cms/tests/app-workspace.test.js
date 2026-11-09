@@ -125,6 +125,31 @@ test("proposed organization covers every seeded site team without creating live 
   assert.equal(new Set(ids).size, ids.length, "controller IDs must remain unique");
   assert.match(html, /No new payout or stake-unlock flow is enabled/);
 });
+test("shared animations stay paused until the page, fonts and app have loaded", async () => {
+  const css = fs.readFileSync(path.join(root, "shared", "site-links.css"), "utf8");
+  assert.match(css, /html:not\(\.fth-ready\) \*:not\(\.page-transition-spinner\)[^{]*\{animation-play-state:paused!important;transition:none!important\}/);
+  const classes = new Set(), attributes = new Set(["data-app-loading"]), events = [];
+  let observer, onLoad;
+  const documentElement = { classList: { contains: name => classes.has(name), add: name => classes.add(name) },
+    hasAttribute: name => attributes.has(name) };
+  const node = () => ({ dataset: {}, style: {}, children: [], append() {}, prepend() {}, setAttribute() {}, removeAttribute() {},
+    replaceChildren() {}, addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], classList: { add() {}, remove() {}, toggle() {} } });
+  const document = { readyState: "interactive", documentElement, fonts: { ready: Promise.resolve() },
+    body: node(), head: node(), addEventListener() {}, querySelector: () => null, querySelectorAll: () => [],
+    createElement: node, dispatchEvent: event => events.push(event.type) };
+  const window = { location: new URL("http://world.localhost:8080/settlement/"), addEventListener: (type, callback) => { if (type === "load") onLoad = callback; } };
+  class MutationObserver { constructor(callback) { observer = callback; } observe() {} disconnect() {} }
+  const tick = () => new Promise(resolve => setTimeout(resolve, 50));
+  vm.runInNewContext(fs.readFileSync(path.join(root, "shared", "site-links.js"), "utf8"),
+    { window, document, URL, Event: class { constructor(type) { this.type = type; } }, MutationObserver, requestAnimationFrame: callback => setTimeout(callback, 0), setTimeout });
+  await tick();
+  assert.equal(classes.has("fth-ready"), false, "animations wait for window load");
+  onLoad(); await tick();
+  assert.equal(classes.has("fth-ready"), false, "animations wait for the app to finish rendering");
+  attributes.delete("data-app-loading"); observer(); await tick();
+  assert.equal(classes.has("fth-ready"), true);
+  assert.deepEqual(events, ["featheral:ready"]);
+});
 test("App uses a standalone shell without losing shared site URLs", () => {
   const created = [];
   const document = { readyState: "complete", body: { dataset: { familyLayout: "true" } }, addEventListener() {},

@@ -16,7 +16,11 @@
   let generation = 0;
   let inspectionGeneration = 0;
   let issuanceEnabled = false;
-  const units = (value) => ethers.formatUnits(value, 18);
+  const units = (value) => {
+    const rounded = (BigInt(value) + 5n * 10n ** 13n) / 10n ** 14n;
+    const fraction = (rounded % 10000n).toString().padStart(4, "0").replace(/0+$/, "") || "0";
+    return `${rounded / 10000n}.${fraction}`;
+  };
   const errorText = (error) => error.shortMessage || error.message || String(error);
 
   function integer(id) {
@@ -166,7 +170,7 @@
       if (amount > balance) throw new Error("Stake exceeds your FTHG balance.");
       const reward = (amount * apr * term / 10000n) * rate / ONE;
       if (reward === 0n || reward > budget) throw new Error("Insufficient FTH$ reward budget.");
-      if (!confirm(`Lock ${units(amount)} FTHG for ${term} game-years, until year ${year + term}? Current estimate: ${units(reward)} FTH$ reward, credited only after mature claim. Rates may change before mining. Approval and staking may require two transactions.`)) return;
+      if (!confirm(`Lock ${units(amount)} FTHG for ${term} game-years, until year ${year + term}? Current estimate: ${fth(reward)} reward, credited only after mature claim. Rates may change before mining. Approval and staking may require two transactions.`)) return;
       if (await token.allowance(current.account, current.address) < amount) await send(token, "approve", [current.address, amount]);
       const receipt = await send(bridge, "stake", [amount, term, ethers.zeroPadValue(current.account, 32)]);
       for (const log of receipt.logs) {

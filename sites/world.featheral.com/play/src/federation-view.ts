@@ -18,7 +18,7 @@ export function federationPanel(state: ApiState, language: Language): string {
     `<span>${icon(resource)}${formatResourceAmount(resource, amount, locale(language))}</span>`).join('');
   const vault = state.federationVault;
   const amounts = (stock: FederationVault['stock']) => [...resources, 'dollars'].map(asset =>
-    `<span>${icon(asset)}${asset === 'dollars' ? `${stock.dollars.toLocaleString(locale(language), { maximumFractionDigits: 4 })} FTH$`
+    `<span>${icon(asset)}${asset === 'dollars' ? `${stock.dollars.toLocaleString(locale(language), { maximumFractionDigits: 2 })} FTH$`
       : formatResourceAmount(asset, stock[asset as Resource], locale(language))}</span>`).join('');
   const percent = (value: number) => `${value.toLocaleString(locale(language), { maximumFractionDigits: 2 })}%`;
   const vaultPanel = !member ? '' : `<section class="federation-vault" aria-labelledby="federation-vault-title">

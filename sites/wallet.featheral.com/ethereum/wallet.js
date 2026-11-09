@@ -251,7 +251,7 @@
       const quote = await bridge.quoteFthDollarOut(amount);
       const minOut = (quote * 99n) / 100n;
       const accountId = F.accountIdFor(account);
-      if (!confirm(`Convert ${ethers.formatUnits(amount, 18)} FTHG into about ${fth(quote)} (minimum ${fth(minOut)})?\nFTH$ will be credited to ${accountId}.\nThis sends Ethereum transactions and costs gas.`)) return;
+      if (!confirm(`Convert ${F.amount(amount, 4)} FTHG into about ${fth(quote)} (minimum ${fth(minOut)})?\nFTH$ will be credited to ${accountId}.\nThis sends Ethereum transactions and costs gas.`)) return;
       if ((await token.allowance(account, state.bridge.address)) < amount) {
         setStatus("convertStatus", "Approve FTHG for the bridge in your wallet…");
         await (await token.approve(state.bridge.address, amount)).wait();

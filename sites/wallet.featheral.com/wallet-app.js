@@ -107,19 +107,20 @@ async function mountFeatheralWallet(context) {
     if (text === `0 ${primarySymbol}`) text = emptyBalance;
     $("balance").replaceChildren(el("span", text.endsWith(` ${primarySymbol}`) ? text.slice(0, -primarySymbol.length - 1) : text), el("span", ` ${primarySymbol}`, "balance-currency"));
   }
-  const goldAmount = raw => {
-    const amount = BigInt(raw), fraction = (amount % 10n ** 18n).toString().padStart(18, "0").slice(0, 6).replace(/0+$/, "");
-    return amount > 0n && amount < 10n ** 12n ? "<0.000001 FTHG"
-      : `${(amount / 10n ** 18n).toLocaleString()}${fraction ? "." + fraction : ""} FTHG`;
+  const goldAmount = (raw, digits = 4) => {
+    const amount = BigInt(raw), factor = 10n ** BigInt(18 - digits), rounded = (amount + factor / 2n) / factor, scale = 10n ** BigInt(digits);
+    const fraction = (rounded % scale).toString().padStart(digits, "0").replace(/0+$/, "");
+    return amount > 0n && rounded === 0n ? `<0.${"0".repeat(digits - 1)}1 FTHG`
+      : `${(rounded / scale).toLocaleString()}${fraction ? "." + fraction : ""} FTHG`;
   };
-  const estimateNumber = (raw, minimumDecimals = 0) => {
-    const value = BigInt(raw);
-    if (value > 0n && value < 10n ** 14n) return "<0.0001";
-    const rounded = (value + 5n * 10n ** 13n) / 10n ** 14n;
-    const fraction = (rounded % 10000n).toString().padStart(4, "0").replace(/0+$/, "").padEnd(minimumDecimals, "0");
-    return `${(rounded / 10000n).toLocaleString()}${fraction ? "." + fraction : ""}`;
+  const estimateNumber = (raw, minimumDecimals = 0, digits = 4) => {
+    const value = BigInt(raw), factor = 10n ** BigInt(18 - digits), scale = 10n ** BigInt(digits);
+    if (value > 0n && value < factor) return `<0.${"0".repeat(digits - 1)}1`;
+    const rounded = (value + factor / 2n) / factor;
+    const fraction = (rounded % scale).toString().padStart(digits, "0").replace(/0+$/, "").padEnd(minimumDecimals, "0");
+    return `${(rounded / scale).toLocaleString()}${fraction ? "." + fraction : ""}`;
   };
-  const equivalent = (raw, symbol) => `${estimateNumber(raw)} ${symbol}`;
+  const equivalent = (raw, symbol) => `${estimateNumber(raw, 0, ["FTHG", "FTHS"].includes(symbol) ? 4 : 2)} ${symbol}`;
   const usdEstimate = raw => {
     const value = estimateNumber(raw, 4);
     return value.startsWith("<") ? "<$" + value.slice(1) : "$" + value;
@@ -892,7 +893,7 @@ async function mountFeatheralWallet(context) {
       for (const asset of data.portfolio?.nativeAssets || []) {
         if (asset.balance === null) $("holdings").append(el("p", `${asset.name} ETH balance unavailable.`, "account-divider"));
         else if (BigInt(asset.balance) > 0n)
-          appendToken("ETH", goldAmount(asset.balance).replace("FTHG", "ETH"), asset.name, asset.estimates[primarySymbol], asset.usdValue, data.portfolio, false);
+          appendToken("ETH", goldAmount(asset.balance, 6).replace("FTHG", "ETH"), asset.name, asset.estimates[primarySymbol], asset.usdValue, data.portfolio, false);
       }
     }
     for (const tx of [...data.exchange.trades, ...data.markets.trades]) {
@@ -1027,13 +1028,8 @@ async function mountFeatheralWallet(context) {
   $("copy-wallet-address").addEventListener("click", copyAddress);
   $("copy-wallet-address").disabled = !owner;
   let swapRequest;
-  const exactAmount = (raw, symbol) => {
-    if (symbol !== "FTH$") return `${raw} ${symbol}`;
-    const digits = BigInt(raw).toString().padStart(19, "0"), fraction = digits.slice(-18).replace(/0+$/, "");
-    return `${digits.slice(0, -18)}${fraction ? "." + fraction : ""} ${symbol}`;
-  };
   function swapReview(quote, minimum = quote.output) {
-    return `Swap ${exactAmount(quote.amount, quote.from)} → at least ${exactAmount(minimum, quote.to)}?\nRoute: ${quote.route.join(" → ")}\nLive Exchange pools · 0.3% fee per hop, including price impact.\nRecorded as Exchange trades. Ethereum FTHG conversion is separate.`;
+    return `Swap ${format(quote.amount, quote.from)} → at least ${format(minimum, quote.to)}?\nRoute: ${quote.route.join(" → ")}\nLive Exchange pools · 0.3% fee per hop, including price impact.\nRecorded as Exchange trades. Ethereum FTHG conversion is separate.`;
   }
   async function finishSwap(request, account) {
     if (owner !== account) throw new Error("Wallet changed. Review the swap again.");
@@ -1044,7 +1040,7 @@ async function mountFeatheralWallet(context) {
     await refresh();
     swapRequest = null;
     $("swap-amount").value = "";
-    $("swap-status").textContent = `Swapped ${exactAmount(result.amount, result.from)} → ${exactAmount(result.output, result.to)} · recorded on Exchange.`;
+    $("swap-status").textContent = `Swapped ${format(result.amount, result.from)} → ${format(result.output, result.to)} · recorded on Exchange.`;
   }
   async function resumeSwap(id) {
     if (busy) return; lock(true);
@@ -1065,7 +1061,7 @@ async function mountFeatheralWallet(context) {
       if (!swapRequest) {
         const from = $("swap-from").value, to = $("swap-to").value, amount = units($("swap-amount").value, from);
         const quote = await api("/wallet/swaps/quote", { from, to, amount });
-        $("swap-status").textContent = `${exactAmount(quote.amount, from)} → ${exactAmount(quote.output, to)} · ${quote.route.join(" → ")}`;
+        $("swap-status").textContent = `${format(quote.amount, from)} → ${format(quote.output, to)} · ${quote.route.join(" → ")}`;
         if (!await review(swapReview(quote), "Approve swap")) return;
         if (owner !== account) throw new Error("Wallet changed. Review the swap again.");
         swapRequest = { from, to, amount, minOutput: quote.output, requestId: crypto.randomUUID() };
@@ -1089,7 +1085,7 @@ async function mountFeatheralWallet(context) {
       if (!await ensureSession()) return;
       const symbol = $("send-symbol").value, raw = units($("send-amount").value, symbol);
       const account = owner, startingEpoch = epoch, recipient = $("recipient").value;
-      const reviewAmount = symbol === "FTH$" ? `${$("send-amount").value.trim()} FTH$` : format(raw, symbol);
+      const reviewAmount = format(raw, symbol);
       if (!await review(`Send ${reviewAmount} to ${recipient}?\nNetwork: native Featheral ledger. This moves existing funds.`, "Approve transfer")) return;
       if (owner !== account || epoch !== startingEpoch) throw new Error("Wallet changed. Review the transfer again.");
       if (symbol === "FTH$") {

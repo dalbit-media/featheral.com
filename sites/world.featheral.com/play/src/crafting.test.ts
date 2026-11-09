@@ -12,6 +12,7 @@ import type { MarketSnapshot } from './market.ts';
 import { renderPriceChange } from './marketplace-catalog.ts';
 import { gameConsumption } from './consumption.ts';
 import { withDollarFee } from './costs.ts';
+import { dollarsScale, dollarsUnits } from './dollars.ts';
 import { translate } from './i18n.ts';
 import { marketAnalysisDuration } from './market-analysis.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
@@ -97,16 +98,20 @@ test('every crafting recipe charges FTH$ per copy without mutating recipes or re
   const recipes = structuredClone(craftableItems);
   const prices = craftableKeys.map(marketBasePrice);
   const state = fixture();
+  state.inventory.items = ['craft-batch-10', 'craft-batch-20', 'craft-batch-50', 'craft-batch-100'];
+  assert.doesNotThrow(() => craftingPanel(state, () => '', 'all'));
   for (const item of craftableKeys) {
     const cost = craftingCost(item);
     assert.ok(cost.dollars! >= 1, item);
     assert.equal(cost.dollars, Math.max(1, withDollarFee(craftableItems[item].cost).dollars / 10), item);
     for (const quantity of [1, 10, 20, 50, 100]) {
-      assert.equal(craftingCost(item, quantity).dollars, cost.dollars! * quantity);
+      const expectedDollars = dollarsUnits(cost.dollars!) * quantity / dollarsScale;
+      assert.equal(craftingCost(item, quantity).dollars, expectedDollars);
+      assert.equal(dollarsUnits(craftingCost(item, quantity).dollars!), dollarsUnits(cost.dollars!) * quantity);
       for (const resource of ['wood', 'water', 'metal', 'oil'] as const)
         if (cost[resource] !== undefined) assert.equal(craftingCost(item, quantity)[resource], cost[resource]! * quantity);
       const quote = gameConsumption(state, { type: 'craft', item, quantity })!;
-      assert.ok(quote.costs.some(row => row.asset === 'dollars' && row.amount === cost.dollars! * quantity));
+      assert.ok(quote.costs.some(row => row.asset === 'dollars' && row.amount === expectedDollars));
     }
     for (const [resource, amount] of Object.entries(craftableItems[item].cost))
       if (resource !== 'dollars') {

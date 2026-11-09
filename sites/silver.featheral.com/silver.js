@@ -37,13 +37,13 @@
     try { me = await api("/me"); }
     catch (error) { if (error.status !== 401) throw error; me = null; }
     $("connect").textContent = me ? "Change wallet" : "Connect wallet"; $("logout").hidden = !me;
-    $("buyer").textContent = me ? `..${me.address.slice(-5)} · ${me.balance.toLocaleString()} FTHS available` : "";
+    $("buyer").textContent = me ? `..${me.address.slice(-5)} · ${me.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS available` : "";
     $("order-list").replaceChildren();
     if (!me) { $("order-list").append(node("p", "Connect your wallet to view private orders and delivered codes.")); return; }
     if (!me.orders.length) $("order-list").append(node("p", "No orders yet."));
     for (const order of me.orders) {
       const card = node("article", null, "order-card"), detail = order.snapshot;
-      card.append(node("h3", detail.product.title), node("p", `${detail.total.toLocaleString()} FTHS · ${order.status}`),
+      card.append(node("h3", detail.product.title), node("p", `${detail.total.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS · ${order.status}`),
         node("small", `${new Date(order.at).toLocaleString()} · ${order.id}`));
       if (order.status === "paid") card.append(node("p", "Payment received. Your code is reserved, awaiting administrator delivery."));
       if (order.status === "prepared" && order.expires > Date.now()) {
@@ -79,7 +79,7 @@
     for (const product of products) {
       const card = node("article", null, "product-card"), logo = node("img"); logo.src = "/shared/logo-silver.svg"; logo.alt = ""; logo.width = logo.height = 48;
       card.append(logo, node("small", product.brand), node("h3", product.title), node("p", product.description),
-        node("p", `${product.denomination} · ${product.region}`, "product-region"), node("strong", `${product.price.toLocaleString()} FTHS`),
+        node("p", `${product.denomination} · ${product.region}`, "product-region"), node("strong", `${product.price.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS`),
         node("small", product.stock ? `${product.stock} available` : "Out of stock"));
       const terms = node("details"); terms.append(node("summary", "Issuer terms"), node("p", product.terms),
         node("small", product.codeExpiresAt ? `Next code expiry: ${new Date(product.codeExpiresAt).toLocaleString()}` : "Expiry not recorded; check issuer terms."));
@@ -99,7 +99,7 @@
   }
   function showCheckout(order) {
     checkout = order; const { product, total, treasury, storeTerms } = order.snapshot;
-    $("checkout-detail").replaceChildren(node("h3", product.title), node("strong", `${total.toLocaleString()} FTHS`),
+    $("checkout-detail").replaceChildren(node("h3", product.title), node("strong", `${total.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS`),
       node("p", `${product.denomination} · ${product.region}`), node("p", product.description),
       node("h4", "Redemption terms"), node("p", product.terms), node("p", `Sourcing: ${product.sourcing}`),
       node("p", product.codeExpiresAt ? `Code expiry: ${new Date(product.codeExpiresAt).toLocaleString()}` : "Code expiry not recorded. Check issuer terms before paying."),

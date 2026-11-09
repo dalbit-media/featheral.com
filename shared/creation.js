@@ -51,8 +51,10 @@
     const caption = el("figcaption");
     const formatPrice = ratio => {
       const numerator = BigInt(ratio.numerator), denominator = BigInt(ratio.denominator);
-      const fraction = (numerator % denominator * 10n ** 18n / denominator).toString().padStart(18, "0").replace(/0+$/, "");
-      return (numerator / denominator).toLocaleString() + (fraction ? "." + fraction : "");
+      const digits = ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[ratio.currency || "FTHX"] ?? 18;
+      const scale = 10n ** BigInt(digits), rounded = (numerator * scale + denominator / 2n) / denominator;
+      const fraction = (rounded % scale).toString().padStart(digits, "0").replace(/0+$/, "");
+      return (rounded / scale).toLocaleString() + (fraction ? "." + fraction : "");
     };
     const price = el("span", note.price ? `${formatPrice(note.price)} ${note.price.currency || "FTHX"}` : "No market price", "note-price");
     price.title = "Current pool spot ratio. Executable swaps include price impact and a 0.3% pool fee.";

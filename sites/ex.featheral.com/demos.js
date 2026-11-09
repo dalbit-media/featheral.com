@@ -3,7 +3,7 @@ const assetDecimals = { 'FTH$': 6, FTHX: 0, 'USD$': 6, 'BTC$': 6, 'ETH$': 6, 'SO
 const minimumAfterSlippage = (output, bps) => Number((BigInt(output) * BigInt(10000 - bps) + 9999n) / 10000n);
 function displayAsset(value, symbol) {
   const decimals = assetDecimals[symbol] ?? 0;
-  return (value / 10 ** decimals).toLocaleString(undefined, { maximumFractionDigits: decimals });
+  return (value / 10 ** decimals).toLocaleString(undefined, { maximumFractionDigits: Math.min(decimals, ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[symbol] ?? decimals) });
 }
 function rawAmount(value, symbol) {
   const decimals = assetDecimals[symbol] ?? 0;

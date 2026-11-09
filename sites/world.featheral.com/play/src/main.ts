@@ -135,6 +135,7 @@ try {
 } catch (error) {
   const root = document.querySelector('#app')!;
   root.removeAttribute('aria-busy');
+  document.documentElement.removeAttribute('data-app-loading');
   root.textContent = `Cannot connect to the authoritative API. Start the backend and reload. ${error instanceof Error ? error.message : 'Connection failed.'}`;
   localize(document);
   throw error;
@@ -1613,3 +1614,4 @@ mountWorldChat();
 if (marketPage) marketplace = new Marketplace(document.querySelector<HTMLElement>('#marketplace-content')!, () => state,
   next => { if (next.revision >= state.revision) { synchronize(next); render(); } }, toast, language);
 if (bankPage) new WalletPage(document.querySelector<HTMLElement>('#bank-content')!, async () => { await syncProduction(); });
+document.documentElement.removeAttribute('data-app-loading');

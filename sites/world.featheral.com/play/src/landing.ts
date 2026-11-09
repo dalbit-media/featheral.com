@@ -104,7 +104,7 @@ async function refreshStats(): Promise<void> {
       const text = key === 'dollars' ? formatDollars(data.dollars, languageLocale) : target.toLocaleString(languageLocale);
       element.parentElement!.setAttribute('aria-label', text);
       element.title = text;
-      counter.set(target, !document.hidden && !reducedMotion.matches);
+      counter.set(target, !document.hidden && !reducedMotion.matches && document.documentElement.classList.contains('fth-ready'));
     }
     hasStats = true;
     const message = translate('Live snapshot \u00b7 updates about every 30s', language);

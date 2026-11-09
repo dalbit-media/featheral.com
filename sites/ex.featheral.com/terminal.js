@@ -22,14 +22,11 @@
     const fraction = (rounded % 10n ** BigInt(places)).toString().padStart(places, "0").replace(/0+$/, "");
     return `${value > 0n && rounded === 0n ? "<0.01" : whole.toLocaleString() + (fraction ? "." + fraction : "")} ${symbol}`;
   }
-  function exact(raw, symbol) {
-    const value = BigInt(raw), scale = 10n ** BigInt(decimals(symbol)), fraction = (value % scale).toString().padStart(decimals(symbol), "0").replace(/0+$/, "");
-    return `${value / scale}${fraction ? "." + fraction : ""} ${symbol}`;
-  }
   function ratio(price) {
-    const n = BigInt(price.numerator), d = BigInt(price.denominator), fraction = (n % d * 100000000n / d).toString().padStart(8, "0").replace(/0+$/, "");
-    if (n > 0n && n * 100000000n < d) return "<0.00000001";
-    return `${n / d}${fraction ? "." + fraction : ""}`;
+    const n = BigInt(price.numerator), d = BigInt(price.denominator), rounded = (n * 100n + d / 2n) / d;
+    const fraction = (rounded % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    if (n > 0n && rounded === 0n) return "<0.01";
+    return `${rounded / 100n}${fraction ? "." + fraction : ""}`;
   }
   async function api(path, method = "GET", body) {
     const response = await fetch("/api/creation" + path, { method, cache: "no-store",
@@ -69,13 +66,13 @@
     const pending = sessionStorage.getItem(`featheral-exchange-pending:${owner}:trade`);
     if (pending && !preview) {
       preview = JSON.parse(pending);
-      $("order-preview").textContent = `Previously submitted order: ${exact(preview.amount, preview.side === "buy" ? "FTHX" : preview.symbol)}. Resume the same request to retrieve or complete its result; do not create a replacement.`;
+      $("order-preview").textContent = `Previously submitted order: ${format(preview.amount, preview.side === "buy" ? "FTHX" : preview.symbol)}. Resume the same request to retrieve or complete its result; do not create a replacement.`;
       $("execute-order").disabled = false;
     }
     const usd = current.portfolio.usd;
     $("trading-total").textContent = usd === null ? "USD unavailable" : `${current.portfolio.partial ? "Partial " : ""}$${usd} estimated trading assets`;
     rows($("positions"), current.holdings, "No trading assets. Deposit FTHX to start.", asset => {
-      const tr = row([asset.symbol, format(asset.balance, asset.symbol)]); tr.title = exact(asset.balance, asset.symbol); return tr;
+      const tr = row([asset.symbol, format(asset.balance, asset.symbol)]); tr.title = format(asset.balance, asset.symbol); return tr;
     });
     const previous = $("withdraw-symbol").value;
     $("withdraw-symbol").replaceChildren(...current.holdings.map(asset => { const option = text("option", asset.symbol); option.value = asset.symbol; return option; }));
@@ -84,7 +81,7 @@
     rows($("trade-history"), trades, "No executed trades.", trade => {
       const from = trade.from || (trade.side === "buy" ? "FTHX" : trade.symbol), to = trade.to || (trade.side === "buy" ? trade.symbol : "FTHX");
       const tr = row([new Date(trade.at).toLocaleString(), trade.symbol ? trade.symbol + "/FTHX" : `${from}/${to}`, `${trade.wallet ? "Wallet · " : ""}${trade.side || "swap"}`, format(trade.amount, from), format(trade.output, to)]);
-      tr.title = `${exact(trade.amount, from)} → ${exact(trade.output, to)}`; return tr;
+      tr.title = `${format(trade.amount, from)} → ${format(trade.output, to)}`; return tr;
     });
     rows($("movement-history"), current.movements, "No deposits or withdrawals.", movement => {
       const tr = row([new Date(movement.at).toLocaleString(), movement.kind, format(movement.amount, movement.symbol), movement.status]);
@@ -155,7 +152,7 @@
     const key = `featheral-exchange-pending:${owner}:${kind}`, previous = sessionStorage.getItem(key);
     const saved = previous ? JSON.parse(previous) : null;
     const input = saved?.symbol === symbol && saved?.amount === raw ? saved : { symbol, amount: raw, requestId: crypto.randomUUID() };
-    if (!confirm(`${kind === "deposit" ? "Deposit into Exchange trading" : "Withdraw to your own wallet"}: ${exact(raw, symbol)}? This moves existing funds only.`)) return;
+    if (!confirm(`${kind === "deposit" ? "Deposit into Exchange trading" : "Withdraw to your own wallet"}: ${format(raw, symbol)}? This moves existing funds only.`)) return;
     sessionStorage.setItem(key, JSON.stringify(input));
     await api("/trading/" + kind, "POST", input);
     sessionStorage.removeItem(key);
@@ -180,7 +177,7 @@
       const minOutput = BigInt(quote.output) * (10000n - bps) / 10000n;
       if (minOutput < 1n) throw Error("Minimum output rounds to zero. Increase the amount or reduce slippage.");
       preview = { owner, symbol, side, amount: raw, minOutput: minOutput.toString(), requestId: crypto.randomUUID(), expires: Date.now() + 30000 };
-      $("order-preview").textContent = `Spend ${exact(raw, quote.from)} → estimated ${exact(quote.output, quote.to)}. Minimum ${exact(minOutput, quote.to)}. Fee 0.3%.`;
+      $("order-preview").textContent = `Spend ${format(raw, quote.from)} → estimated ${format(quote.output, quote.to)}. Minimum ${format(minOutput, quote.to)}. Fee 0.3%.`;
     });
   });
   $("execute-order").addEventListener("click", () => run(async () => {
@@ -188,7 +185,7 @@
     if (!preview || !preview.submitted && preview.expires < Date.now()) { invalidate(); throw Error("Quote expired. Request a new preview."); }
     const order = preview;
     if (order.owner !== owner) throw Error("Trading owner changed. Reconnect and review this owner's order.");
-    if (!confirm(`Execute spot trade? Minimum output: ${exact(order.minOutput, order.side === "buy" ? order.symbol : "FTHX")}`)) return;
+    if (!confirm(`Execute spot trade? Minimum output: ${format(order.minOutput, order.side === "buy" ? order.symbol : "FTHX")}`)) return;
     order.submitted = true;
     sessionStorage.setItem(`featheral-exchange-pending:${owner}:trade`, JSON.stringify(order));
     try { await api("/trading/trade", "POST", order); }
@@ -229,7 +226,7 @@
         requireOwner();
         const dollars = amount($("funding-dollar").value, "FTH$"), fthx = amount($("funding-fthx").value, "FTHX"), approval = $("funding-approval").value;
         if (approval !== `FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`) throw Error(`Exact approval required: FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`);
-        if (!confirm(`Commit ${exact(dollars, "FTH$")} and ${exact(fthx, "FTHX")} from your MAIN wallet to initial liquidity? No new supply is created. This capital has no LP withdrawal interface.`)) return;
+        if (!confirm(`Commit ${format(dollars, "FTH$")} and ${format(fthx, "FTHX")} from your MAIN wallet to initial liquidity? No new supply is created. This capital has no LP withdrawal interface.`)) return;
         const key = `featheral-exchange-pending:${owner}:funding`, previous = sessionStorage.getItem(key), saved = previous ? JSON.parse(previous) : null;
         const input = saved?.dollars === dollars && saved?.fthx === fthx ? saved : { dollars, fthx, approval, requestId: crypto.randomUUID() };
         sessionStorage.setItem(key, JSON.stringify(input));

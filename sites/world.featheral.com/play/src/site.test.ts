@@ -187,9 +187,12 @@ test('every Play game entry loads the canonical World wallet/profile assets', ()
   if (typeof transform !== 'function') throw new Error('Missing profile asset transform');
   for (const file of ['explore/index.html', ...['settlement', 'market', 'communicate', 'federation', 'contacts', 'journal', 'help', 'bank'].map(route => `${route}/index.html`)]) {
     const html = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
-    const tags = transform(html, { path: file, filename: file });
-    assert.ok(Array.isArray(tags));
-    assert.deepEqual(tags.map(tag => tag.attrs?.href ?? tag.attrs?.src), ['/shared/wallet-profile.css', '/shared/wallet-profile.js', '/shared/featheral.css', '/shared/site-links.js']);
+    const result = transform(html, { path: file, filename: file });
+    assert.ok(result && typeof result === 'object' && !Array.isArray(result) && 'tags' in result);
+    const tags = result.tags;
+    assert.match(result.html, /<html data-app-loading[\s>]/);
+    assert.match(result.html, /<div id="app" aria-busy="true"><div class="page-transition-loader"/);
+    assert.deepEqual(tags.map(tag => tag.attrs?.href ?? tag.attrs?.src), ['/shared/wallet-profile.css', '/shared/wallet-profile.js', '/shared/wallet/ethers.js', '/shared/world-account.js', '/shared/world-account.css', '/shared/featheral.css', '/shared/site-links.css', '/shared/site-links.js']);
     assert.ok(tags.every(tag => tag.attrs?.['vite-ignore'] === true));
     assert.ok(tags.filter(tag => tag.tag === 'script').every(tag => !tag.attrs?.type));
   }

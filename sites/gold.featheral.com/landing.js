@@ -175,7 +175,7 @@ function renderEconomy(api) {
   if (api?.goldReserve?.enabled) {
     const reserve = api.goldReserve;
     const dynamic = reserve.pricingPolicy === "origin-linear-v1";
-    const rate = dynamic ? tokens(reserve.spotRateFthDollarPerFthg) : Number(reserve.rate).toLocaleString("en-US");
+    const rate = dynamic ? tokens(reserve.spotRateFthDollarPerFthg) : Number(reserve.rate).toLocaleString("en-US", { maximumFractionDigits: 2 });
     $("rateValue").textContent = `1 FTHG ${dynamic ? "≈" : "="} ${rate} FTH$`;
     $("rateNote").textContent = dynamic
       ? "Current spot price on a demand-based curve, not a fixed rate. It starts at 10,000 FTH$, rises as Gold is allocated and falls as it is returned; larger trades move the price. No Mainnet transfers are submitted."

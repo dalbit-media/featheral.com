@@ -71,7 +71,7 @@ test('federation display escapes names, preserves balances and localizes actiona
 test('common vault shows every asset, all-time and game-year shares with an explicit pending payout policy', () => {
   const state = fixture();
   state.game.federation = 'Evergreen Union';
-  const stock = { wood: 3, water: 4, metal: 5, oil: 6, dollars: .0001 };
+  const stock = { wood: 3, water: 4, metal: 5, oil: 6, dollars: 12.3456 };
   const vault = { year: 12, stock, annualContributed: stock, totalValue: 100, annualValue: 50, taxStatus: 'pending' as const,
     contributors: [{ id: 'member', name: '<script>test</script>', yours: true, contributed: stock, annualContributed: stock,
       value: 50, annualValue: 25, allTimePercent: 50, annualPercent: 25 }] };
@@ -79,7 +79,7 @@ test('common vault shows every asset, all-time and game-year shares with an expl
   const html = federationPanel(complete, 'en');
   assert.match(html, /Common resources vault/);
   assert.match(html, /50%/); assert.match(html, /25%/);
-  assert.match(html, /0.0001 FTH\$/);
+  assert.match(html, /12\.35 FTH\$/);
   assert.match(html, /&lt;script&gt;/); assert.doesNotMatch(html, /<script>/);
   assert.match(html, /Tax collection, payout rate and eligibility are pending/);
   assert.match(html, /data-action="federation-contribute"/);

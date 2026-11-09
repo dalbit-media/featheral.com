@@ -115,7 +115,7 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
       glyph.innerHTML = icon(value.asset === 'dollars' ? 'dollars' : value.asset === 'fthg' || isMarketResource(value.asset) ? value.asset : 'layers');
       glyph.setAttribute('aria-hidden', 'true');
       dt.append(glyph, element('span', value.asset === 'dollars' ? 'FTH$' : value.asset === 'fthg' ? 'FTHG' : t(marketAssetName(value.asset))));
-      row.append(dt, element('dd', `${spending ? '-' : '+'}${value.asset === 'fthg' || (value.asset === 'dollars' && quote.preciseDollars) ? formatFthg(value.amount, locale(language)) : value.asset === 'dollars' ? formatDollars(value.amount, locale(language)) : formatResourceAmount(value.asset, value.amount, locale(language))}`));
+      row.append(dt, element('dd', `${spending ? '-' : '+'}${value.asset === 'fthg' ? formatFthg(value.amount, locale(language)) : value.asset === 'dollars' ? formatDollars(value.amount, locale(language)) : formatResourceAmount(value.asset, value.amount, locale(language))}`));
       dl.append(row);
     }
     section.append(dl);

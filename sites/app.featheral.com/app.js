@@ -142,7 +142,7 @@
     if (state.me.adminPermissions.length) {
       const admin = node("a", "Open assigned Admin workspace"); admin.href = link("admin", "/#/intranet"); $("identity").append(admin);
     }
-    $("silver-balance").textContent = `${silver.toLocaleString()} FTHS`;
+    $("silver-balance").textContent = `${silver.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS`;
     $("header-member").textContent = profile?.username || short(address);
     $("sidebar-identity").replaceChildren(node("strong", profile?.username || short(address)),
       node("small", `${member.level} / ${member.role}`),
@@ -310,12 +310,12 @@
     progress.setAttribute("aria-label", "Approved weekly task completion");
     card.append(progress, node("p", `${pay.accomplished} / ${pay.assigned} assigned tasks approved (${percent}%)`),
       node("p", "Above 60%: configured base + completed-task incentives. At or below 60%: incentives only, no base, and return to visitor. No assignments: membership stays and no salary record.", "fine"));
-    card.append(node("p", pay.configured ? `Configured weekly base: ${pay.base.toLocaleString()} FTHS. Incentive per approved task: ${pay.incentivePerTask.toLocaleString()} FTHS. Evaluated after the cycle closes.` : "Reward amounts are not configured for this cycle. No FTHS will be issued; completion and membership rules still apply.", "fine"));
-    for (const record of pay.history) card.append(node("p", `${new Date(record.period).toISOString().slice(0, 10)} / ${record.accomplished}/${record.assigned} approved / Base ${record.base} + incentive ${record.incentive} = ${record.total} FTHS / ${record.qualified ? "membership retained" : "returned to visitor"}${record.configured ? "" : " / policy unconfigured"}`, "fine"));
+    card.append(node("p", pay.configured ? `Configured weekly base: ${pay.base.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS. Incentive per approved task: ${pay.incentivePerTask.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS. Evaluated after the cycle closes.` : "Reward amounts are not configured for this cycle. No FTHS will be issued; completion and membership rules still apply.", "fine"));
+    for (const record of pay.history) card.append(node("p", `${new Date(record.period).toISOString().slice(0, 10)} / ${record.accomplished}/${record.assigned} approved / Base ${record.base.toLocaleString(undefined, { maximumFractionDigits: 4 })} + incentive ${record.incentive.toLocaleString(undefined, { maximumFractionDigits: 4 })} = ${record.total.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS / ${record.qualified ? "membership retained" : "returned to visitor"}${record.configured ? "" : " / policy unconfigured"}`, "fine"));
     root.append(card);
     if (active) {
       $("reward-record").replaceChildren(card.cloneNode(true));
-      const summary = $("reward-summary"); summary.replaceChildren(node("h2", `${state.me.silver.toLocaleString()} FTHS earned balance`),
+      const summary = $("reward-summary"); summary.replaceChildren(node("h2", `${state.me.silver.toLocaleString(undefined, { maximumFractionDigits: 4 })} FTHS earned balance`),
         node("p", eligibilityText(pay)), node("p", "Existing weekly evaluation rules are unchanged. No manual payout is enabled from this workspace.", "fine"));
       renderOverview();
     }

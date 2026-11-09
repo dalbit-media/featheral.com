@@ -67,7 +67,7 @@ test("integrated review preserves exact Max, recovers lost receipts with the sam
   const h = harness({ builtIn: true, loseReceipt: true }); await h.panel.refresh();
   assert.equal(h.saved.get("featheral-world-account"), account);
   h.get("max").onclick(); assert.equal(h.get("amount").value, "1.23456789");
-  assert.match(h.get("preview").textContent, /Game 4.23456789.*Wallet 0/);
+  assert.match(h.get("preview").textContent, /Game 4\.23.*Wallet 0/);
   h.get("form").onsubmit({ preventDefault() {} }); await tick();
   assert.equal(h.get("review").hidden, false); assert.equal(h.posts.length, 1);
   h.get("approve").onclick(); await tick();
@@ -98,7 +98,7 @@ test("legacy direct mode keeps a single shared balance and does not enable trans
 });
 test("visible polling refreshes balances and disposing removes event listeners", async () => {
   const h = harness(); await h.panel.refresh(); h.view.available = "1000000000000000001";
-  h.interval(); await tick(); assert.equal(h.get("world").textContent, "1.000000000000000001 FTH$");
+  h.interval(); await tick(); assert.equal(h.get("world").textContent, "1 FTH$");
   h.panel.dispose(); assert.equal(h.listeners.size, 0);
 });
 test("a durable paying request resumes without another wallet signature", async () => {

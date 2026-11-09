@@ -8,8 +8,9 @@
     return element;
   };
   const units = raw => {
-    const [whole, fraction] = ethers.formatUnits(raw || "0", 18).split(".");
-    return `${BigInt(whole).toLocaleString("en-US")}${fraction === "0" ? "" : `.${fraction}`}`;
+    const rounded = (BigInt(raw || "0") + 5n * 10n ** 13n) / 10n ** 14n;
+    const fraction = (rounded % 10000n).toString().padStart(4, "0").replace(/0+$/, "");
+    return `${(rounded / 10000n).toLocaleString("en-US")}${fraction ? `.${fraction}` : ""}`;
   };
   const dollars = raw => {
     const cents = (BigInt(raw || "0") + 5n * 10n ** 15n) / 10n ** 16n;
@@ -49,7 +50,7 @@
       metric("Locked redeemed currency", `${dollars(state.lockedRedemptionDollars)} FTH$`, "Cannot be spent on markets; reconversion unlocks the same currency."),
     );
     const rate = state.pricingPolicy === "origin-linear-v1"
-      ? dollars(state.spotRateFthDollarPerFthg) : Number(state.rate).toLocaleString("en-US");
+      ? dollars(state.spotRateFthDollarPerFthg) : Number(state.rate).toLocaleString("en-US", { maximumFractionDigits: 2 });
     root.querySelector("#reserve-mode").textContent = `${state.mode === "live" ? "Live off-chain economy" : "Isolated test economy"} · 1 FTHG = ${rate} FTH$${state.pricingPolicy ? " · demand-based spot; trade quotes vary by size" : " · legacy fixed rate"}`;
   }
   function row(item) {

@@ -220,7 +220,7 @@ test('payment links prefill FTH$ without transferring until explicit exact-amoun
   assert.equal(ui.calls.some(call => call.url.includes('/send/prepare') || call.url.includes('/transfers')), false);
   const cancelled = ui.nodes['send-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
-  assert.match(ui.nodes['wallet-review-message'].textContent, /0\.000000000000000001 FTH\$/);
+  assert.match(ui.nodes['wallet-review-message'].textContent, /<0\.01 FTH\$/);
   await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
   assert.equal(ui.calls.some(call => call.url.includes('/transfers')), false);
   const approved = ui.nodes['send-form'].fire('submit');
@@ -1246,7 +1246,7 @@ test('Swap requires explicit approval, preserves exact Dollar minimums and recov
   const submit = ui.nodes['swap-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(ui.calls.some(call => call.url.endsWith('/wallet/swaps/prepare')), false);
-  assert.match(ui.nodes['wallet-review-message'].textContent, /1\.000000000000000001 FTH\$ → at least 9 FTHA/);
+  assert.match(ui.nodes['wallet-review-message'].textContent, /1 FTH\$ → at least 9 FTHA/);
   await ui.nodes['wallet-review-cancel'].fire('click'); await submit;
   assert.equal(ui.calls.some(call => call.url.endsWith('/wallet/swaps/prepare')), false);
   const approved = ui.nodes['swap-form'].fire('submit');

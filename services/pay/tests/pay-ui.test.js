@@ -52,7 +52,7 @@ test("Pay UI separates fixed payment QR from amount-free printable card and writ
   const ui = fixture({ nfc: true });
   await ui.generate("12.500000000000000001");
   assert.equal(ui.nodes["request-result"].hidden, false);
-  assert.equal(ui.nodes["request-amount"].textContent, "12.500000000000000001 FTH$");
+  assert.equal(ui.nodes["request-amount"].textContent, "12.5 FTH$");
   assert.equal(ui.nodes["card-name"].textContent, "Shop <test>");
   assert.equal(new URL(ui.nodes["payment-qr"].src).searchParams.get("amount"), "12.500000000000000001");
   assert.equal(new URL(ui.nodes["card-qr"].src).searchParams.has("amount"), false);
@@ -70,6 +70,15 @@ test("Pay UI separates fixed payment QR from amount-free printable card and writ
   assert.equal(ui.nodes["card-qr"].hidden, true);
   assert.equal(ui.nodes["print-card"].disabled, true);
   ui.nodes["print-card"].fire("click"); assert.equal(ui.prints(), 1);
+});
+
+test("Pay display rounds without altering the exact payment request", async () => {
+  const ui = fixture();
+  await ui.generate("12345678901234567890.123456789012345678");
+  assert.equal(ui.nodes["request-amount"].textContent, "12345678901234567890.12 FTH$");
+  assert.equal(new URL(ui.nodes["payment-qr"].src).searchParams.get("amount"), "12345678901234567890.123456789012345678");
+  await ui.generate("0.000000000000000001");
+  assert.equal(ui.nodes["request-amount"].textContent, "<0.01 FTH$");
 });
 
 test("Pay UI surfaces unsupported NFC, API failures and missing QR rather than enabling a broken card", async () => {
@@ -93,7 +102,7 @@ test("Pay UI loads incoming requests without authorizing payments and rejects ma
   await ui.settle();
   assert.equal(ui.nodes["request-result"].hidden, false);
   assert.equal(ui.nodes.to.value, address);
-  assert.equal(ui.nodes["request-amount"].textContent, "1.000000000000000001 FTH$");
+  assert.equal(ui.nodes["request-amount"].textContent, "1 FTH$");
   assert.match(ui.nodes.status.textContent, /Verify the recipient/);
   assert.equal(ui.requests.every(url => url.startsWith("/api/v1/pay/requests?")), true);
   const invalid = fixture({ search: `?to=${address}&amount=1&amount=2` });

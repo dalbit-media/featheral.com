@@ -2,7 +2,11 @@
 
 window.FeatheralAdminControllers.dollar = (root, kit) => {
   const { el, json, stat, gate } = kit;
-  const fmt = wei => ethers.formatUnits(wei, 18);
+  const fmt = wei => {
+    const rounded = (BigInt(wei) + 5n * 10n ** 15n) / 10n ** 16n;
+    const fraction = (rounded % 100n).toString().padStart(2, "0").replace(/0+$/, "") || "0";
+    return `${rounded / 100n}.${fraction}`;
+  };
   const num = (n) => Number(n || 0).toLocaleString("en-US");
   gate(root.querySelector("#gate"), "any");
 

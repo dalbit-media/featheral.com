@@ -162,7 +162,9 @@ export function craftingStageName(item: CraftableItem): string {
 export function craftingCost(item: CraftableItem, quantity = 1): Cost {
   const cost = withDollarFee(craftableItems[item].cost);
   return Object.fromEntries(Object.entries(cost).map(([resource, amount]) =>
-    [resource, (resource === 'dollars' ? Math.max(1, amount / 10) : Math.ceil(amount / 10)) * quantity]));
+    [resource, resource === 'dollars'
+      ? Math.round(Math.max(1, amount / 10) * quantity * monetaryPolicy.scale) / monetaryPolicy.scale
+      : Math.ceil(amount / 10) * quantity]));
 }
 export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
   const ingredients = isTransportItem(item) ? transportItems[item].ingredients : isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
