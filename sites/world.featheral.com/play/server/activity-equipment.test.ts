@@ -5,7 +5,7 @@ import { accrue, apply, execute, parseCommand, snapshot } from './economy.ts';
 import { createFundedFixtureAccount } from './test-support.ts';
 import { craft, equipActivity, inventory } from './inventory.ts';
 import { SqliteStore } from './store.ts';
-import { activityEquipmentBenefit, activityEquipmentDiscount, activityEquipmentItems, discountedActivityCost, equipmentActivities } from '../src/activity-equipment.ts';
+import { activityEquipmentBenefit, activityEquipmentDiscount, activityEquipmentItems, discountedActivityCost, equipmentActivities, isActivityEquipment } from '../src/activity-equipment.ts';
 import { craftableKeys, craftingCost, craftingIngredients, craftingMaximum, decorationItems, inventoryUsed, itemStorage, sellableItemCount } from '../src/items.ts';
 import type { ItemId } from '../src/items.ts';
 import type { Command } from '../src/api-types.ts';
@@ -225,18 +225,19 @@ test('equipment survives SQLite session serialization and idempotent command ret
     });
   } finally { store.close(); }
 });
-test('cost equipment UI has nine compact recipes, available input counts and three equipment slots', () => {
+test('cost equipment UI has nine compact recipes, available input counts and equipped inventory slots', () => {
   const account = fixture();
   supplyRecipe(account, 'survey-satchel');
   const state = snapshot(account);
-  const html = craftingPanel(state, () => '', 'efficiency', 'en');
-  assert.equal((html.match(/data-action="craft"/g) ?? []).length, 9);
+  const html = craftingPanel(state, () => '', 'efficiency', 'settlement', 1, 'en');
+  assert.equal([...html.matchAll(/data-action="craft" data-item="([^"]+)"/g)].filter(match => isActivityEquipment(match[1])).length, 9);
   assert.match(html, /10% lower investigation fees/);
   assert.match(html, /Wood auto-collection/);
   assert.match(html, /1 \/ 1/);
   inventory(account).items.push('survey-satchel');
   equipActivity(account, 'investigation', 'survey-satchel');
   const panel = inventoryPanel(snapshot(account), () => '', 'efficiency', 'en');
-  assert.equal((panel.match(/class="activity-equipment-slot"/g) ?? []).length, 3);
+  assert.doesNotMatch(panel, /class="activity-equipment-slot"/);
+  assert.match(panel, /data-item="survey-satchel"[^>]+data-equipped="true"/);
   assert.match(panel, /data-action="activity-gear" data-activity="investigation"/);
 });

@@ -13,6 +13,38 @@ import { settlementSectionNavigation, settlementTasks } from './settlement-ui.ts
 import { icon } from './icons.ts';
 import { translate } from './i18n.ts';
 import { stages } from './engine.ts';
+import { inventoryPanel } from './inventory-view.ts';
+import { craftableKeys } from './items.ts';
+
+test('inventory pins equipped stacks first, keeps filters and pages, and provides bilingual touch and hover details', () => {
+  const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
+  state.inventory.storage = 2;
+  state.inventory.items = [...craftableKeys.slice(0, 22), 'survey-satchel', 'trail-kit', 'welcome-kit'];
+  state.inventory.equipped = 'lamp';
+  state.inventory.activityEquipment = { investigation: 'survey-satchel', exploration: 'trail-kit', attraction: 'welcome-kit' };
+  state.inventory.marketReserved = ['relic-glacier'];
+  const before = structuredClone(state);
+  for (const language of ['en', 'ko'] as const) {
+    const html = inventoryPanel(state, () => '', 'all', language);
+    const slots = [...html.matchAll(/<button class="inventory-slot[^"]*"[^>]*data-item="([^"]+)"[^>]*>/g)].map(match => match[1]);
+    assert.deepEqual(slots.slice(0, 4), ['lamp', 'survey-satchel', 'trail-kit', 'welcome-kit']);
+    assert.equal((html.match(/data-equipped="true"/g) ?? []).length, 4);
+    assert.equal((html.match(/class="inventory-equipped-label"/g) ?? []).length, 4);
+    assert.doesNotMatch(html, /activity-equipment-slots/);
+    for (const id of slots) {
+      assert.ok(html.includes(`data-inventory-preview="inventory-preview-${id}"`));
+      assert.ok(html.includes(`id="inventory-preview-${id}" popover="auto"`));
+      assert.ok(html.includes(translate(itemDescription(id).effect, language)));
+    }
+    const pageTwo = inventoryPanel(state, () => '', 'all', language, 'settlement', 1);
+    assert.doesNotMatch(pageTwo, /data-equipped="true"/);
+    assert.match(pageTwo, /data-action="inventory-preview" data-item="relic-glacier"/);
+    assert.match(pageTwo, /Available copies|사용 가능한 수량/);
+    const decorations = inventoryPanel(state, () => '', 'decoration', language);
+    assert.doesNotMatch(decorations, /data-equipped="true"/);
+  }
+  assert.deepEqual(state, before);
+});
 
 test('settlement tier badge shows the exact civilization stage even with a custom settlement name', () => {
   const account = createAccount(0);

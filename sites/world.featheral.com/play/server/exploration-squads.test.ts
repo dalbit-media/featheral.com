@@ -12,12 +12,56 @@ import { itemArt } from '../src/item-art.ts';
 import { translate } from '../src/i18n.ts';
 import { investigationQuote, explorationQuote, workforceCounts } from '../src/workforce.ts';
 import { worldWeekMs } from '../src/environment.ts';
-import { dollarsScale } from '../src/dollars.ts';
+import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { fieldMissionActivity, squadOptions } from '../src/squad-options.ts';
 import { craftingPanel, inventoryPanel } from '../src/inventory-view.ts';
 import type { ApiState } from '../src/api-types.ts';
 import { marketBasePrice, marketAssets } from '../src/market.ts';
 import { filterMarketCatalog } from '../src/marketplace-catalog.ts';
+import { seedFixturePools } from './test-support.ts';
+
+test('all squad sizes have executable dynamic buys and sales, recorded history and receipt replay', () => {
+  let time = 1000000;
+  const store = new SqliteStore(':memory:', () => time);
+  try {
+    seedFixturePools(store);
+    const user = store.create();
+    store.transaction(user.token, session => {
+      session.account.game.stage = 0;
+      session.account.game.population = 0;
+      session.account.game.dollars = dollarsUnits(1000000);
+    });
+    const total = store.publicTotals().dollars;
+    for (const asset of squadKeys) {
+      time += 1000;
+      const before = store.transaction(user.token, (session, now, realTime, exchange, owner) =>
+        exchange.read(owner, session.account, now, realTime, asset, 10));
+      assert.ok(before.market.quotes.buy.available, asset);
+      const buy = { id: randomUUID(), revision: before.revision,
+        command: { type: 'spot', side: 'buy', asset, quantity: 10, limitDollars: before.market.quotes.buy.dollars } };
+      const purchased = store.transaction(user.token, (session, now, realTime, exchange, owner) =>
+        exchange.action(owner, session, buy, now, realTime));
+      assert.equal(purchased.inventory.items.filter(item => item === asset).length, 10);
+      const afterBuy = store.transaction(user.token, (session, now, realTime, exchange, owner) =>
+        exchange.read(owner, session.account, now, realTime, asset, 10));
+      assert.ok(afterBuy.market.quotes.buy.dollars > before.market.quotes.buy.dollars, asset);
+      assert.ok(afterBuy.market.quotes.sell.available, asset);
+      time += 250;
+      const sell = { id: randomUUID(), revision: purchased.revision,
+        command: { type: 'spot', side: 'sell', asset, quantity: 10, limitDollars: afterBuy.market.quotes.sell.dollars } };
+      const sold = store.transaction(user.token, (session, now, realTime, exchange, owner) =>
+        exchange.action(owner, session, sell, now, realTime));
+      assert.equal(sold.inventory.items.includes(asset), false);
+      assert.equal(sold.market.history.length, 2);
+      assert.ok(sold.market.history.every(fill => fill.asset === asset && fill.quantity === 10));
+      const saved = store.read(user.token, session => structuredClone(session.account));
+      store.transaction(user.token, (session, now, realTime, exchange, owner) =>
+        exchange.action(owner, session, sell, now, realTime));
+      assert.deepEqual(store.read(user.token, session => session.account), saved);
+      assert.equal(store.publicTotals().dollars, total);
+    }
+  } finally { store.close(); }
+});
 
 const start = 1000000;
 function fixture() {

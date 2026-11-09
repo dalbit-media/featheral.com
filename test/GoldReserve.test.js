@@ -10,7 +10,7 @@ const { ethers } = require("ethers");
 const { FthLedger, walletAccountId } = require("../services/fth-ledger/ledger");
 const { canonical } = require("../services/fth-ledger/codec");
 const { transferMessage } = require("../services/fth-ledger/transfer");
-const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets, reserveLiquidityTargets: relicLiquidityTargets, craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets, transportLiquidityTargets: reserveLiquidityTargets } = require("../services/notes/game-funds");
+const { gameSigningKey, ledgerFunds, authorizedLiquidityTargets, reserveLiquidityTargets: relicLiquidityTargets, craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets, transportLiquidityTargets, squadLiquidityTargets: reserveLiquidityTargets } = require("../services/notes/game-funds");
 const { createReserveEngine, conversionMessage, RATE, TREASURY, REDEMPTION_ESCROW } = require("../services/gold/reserve");
 const pricing = require("../shared/gold-pricing");
 const { createGoldApi, reconciliationMessage, TOKEN_ADDRESS } = require("../services/gold/server");
@@ -88,9 +88,9 @@ describe("Isolated finite Gold reserve", () => {
     tx.d.signature = crypto.sign(null, Buffer.from(canonical(tx)), keys.privateKey).toString("base64");
     return tx;
   }
-  for (const startingCatalog of ["original", "identity-collectors", "relics", "crafting", "equipment", "bulk-crafting"]) it(`authorizes additive markets from ${startingCatalog} with both original keys, preserves funds and replays without rewriting genesis`, async () => {
+  for (const startingCatalog of ["original", "identity-collectors", "relics", "crafting", "equipment", "bulk-crafting", "transport"]) it(`authorizes additive markets from ${startingCatalog} with both original keys, preserves funds and replays without rewriting genesis`, async () => {
     ledger.close();
-    const originalTargets = startingCatalog === "bulk-crafting" ? bulkCraftingLiquidityTargets() : startingCatalog === "equipment" ? equipmentLiquidityTargets() : startingCatalog === "crafting" ? craftingLiquidityTargets() : startingCatalog === "relics" ? relicLiquidityTargets() : startingCatalog === "identity-collectors" ? authorizedLiquidityTargets()
+    const originalTargets = startingCatalog === "transport" ? transportLiquidityTargets() : startingCatalog === "bulk-crafting" ? bulkCraftingLiquidityTargets() : startingCatalog === "equipment" ? equipmentLiquidityTargets() : startingCatalog === "crafting" ? craftingLiquidityTargets() : startingCatalog === "relics" ? relicLiquidityTargets() : startingCatalog === "identity-collectors" ? authorizedLiquidityTargets()
       : Object.fromEntries(Object.entries(targets).filter(([asset]) => !Object.hasOwn(approvedMarkets, asset)));
     const folder = path.join(directory, "market-expansion");
     ledger = new FthLedger({ directory: folder, blockIntervalMs: 0, genesis: {
@@ -144,7 +144,7 @@ describe("Isolated finite Gold reserve", () => {
     assert.deepEqual(ledger.genesis.goldMarkets, targets);
     assert.deepEqual(ledger.goldReserve, reserveState);
     engine = createReserveEngine({ ledger, privateKey: goldKeys.privateKey, provider });
-    const result = await fund(startingCatalog === "relics" ? "logseat" : startingCatalog === "identity-collectors" ? "relic-forest" : "collector-all-52");
+    const result = await fund(startingCatalog === "transport" ? "squad-100" : startingCatalog === "relics" ? "logseat" : startingCatalog === "identity-collectors" ? "relic-forest" : "collector-all-52");
     assert.equal(result.quantity, startingCatalog === "identity-collectors" ? 100 : 10000);
     assert.equal(ledger.goldReserve.cap, reserveState.cap);
     assert.deepEqual(ledger.goldReserve.pools.wood, reserveState.pools.wood);

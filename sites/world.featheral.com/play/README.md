@@ -102,6 +102,16 @@ all available history. Only the latest 120 executed
 trades are available; missing intervals stay empty, not fabricated or carried
 forward. This is a trade-history chart, not a guaranteed complete time series.
 
+## Inventory inspection
+
+Inventory shows equipped visibility and activity gear in the first slots of
+each matching category, with illustrated icons and equipped badges. Identical
+copies remain one stack; equipment still uses its ordinary storage slot.
+The grid fills the panel width. Hover or keyboard-focus a slot for a bounded
+item-detail popover; tap to inspect and select an owned item for its ordinary
+actions. Reserved-only stacks can be inspected without making them usable.
+Escape or clicking outside dismisses the popover.
+
 ## Master Merchant Charter
 
 `merchant-charter` is the most expensive per-copy crafting recipe: FTH$10,000
@@ -148,10 +158,16 @@ additional reserve funding to force a sale.
 
 ## Squad dispatch vouchers
 
-Squad vouchers are not authorized live reserve markets. They remain craftable,
-tradeable through player offers, and eligible for player-funded pools, but do
-not request automatic Gold reserve funding or alter any existing reserve seed
-target. Deployment preflight and ledger authority checks remain enforced.
+Squad vouchers have liquid buy/sell markets for both exploration and
+investigation. Player offers and funded pools use ordinary dynamic pricing,
+trade history and limit orders. Live reserve additions are pinned at 10,000
+vouchers per market with initial price seeds of FTH$96/192/480/960 for
+10/20/50/100 missions. These are seeds, not fixed execution prices.
+Reserve funding remains finite and on demand; unavailable funding surfaces an
+error rather than creating currency. Historical reserve catalogs and seeds
+are unchanged. Deployment preflight approves only these additive targets,
+and activation requires both original authorities through the existing
+post-health-check authorization flow. Existing ledgers and keys are not reset.
 
 Craft or trade `squad-10`, `squad-20`, `squad-50`, and `squad-100` to launch
 up to that many field missions with one confirmation and one server action.

@@ -9,7 +9,6 @@ import { activityItemDetails, automationItems, isActivityItem } from './automati
 import { dollarsScale } from './dollars.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
 import type { BuyQuantityBudget } from './market-buy-quantity.ts';
-import { isSquadItem } from './exploration-squads.ts';
 import { isAutoCraftingItem } from './auto-crafting.ts';
 import type { AutoCraftQuote } from './auto-crafting.ts';
 
@@ -31,7 +30,7 @@ export function isMarketResource(asset: MarketAsset): asset is MarketResource {
 }
 export function isLiquidAsset(_asset: MarketAsset): boolean { return true; }
 export function isReserveMarketAsset(asset: MarketAsset): boolean {
-  return isLiquidAsset(asset) && !isSquadItem(asset) && !isAutoCraftingItem(asset);
+  return isLiquidAsset(asset) && !isAutoCraftingItem(asset);
 }
 export function marketQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : isCollectible(asset) ? 1 : 10000; }
 export function marketStartingQuantity(asset: MarketAsset): number { return isCollectible(asset) ? 100 : 10000; }
@@ -53,6 +52,7 @@ const craftedSeedPrices: Partial<Record<ItemId, number>> = Object.freeze({
   'welcome-kit': 450, 'welcome-pavilion': 2200, 'welcome-network': 4800,
   'craft-batch-10': 350, 'craft-batch-20': 850, 'craft-batch-50': 1800, 'craft-batch-100': 3500,
   'transport-cart': 120, 'transport-wagon': 300, 'transport-convoy': 650,
+  'squad-10': 96, 'squad-20': 192, 'squad-50': 480, 'squad-100': 960,
 });
 export function marketBasePrice(asset: MarketAsset): number {
   // Reserve genesis pins this seed price; trading floors must not change it.

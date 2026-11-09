@@ -659,7 +659,7 @@ test('inventory renders 20 compact stack slots per distinct-item page, including
   }
   state.inventory.storage = 1; state.inventory.items = ['torch']; state.inventory.marketReserved = ['bench'];
   const reserved = inventoryPanel(state, () => '', 'all', 'en');
-  assert.match(reserved, /inventory-slot reserved[^>]+data-item="bench"[^>]+disabled/);
+  assert.match(reserved, /inventory-slot reserved[^>]+data-action="inventory-preview"[^>]+data-item="bench"/);
   assert.equal((reserved.match(/inventory-slot empty/g) ?? []).length, 18);
   assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', 999), /data-page="1"[^>]+aria-current="page"/);
   assert.match(inventoryPanel(state, () => '', 'all', 'en', 'settlement', -1), /data-page="0"[^>]+aria-current="page"/);
@@ -680,11 +680,11 @@ test('inventory stacks owned and reserved copies without changing capacity, one-
   assert.deepEqual(itemStacks(state.inventory.items), [
     { id: 'torch', quantity: 2 }, { id: 'bench', quantity: 1 }, { id: 'collection-wood-1', quantity: 2 },
   ]);
-  assert.equal((html.match(/data-action="inventory-select"/g) ?? []).length, 4);
+  assert.equal((html.match(/data-action="inventory-(?:select|preview)"/g) ?? []).length, 4);
   assert.match(html, /aria-label="Torch · Quantity: 3 · Reserved in market: 1 · Equipped"/);
   assert.match(html, /data-item="torch"[^>]+aria-pressed="true"[^>]*>/);
   assert.doesNotMatch(html, /data-action="inventory-select" data-item="torch"[^>]+disabled/);
-  assert.match(html, /inventory-slot reserved[^>]+data-item="lamp"[^>]+disabled/);
+  assert.match(html, /inventory-slot reserved[^>]+data-action="inventory-preview"[^>]+data-item="lamp"/);
   assert.match(html, /<span>Owned<\/span>: 2 · <span>Reserved in market<\/span>: 1/);
   const pending = html.slice(html.indexOf('class="pending-finds"'), html.indexOf('data-detail="inventory-help"'));
   assert.equal((pending.match(/<li>/g) ?? []).length, 2);

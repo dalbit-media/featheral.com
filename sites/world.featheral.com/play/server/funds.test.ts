@@ -13,7 +13,7 @@ import { Wallet, parseUnits, verifyMessage } from 'ethers';
 import { transferMessage } from '../../../../services/fth-ledger/transfer.js';
 import { createAccount } from './economy.ts';
 
-test('squad markets never request reserve authority while existing market funding remains enabled', async () => {
+test('squad markets request reserve authority without changing pools until funded; merchant charter remains player-funded', async () => {
   const requested: string[] = [];
   const store = new SqliteStore(':memory:', Date.now, 1, {
     available: () => '0', supply: () => '0',
@@ -26,11 +26,12 @@ test('squad markets never request reserve authority while existing market fundin
     store.transaction(token, session => { session.account.game.stage = 0; });
     const before = store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all();
     for (const asset of ['squad-10', 'squad-20', 'squad-50', 'squad-100'] as const)
-      await store.ensureLiquidity(token, asset, 1);
-    assert.deepEqual(requested, []);
+      await store.ensureLiquidity(token, asset);
+    assert.deepEqual(requested, ['squad-10', 'squad-20', 'squad-50', 'squad-100']);
     assert.deepEqual(store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all(), before);
+    await store.ensureLiquidity(token, 'merchant-charter');
     await store.ensureLiquidity(token, 'torch');
-    assert.deepEqual(requested, ['torch']);
+    assert.deepEqual(requested, ['squad-10', 'squad-20', 'squad-50', 'squad-100', 'torch']);
   } finally { store.close(); }
 });
 

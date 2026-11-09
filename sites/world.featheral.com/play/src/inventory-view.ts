@@ -12,7 +12,7 @@ import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, activityName, isActivityItem, isAutomationItem } from './automation.ts';
 import { isCustomizationItem, isTitleItem, titleItems } from './customization.ts';
 import { formatResourceAmount } from './resource-units.ts';
-import { activityEquipmentBenefit, activityEquipmentItems, equipmentActivities, isActivityEquipment } from './activity-equipment.ts';
+import { activityEquipmentBenefit, activityEquipmentItems, isActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, craftBatchOptions, isBulkCraftingItem } from './bulk-crafting.ts';
 import { marketAssetName, marketPriceAvailable } from './market.ts';
 import type { MarketSnapshot } from './market.ts';
@@ -27,12 +27,31 @@ import { isAutoCraftingItem } from './auto-crafting.ts';
 
 export type InventoryFilter = 'all' | 'utility' | 'efficiency' | 'bulk' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
-export function activityEquipmentSlots(state: ApiState, language: Language): string {
-  const equipped = state.inventory.activityEquipment ?? {};
-  return `<section class="activity-equipment-slots" aria-label="${translate('Cost-saving equipment', language)}"><p class="fineprint">One item per activity. No stacking. Maximum discount: 50%.</p>${equipmentActivities.map(activity => {
-    const item = equipped[activity];
-    return `<div class="activity-equipment-slot">${item ? itemArt(item) : icon(activity === 'attraction' ? 'people' : 'compass')}<span><strong>${translate(activity === 'investigation' ? 'Investigation' : activity === 'exploration' ? 'Exploration' : 'Attraction', language)}</strong><small>${item ? `${translate(itemName(item), language)} · −${activityEquipmentItems[item].discount}%` : translate('No equipment', language)}</small></span>${item ? `<button class="button" data-action="activity-gear" data-activity="${activity}" aria-label="${translate('Unequip', language)} ${translate(itemName(item), language)}">${translate('Unequip', language)}</button>` : ''}</div>`;
-  }).join('')}</section>`;
+export function wireInventoryDetails(root: ParentNode): void {
+  for (const button of root.querySelectorAll<HTMLButtonElement>('[data-inventory-preview]')) {
+    const preview = root.querySelector<HTMLElement>(`#${button.dataset.inventoryPreview}`);
+    if (!preview) continue;
+    const show = () => {
+      if (!preview.matches(':popover-open')) preview.showPopover();
+      const anchor = button.getBoundingClientRect(), bounds = preview.getBoundingClientRect();
+      const top = anchor.top >= bounds.height + 16 ? anchor.top - bounds.height - 8 : anchor.bottom + 8;
+      preview.style.left = `${Math.max(8, Math.min(anchor.left + anchor.width / 2 - bounds.width / 2, innerWidth - bounds.width - 8))}px`;
+      preview.style.top = `${Math.max(8, Math.min(top, innerHeight - bounds.height - 8))}px`;
+    };
+    const hide = () => { if (preview.matches(':popover-open')) preview.hidePopover(); };
+    button.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') show(); });
+    button.addEventListener('pointerleave', () => { if (document.activeElement !== button) hide(); });
+    button.addEventListener('focus', show);
+    button.addEventListener('blur', hide);
+    button.addEventListener('click', show);
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && preview.matches(':popover-open')) {
+        event.preventDefault();
+        event.stopPropagation();
+        hide();
+      }
+    });
+  }
 }
 export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => string, filter: InventoryFilter, language: Language, context: 'settlement' | 'explore' = 'settlement', page = 0, selection: ItemId | null = null): string {
   const { game, inventory: bag } = state, tier = itemStorage[bag.storage], next = itemStorage[bag.storage + 1];
@@ -42,7 +61,8 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
   const filtered = itemStacks([...bag.items, ...(bag.marketReserved ?? [])])
     .map(stack => ({ ...stack, reserved: reserved.get(stack.id) ?? 0, owned: stack.quantity - (reserved.get(stack.id) ?? 0), equipped: bag.equipped === stack.id || Object.values(bag.activityEquipment ?? {}).some(equipped => equipped === stack.id) }))
     .filter(({ id }) => filter === 'all' || (filter === 'utility' ? isVisibilityItem(id) || isAutomationItem(id) || isActivityEquipment(id) || isBulkCraftingItem(id) || isAutoCraftingItem(id) || isTransportItem(id) || isSquadItem(id) : filter === 'bulk' ? isBulkCraftingItem(id) || isAutoCraftingItem(id) || isSquadItem(id) : filter === 'efficiency' ? isActivityEquipment(id) || isTransportItem(id) : filter === 'decoration' ? isDecorationItem(id)
-      : filter === 'collectors' ? isCollectionItem(id) : filter === 'customization' ? isCustomizationItem(id) : id.startsWith('relic-')));
+      : filter === 'collectors' ? isCollectionItem(id) : filter === 'customization' ? isCustomizationItem(id) : id.startsWith('relic-')))
+    .sort((a, b) => Number(b.equipped) - Number(a.equipped));
   const pages = tier.capacity / inventoryPageSize, current = Math.max(0, Math.min(Number.isSafeInteger(page) ? page : 0, pages - 1));
   const visible = filtered.slice(current * inventoryPageSize, (current + 1) * inventoryPageSize);
   const selectedStack = visible.find(slot => slot.owned > 0 && slot.id === selection) ?? visible.find(slot => slot.owned > 0);
@@ -51,13 +71,15 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
   return `<section class="settlement-section inventory-panel" id="inventory" aria-labelledby="inventory-title">
     <div class="settlement-section-title"><h3 id="inventory-title">${translate(tier.name, language)}</h3><strong aria-label="Inventory capacity">${fmt(inventoryUsed(bag))} / ${tier.capacity}</strong></div>
     <div class="inventory-expansion">${next ? `<span>${translate(`${next.name} · ${next.capacity} item slots`, language)}</span><button class="button" data-action="item-storage" aria-label="Expand item storage" ${game.stage < 0 || !canAfford(game, { metal: next.metal, dollars: next.dollars }) ? 'disabled' : ''}>${icon('plus')}<span>Expand storage</span>${costChips({ metal: next.metal, dollars: next.dollars })}</button>` : '<span>Maximum item storage</span>'}</div>
-    ${activityEquipmentSlots(state, language)}
+    <p class="inventory-hint">${translate('Equipped items come first. Hover, focus or tap an item for details.', language)}</p>
     <div class="inventory-filters" role="group" aria-label="Inventory filters">${([['all', 'All items'], ['utility', 'Equipment & automation'], ['efficiency', 'Cost-saving equipment'], ['bulk', 'Bulk actions'], ['decoration', 'Decorations'], ['collectible', 'Collectibles'], ['collectors', 'Collectors'], ['customization', 'Names & titles']] as const).map(([key, label]) => `<button class="button" data-action="inventory-filter" data-filter="${key}" aria-pressed="${key === filter}">${label}</button>`).join('')}</div>
     <div class="inventory-slots" role="group" aria-label="Item slots">${Array.from({ length: inventoryPageSize }, (_, index) => {
       const slot = visible[index], number = current * inventoryPageSize + index + 1;
       if (!slot) return `<div class="inventory-slot empty" role="img" aria-label="${translate('Empty slot', language)} ${number}"></div>`;
       const label = `${name(slot.id)} · ${translate('Quantity', language)}: ${fmt(slot.quantity)}${slot.reserved ? ` · ${translate('Reserved in market', language)}: ${fmt(slot.reserved)}` : ''}${slot.equipped ? ` · ${translate('Equipped', language)}` : ''}`;
-      return `<button class="inventory-slot${slot.owned === 0 ? ' reserved' : ''}" data-action="inventory-select" data-item="${slot.id}" aria-label="${label}" title="${label}" aria-pressed="${slot.id === selected}" ${slot.owned === 0 ? 'disabled' : ''}>${itemArt(slot.id)}<b class="inventory-quantity" aria-hidden="true">${fmt(slot.quantity)}</b>${slot.reserved || slot.equipped ? `<i>${icon(slot.equipped ? 'check' : 'lock')}</i>` : ''}</button>`;
+      const previewId = `inventory-preview-${slot.id}`;
+      return `<button class="inventory-slot${slot.owned === 0 ? ' reserved' : ''}" data-action="${slot.owned === 0 ? 'inventory-preview' : 'inventory-select'}" data-item="${slot.id}" data-inventory-preview="${previewId}" aria-controls="${previewId}" aria-label="${label}" aria-pressed="${slot.id === selected}" ${slot.equipped ? 'data-equipped="true"' : ''}>${itemArt(slot.id)}<b class="inventory-quantity" aria-hidden="true">${fmt(slot.quantity)}</b>${slot.reserved || slot.equipped ? `<i>${icon(slot.equipped ? 'check' : 'lock')}</i>` : ''}${slot.equipped ? `<span class="inventory-equipped-label">${translate('Equipped', language)}</span>` : ''}</button>
+        <aside class="inventory-preview" id="${previewId}" popover="auto" aria-label="${name(slot.id)}"><header>${itemArt(slot.id)}<div><h4>${name(slot.id)}</h4>${slot.equipped ? `<span>${icon('check')} ${translate('Equipped', language)}</span>` : ''}</div></header>${itemDetailRows(slot.id, language, sellableItemCount(bag, slot.id), slot.reserved)}</aside>`;
     }).join('')}</div>
     <nav class="inventory-pages" aria-label="Inventory pages">${Array.from({ length: pages }, (_, index) => `<button class="button" data-action="inventory-page" data-page="${index}" aria-label="${translate(`Inventory page ${index + 1} of ${pages}`, language)}" aria-current="${index === current ? 'page' : 'false'}">${index + 1}</button>`).join('')}<span>${translate(`Page ${current + 1} of ${pages}`, language)}</span></nav>
     ${selectedStack && selected ? `<article class="inventory-item-detail${isCustomizationItem(selected) ? ' customization-detail' : ''}">${itemArt(selected)}<div><h3>${name(selected)}</h3><p><span>Owned</span>: ${fmt(selectedStack.owned)}${selectedStack.reserved ? ` · <span>Reserved in market</span>: ${fmt(selectedStack.reserved)}` : ''}</p><p>${isTransportItem(selected) || isBulkCraftingItem(selected) || isAutoCraftingItem(selected) || isSquadItem(selected) ? translate('Consumes one permit', language) : isActivityEquipment(selected) ? translate(activityEquipmentBenefit(selected), language) : isCustomizationItem(selected) ? 'Consumes one permit. Cosmetic only.' : isActivityItem(selected) ? translate(activityName(activityItemDetails(selected).activity), language) : isCollectionItem(selected) ? translate(`Auto-collection for ${collectionItemDetails(selected).weeks} game weeks`, language) : isVisibilityItem(selected) ? `${visibilityItems[selected].radius}-tile view` : isDecorationItem(selected) ? position ? translate(`Placed at ${position.x}, ${position.y}`, language) : 'Not placed' : 'Exploration keepsake'}</p>

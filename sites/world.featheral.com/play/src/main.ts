@@ -24,7 +24,7 @@ import { editableAllocation, emergencyCollection, explorationCount, nextExplorat
 import { canCollectFinds, collectibleFindAvailable, inventoryPageSize, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import { isActivityEquipment, isEquipmentActivity } from './activity-equipment.ts';
 import type { ItemId } from './items.ts';
-import { craftingPanel, inventoryPanel } from './inventory-view.ts';
+import { craftingPanel, inventoryPanel, wireInventoryDetails } from './inventory-view.ts';
 import type { CraftingFilter, InventoryFilter } from './inventory-view.ts';
 import { settlementLayoutPanel, settlementScene } from './settlement-scene.ts';
 import { arrangementError, isSettlementEntity, settlementBuildings, settlementEntityName, settlementPositions } from './settlement-layout.ts';
@@ -934,6 +934,7 @@ function replaceContent(root: Element, content: string): void {
   const scrollTop = root.scrollTop;
   const canvas = root.querySelector<HTMLCanvasElement>('#settlement-world');
   root.innerHTML = content;
+  wireInventoryDetails(root);
   const sale = root.querySelector('[data-settlement-sale]');
   if (sale) settlementSale?.mount(sale);
   const resourceSale = root.querySelector<HTMLElement>('[data-resource-sale]');
@@ -1541,7 +1542,11 @@ app.addEventListener('click', event => {
     }
     case 'inventory-select': {
       const item = state.inventory.items.find(id => id === target.dataset.item);
-      if (item) { inventorySelection = item; renderSettlement(); }
+      if (item) {
+        inventorySelection = item;
+        if (settlementPage) renderSettlement(); else renderSidebar();
+        document.querySelector<HTMLButtonElement>(`[data-action="inventory-select"][data-item="${item}"]`)?.focus({ preventScroll: true });
+      }
       break;
     }
     case 'crafting-filter': {
