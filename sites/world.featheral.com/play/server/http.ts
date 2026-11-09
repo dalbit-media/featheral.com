@@ -251,6 +251,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       }
       const marketUrl = new URL(request.url ?? '/', origin), marketRead = marketUrl.pathname === '/api/market', marketAction = request.url === '/api/market/actions';
       const halfRead = marketUrl.pathname === '/api/market/half';
+      const autoCraftRead = marketUrl.pathname === '/api/market/auto-craft';
       const collectionRead = marketUrl.pathname === '/api/collection';
       if (marketUrl.pathname === '/api/atlas') {
         if (request.method !== 'GET') throw new ApiError(405, 'Method not allowed.');
@@ -259,9 +260,10 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         reply(response, 200, store.atlasView(token));
         return;
       }
-      if (request.url !== '/api/state' && request.url !== '/api/actions' && !marketRead && !marketAction && !halfRead && !collectionRead) throw new ApiError(404, 'API route not found.');
-      if (((request.url === '/api/state' || marketRead || halfRead || collectionRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
+      if (request.url !== '/api/state' && request.url !== '/api/actions' && !marketRead && !marketAction && !halfRead && !collectionRead && !autoCraftRead) throw new ApiError(404, 'API route not found.');
+      if (((request.url === '/api/state' || marketRead || halfRead || collectionRead || autoCraftRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
       if (halfRead && [...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid half-sale query.');
+      if (autoCraftRead && [...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid automatic crafting query.');
       const asset = marketUrl.searchParams.get('asset') ?? 'wood', quantity = Number(marketUrl.searchParams.get('quantity') ?? '1');
       const budgetPercent = Number(marketUrl.searchParams.get('budgetPercent'));
       const buyingPrice = marketUrl.searchParams.has('price') ? Number(marketUrl.searchParams.get('price')) : undefined;
@@ -323,7 +325,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         })
         : store.transaction(token, (session, time, realTime, exchange, owner) => {
           accrue(session.account, time);
-          return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity,
+          return { ...(autoCraftRead ? exchange.autoCraftQuote(owner, session.account, time, realTime) : collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity,
             isMarketPercentage(budgetPercent) ? { percent: budgetPercent, ...(buyingPrice === undefined ? {} : { price: buyingPrice }) } : undefined) : snapshot(session.account)),
             csrf: session.csrf };
         });

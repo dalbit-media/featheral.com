@@ -47,6 +47,7 @@ export const readMarket = (asset: MarketAsset, quantity: number, buying?: BuyQua
   request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}${buying ? `&budgetPercent=${buying.percent}${buying.price === undefined ? '' : `&price=${buying.price}`}` : ''}`);
 export const readHalfSale = (): Promise<HalfSaleResponse> => request('market/half');
 export const sendMarket = (state: ApiState, command: MarketCommand): Promise<MarketResponse> => submit(state, command, 'market/actions');
+export const readAutoCraft = (): Promise<import('./auto-crafting.ts').AutoCraftResponse> => request('market/auto-craft');
 export const linkFundWallet = (csrf: string, address: string, issuedAt: string, signature: string, moveGuestFunds = false, separateWorldFunds = false): Promise<ApiState> => request('wallet/link', {
   method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ address, issuedAt, signature, moveGuestFunds, separateWorldFunds }),
 });

@@ -10,7 +10,7 @@ import { fieldMissionActivity, squadOptions } from './squad-options.ts';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
-import { connect, readCollection, readMarket, refresh, send, sendMarket } from './api.ts';
+import { connect, readAutoCraft, readCollection, readMarket, refresh, send, sendMarket } from './api.ts';
 import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
 import { ScreenPreview } from './screen-preview.ts';
@@ -45,7 +45,7 @@ import { gamePage, primaryGamePageKeys, gamePages } from './game-pages.ts';
 import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
-import { claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
+import { autoCraftConsumption, claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
 import { chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
@@ -1044,6 +1044,25 @@ async function purchaseCraftingAnalysis(): Promise<void> {
     if (settlementTask === 'crafting') renderSettlement();
   }
 }
+async function automaticCraftAndSell(): Promise<void> {
+  if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return; }
+  busy = true;
+  try {
+    const preview = await readAutoCraft();
+    synchronize(preview);
+    if (!await confirmConsumption(autoCraftConsumption(preview.autoCraft, language), language)) return;
+    const response = await sendMarket(state, { type: 'auto-craft', fingerprint: preview.autoCraft.fingerprint });
+    synchronize(response);
+    if (!response.autoCraft) throw new Error('Automatic crafting result is unavailable. Refresh before trying again.');
+    craftingTickers = response.market.tickers;
+    toast(`${translate('Automatic crafting and immediate sales completed.', language)} ${translate('Estimated total profit', language)}: FTH$ ${response.autoCraft.estimatedProfit.toLocaleString(languageLocale, { maximumFractionDigits: 4 })}`);
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'Automatic crafting failed.', true);
+  } finally {
+    busy = false;
+    renderSettlement();
+  }
+}
 function renderSettlement(): void {
   const root = document.querySelector('#settlement-content')!;
   if (visitingSettlement) {
@@ -1449,6 +1468,7 @@ app.addEventListener('click', event => {
     case 'craft':
       if (isCraftableItem(target.dataset.item)) void act({ type: 'craft', item: target.dataset.item });
       break;
+    case 'auto-craft': void automaticCraftAndSell(); break;
     case 'equip':
       if (isVisibilityItem(target.dataset.item)) void act({ type: 'equip', item: target.dataset.item });
       break;

@@ -149,11 +149,18 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
   const details = element('dl', undefined, 'consumption-details');
   const detail = (label: string, value: string) => {
     const row = element('div');
+    if (label === 'Estimated total profit') row.className = 'consumption-profit';
     row.append(element('dt', t(label)), element('dd', value));
-    details.append(row);
+    if (label === 'Estimated total profit') {
+      const summary = element('dl', undefined, 'consumption-details');
+      summary.append(row);
+      dialog.insertBefore(summary, description.nextSibling);
+      dialog.classList.add('auto-craft-dialog');
+    } else details.append(row);
   };
   if (quote.residents !== undefined) detail('Assigned residents', number(quote.residents));
   if (quote.arrivals !== undefined) detail('Arriving residents', number(quote.arrivals));
+  for (const row of quote.details ?? []) detail(row.label, row.value);
   detail('Duration', quote.days !== undefined ? t(`${quote.days} game day${quote.days === 1 ? '' : 's'}`)
     : quote.weeks === null ? t('Until filled or cancelled') : quote.weeks ? t(`${quote.weeks} game week${quote.weeks === 1 ? '' : 's'}`) : t('Immediate'));
   dialog.append(details);
@@ -206,7 +213,10 @@ export function confirmConsumption(quote: ConsumptionQuote, language: Language):
     });
     window.addEventListener('pagehide', cancelDialog, { once: true });
     document.body.append(dialog);
-    try { dialog.showModal(); }
+    try {
+      dialog.showModal();
+      if (dialog.classList.contains('auto-craft-dialog')) dialog.scrollTop = 0;
+    }
     catch (error) {
       window.removeEventListener('pagehide', cancelDialog);
       activeDialog = null; dialog.remove(); reject(error);

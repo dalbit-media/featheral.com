@@ -1,10 +1,10 @@
 import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot } from './economy.ts';
 import type { Account } from './economy.ts';
-import { inventory } from './inventory.ts';
-import { note } from '../src/engine.ts';
-import { craftableKeys, craftingCost, craftingInputs, inventoryFits, inventoryUsed, isCollectible, itemStorage, sellableItemCount } from '../src/items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
+import { craft, inventory } from './inventory.ts';
+import { canAfford, note } from '../src/engine.ts';
+import { craftableKeys, craftingCost, craftingFits, craftingInputs, craftingStage, inventoryFits, inventoryUsed, isCollectible, itemStorage, recipeDiscovered, sellableItemCount } from '../src/items.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketStartingQuantity, marketResources } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
@@ -17,11 +17,15 @@ import { activeMarketAnalysis, marketAnalysisDuration, marketAnalysisFee } from 
 import type { MarketAnalysis } from '../src/market-analysis.ts';
 import { affordableBuyingQuantity, buyingBudgetUnits } from '../src/market-buy-quantity.ts';
 import type { BuyQuantityBudget, BuyQuantityRequest } from '../src/market-buy-quantity.ts';
+import { createHash } from 'node:crypto';
+import { autoCraftableOutput, merchantCharter } from '../src/auto-crafting.ts';
+import type { AutoCraftQuote } from '../src/auto-crafting.ts';
+import { bulkCraftingItems, bulkCraftingKeys } from '../src/bulk-crafting.ts';
 
 interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
 interface Step { quantity: number; dollars: number; maker: Order | null }
-export interface ExchangeResult extends Snapshot { market: MarketSnapshot; message?: string }
+export interface ExchangeResult extends Snapshot { market: MarketSnapshot; message?: string; autoCraft?: AutoCraftQuote }
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Expected a JSON object.');
   return value as Record<string, unknown>;
@@ -35,13 +39,18 @@ function orderRow(row: Record<string, unknown>): Order {
 }
 export function parseMarketCommand(value: unknown): MarketCommand {
   const c = object(value);
+  if (c.type === 'auto-craft') {
+    if (Object.keys(c).sort().join() !== 'fingerprint,type' || typeof c.fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(c.fingerprint))
+      throw new ApiError(400, 'Invalid automatic crafting command.');
+    return { type: 'auto-craft', fingerprint: c.fingerprint };
+  }
   if (c.type === 'profit-analysis') {
     if (Object.keys(c).join() !== 'type') throw new ApiError(400, 'Invalid profit analysis command.');
     return { type: 'profit-analysis' };
   }
   if (c.type === 'fund-pool') {
     if (Object.keys(c).sort().join() !== 'asset,dollars,quantity,type' || !isMarketAsset(c.asset) || !isLiquidAsset(c.asset)
-      || !positive(c.quantity, marketQuantityLimit(c.asset))) throw new ApiError(400, 'Invalid pool funding command.');
+      || !positive(c.quantity, Math.min(marketQuantityLimit(c.asset), marketStartingQuantity(c.asset)))) throw new ApiError(400, 'Invalid pool funding command.');
     return { type: 'fund-pool', asset: c.asset, quantity: c.quantity, dollars: paymentUnits(c.dollars, 10000000000) };
   }
   if (c.type === 'sell-half') {
@@ -69,7 +78,7 @@ export function parseMarketCommand(value: unknown): MarketCommand {
   }
   if (c.type === 'cancel') return c as MarketCommand;
   const units = paymentUnits(c.type === 'spot' ? c.limitDollars : c.price, c.type === 'spot'
-    ? c.side === 'sell' && isMarketAsset(c.asset) && isMarketResource(c.asset) ? Number.MAX_SAFE_INTEGER / dollarsScale : 10000000000 : 1000000);
+    ? isMarketAsset(c.asset) && isMarketResource(c.asset) ? Number.MAX_SAFE_INTEGER / dollarsScale : 10000000000 : 1000000);
   return { ...c, ...(c.type === 'spot' ? { limitDollars: units } : { price: units }) } as MarketCommand;
 }
 function paymentUnits(value: unknown, maximum: number): number {
@@ -192,7 +201,7 @@ export class Exchange {
         : Math.max(maker?.price ?? 0, limit ?? 0, floor);
       let low = 0, high = Math.min(remaining, side === 'buy' ? pool.units - (pool.depthUnits ? 0 : 1) : Number.MAX_SAFE_INTEGER - pool.units);
       while (low < high) {
-        const middle = Math.ceil((low + high) / 2), comparison = compareMarginal(pool, side, middle, boundary);
+        const middle = low + Math.ceil((high - low) / 2), comparison = compareMarginal(pool, side, middle, boundary);
         const cost = poolPaymentUnits(pool, side, middle);
         const funded = cost <= BigInt(side === 'buy' ? Number.MAX_SAFE_INTEGER - pool.dollars : pool.dollars);
         if (funded && (side === 'buy' ? comparison <= 0 : comparison >= 0)) low = middle; else high = middle - 1;
@@ -224,10 +233,13 @@ export class Exchange {
       const blocked = !isMarketResource(asset) && (!inventoryFits(bag, asset)
         || isCollectible(asset) && (bag.items.includes(asset) || bag.marketReserved?.includes(asset) || bag.pending.some(item => item === asset)));
       const price = buying.price === undefined ? undefined : dollarsUnits(buying.price);
-      const selected = affordableBuyingQuantity(blocked ? 0 : marketQuantityLimit(asset), budget, amount => {
+      const maximum = Math.min(marketQuantityLimit(asset), Math.floor(budget / (price ?? dollarsUnits(marketPriceFloor(asset)))),
+        isMarketResource(asset) ? Number.MAX_SAFE_INTEGER - account.game.stock[asset] : marketQuantityLimit(asset));
+      const selected = affordableBuyingQuantity(blocked ? 0 : maximum, budget, amount => {
         if (price !== undefined) return BigInt(price) * BigInt(amount);
         const steps = this.plan(owner, asset, 'buy', amount, realTime);
         if (steps.reduce((sum, step) => sum + step.quantity, 0) !== amount) return null;
+        if (steps.some(step => !Number.isSafeInteger(step.dollars))) return null;
         return steps.reduce((sum, step) => sum + BigInt(step.dollars), 0n);
       });
       buyBudget = { ...buying, dollars: budget / dollarsScale, quantity: selected };
@@ -297,9 +309,7 @@ export class Exchange {
     const row = this.db.prepare('SELECT data FROM market_analysis WHERE owner=? AND generatedAt<=? AND expiresAt>?').get(owner, now, now);
     return row ? activeMarketAnalysis(JSON.parse(String(row.data)) as MarketAnalysis, now) : null;
   }
-  private purchaseAnalysis(owner: string, account: Account, now: number, realTime: number): void {
-    const fee = dollarsUnits(marketAnalysisFee);
-    if (account.game.dollars < fee) throw new ApiError(409, 'Not enough FTH$ for profit analysis.');
+  private generateAnalysis(owner: string, now: number, realTime: number): MarketAnalysis {
     const quote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
       const steps = this.plan(owner, asset, side, quantity, realTime);
       const units = steps.reduce((sum, step) => sum + step.dollars, 0);
@@ -323,10 +333,106 @@ export class Exchange {
           profit: cost === null || revenue === null ? null : (revenue - cost) / dollarsScale };
       }) };
     if (!Number.isSafeInteger(report.expiresAt)) throw new ApiError(409, 'Server clock out of range.');
+    return report;
+  }
+  private purchaseAnalysis(owner: string, account: Account, now: number, realTime: number): void {
+    const fee = dollarsUnits(marketAnalysisFee);
+    if (account.game.dollars < fee) throw new ApiError(409, 'Not enough FTH$ for profit analysis.');
+    const report = this.generateAnalysis(owner, now, realTime);
     if (!report.items.some(item => item.profit !== null)) throw new ApiError(409, 'Profit analysis is unavailable because ingredient or sale liquidity is missing. No fee was charged.');
     this.db.prepare(`INSERT INTO market_analysis VALUES (?,?,?,?) ON CONFLICT(owner) DO UPDATE SET
       generatedAt=excluded.generatedAt,expiresAt=excluded.expiresAt,data=excluded.data`).run(owner, report.generatedAt, report.expiresAt, JSON.stringify(report));
     account.game.dollars -= fee;
+  }
+  autoCraftQuote(owner: string, account: Account, now: number, realTime: number): Snapshot & { autoCraft: AutoCraftQuote } {
+    this.db.exec('SAVEPOINT auto_craft_preview');
+    try {
+      const copy = structuredClone(account);
+      const state = snapshot(copy);
+      return { ...state, autoCraft: this.planAutoCraft(owner, copy, now, realTime) };
+    } finally {
+      this.db.exec('ROLLBACK TO auto_craft_preview; RELEASE auto_craft_preview');
+    }
+  }
+  private planAutoCraft(owner: string, account: Account, now: number, realTime: number): AutoCraftQuote {
+    const bag = inventory(account);
+    if (account.game.stage < 0) throw new ApiError(409, 'Establish a settlement before crafting.');
+    if (sellableItemCount(bag, merchantCharter) < 1) throw new ApiError(409, 'An unused Master Merchant Charter is required.');
+    const permits = new Map(bulkCraftingKeys.map(permit => [permit, sellableItemCount(bag, permit)]));
+    const startingBalance = account.game.dollars;
+    const totalPermits = [...permits.values()].reduce((sum, count) => sum + count, 0);
+    if (!totalPermits) throw new ApiError(409, 'Own unused bulk crafting permits before using the charter.');
+    const ranked = this.generateAnalysis(owner, now, realTime).items
+      .filter(row => autoCraftableOutput(row.item) && row.profit !== null && row.profit > 0)
+      .sort((a, b) => b.profit! - a.profit! || a.item.localeCompare(b.item));
+    bag.items.splice(bag.items.indexOf(merchantCharter), 1);
+    const costs = new Map<MarketAsset | 'dollars', number>([[merchantCharter, 1]]);
+    const batches: AutoCraftQuote['batches'] = [];
+    let fees = 0, proceeds = 0, valuedCost = 0;
+    const fullQuote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
+      const steps = this.plan(owner, asset, side, quantity, realTime);
+      const dollars = steps.reduce((sum, step) => sum + step.dollars, 0);
+      return Number.isSafeInteger(dollars) && dollars > 0 && steps.reduce((sum, step) => sum + step.quantity, 0) === quantity ? dollars : null;
+    };
+    // Only permits owned at confirmation are eligible; crafted permits cannot extend the run.
+    const order = [...bulkCraftingKeys].sort((a, b) => bulkCraftingItems[b].quantity - bulkCraftingItems[a].quantity);
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const row of ranked) {
+        const item = row.item;
+        if (account.game.stage < craftingStage(item) || !recipeDiscovered(account.game, item)) continue;
+        for (const permit of order) {
+          if (!permits.get(permit) || sellableItemCount(bag, permit) < 1) continue;
+          const quantity = bulkCraftingItems[permit].quantity, cost = craftingCost(item, quantity), inputs = craftingInputs(item, quantity);
+          if (dollarsUnits(cost.dollars ?? 0) > startingBalance - fees || !canAfford(account.game, cost) || !craftingFits(bag, item, quantity)
+            || !Object.entries(inputs).every(([asset, count]) => isMarketAsset(asset) && !isMarketResource(asset) && sellableItemCount(bag, asset) >= count)) continue;
+          const fee = dollarsUnits(cost.dollars ?? 0), revenue = fullQuote(item, 'sell', quantity);
+          if (revenue === null) continue;
+          const materialCosts = [...Object.entries(cost).filter(([asset]) => asset !== 'dollars'), ...Object.entries(inputs)]
+            .map(([asset, count]) => isMarketAsset(asset) ? fullQuote(asset, 'buy', count) : null);
+          if (materialCosts.some(cost => cost === null)) continue;
+          const estimatedCost = fee + materialCosts.reduce<number>((sum, cost) => sum + cost!, 0);
+          if (!Number.isSafeInteger(estimatedCost) || revenue <= estimatedCost) continue;
+          this.craftAndSell(owner, account, item, quantity, revenue, now, realTime);
+          permits.set(permit, permits.get(permit)! - 1);
+          fees += fee; proceeds += revenue; valuedCost += estimatedCost;
+          if (![fees, proceeds, valuedCost].every(Number.isSafeInteger)) throw new ApiError(409, 'Account limit reached.');
+          for (const [asset, count] of [...Object.entries(cost), ...Object.entries(inputs)]) {
+            if (asset !== 'dollars' && !isMarketAsset(asset)) throw new ApiError(409, 'Crafting ingredient has no market.');
+            if (asset === 'dollars' || isMarketAsset(asset)) costs.set(asset, (costs.get(asset) ?? 0) + count);
+          }
+          batches.push({ item, permit, quantity, fee: fee / dollarsScale, proceeds: revenue / dollarsScale, valuedCost: estimatedCost / dollarsScale });
+          progress = true;
+          break;
+        }
+        if (progress) break;
+      }
+    }
+    if (!batches.length) throw new ApiError(409, 'No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed.');
+    const result = { batches, costs: [...costs].map(([asset, amount]) => ({ asset, amount })), startingBalance: startingBalance / dollarsScale,
+      craftingFees: fees / dollarsScale, proceeds: proceeds / dollarsScale, cashChange: (proceeds - fees) / dollarsScale,
+      estimatedProfit: (proceeds - valuedCost) / dollarsScale, remainingPermits: [...permits.values()].reduce((sum, count) => sum + count, 0),
+      consumedPermits: batches.length };
+    const fingerprint = createHash('sha256').update(JSON.stringify({ revision: account.revision, ...result })).digest('hex');
+    return { fingerprint, ...result };
+  }
+  private craftAndSell(owner: string, account: Account, item: import('../src/items.ts').CraftableItem, quantity: number, proceeds: number, now: number, realTime: number): void {
+    const equipped = inventory(account).equipped;
+    craft(account, item, quantity);
+    // Ordinary crafting equips better lamps; immediate resale must preserve the player's equipment.
+    inventory(account).equipped = equipped;
+    inventory(account);
+    this.processOrder(owner, account, { type: 'spot', asset: item, side: 'sell', quantity, limitDollars: proceeds }, now, realTime);
+    this.check(account);
+  }
+  private executeAutoCraft(owner: string, account: Account, fingerprint: string, now: number, realTime: number): AutoCraftQuote {
+    const quote = this.autoCraftQuote(owner, account, now, realTime).autoCraft;
+    if (quote.fingerprint !== fingerprint) throw new ApiError(409, 'Automatic crafting quote changed. Review the totals again.');
+    const bag = inventory(account);
+    bag.items.splice(bag.items.indexOf(merchantCharter), 1);
+    for (const batch of quote.batches) this.craftAndSell(owner, account, batch.item, batch.quantity, dollarsUnits(batch.proceeds), now, realTime);
+    return quote;
   }
   halfQuote(owner: string, account: Account, realTime: number): Snapshot & { halfSale: HalfSaleQuote } {
     const sales = marketResources.flatMap(asset => {
@@ -388,7 +494,11 @@ export class Exchange {
     accrue(account, now);
     if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
     let asset: MarketAsset;
-    if (command.type === 'profit-analysis') {
+    let autoCraft: AutoCraftQuote | undefined;
+    if (command.type === 'auto-craft') {
+      asset = merchantCharter;
+      autoCraft = this.executeAutoCraft(owner, account, command.fingerprint, now, realTime);
+    } else if (command.type === 'profit-analysis') {
       asset = 'wood';
       this.purchaseAnalysis(owner, account, now, realTime);
     } else if (command.type === 'cancel') {
@@ -416,11 +526,12 @@ export class Exchange {
     }
     this.check(account);
     account.revision++; account.lastActionAt = realTime;
-    const message = note(account.game, command.type === 'profit-analysis' ? 'Latest profit analysis purchased. Access expires after one game day.'
+    const message = note(account.game, command.type === 'auto-craft' ? 'Automatic crafting and immediate sales completed.'
+      : command.type === 'profit-analysis' ? 'Latest profit analysis purchased. Access expires after one game day.'
       : command.type === 'cancel' ? 'Market order cancelled. Escrow returned.'
       : command.type === 'fund-pool' ? 'Existing FTH$ and owned assets donated to market liquidity.'
         : command.type === 'sell-half' ? 'Half of your owned resources sold for FTH$.' : 'Market order processed.');
-    const result = { ...this.read(owner, account, now, realTime, asset, 1), message };
+    const result = { ...this.read(owner, account, now, realTime, asset, 1), message, ...(autoCraft ? { autoCraft } : {}) };
     this.db.prepare('INSERT INTO market_receipts VALUES (?,?,?,?)').run(owner, body.id, request, JSON.stringify(result));
     return result;
   }
@@ -518,6 +629,7 @@ export class Exchange {
   }
   private reserve(account: Account, command: Extract<MarketCommand, { type: 'spot' | 'limit' }>, dollars: number): void {
     const { asset, quantity, side } = command, bag = inventory(account);
+    if (!Number.isSafeInteger(dollars) || dollars < 0) throw new ApiError(409, 'Account limit reached.');
     if (side === 'buy' && account.game.dollars < dollars) throw new ApiError(409, 'Not enough FTH$ for this order.');
     if (isMarketResource(asset)) {
       if (side === 'sell' && account.game.stock[asset] < quantity) throw new ApiError(409, 'Not enough owned resources for this order.');

@@ -17,11 +17,11 @@ test('resource sale presets round down whole lots and default half retains the o
     assert.equal(accountingQuantity(resource, amount), 854);
   }
 });
-test('100% can sell large owned resource inventories without loosening item or buy limits', () => {
+test('resources have no fixed buy or sell cap while item limits remain unchanged', () => {
   assert.equal(saleQuantity(85401, 100), 85401);
   for (const resource of marketResources) {
     assert.equal(marketSaleQuantityLimit(resource), Number.MAX_SAFE_INTEGER);
-    assert.equal(marketQuantityLimit(resource), 10000);
+    assert.equal(marketQuantityLimit(resource), Number.MAX_SAFE_INTEGER);
   }
   assert.equal(marketSaleQuantityLimit('torch'), 10000);
   assert.equal(marketSaleQuantityLimit('relic-forest'), 1);

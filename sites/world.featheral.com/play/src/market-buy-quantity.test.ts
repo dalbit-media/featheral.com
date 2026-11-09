@@ -27,6 +27,8 @@ test('budget sizing finds the largest affordable whole quantity with depth, liqu
   assert.equal(affordableBuyingQuantity(100, 1, () => 2n), 0);
   assert.equal(affordableBuyingQuantity(100, 100, () => null), 0);
   assert.equal(affordableBuyingQuantity(0, 100, () => 1n), 0);
+  assert.equal(affordableBuyingQuantity(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, quantity => BigInt(quantity)), Number.MAX_SAFE_INTEGER);
+  assert.equal(affordableBuyingQuantity(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1, quantity => BigInt(quantity)), Number.MAX_SAFE_INTEGER - 1);
 });
 test('buying quantity and budget disclosures are bilingual', () => {
   for (const label of [

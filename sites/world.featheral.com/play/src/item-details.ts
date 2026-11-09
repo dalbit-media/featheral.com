@@ -10,8 +10,11 @@ import { isCustomizationItem } from './customization.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { escapeAtlas } from './atlas.ts';
+import { isAutoCraftingItem } from './auto-crafting.ts';
 
 export function itemDescription(id: ItemId): { category: string; effect: string; use: string } {
+  if (isAutoCraftingItem(id)) return { category: 'Bulk crafting', effect: 'Fresh profit analysis, automatic bulk crafting and immediate sales. Highest estimated profit per copy first.',
+    use: 'Activate in inventory to review totals. Consumes one charter and eligible owned bulk permits. Uses only your starting balance; sale proceeds are not reinvested.' };
   if (isSquadItem(id)) return { category: 'Squad vouchers', effect: 'Automatic targets. Two residents per mission. Existing concurrency fees apply.',
     use: 'Click Explore or Investigate to choose an owned squad voucher. One voucher is consumed only after confirmation.' };
   if (isTransportItem(id)) return { category: 'Transport vouchers', effect: transportBenefit(id),

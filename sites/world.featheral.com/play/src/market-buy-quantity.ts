@@ -15,7 +15,7 @@ export function affordableBuyingQuantity(maximum: number, budget: number, cost: 
     throw new RangeError('Invalid buying quantity limits.');
   let low = 0, high = maximum;
   while (low < high) {
-    const middle = Math.ceil((low + high) / 2), payment = cost(middle);
+    const middle = low + Math.ceil((high - low) / 2), payment = cost(middle);
     if (payment !== null && payment > 0n && payment <= BigInt(budget)) low = middle;
     else high = middle - 1;
   }

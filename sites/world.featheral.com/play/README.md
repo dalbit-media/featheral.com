@@ -58,8 +58,11 @@ Marketplace buy quantities use the same **25%, 50%, 75%, 100%** presets as
 resource sales. Buying percentages select the largest whole trading-lot quantity
 within that share of available game FTH$, using executable market depth rather
 than multiplying a one-lot ticker price. In **Choose price**, sizing uses the
-full limit-order escrow cost. Inventory restrictions, collectible uniqueness and
-the 10,000-lot buy cap still apply. **100%** never authorizes more than the
+full limit-order escrow cost. Resource buys have no fixed quantity cap: **100%**
+selects the largest affordable whole-lot amount supported by actual liquidity,
+with any remainder smaller than the next lot's cost. Inventory restrictions,
+collectible uniqueness and the 10,000-lot item cap still apply.
+**100%** never authorizes more than the
 available budget, including spot-price slippage. The ticket shows the minimum
 physical-unit increment and selected spending limit; editing quantity or using
 the stepper switches back to manual sizing. Item sale presets use sellable copies,
@@ -98,6 +101,37 @@ not wall-clock time. Zoom and pan survive price refreshes; Reset restores
 all available history. Only the latest 120 executed
 trades are available; missing intervals stay empty, not fabricated or carried
 forward. This is a trade-history chart, not a guaranteed complete time series.
+
+## Master Merchant Charter
+
+`merchant-charter` is the most expensive per-copy crafting recipe: FTH$10,000,
+unlocked at Capital. It is consumable and player-tradeable, but excluded from
+automatic reserve markets. No existing reserve catalog, price, ledger or key
+changes are required.
+
+Select the charter in Inventory (Bulk actions), then **Review craft and sell**.
+The server includes a fresh one-operation analysis without buying or extending
+the ordinary paid analysis. It ranks recipes by estimated profit per copy,
+tries owned 100/50/20/10-copy permits, and executes only complete batches with
+available materials, bag space, positive estimated profit and fully funded
+immediate sales. It keeps trying smaller permits and lower-ranked recipes
+when a batch does not fit. Permit recipes and charters are not output targets.
+
+The spending ceiling is the balance at confirmation; sale proceeds do not
+fund additional crafting. Materials and permits must already be owned and
+unused (no escrow, equipped/placed items or pending finds). All originally
+owned usable permits are eligible; unused permits remain. Exactly one charter
+is consumed only on success. The popup lists crafting/material/permit costs,
+sale proceeds, estimated total profit and actual cash increase separately.
+Profit values owned materials and bulk permits at executable purchase prices,
+including price impact; it excludes the already-paid charter acquisition cost.
+
+Preview simulates market fills inside a rolled-back savepoint, including
+depleted pools and player bids across batches. Confirmation recomputes the
+plan and verifies its fingerprint and account revision. Changed quotes,
+failed fills or ledger errors roll back the entire operation. One idempotent
+market receipt covers all crafts and sales. It never mints currency or requests
+additional reserve funding to force a sale.
 
 ## Squad dispatch vouchers
 
@@ -586,7 +620,7 @@ Pricing and collection migrations invalidate stale gameplay revisions once while
 
 Timber/Wood trades in **kilograms (kg)** and Water in **liters (L)**, generic Metal in **metric tonnes (t)**, Oil in **42-US-gallon barrels (bbl)** and items in **pieces** (Korean: 개). Wood uses a fixed game conversion of 500 kg per former m³, not a universal timber density. Metal remains a game-wide basket, not an exchange-specific copper or steel contract; FTH$ is not a real commodity-price/USD peg. One bbl is 158.987294928 L.
 
-[resource-units.ts](./src/resource-units.ts) defines exact accounting lots: timber 50 kg, Water 10 L, Metal 0.01 t (10 kg), Oil 1 bbl. Resource API payloads, orders, fills, reserves and saved quantities remain integer **lots**, including historical pending fractions; currency APIs retain their existing ordinary-FTH$ convention. UI quantity = lots / lots-per-unit; UI price = price-per-lot × lots-per-unit. This preserves every existing payment and escrow without destructive rounding. The 10,000-lot order limit means 500,000 kg timber, 100,000 L Water, 100 t Metal or 10,000 bbl Oil; displayed price ticks scale the same way. Changing display units requires no save migration.
+[resource-units.ts](./src/resource-units.ts) defines exact accounting lots: timber 50 kg, Water 10 L, Metal 0.01 t (10 kg), Oil 1 bbl. Resource API payloads, orders, fills, reserves and saved quantities remain integer **lots**, including historical pending fractions; currency APIs retain their existing ordinary-FTH$ convention. UI quantity = lots / lots-per-unit; UI price = price-per-lot × lots-per-unit. This preserves every existing payment and escrow without destructive rounding. Resource orders have no fixed lot cap; available funds, real liquidity and safe-integer accounting still apply. Displayed price ticks scale with physical units. Changing display units requires no save migration.
 
 Physical model version 1 adds an idempotent `physicalVersion`/`physicalStartedAt` save marker. Earlier events retain legacy rules; paid crews, promised recruitment, old expedition rewards, financial tables and receipts are preserved. New recruitment charges FTH$50 per climate-adjusted, confirmed arrival. The 16-game-year deterministic climate cycle enables cached exact daily-consumption sums and bounded idle skipping without assuming constant weather. Calendar years continue normally. Online polling and offline catch-up use the same scheduled deadlines.
 

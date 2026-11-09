@@ -7,7 +7,7 @@ import { seedFixturePools } from './test-support.ts';
 import { inventory } from './inventory.ts';
 import { createApi } from './http.ts';
 import { dollarsScale, dollarsSlippage, dollarsUnits } from '../src/dollars.ts';
-import { marketQuantityLimit } from '../src/market.ts';
+import { marketQuantityLimit, marketResources } from '../src/market.ts';
 import type { MarketAsset, MarketResponse } from '../src/market.ts';
 import type { BuyQuantityRequest } from '../src/market-buy-quantity.ts';
 import { buyingBudgetUnits } from '../src/market-buy-quantity.ts';
@@ -52,7 +52,7 @@ test('all four buy budgets use executable depth quotes, not single-lot ticker es
     assert.deepEqual(h.store.read(h.buyer.token, session => session.account), initial);
   } finally { h.store.close(); }
 });
-test('limit-price budgets use full escrow cost and keep the existing quantity cap', () => {
+test('limit-price budgets use the entire budget without a fixed resource quantity cap', () => {
   const h = fixture();
   try {
     for (const percent of salePercentages) {
@@ -61,7 +61,7 @@ test('limit-price budgets use full escrow cost and keep the existing quantity ca
       assert.ok(budget.quantity * 3 <= budget.dollars);
       assert.ok((budget.quantity + 1) * 3 > budget.dollars);
     }
-    assert.equal(h.read('wood', 1, { percent: 100, price: .0001 }).market.buyBudget!.quantity, 10000);
+    assert.equal(h.read('wood', 1, { percent: 100, price: .0001 }).market.buyBudget!.quantity, 10000000);
     h.store.transaction(h.buyer.token, session => { session.account.game.dollars = 1; });
     assert.equal(h.read('wood', 1, { percent: 100, price: 1 }).market.buyBudget!.quantity, 0);
   } finally { h.store.close(); }
@@ -121,6 +121,53 @@ test('100% budget buys execute without requiring a spare 2% balance and never ex
     assert.equal(initial - purchased.dollars, quoted.market.quotes.buy.dollars);
   } finally { h.store.close(); }
 });
+test('every resource spends its full feasible percentage budget above 10,000 lots and executes atomically', () => {
+  for (const asset of marketResources) {
+    const h = fixture([asset]), maker = h.store.create();
+    try {
+      h.store.transaction(maker.token, (session, time, realTime, exchange) => {
+        session.account.game.stock[asset] = 100000;
+        session.account.game.dollars = 500000 * dollarsScale;
+        exchange.fundPool(session.account, asset, 100000, 100000 * dollarsScale);
+      });
+      h.store.transaction(h.buyer.token, session => { session.account.game.dollars = 100000 * dollarsScale; });
+      for (const percent of salePercentages) {
+        const result = h.read(asset, 1, { percent }), budget = result.market.buyBudget!;
+        assert.ok(budget.quantity > 10000, `${asset} ${percent}% must exceed the old cap`);
+        assert.ok(result.market.quotes.buy.dollars <= budget.dollars);
+        const next = h.read(asset, budget.quantity + 1).market.quotes.buy;
+        assert.ok(!next.available || next.dollars > budget.dollars);
+      }
+      const quoted = h.read(asset, 1, { percent: 100 }), budget = quoted.market.buyBudget!;
+      const total = h.store.publicTotals().dollars;
+      const body = { id: randomUUID(), revision: quoted.revision, command: { type: 'spot', asset, side: 'buy', quantity: budget.quantity, limitDollars: budget.dollars } };
+      const buy = () => h.store.transaction(h.buyer.token, (session, time, realTime, exchange, owner) => exchange.action(owner, session, body, time, realTime));
+      const purchased = buy();
+      assert.equal(purchased.game.stock[asset], budget.quantity);
+      assert.equal(dollarsUnits(quoted.dollars - purchased.dollars), dollarsUnits(quoted.market.quotes.buy.dollars));
+      assert.equal(h.store.publicTotals().dollars, total);
+      assert.deepEqual(buy(), purchased);
+    } finally { h.store.close(); }
+  }
+});
+test('100% limit buys escrow all funds for millions of resource lots and cancellation returns the exact balance', () => {
+  const h = fixture();
+  try {
+    const quoted = h.read('wood', 1, { percent: 100, price: .0001 }), budget = quoted.market.buyBudget!;
+    assert.equal(budget.quantity, 10000000);
+    const placed = h.store.transaction(h.buyer.token, (session, time, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: quoted.revision, command: { type: 'limit', asset: 'wood', side: 'buy', quantity: budget.quantity, price: .0001 },
+    }, time, realTime));
+    assert.equal(placed.dollars, 0);
+    const order = placed.market.orders.find(order => order.side === 'buy')!;
+    assert.equal(order.remaining, budget.quantity);
+    h.advance();
+    const cancelled = h.store.transaction(h.buyer.token, (session, time, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: placed.revision, command: { type: 'cancel', orderId: order.id },
+    }, time, realTime));
+    assert.equal(cancelled.dollars, quoted.dollars);
+  } finally { h.store.close(); }
+});
 test('HTTP budget reads validate percentages, price precision and duplicate query fields', async () => {
   const h = fixture(), origin = 'http://127.0.0.1:5173', server = createApi(h.store, origin);
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -138,6 +185,9 @@ test('HTTP budget reads validate percentages, price precision and duplicate quer
     const limit = await fetch(`${base}&budgetPercent=50&price=3`, { headers });
     assert.equal(limit.status, 200);
     assert.equal((await limit.json() as MarketResponse).market.buyBudget!.quantity, 166);
+    const large = await fetch(`${base}&budgetPercent=100&price=0.0001`, { headers });
+    assert.equal(large.status, 200);
+    assert.equal((await large.json() as MarketResponse).market.buyBudget!.quantity, 10000000);
     for (const query of ['budgetPercent=0', 'budgetPercent=101', 'budgetPercent=NaN', 'budgetPercent=25&budgetPercent=50',
       'budgetPercent=25&price=0', 'budgetPercent=25&price=1.00001', 'budgetPercent=25&price=1000001', 'price=1', 'quantity=2'])
       assert.equal((await fetch(`${base}&${query}`, { headers })).status, 400, query);

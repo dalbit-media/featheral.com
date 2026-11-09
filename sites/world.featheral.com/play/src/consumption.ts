@@ -7,6 +7,7 @@ import { explorationCount, explorationQuote, investigationQuote } from './workfo
 import { activityItemDetails, activityName } from './automation.ts';
 import { isWaterFacility, waterFacilities } from './water-facilities.ts';
 import type { MarketAsset, MarketCommand } from './market.ts';
+import { marketAssetName } from './market.ts';
 import { fthgScale, fthgUnits } from './fthg.ts';
 import { incomeFacilities, isIncomeFacility } from './income.ts';
 import { constructionCost, constructionLevel, constructions } from './constructions.ts';
@@ -20,6 +21,7 @@ import type { Language } from './i18n.ts';
 import { formatDollars } from './dollars.ts';
 import { marketAnalysisFee } from './market-analysis.ts';
 import { planSquad, squadItems } from './exploration-squads.ts';
+import type { AutoCraftQuote } from './auto-crafting.ts';
 
 export interface ConsumptionAmount { asset: MarketAsset | 'fthg' | 'dollars'; amount: number }
 export interface ConsumptionQuote {
@@ -38,6 +40,28 @@ export interface ConsumptionQuote {
   preciseDollars?: boolean;
   warning?: string;
   recommendations?: { label: string; href: string }[];
+  details?: { label: string; value: string }[];
+}
+export function autoCraftConsumption(quote: AutoCraftQuote, language: Language): ConsumptionQuote {
+  const fmt = (value: number) => `FTH$ ${formatDollars(value, locale(language))}`;
+  const outputs = new Map<MarketAsset, number>();
+  for (const batch of quote.batches) outputs.set(batch.item, (outputs.get(batch.item) ?? 0) + batch.quantity);
+  return { title: 'Automatic craft and sell', subject: 'Master Merchant Charter', costs: quote.costs, weeks: 0,
+    receives: [{ asset: 'dollars', amount: quote.proceeds }], receiveLabel: 'Immediate sale proceeds',
+    details: [
+      { label: 'Estimated total profit', value: fmt(quote.estimatedProfit) },
+      { label: 'Cash balance increase', value: fmt(quote.cashChange) },
+      { label: 'Starting spending ceiling', value: fmt(quote.startingBalance) },
+      { label: 'Bulk permits consumed', value: quote.consumedPermits.toLocaleString(locale(language)) },
+      { label: 'Unused bulk permits', value: quote.remainingPermits.toLocaleString(locale(language)) },
+      ...[...outputs].map(([item, count]) => ({ label: translate(marketAssetName(item), language), value: `${count.toLocaleString(locale(language))} × ${translate('Craft and sell', language)}` })),
+    ],
+    notes: ['Highest estimated profit per copy first. Only complete, profitable batches with executable sales are included.',
+      'Uses owned materials and only the starting FTH$ balance. Sale proceeds are not reinvested.',
+      'Estimated profit deducts crafting fees and current purchase values of consumed materials and bulk permits. The already-owned charter acquisition cost is excluded.',
+      'One charter is consumed. Unused bulk permits stay in inventory. The included analysis applies only to this operation.',
+      'Changed quotes cancel the entire operation without consuming anything.'],
+  };
 }
 export const transportRecommendations = [
   { label: 'Upgrade Trade hub routes', href: '/settlement/#buildings' },
@@ -190,6 +214,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
   }
 }
 export function marketConsumption(command: MarketCommand): ConsumptionQuote | null {
+  if (command.type === 'auto-craft') return null;
   if (command.type === 'profit-analysis') return {
     title: 'Latest profit analysis', subject: 'Crafting', weeks: 0, costs: [{ asset: 'dollars', amount: marketAnalysisFee }],
     notes: ['Purchases a full-market snapshot for one output copy of each craftable item. Access expires after one game day.',

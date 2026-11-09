@@ -16,6 +16,7 @@ import type { EquippedActivities } from './activity-equipment.ts';
 import { bulkCraftingItems, bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
 import { transportItems, isTransportItem } from './transport-items.ts';
 import { squadItems } from './exploration-squads.ts';
+import { autoCraftingItems, isAutoCraftingItem } from './auto-crafting.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
@@ -57,7 +58,7 @@ export const decorationItems = {
   skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
 } satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems, ...squadItems };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems, ...squadItems, ...autoCraftingItems };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {
@@ -155,7 +156,7 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   return resources.every(resource => found.has(resource as Resource));
 }
 export function craftingStage(item: CraftableItem): number {
-  return isTransportItem(item) ? transportItems[item].stage : isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
+  return isAutoCraftingItem(item) ? autoCraftingItems[item].stage : isTransportItem(item) ? transportItems[item].stage : isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
 }
 export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;

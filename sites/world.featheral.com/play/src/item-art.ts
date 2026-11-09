@@ -11,6 +11,7 @@ import type { ActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem, transportItems } from './transport-items.ts';
 import { isSquadItem, squadItems } from './exploration-squads.ts';
+import { isAutoCraftingItem } from './auto-crafting.ts';
 
 const activityEquipmentDrawings: Record<ActivityEquipment, string> = {
   'survey-satchel': '<path d="M19 24V17a13 13 0 0 1 26 0v7" fill="none" stroke="#dec18b" stroke-width="4"/><path d="M12 22h40v35H12Z" fill="#ad8059"/><path d="M12 22h40l-7 17H19Z" fill="#d2af76"/><circle cx="32" cy="39" r="5" fill="#82c4ad"/><path d="m21 48 6 4 7-5 9 5" fill="none" stroke="#eadcaa" stroke-width="2"/>',
@@ -69,7 +70,11 @@ export function itemArt(id: ItemId): string {
   let drawing = '', badge = '', kind = '', accent = '#e0bc84';
   const emblem = (symbol: string) => `<g transform="translate(19 18) scale(1.1)">${icon(symbol).replace(/^<svg[^>]*>/, '').replace('</svg>', '')}</g>`;
   const permit = (symbol: string) => `<path d="M15 7h29l7 7v42H15Z" fill="#e6d7b2" stroke="#ac9365" stroke-width="2"/><path d="M44 7v9h7M21 45h23M21 50h15" fill="none" stroke="#ac9365" stroke-width="2"/><g color="${accent}">${emblem(symbol)}</g>`;
-  if (isSquadItem(id)) {
+  if (isAutoCraftingItem(id)) {
+    kind = 'merchant-charter-art'; accent = '#efd183';
+    drawing = `<path d="M10 8h39l6 9v38H10Z" fill="#e6d8b3" stroke="#ae8b46" stroke-width="2"/><path d="M49 8v10h6M17 44h28M17 49h20" fill="none" stroke="#ae8b46" stroke-width="2"/><path d="m18 18 7 7 7-12 7 12 7-7-3 17H21Z" fill="#d3a947" stroke="#8a6b28" stroke-width="2"/><circle cx="43" cy="51" r="10" fill="#d3a947" stroke="#f2dfa1" stroke-width="2"/><g color="#755321" transform="translate(35 43) scale(.67)">${icon('market').replace(/^<svg[^>]*>/, '').replace('</svg>', '')}</g>`;
+  }
+  else if (isSquadItem(id)) {
     kind = 'bulk-crafting-art'; accent = ['#769e88', '#80b6bd', '#9c93c4', '#d5a76d'][squadItems[id].quantity === 10 ? 0 : squadItems[id].quantity === 20 ? 1 : squadItems[id].quantity === 50 ? 2 : 3];
     drawing = permit('compass'); badge = `×${squadItems[id].quantity}`;
   }
