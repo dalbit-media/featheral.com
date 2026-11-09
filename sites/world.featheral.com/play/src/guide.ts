@@ -38,7 +38,7 @@ export const guideTopics = [
       'Use the top-right resource settings button to activate timed auto-collection, sell an exact owned quantity, collect-and-sell pending output or adjust that crew. Settlement production and population management share the same collection and settings controls. Tap the population-health bar to recruit or send expeditions.',
       'Desktop management uses side-by-side panels; small screens and long histories scroll when needed.',
       'Season, weather and temperature affect weekly resource yields, recruitment and expedition finds. All eight weather periods each day contribute. New jobs lock their output or arrival count at departure; refreshing cannot reroll outcomes. Water planning includes consumption during the work week.'],
-    tip: 'Recruitment also takes a full game week. Arriving residents never receive early production.', image: 'settlement', alt: 'Resident allocation screen with weekly crews and Water upkeep.', path: '/settlement/#residents', action: 'Manage residents' },
+    tip: 'Recruitment starts at 5% of population, minimum one resident. Housing and climate bonuses cannot exceed a final 20% batch, rounded up. Paid arrivals remain unchanged.', image: 'settlement', alt: 'Resident allocation screen with weekly crews and Water upkeep.', path: '/settlement/#residents', action: 'Manage residents' },
   { id: 'home', title: 'Make room for a home.', icon: 'home', tag: 'Building & crafting',
     intro: 'Build useful things. Add little touches. Make this clearing yours.',
     paragraphs: ['Open Buildings for Water facilities and commercial buildings. No building grants FTH$. A city bank unlocks Oil production and resource trading.',

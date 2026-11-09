@@ -1,4 +1,6 @@
 export const korean: Record<string, string> = {
+  'Recruitment +25% per level · 20% population cap': '레벨당 모집 +25% · 인구의 20% 한도',
+  'Recruitment starts at 5% of population, minimum one resident. Housing and climate bonuses cannot exceed a final 20% batch, rounded up. Paid arrivals remain unchanged.': '기본 모집 인원은 인구의 5%이며 최소 1명입니다. 주거와 기후 보너스를 포함해도 최종 모집 인원은 인구의 20%를 올림한 수를 넘지 않습니다. 이미 결제한 모집 인원은 유지됩니다.',
   'Open Inventory to manage items, craft supplies and enhance permanent fee-saving equipment.': '보관함에서 아이템을 관리하고 물자를 제작하며 영구 수수료 할인 장비를 강화하세요.',
   'Refinement consumes one core and escalating resources per attempt. Failure keeps your equipment and level. Enhanced copies can be equipped or traded individually.': '강화 시도마다 코어 하나와 레벨에 따라 증가하는 자원을 사용합니다. 실패해도 장비와 레벨은 유지됩니다. 강화 장비는 각각 장착하거나 거래할 수 있습니다.',
   'Inventory sections': '보관함 메뉴',

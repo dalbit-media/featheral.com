@@ -5,6 +5,8 @@ import { foundedFederationName } from './atlas.ts';
 import type { Game } from './engine.ts';
 import { isWaterFacility, waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { dollarsScale } from './dollars.ts';
+import { worldEpoch, seasonMs } from './environment.ts';
+import { recruitmentClimate, weeklyClimate } from './climate.ts';
 
 function wealthy(): Game {
   const game = newGame();
@@ -191,15 +193,38 @@ test('resident recruitment charges supplies without instantly adding the quoted 
   const g = wealthy();
   upgrade(g);
   const metal = g.stock.metal, dollars = g.dollars;
-  assert.match(invite(g), /Recruiting 18 residents/);
+  assert.match(invite(g), /Recruiting 1 residents/);
   assert.equal(g.stock.metal, metal);
-  assert.equal(g.dollars, dollars - 900 * dollarsScale);
+  assert.equal(g.dollars, dollars - 50 * dollarsScale);
   assert.equal(g.population, 12);
-  assert.equal(recruitmentAmount(g.population), 18);
+  assert.equal(recruitmentAmount(g.population), 1);
   g.population = 10000;
   invite(g);
   assert.equal(g.population, 10000);
-  assert.equal(recruitmentAmount(g.population), 1200);
+  assert.equal(recruitmentAmount(g.population), 500);
+});
+
+test('recruitment grows at five percent with one starter and a final twenty percent cap after all bonuses', () => {
+  for (const [population, arrivals] of [[0, 1], [1, 1], [12, 1], [39, 1], [40, 2],
+    [100, 5], [1000, 50], [10000, 500], [20000000, 1000000]]) {
+    assert.equal(recruitmentAmount(population), arrivals);
+  }
+  assert.equal(recruitmentAmount(1000, 4), 100);
+  assert.equal(recruitmentAmount(1000, 12), 200);
+  assert.equal(recruitmentAmount(101, 99), 21, 'cap rounds up after housing bonuses');
+  for (let season = 0; season < 4; season++) {
+    const time = worldEpoch + season * seasonMs;
+    const climate = weeklyClimate(time, recruitmentClimate);
+    assert.equal(recruitmentAmount(1000, 4, time), Math.min(200, Math.max(1, Math.floor(100 * climate))));
+    for (const population of [1, 12, 101, 1000, 20000000]) {
+      for (const housing of [0, 4, 12, 99]) {
+        const amount = recruitmentAmount(population, housing, time);
+        assert.ok(Number.isInteger(amount) && amount >= 1);
+        assert.ok(amount <= Math.ceil(population / 5));
+      }
+    }
+    assert.equal(recruitmentAmount(1000, 99, time), 200);
+  }
 });
 
 test('five resource collections deplete a location and a new tile remains collectible', () => {
@@ -319,13 +344,15 @@ test('the first camp is achievable with funded recruitment and supplied resource
   discover(g);
   upgrade(g);
   g.dollars = 1500 * dollarsScale;
-  invite(g);
-  g.population += recruitmentAmount(g.population);
+  while (g.population < stages[1].population) {
+    invite(g);
+    g.population += recruitmentAmount(g.population);
+  }
   gather(g);
   gather(g);
   g.stock.water += 8;
   upgrade(g);
   assert.equal(g.stage, 1);
-  assert.equal(g.population, 30);
+  assert.equal(g.population, stages[1].population);
   assert.ok(Object.values(g.stock).every(n => n >= 0));
 });

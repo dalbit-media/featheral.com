@@ -698,6 +698,12 @@ New players and founding settlements start with **FTH$0**. Residents, banks, com
 
 Recruitment still costs **FTH$50 per arriving resident**. Exploration still costs FTH$ by distance/difficulty but rewards discovery and collectibles, not currency. Transport and upgrades consume FTH$. Marketplace sales transfer existing player escrow or pool reserves into the seller's wallet; Gold exchanges transfer existing reserves. Initial market reserves are provisioned once and never replenished by gameplay. No action mints new FTH$, and fixed-price legacy trades and global currency reward claims are disabled.
 
+New recruitment batches start at **5% of current population**, rounded down with
+a minimum of one resident. Housing and climate apply before a final cap of
+**20% of current population, rounded up**. Manual and automatic recruitment share
+this rule and charge only for the final arrivals. Already-paid batches retain
+their stored arrival counts and deadlines.
+
 Commercial buildings retain ownership, placement and costs but generate no income: Market stall (Camp; 4,000 kg timber + 0.4 t Metal + FTH$200), Commercial workshop (Neighborhood; 10,000 kg timber + 1 t Metal + FTH$600), Trade hub (Town; 25,000 kg timber + 3 t Metal + FTH$1,800). The bank still unlocks Oil collection and resource trading. FTH$ is simulated game currency, not USD or an on-chain token; cash withdrawals are disabled.
 
 **Settlement → Sell resources** is available immediately after founding, without a bank or commercial building. Review the current funded quote to sell `floor(owned / 2)` of every raw resource in one confirmation. Pending stock and sell-order escrow are excluded; zero quantities are skipped. Exact halves above 10,000 units are supported. Each resource uses static base pricing (or better player bids) and retains conservative 2% minimum-proceeds protection. One atomic transaction sells everything or nothing, including player orders, pool movements and fills; retries cannot sell twice. Selling Water can reduce upkeep reserves, so review the Water warning before confirming.

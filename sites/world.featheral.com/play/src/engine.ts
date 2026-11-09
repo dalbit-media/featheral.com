@@ -207,8 +207,9 @@ export function invite(game: Game, time?: number): string {
   return note(game, `Recruiting ${recruitmentAmount(game.population, constructionLevel(game, 'housing'), time).toLocaleString()} residents. Arrival in one game week.`);
 }
 export function recruitmentAmount(population: number, housingLevel = 0, time?: number): number {
-  return Math.max(1, Math.floor(Math.max(18, Math.floor(population * 0.12)) * (1 + housingLevel / 4)
+  const amount = Math.max(1, Math.floor(Math.max(1, Math.floor(population / 20)) * (1 + housingLevel / 4)
     * (time === undefined ? 1 : weeklyClimate(time, recruitmentClimate))));
+  return Math.min(amount, Math.max(1, Math.ceil(population / 5)));
 }
 export function recruitmentMetal(population: number): number {
   return 10 + Math.ceil(population / 10);

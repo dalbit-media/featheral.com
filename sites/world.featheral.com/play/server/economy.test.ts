@@ -13,6 +13,7 @@ import { balancedAllocation, emptyAllocation, explorationQuote, nextExploration,
 import { waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
 import { waterFacilityKeys } from '../src/water-facilities.ts';
 import { automateFixtureCollections } from './test-support.ts';
+import { gameConsumption } from '../src/consumption.ts';
 
 const start = 1000000, minute = 60000;
 const envelope = (account: Account, command: Command) => ({ id: randomUUID(), revision: account.revision, command });
@@ -864,6 +865,42 @@ test('recruitment size is locked at dispatch', () => {
   accrue(account, due);
   assert.equal(account.game.population, 10001 + result.recruitment!.population);
   assert.equal(snapshot(account).pending.wood, pending);
+});
+test('already-paid larger recruitment batches retain their exact arrivals after the growth rebalance', () => {
+  const account = manual(emptyAllocation());
+  account.game.stock.wood = 1000000;
+  account.game.stock.metal = 1000000;
+  const startedAt = account.updatedAt, readyAt = startedAt + worldWeekMs;
+  account.recruitment = { population: 18, startedAt, readyAt };
+  account.inviteReadyAt = readyAt;
+  const dollars = account.game.dollars;
+  const withoutRecruitment = structuredClone(account);
+  withoutRecruitment.recruitment = null;
+  assert.ok(recruitmentAmount(12) < account.recruitment.population);
+  assert.equal(snapshot(account).recruitment?.population, 18);
+  accrue(account, readyAt);
+  accrue(withoutRecruitment, readyAt);
+  assert.equal(account.game.population, withoutRecruitment.game.population + 18);
+  assert.equal(account.recruitment, null);
+  assert.equal(account.game.dollars, dollars);
+  accrue(account, readyAt + 1);
+  assert.equal(account.game.population, withoutRecruitment.game.population + 18, 'paid batch arrives exactly once');
+});
+test('capped recruitment preview confirmation and dispatch charge only the final arrival count', () => {
+  const account = manual(emptyAllocation());
+  account.game.population = 1000;
+  account.game.constructionLevels = { housing: 99 };
+  account.game.stock.wood = 1000000;
+  account.game.stock.metal = 1000000;
+  const before = snapshot(account);
+  const quote = gameConsumption({ ...before, csrf: 'test', population: { global: 1000, federation: null }, clockSpeed: 1 }, { type: 'invite' })!;
+  assert.equal(quote.arrivals, 200);
+  assert.equal(before.recruitmentDollars, 200 * 50);
+  assert.equal(quote.costs.find(cost => cost.asset === 'dollars')?.amount, 200 * 50);
+  const dollars = account.game.dollars;
+  const result = act(account, { type: 'invite' });
+  assert.equal(result.recruitment?.population, 200);
+  assert.equal(account.game.dollars, dollars - 200 * 50 * dollarsScale);
 });
 test('new residents cannot join an active delivery or earn retroactive partial-week production', () => {
   const account = manual({ ...emptyAllocation(), wood: 28 });
