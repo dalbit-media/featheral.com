@@ -10,6 +10,26 @@ const { approvedMarkets, approvedMarketExpansion } = require("../../gold/market-
 const root = path.resolve(__dirname, "../../..");
 const bash = process.platform === "win32" ? "C:\\Program Files\\Git\\bin\\bash.exe" : "bash";
 
+test("squad vouchers preserve the running transport reserve policy and all historical catalogs", () => {
+  const { transportLiquidityTargets } = require("../../notes/game-funds");
+  const { marketAssets, isReserveMarketAsset, isLiquidAsset } = require("../../../sites/world.featheral.com/play/src/market.ts");
+  const squads = ["squad-10", "squad-20", "squad-50", "squad-100"];
+  const targets = transportLiquidityTargets();
+  assert.equal(Object.keys(targets).length, 121);
+  assert.deepEqual(marketAssets.filter(asset => !isReserveMarketAsset(asset)), squads);
+  for (const asset of squads) {
+    assert.equal(isLiquidAsset(asset), true, "player-funded pools remain available");
+    for (const catalog of [liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets,
+      craftingLiquidityTargets, equipmentLiquidityTargets, bulkCraftingLiquidityTargets, transportLiquidityTargets])
+      assert.equal(Object.hasOwn(catalog(), asset), false);
+    assert.equal(Object.hasOwn(approvedMarkets, asset), false, "no new reserve authorization");
+  }
+  const policy = { monetaryPolicy: { scale: 10000 }, collectionPolicy: { version: 1 }, markets: targets };
+  assert.deepEqual(verifyCompatibility("candidate", "running", { policy: () => policy }), { marketExpansion: false });
+  assert.throws(() => verifyCompatibility("candidate", "running", { policy: name => name === "candidate"
+    ? { ...policy, markets: { ...targets, "squad-10": { quantity: 10000, pricePerLot: "10000000000000000000" } } } : policy }), /Activation refused/);
+});
+
 test("live reserve seed prices stay genesis-compatible when market floors change", () => {
   const { marketPriceFloor, marketBasePrice } = require("../../../sites/world.featheral.com/play/src/market.ts");
   const targets = liquidityTargets();

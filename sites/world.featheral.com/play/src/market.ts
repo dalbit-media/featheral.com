@@ -9,6 +9,7 @@ import { activityItemDetails, automationItems, isActivityItem } from './automati
 import { dollarsScale } from './dollars.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
 import type { BuyQuantityBudget } from './market-buy-quantity.ts';
+import { isSquadItem } from './exploration-squads.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -27,6 +28,9 @@ export function isMarketResource(asset: MarketAsset): asset is MarketResource {
   return marketResources.some(resource => resource === asset);
 }
 export function isLiquidAsset(_asset: MarketAsset): boolean { return true; }
+export function isReserveMarketAsset(asset: MarketAsset): boolean {
+  return isLiquidAsset(asset) && !isSquadItem(asset);
+}
 export function marketQuantityLimit(asset: MarketAsset): number { return isCollectible(asset) ? 1 : 10000; }
 export function marketStartingQuantity(asset: MarketAsset): number { return isCollectible(asset) ? 100 : 10000; }
 export function marketSaleQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : marketQuantityLimit(asset); }

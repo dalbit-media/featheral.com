@@ -418,6 +418,20 @@ test('player orders escrow, match by price and time, partially fill and cancel w
     assert.equal(h.read(seller.token).market.orders.find(o => o.id === first.market.orders[0].id)!.remaining, 1);
   } finally { h.store.close(); }
 });
+test('squad vouchers trade through player offers and donated pools without reserve seeds', () => {
+  const h = setup(':memory:', false), buyer = h.create(), seller = h.create();
+  try {
+    h.store.transaction(seller.token, session => { inventory(session.account).items.push('squad-10', 'squad-10', 'squad-10'); });
+    assert.equal(h.read(buyer.token, 'squad-10').market.quotes.buy.available, false);
+    h.act(seller.token, { type: 'limit', asset: 'squad-10', side: 'sell', quantity: 1, price: 10 });
+    const bought = h.act(buyer.token, { type: 'spot', asset: 'squad-10', side: 'buy', quantity: 1, limitDollars: 10 });
+    assert.equal(bought.inventory.items.filter(item => item === 'squad-10').length, 1);
+    assert.equal(bought.market.trades[0].venue, 'players');
+    h.act(seller.token, { type: 'fund-pool', asset: 'squad-10', quantity: 2, dollars: 20 });
+    assert.equal(h.read(buyer.token, 'squad-10').market.quotes.buy.available, true);
+    assert.equal(h.store.db.prepare("SELECT units FROM market_pools WHERE asset='squad-10'").get()!.units, 2);
+  } finally { h.store.close(); }
+});
 test('system liquidity covers every catalog item and raw resource, records real history and cannot profit from a round trip', () => {
   const h = setup(), user = h.create();
   try {

@@ -41,9 +41,9 @@ function bulkCraftingLiquidityTargets() {
 }
 
 function transportLiquidityTargets() {
-  const { marketAssets, isLiquidAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
+  const { marketAssets, isReserveMarketAsset, marketBasePrice, marketStartingQuantity } = require("../../sites/world.featheral.com/play/src/market.ts");
   const { dollarsUnits } = require("../../sites/world.featheral.com/play/src/dollars.ts");
-  return Object.fromEntries(marketAssets.filter(isLiquidAsset).map(asset => [asset, {
+  return Object.fromEntries(marketAssets.filter(isReserveMarketAsset).map(asset => [asset, {
     quantity: marketStartingQuantity(asset), pricePerLot: (BigInt(dollarsUnits(marketBasePrice(asset))) * 10n ** 14n).toString(),
   }]));
 }

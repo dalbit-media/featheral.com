@@ -13,7 +13,7 @@ import { GameFunds } from './funds.ts';
 import type { DollarFunds, FundRequest, FundView, WalletView } from './funds.ts';
 import type { ClockSpeed } from '../src/environment.ts';
 import { enforceMonetaryPolicy } from './monetary-policy.ts';
-import { isLiquidAsset, isMarketResource, marketBasePrice, marketQuantityLimit, marketStartingQuantity } from '../src/market.ts';
+import { isReserveMarketAsset, isMarketResource, marketBasePrice, marketQuantityLimit, marketStartingQuantity } from '../src/market.ts';
 import { isTitleItem } from '../src/customization.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { FederationTreasury } from './federation.ts';
@@ -207,7 +207,7 @@ export class SqliteStore implements Store {
     }
   }
   async ensureLiquidity(token: string, asset: MarketAsset, saleQuantity = 0): Promise<void> {
-    if (!this.funds || !isLiquidAsset(asset)) return;
+    if (!this.funds || !isReserveMarketAsset(asset)) return;
     const settled = this.read(token, session => {
       if (isMarketResource(asset) && saleQuantity > marketQuantityLimit(asset)
         && saleQuantity > Math.max(session.account.game.stock[asset], Math.floor(session.account.pending[asset] / 60000)))

@@ -82,6 +82,11 @@ forward. This is a trade-history chart, not a guaranteed complete time series.
 
 ## Squad dispatch vouchers
 
+Squad vouchers are not authorized live reserve markets. They remain craftable,
+tradeable through player offers, and eligible for player-funded pools, but do
+not request automatic Gold reserve funding or alter any existing reserve seed
+target. Deployment preflight and ledger authority checks remain enforced.
+
 Craft or trade `squad-10`, `squad-20`, `squad-50`, and `squad-100` to launch
 up to that many field missions with one confirmation and one server action.
 Open **Bulk field missions** from Explore or population management, or select

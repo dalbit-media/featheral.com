@@ -13,6 +13,27 @@ import { Wallet, parseUnits, verifyMessage } from 'ethers';
 import { transferMessage } from '../../../../services/fth-ledger/transfer.js';
 import { createAccount } from './economy.ts';
 
+test('squad markets never request reserve authority while existing market funding remains enabled', async () => {
+  const requested: string[] = [];
+  const store = new SqliteStore(':memory:', Date.now, 1, {
+    available: () => '0', supply: () => '0',
+    prepare: () => { throw new Error('Unexpected fund movement'); },
+    commit: () => { throw new Error('Unexpected settlement'); },
+    ensureLiquidity: async asset => { requested.push(asset); },
+  });
+  try {
+    const { token } = store.create();
+    store.transaction(token, session => { session.account.game.stage = 0; });
+    const before = store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all();
+    for (const asset of ['squad-10', 'squad-20', 'squad-50', 'squad-100'] as const)
+      await store.ensureLiquidity(token, asset, 1);
+    assert.deepEqual(requested, []);
+    assert.deepEqual(store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all(), before);
+    await store.ensureLiquidity(token, 'torch');
+    assert.deepEqual(requested, ['torch']);
+  } finally { store.close(); }
+});
+
 test('fund balance projections migrate, follow every session write and roll back atomically', () => {
   const db = sqlite.open(':memory:');
   try {
