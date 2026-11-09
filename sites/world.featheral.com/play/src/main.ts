@@ -61,6 +61,25 @@ import { actionRemaining, timedActionKey, renderActionControls } from './action-
 import type { TimedAction } from './action-timing.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
 
+const prefetchedGamePages = new Set<string>();
+function prefetchGamePage(event: Event): void {
+  if (!navigator.onLine || !(event.target instanceof Element)) return;
+  const link = event.target.closest<HTMLAnchorElement>('a[href]');
+  if (!link) return;
+  const url = new URL(link.href, location.href);
+  if (url.origin !== location.origin || url.pathname === location.pathname
+    || (url.pathname !== '/' && !Object.values(gamePages).some(page => url.pathname === page.path || url.pathname === `${page.path}index.html`))) return;
+  url.hash = '';
+  if (prefetchedGamePages.has(url.href)) return;
+  prefetchedGamePages.add(url.href);
+  const prefetch = document.createElement('link');
+  prefetch.rel = 'prefetch';
+  prefetch.href = url.href;
+  document.head.append(prefetch);
+}
+document.addEventListener('pointerover', prefetchGamePage, { passive: true });
+document.addEventListener('focusin', prefetchGamePage);
+
 const navigationPage = gamePage(location.pathname);
 const settlementPage = navigationPage === 'home', marketPage = navigationPage === 'market';
 const bankPage = navigationPage === 'bank';
@@ -114,7 +133,9 @@ try {
   await window.FeatheralWorldAccount.request('/game', {});
   state = await connect();
 } catch (error) {
-  document.querySelector('#app')!.textContent = `Cannot connect to the authoritative API. Start the backend and reload. ${error instanceof Error ? error.message : 'Connection failed.'}`;
+  const root = document.querySelector('#app')!;
+  root.removeAttribute('aria-busy');
+  root.textContent = `Cannot connect to the authoritative API. Start the backend and reload. ${error instanceof Error ? error.message : 'Connection failed.'}`;
   localize(document);
   throw error;
 }
@@ -192,6 +213,7 @@ app.innerHTML = `
     <div class="management-content"></div>
   </dialog>
 `;
+app.removeAttribute('aria-busy');
 const screenModeControls = app.querySelector<HTMLElement>('.screen-mode-controls')!;
 const screenModeStatus = screenModeControls.querySelector<HTMLElement>('[data-screen-mode-status]')!;
 const screenPreviewBar = document.createElement('div');
@@ -976,7 +998,6 @@ async function purchaseCraftingAnalysis(): Promise<void> {
   if (!quote) { toast('Profit analysis is unavailable.', true); return; }
   busy = true;
   try {
-    renderSettlement();
     if (!await confirmConsumption(quote, language)) return;
     const response = await sendMarket(state, command);
     synchronize(response);

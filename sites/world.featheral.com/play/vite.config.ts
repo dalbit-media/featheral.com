@@ -77,15 +77,20 @@ export function worldProfileAssets(): Plugin {
       order: 'pre',
       handler(html) {
         if (!html.includes('src="/src/main.ts"')) return;
-        return [
-          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/wallet-profile.css', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/wallet-profile.js', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/wallet/ethers.js', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/world-account.js', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/world-account.css', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/featheral.css', 'vite-ignore': true }, injectTo: 'head' },
-          { tag: 'script', attrs: { src: '/shared/site-links.js', defer: true, 'vite-ignore': true }, injectTo: 'head' },
-        ];
+        html = html.replace('</head>', '<link rel="stylesheet" href="/page-transition.css"></head>')
+          .replace('<div id="app"></div>', '<div id="app" aria-busy="true"><div class="page-transition-loader" role="status"><span class="page-transition-spinner" aria-hidden="true"></span><span>Loading your world…</span></div></div>');
+        return {
+          html,
+          tags: [
+            { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/wallet-profile.css', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'script', attrs: { src: '/shared/wallet-profile.js', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'script', attrs: { src: '/shared/wallet/ethers.js', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'script', attrs: { src: '/shared/world-account.js', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/world-account.css', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'link', attrs: { rel: 'stylesheet', href: '/shared/featheral.css', 'vite-ignore': true }, injectTo: 'head' },
+            { tag: 'script', attrs: { src: '/shared/site-links.js', defer: true, 'vite-ignore': true }, injectTo: 'head' },
+          ],
+        };
       },
     },
     configureServer(server) {

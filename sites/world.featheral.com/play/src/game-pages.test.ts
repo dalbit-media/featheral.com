@@ -44,6 +44,19 @@ test('Journal and Help move into Account without losing their direct routes', ()
   assert.equal(primaryGamePageKeys.includes('contacts'), false);
   assert.equal(gamePages.communicate.label, 'Inbox');
 });
+test('game routes preload a boot shell, cross-document transitions and likely next pages', () => {
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const transitions = readFileSync(new URL('../public/page-transition.css', import.meta.url), 'utf8');
+  assert.match(vite, /page-transition\.css/);
+  assert.match(vite, /page-transition-loader/);
+  assert.match(main, /document\.addEventListener\('pointerover', prefetchGamePage/);
+  assert.match(main, /document\.addEventListener\('focusin', prefetchGamePage/);
+  assert.match(main, /prefetch\.rel = 'prefetch'/);
+  assert.match(main, /prefetchedGamePages\.has\(url\.href\)/);
+  assert.match(transitions, /@view-transition\{navigation:auto\}/);
+  assert.match(transitions, /prefers-reduced-motion:reduce/);
+});
 test('the continuous encyclopedia has unique chapters, real bilingual screenshots and accessible search/progress', () => {
   assert.equal(guideTopics.length, 8);
   assert.equal(new Set(guideTopics.map(topic => topic.id)).size, guideTopics.length);
