@@ -400,11 +400,23 @@
 #crafting .recipe-market [data-direction=down]{color:#bf4a44}
 #crafting .recipe-market [data-direction=none],#crafting .recipe-market [data-direction=flat]{color:var(--muted)}
 .crafting-market-status{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#crafting .crafting-analysis-access{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;padding:12px;margin:12px 0;border:1px solid #c6e8a430;border-radius:12px;background:#c6e8a407}
-#crafting .crafting-analysis-access h3{margin:0;font-size:14px}
-#crafting .crafting-analysis-access p{margin:5px 0;color:var(--muted);font-size:11px;line-height:1.5}
+#crafting .crafting-filters{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;margin:8px 0}
+#crafting .crafting-filters .button{min-width:0;min-height:36px;padding:0;display:inline-grid;place-items:center}
+#crafting .crafting-filters .button .icon{width:16px;height:16px}
+#crafting .crafting-analysis-access{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 8px;padding:6px 8px;margin:8px 0;border:1px solid #c6e8a430;border-radius:10px;background:#c6e8a407}
+#crafting .crafting-analysis-access>.icon{width:16px;height:16px;color:var(--mint)}
+#crafting .crafting-analysis-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;min-width:0;font-size:12px;line-height:1.35;white-space:nowrap}
+#crafting .crafting-analysis-summary [data-crafting-analysis-status]{color:var(--muted);font-size:11px}
+#crafting .crafting-analysis-access[data-analysis-state=active] [data-crafting-analysis-status]{color:#238455}
+#crafting .crafting-analysis-access>.button{min-height:32px;padding:4px 10px;gap:4px;font-size:11px}
+#crafting .crafting-analysis-access>.button .icon{width:14px;height:14px}
+#crafting .crafting-analysis-rules{display:contents;font-size:11px}
+#crafting .crafting-analysis-rules summary{display:grid;place-items:center;width:32px;height:32px;cursor:pointer;list-style:none;color:var(--muted);border-radius:8px}
+#crafting .crafting-analysis-rules summary::-webkit-details-marker{display:none}
+#crafting .crafting-analysis-rules summary .icon{width:16px;height:16px}
+#crafting .crafting-analysis-rules[open] summary{color:var(--mint)}
+#crafting .crafting-analysis-rules p{grid-column:1/-1;margin:2px 0;color:var(--muted);line-height:1.5}
 #crafting .crafting-analysis-access>details{grid-column:1/-1;font-size:11px}
-#crafting .crafting-analysis-access summary{min-height:32px;cursor:pointer}
 #crafting .recipe-snapshot-estimate{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;font-size:10px;line-height:1.4;font-variant-numeric:tabular-nums;flex-wrap:wrap;background:var(--surface)}
 #crafting .recipe-snapshot-estimate[data-snapshot-profit=profit]{color:#238455}
 #crafting .recipe-snapshot-estimate[data-snapshot-profit=loss]{color:#c2544c}
@@ -413,8 +425,5 @@
 #crafting .consumption-costs{gap:2px 4px}
 #crafting .consumption-costs .cost{font-size:9px;font-weight:400;line-height:1.25;padding:1px 2px;gap:2px;background:transparent;border:0;border-radius:0}
 #crafting .consumption-costs .cost .icon{width:10px;height:10px}
-#crafting .recipe-estimate{grid-column:1 / -1;display:flex;justify-content:space-between;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;font-size:11px;line-height:1.4;font-variant-numeric:tabular-nums;flex-wrap:wrap}
-#crafting .recipe-estimate[data-profit=profit]{color:#238455;background:#23845518}
-#crafting .recipe-estimate[data-profit=loss]{color:#c2544c;background:#c2544c18}
-#crafting .recipe-estimate[data-profit=even],#crafting .recipe-estimate[data-profit=unavailable]{color:var(--muted);background:var(--surface)}
-@media(max-width:650px){#crafting .crafting-analysis-access{grid-template-columns:minmax(0,1fr)}#crafting .crafting-analysis-access>.button{justify-self:start}}
+@media(max-width:650px){#crafting .crafting-filters .button,#crafting .crafting-analysis-access>.button{min-height:44px}#crafting .crafting-analysis-rules summary{width:44px;height:44px}}
+@media(max-width:400px){#crafting .crafting-filters{grid-template-columns:repeat(4,minmax(0,1fr))}}

@@ -4,9 +4,9 @@ import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
-import { canCollectFinds, craftingCost, craftingFits, craftingIngredients, craftingInputs, craftingMaximum, craftingStage, craftingStageName, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, sellableItemCount, visibilityItems } from './items.ts';
+import { canCollectFinds, craftingCost, craftingFits, craftingIngredients, craftingMaximum, craftingStage, craftingStageName, craftableItems, craftableKeys, inventoryPageSize, inventoryUsed, isDecorationItem, isVisibilityItem, itemName, itemStacks, itemStorage, recipeDiscovered, sellableItemCount, visibilityItems } from './items.ts';
 import { settlementPositions } from './settlement-layout.ts';
-import type { CraftableItem, ItemId } from './items.ts';
+import type { ItemId } from './items.ts';
 import { itemArt } from './item-art.ts';
 import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, activityName, isActivityItem, isAutomationItem } from './automation.ts';
@@ -21,22 +21,6 @@ import { formatResourcePrice } from './resource-units.ts';
 import { activeMarketAnalysis, marketAnalysisFee } from './market-analysis.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
 import { isTransportItem, transportBenefit } from './transport-items.ts';
-
-export function craftingEstimate(item: CraftableItem, quantity: number, tickers: MarketSnapshot['tickers']): { revenue: number; cost: number; net: number } | null {
-  const output = tickers.find(ticker => ticker.asset === item);
-  if (!output || !marketPriceAvailable(output.bid)) return null;
-  const cost = craftingCost(item, quantity);
-  let inputs = cost.dollars ?? 0;
-  for (const [asset, amount] of [...Object.entries(cost).filter(([asset, amount]) => asset !== 'dollars' && amount > 0), ...Object.entries(craftingInputs(item, quantity))]) {
-    const ticker = tickers.find(ticker => ticker.asset === asset);
-    if (!ticker || !marketPriceAvailable(ticker.bid)) return null;
-    inputs += ticker.bid * amount;
-  }
-  const revenue = Math.round(output.bid * quantity * 10000) / 10000;
-  const total = Math.round(inputs * 10000) / 10000;
-  if (!Number.isFinite(revenue) || !Number.isFinite(total)) return null;
-  return { revenue, cost: total, net: Math.round((revenue - total) * 10000) / 10000 };
-}
 
 export type InventoryFilter = 'all' | 'utility' | 'efficiency' | 'bulk' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
@@ -87,18 +71,24 @@ export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string
   const { game, inventory: bag } = state, tier = itemStorage[bag.storage];
   const report = activeMarketAnalysis(marketReport, now);
   const reportItems = new Map(report?.items.map(item => [item.item, item]));
-  const reportStatus = report ? `${translate('Snapshot time', language)}: ${new Date(report.generatedAt).toLocaleString(locale(language), { timeZone: 'UTC' })} UTC · ${translate('Expires in', language)} ${Math.ceil((report.expiresAt - now) / 60000)} ${translate('game hours', language)}`
+  const hoursLeft = report ? Math.max(1, Math.ceil((report.expiresAt - now) / 60000)) : 0;
+  const analysisState = report ? 'active' : loading ? 'loading' : marketReport ? 'expired' : 'locked';
+  const reportStatus = report ? `${hoursLeft} ${translate('game hours left', language)}`
     : loading ? translate('Loading prices...', language)
-    : marketReport ? translate('Analysis expired. Purchase a new latest-quote report.', language)
-      : translate('Profit analysis is locked. FTH$100 grants one game day of access.', language);
+    : translate(marketReport ? 'Expired' : 'Locked', language);
+  const reportDetail = report ? `${translate('Snapshot time', language)}: ${new Date(report.generatedAt).toLocaleString(locale(language), { timeZone: 'UTC' })} UTC`
+    : translate(marketReport ? 'Analysis expired. Purchase a new latest-quote report.' : 'Profit analysis is locked. FTH$100 grants one game day of access.', language);
   const analysisValue = (value: number | null) => value === null ? translate('Quote unavailable', language)
     : `FTH$ ${value.toLocaleString(locale(language), { maximumFractionDigits: 2 })}`;
-  const analysisAccess = `<section class="crafting-analysis-access" aria-labelledby="crafting-analysis-title"><div><h3 id="crafting-analysis-title">${translate('Latest profit analysis', language)}</h3><p data-crafting-analysis-status role="status">${reportStatus}</p></div><button type="button" class="button" data-action="crafting-analysis" ${pending || loading || state.dollars < marketAnalysisFee || game.stage < 0 ? 'disabled' : ''}>${translate(report ? 'Refresh analysis' : 'Get profit analysis', language)} · FTH$${marketAnalysisFee}</button><details><summary>${translate('Analysis rules', language)}</summary><p>${translate('One full-market snapshot costs FTH$100 and expires after one game day. Each refresh is charged. Profit is one-copy sale proceeds minus the crafting fee and executable purchase costs of every ingredient. The report fee is separate; prices are not reserved. Unavailable quotes are not estimated.', language)}</p></details></section>`;
+  const signedValue = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : ''}${Math.abs(value).toLocaleString(locale(language), { maximumFractionDigits: 2 })} FTH$`;
+  const analysisLabel = `${translate(report ? 'Refresh analysis' : 'Get profit analysis', language)} · FTH$${marketAnalysisFee}`;
+  const analysisAccess = `<section class="crafting-analysis-access" data-analysis-state="${analysisState}" aria-labelledby="crafting-analysis-title">${icon('spark')}<div class="crafting-analysis-summary" title="${reportDetail}"><strong id="crafting-analysis-title">${translate('Profit analysis', language)}</strong><span data-crafting-analysis-status role="status">${reportStatus}</span></div><button type="button" class="button" data-action="crafting-analysis" aria-label="${analysisLabel}" title="${analysisLabel}" ${pending || loading || state.dollars < marketAnalysisFee || game.stage < 0 ? 'disabled' : ''}>${icon(report ? 'refresh' : 'dollars')}<span>FTH$${marketAnalysisFee}</span></button><details class="crafting-analysis-rules"><summary aria-label="${translate('Analysis rules', language)}" title="${translate('Analysis rules', language)}">${icon('help')}</summary><p>${reportDetail}</p><p>${translate('One full-market snapshot costs FTH$100 and expires after one game day. Each refresh is charged. Profit is one-copy sale proceeds minus the crafting fee and executable purchase costs of every ingredient. The report fee is separate; prices are not reserved. Unavailable quotes are not estimated.', language)}</p></details></section>`;
+  const filters = [['all', 'All items', 'grid'], ['affordable', 'Affordable', 'dollars'], ['utility', 'Equipment', 'tool'], ['efficiency', 'Cost-saving equipment', 'percent'], ['bulk', 'Bulk crafting', 'layers'], ['decoration', 'Decorations', 'flower'], ['collectors', 'Collectors', 'gem'], ['customization', 'Names & titles', 'tag']] as const;
   const keys = craftableKeys.filter(id => filter === 'all' || (filter === 'affordable'
     ? game.stage >= 0 && recipeDiscovered(game, id) && craftingFits(bag, id, quantity) && quantity <= craftingMaximum(game, bag, id) && canAfford(game, craftingCost(id, quantity))
     : filter === 'utility' ? isVisibilityItem(id) || isActivityEquipment(id) || isBulkCraftingItem(id) || isTransportItem(id) : filter === 'bulk' ? isBulkCraftingItem(id) : filter === 'efficiency' ? isActivityEquipment(id) || isTransportItem(id) : filter === 'collectors' ? isCollectionItem(id) : filter === 'customization' ? isCustomizationItem(id) : isDecorationItem(id)));
   return `<section class="settlement-section" id="crafting" aria-labelledby="crafting-title"><div class="settlement-section-title"><h3 id="crafting-title">Recipes</h3><span>${inventoryUsed(bag)} / ${tier.capacity}</span></div>
-    <div class="inventory-filters" role="group" aria-label="Crafting filters">${([['all', 'All items'], ['affordable', 'Affordable'], ['utility', 'Equipment'], ['efficiency', 'Cost-saving equipment'], ['bulk', 'Bulk crafting'], ['decoration', 'Decorations'], ['collectors', 'Collectors'], ['customization', 'Names & titles']] as const).map(([key, label]) => `<button class="button" data-action="crafting-filter" data-filter="${key}" aria-pressed="${key === filter}">${label}</button>`).join('')}</div>
+    <div class="inventory-filters crafting-filters" role="group" aria-label="${translate('Crafting filters', language)}">${filters.map(([key, label, symbol]) => `<button class="button" data-action="crafting-filter" data-filter="${key}" aria-pressed="${key === filter}" aria-label="${translate(label, language)}" title="${translate(label, language)}">${icon(symbol)}</button>`).join('')}</div>
     <p class="fineprint">Click Craft to choose a batch. Owned permits allow exact batches of 10, 20, 50 or 100 copies.</p>
     <p class="fineprint">Total batch cost shown below. Nothing is spent until you confirm.</p>${analysisAccess}
     ${inventoryUsed(bag) >= tier.capacity ? '<div class="notice"><span>Item inventory full</span><span>Combining collectors can free item slots.</span><button class="button" data-settlement-panel="inventory">Expand item storage</button></div>' : ''}
@@ -116,22 +106,17 @@ export function craftingPanel(state: ApiState, costChips: (cost: Cost) => string
       const requirements = Object.entries(ingredients).map(([item, needed]) => ({ name: itemName(item as ItemId), asset: item, owned: sellableItemCount(bag, item as ItemId), needed }));
       const ready = requirements.filter(row => row.owned >= row.needed).length;
       const ticker = tickers.find(ticker => ticker.asset === id);
-      const estimate = craftingEstimate(id, quantity, tickers);
-      const money = (value: number) => Math.abs(value).toLocaleString(locale(language), { maximumFractionDigits: 2 });
-      const estimateLabel = estimate ? estimate.net > 0 ? 'Estimated profit' : estimate.net < 0 ? 'Estimated loss' : 'Estimated break-even' : 'Estimate unavailable';
-      const estimateExplanation = translate('Uses current sell quotes for output and all consumed resources/items, plus FTH$ fees. Includes any batch permit. Prices can change; liquidity and execution are not guaranteed.', language);
       const snapshot = reportItems.get(id);
-      const snapshotEstimate = snapshot ? `<div class="recipe-snapshot-estimate" data-snapshot-profit="${snapshot.profit === null ? 'unavailable' : snapshot.profit > 0 ? 'profit' : snapshot.profit < 0 ? 'loss' : 'even'}"><span>${translate('Latest snapshot profit · one copy', language)}</span><strong>${analysisValue(snapshot.profit)}</strong></div>` : '';
+      const snapshotEstimate = snapshot ? `<div class="recipe-snapshot-estimate" data-snapshot-profit="${snapshot.profit === null ? 'unavailable' : snapshot.profit > 0 ? 'profit' : snapshot.profit < 0 ? 'loss' : 'even'}"><span>${translate('Profit per copy', language)}</span><strong>${snapshot.profit === null ? translate('Quote unavailable', language) : signedValue(snapshot.profit)}</strong></div>` : '';
       const snapshotDetails = snapshot ? `<p class="fineprint recipe-estimate-details">${translate('Latest snapshot · one copy', language)} · ${translate('Crafting fee', language)}: ${analysisValue(snapshot.craftingFee)} · ${translate('Total craft cost', language)}: ${analysisValue(snapshot.cost)} · ${translate('Sale proceeds', language)}: ${analysisValue(snapshot.revenue)} · ${translate('Estimated profit', language)}: ${analysisValue(snapshot.profit)}${snapshot.ingredients.map(input => ` · ${translate(marketAssetName(input.asset), language)} × ${formatResourceAmount(input.asset, input.quantity, locale(language))}: ${analysisValue(input.dollars)}`).join('')}</p>` : '';
       const amount = (asset: string, value: number) => asset === 'dollars' || Object.hasOwn(ingredients, asset)
         ? value.toLocaleString(locale(language), { maximumFractionDigits: asset === 'dollars' ? 2 : 4 }) : formatResourceAmount(asset, value, locale(language));
       return `<article class="item-card recipe-card"><div class="recipe-heading">${itemArt(id)}<div><h3>${recipe.name}</h3><small class="recipe-level">${craftingStageName(id)}</small></div></div>
-      <div class="recipe-market" aria-label="${translate('Market price', language)}"><span>${translate('Sell price', language)} <strong>${ticker && marketPriceAvailable(ticker.bid) ? `${formatResourcePrice(id, ticker.bid, locale(language))} FTH$` : '—'}</strong></span>${ticker ? renderPriceChange(ticker, '7d', language, true) : `<small>${translate('Prices unavailable', language)}</small>`}</div>
-      <div class="recipe-estimate" data-profit="${estimate ? estimate.net > 0 ? 'profit' : estimate.net < 0 ? 'loss' : 'even' : 'unavailable'}" title="${estimateExplanation}"><span>${translate(estimateLabel, language)}</span><strong>${estimate ? `${estimate.net > 0 ? '+' : estimate.net < 0 ? '−' : ''}${money(estimate.net)} FTH$` : '—'}</strong></div>${snapshotEstimate}
+      <div class="recipe-market" aria-label="${translate('Market price', language)}"><span>${translate('Sell price', language)} <strong>${ticker && marketPriceAvailable(ticker.bid) ? `${formatResourcePrice(id, ticker.bid, locale(language))} FTH$` : '—'}</strong></span>      ${ticker ? renderPriceChange(ticker, '7d', language, true) : `<small>${translate('Prices unavailable', language)}</small>`}</div>${snapshotEstimate}
       <div class="consumption-costs" aria-label="${translate('Batch cost', language)}">${costChips(cost)}${!Object.keys(cost).length ? `<small>${translate('Collector ingredients', language)} · ${Object.values(ingredients).reduce((sum, count) => sum + count, 0)}</small>` : ''}</div>
       ${availableBatch > 1 ? `<small class="recipe-bulk-hint">${translate('Maximum available batch', language)}: ${availableBatch}</small>` : ''}
       <details class="recipe-details" data-detail="recipe-${id}"><summary><span>Recipe</span>${requirements.length ? ` <strong>${ready}/${requirements.length}</strong>` : ''}${icon('chevron')}</summary>
-      <p class="fineprint recipe-estimate-details">${estimateExplanation}${estimate ? ` ${translate('Estimated revenue', language)}: ${money(estimate.revenue)} FTH$ · ${translate('Estimated input value and fees', language)}: ${money(estimate.cost)} FTH$ · ${translate('Batch', language)}: ${quantity}` : ` ${translate('A sell quote is required for the output and every consumed input.', language)}`}</p>${snapshotDetails}
+      ${snapshotDetails}
       ${reason !== 'Craft' ? `<p class="notice">${reason}</p>` : ''}
       <p>${isTransportItem(id) ? translate(transportBenefit(id), language) : isBulkCraftingItem(id) ? translate(`Allows one exact batch of ${bulkCraftingItems[id].quantity} copies. Select a recipe and click Craft to use it.`, language) : isActivityEquipment(id) ? translate(activityEquipmentBenefit(id), language) : isCollectionItem(id) ? 'Combines collector permits without increasing total collection time.' : isCustomizationItem(id) ? 'Consumes one permit. Cosmetic only.' : isVisibilityItem(id) ? `${visibilityItems[id].radius}-tile view` : 'Cosmetic decoration'}</p>${isActivityEquipment(id) || isBulkCraftingItem(id) || isTransportItem(id) ? '<p class="fineprint">Consumes unused decorations and collector permits. Return placed decorations to inventory first.</p>' : ''}<small><span>Batch</span>: ${quantity} · <span>Maximum available batch</span>: ${availableBatch}</small>
       ${requirements.length ? '<p class="fineprint">Ingredients: owned / required</p>' : `<p class="fineprint">${translate('No item ingredients required.', language)}</p>`}<ul class="recipe-resources">${requirements.map(row => `<li class="${row.owned >= row.needed ? 'available' : 'missing'}">${icon(row.owned >= row.needed ? 'check' : 'lock')}<span>${row.name}</span><strong>${amount(row.asset, row.owned)} / ${amount(row.asset, row.needed)}</strong><span class="recipe-resource-state">${row.owned >= row.needed ? 'Available' : 'Missing'}</span></li>`).join('')}</ul>

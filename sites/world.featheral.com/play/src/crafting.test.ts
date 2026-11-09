@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { createAccount, parseCommand, snapshot } from '../server/economy.ts';
 import { craft, inventory } from '../server/inventory.ts';
-import { craftingEstimate, craftingPanel } from './inventory-view.ts';
+import { craftingPanel } from './inventory-view.ts';
 import { craftableKeys, craftableItems, craftingCost, craftingIngredients, craftingMaximum, decorationItems, craftingStage, craftingStageName, isCraftableItem, isDecorationItem, itemName } from './items.ts';
 import type { DecorationItem } from './items.ts';
 import type { ApiState } from './api-types.ts';
@@ -208,45 +208,32 @@ test('crafting loads one shared market catalog, throttles requests and surfaces 
   assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers,/);
   assert.match(source, /data-action="crafting-prices"/);
 });
-test('profit estimates include raw resources, item inputs, fees and batch permits without changing craft charges', () => {
+test('profit estimates stay hidden without an active paid analysis while sell prices remain visible', () => {
   const tickers: MarketSnapshot['tickers'] = [
     { asset: 'bench', bid: 160, ask: 170, last: null },
     { asset: 'wood', bid: 2, ask: 3, last: null },
     { asset: 'metal', bid: 1, ask: 2, last: null },
-    { asset: 'craft-batch-10', bid: 25, ask: 30, last: null },
   ];
-  assert.deepEqual(craftingEstimate('bench', 1, tickers), { revenue: 160, cost: 17, net: 143 });
-  assert.deepEqual(craftingEstimate('bench', 10, tickers), { revenue: 1600, cost: 195, net: 1405 });
-  assert.equal(craftingCost('bench').dollars, 10);
-  assert.equal(craftingEstimate('bench', 1, tickers.filter(ticker => ticker.asset !== 'wood')), null);
-  assert.equal(craftingEstimate('bench', 10, tickers.filter(ticker => ticker.asset !== 'craft-batch-10')), null);
-  assert.equal(craftingEstimate('bench', 1, tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'metal' ? 0 : ticker.bid }))), null);
-  assert.equal(craftingEstimate('bench', 1, []), null);
-  const collector: MarketSnapshot['tickers'] = [
-    { asset: 'collector-wood-4', bid: 30, ask: 40, last: null },
-    { asset: 'collection-wood-1', bid: 10, ask: 12, last: null },
-  ];
-  assert.deepEqual(craftingEstimate('collector-wood-4', 1, collector), { revenue: 30, cost: 41, net: -11 });
-  for (const [bid, direction, label, amount] of [[160, 'profit', 'Estimated profit', '+143'], [7, 'loss', 'Estimated loss', '−10'], [17, 'even', 'Estimated break-even', '0']] as const) {
-    const html = craftingPanel(fixture(), () => '<span class="cost">fees</span>', 'decoration', 'settlement', 1, 'en',
-      tickers.map(ticker => ({ ...ticker, bid: ticker.asset === 'bench' ? bid : ticker.bid })));
+  for (const language of ['en', 'ko'] as const) {
+    const html = craftingPanel(fixture(), () => '<span class="cost">fees</span>', 'decoration', 'settlement', 1, language, tickers);
     const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
-    assert.ok(bench.includes(`data-profit="${direction}"`));
-    assert.ok(bench.includes(label));
-    assert.ok(bench.includes(`${amount} FTH$`));
-    assert.match(bench, /Estimated input value and fees: 17 FTH\$/);
-    assert.match(bench, /liquidity and execution are not guaranteed/);
+    assert.match(bench, /class="recipe-market"/);
+    assert.match(bench, /160 FTH\$/);
+    assert.doesNotMatch(html, /recipe-estimate|recipe-snapshot-estimate|data-profit=|Estimated profit|Estimated loss|Estimate unavailable|예상 이익/);
+    assert.match(html, /data-analysis-state="locked"/);
   }
-  const absent = craftingPanel(fixture(), () => '', 'decoration');
-  assert.match(absent, /data-profit="unavailable"/);
-  assert.match(absent, /Estimate unavailable/);
+  const html = craftingPanel(fixture(), () => '', 'decoration', 'settlement', 1, 'en', tickers);
+  const filters = html.split('class="inventory-filters crafting-filters"')[1].split('</div>')[0];
+  assert.equal((filters.match(/data-action="crafting-filter"/g) ?? []).length, 8);
+  assert.match(filters, /data-filter="efficiency" aria-pressed="false" aria-label="Cost-saving equipment" title="Cost-saving equipment"><svg class="icon /);
+  assert.doesNotMatch(filters, />[A-Za-z][^<]*<\/button>/);
   const ko = craftingPanel(fixture(), () => '', 'decoration', 'settlement', 1, 'ko', tickers);
-  assert.match(ko, /예상 이익/);
-  assert.match(ko, /재료의 판매 시세가 필요/);
+  assert.match(ko, /aria-label="비용 절감 장비"/);
   const css = readFileSync(new URL('./settlement.css', import.meta.url), 'utf8');
   assert.match(css, /#crafting \.consumption-costs \.cost\{font-size:9px;font-weight:400/);
-});
-test('paid market analysis is purchased in crafting and displays active per-copy profit breakdowns', () => {
+  assert.match(css, /#crafting \.crafting-analysis-access\{display:grid;grid-template-columns:auto minmax\(0,1fr\) auto auto/);
+  assert.doesNotMatch(css, /#crafting \.recipe-estimate\{/);
+});test('paid market analysis is purchased in crafting and displays active per-copy profit breakdowns', () => {
   const state = fixture();
   const report: MarketAnalysis = {
     generatedAt: state.serverTime,
@@ -256,18 +243,21 @@ test('paid market analysis is purchased in crafting and displays active per-copy
       cost: 22, revenue: 160, profit: 138 }],
   };
   const html = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, state.serverTime);
-  assert.match(html, /class="crafting-analysis-access"/);
-  assert.match(html, /data-action="crafting-analysis"/);
-  assert.match(html, /Refresh analysis · FTH\$100/);
-  assert.match(html, /Latest snapshot profit · one copy/);
+  assert.match(html, /class="crafting-analysis-access" data-analysis-state="active"/);
+  assert.match(html, /data-action="crafting-analysis" aria-label="Refresh analysis · FTH\$100"/);
+  assert.match(html, /data-crafting-analysis-status role="status">\d+ game hours left</);
+  assert.match(html, /Profit per copy/);
   const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
   assert.match(bench, /data-snapshot-profit="profit"/);
-  assert.match(bench, /FTH\$ 138/);
+  assert.match(bench, /\+138 FTH\$/);
   assert.match(bench, /Wood ×/);
+  const lastMinute = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, report.expiresAt - 1);
+  assert.match(lastMinute, /recipe-snapshot-estimate/);
   const expired = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, report.expiresAt);
+  assert.match(expired, /data-analysis-state="expired"/);
   assert.match(expired, /Analysis expired/);
-  assert.doesNotMatch(expired, /recipe-snapshot-estimate/);
+  assert.doesNotMatch(expired, /recipe-snapshot-estimate|Profit per copy/);
   const locked = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], null, state.serverTime, false, true);
-  assert.match(locked, /Get profit analysis · FTH\$100/);
-  assert.match(locked, /data-action="crafting-analysis" disabled/);
+  assert.match(locked, /aria-label="Get profit analysis · FTH\$100"/);
+  assert.match(locked, /data-action="crafting-analysis"[^>]* disabled/);
 });

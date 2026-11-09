@@ -1600,6 +1600,8 @@ setInterval(() => {
     ...state.workforce.expeditions.map(expedition => expedition.readyAt)];
   const due = Math.min(...deadlines);
   const timestamp = displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed);
+  if (settlementTask === 'crafting' && craftingAnalysis && craftingAnalysis.expiresAt <= timestamp
+    && app.querySelector('.crafting-analysis-access[data-analysis-state="active"]') && !busy && !confirmationOpen()) render();
   if (game.stage >= 0 && due <= timestamp && performance.now() >= nextDeadlineSyncAt && !busy && !confirmationOpen()) {
     nextDeadlineSyncAt = performance.now() + 5000;
     void syncProduction();

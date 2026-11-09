@@ -3,8 +3,9 @@
 ::view-transition-new(root){animation:world-page-in 160ms ease-out both}
 @keyframes world-page-out{to{opacity:0;transform:translateY(-3px)}}
 @keyframes world-page-in{from{opacity:0;transform:translateY(3px)}}
-#app:has(.page-transition-loader){position:fixed;inset:0;z-index:100;display:grid;place-items:center;min-height:100dvh;background:#0e1914;color:#e3e7dd;font:500 14px 'DM Sans',sans-serif}
-.page-transition-loader{display:flex;align-items:center;gap:12px}
-.page-transition-spinner{width:20px;height:20px;border:2px solid #c5e7b433;border-top-color:#c5e7b4;border-radius:50%;animation:world-page-spin .7s linear infinite}
+html body #app:has(>.page-transition-loader){position:fixed;inset:0;z-index:100;display:block;width:auto;max-width:none;height:auto;min-height:100dvh;margin:0;padding:0;overflow:hidden;background:#0e1914}
+.page-transition-loader{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:12px;margin:0;padding:0 16px;background:#0e1914;color:#e3e7dd;font:500 14px 'DM Sans',sans-serif;text-align:center}
+.page-transition-spinner{flex:none;width:20px;height:20px;border:2px solid #c5e7b433;border-top-color:#c5e7b4;border-radius:50%;animation:world-page-spin .7s linear infinite}
 @keyframes world-page-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root){animation:none}.page-transition-spinner{animation:none;border-color:#c5e7b4}}
+html body #app .page-transition-spinner{animation:world-page-spin .7s linear infinite!important}
+@media(prefers-reduced-motion:reduce){::view-transition-old(root),::view-transition-new(root){animation:none}html body #app .page-transition-spinner,.page-transition-spinner{animation:none!important;border-color:#c5e7b4}}

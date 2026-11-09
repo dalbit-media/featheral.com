@@ -56,6 +56,7 @@ test('game routes preload a boot shell, cross-document transitions and likely ne
   assert.match(main, /prefetchedGamePages\.has\(url\.href\)/);
   assert.match(transitions, /@view-transition\{navigation:auto\}/);
   assert.match(transitions, /prefers-reduced-motion:reduce/);
+  assert.match(transitions, /\.page-transition-loader\{position:fixed;inset:0;[^}]*display:flex;align-items:center;justify-content:center/);
 });
 test('the continuous encyclopedia has unique chapters, real bilingual screenshots and accessible search/progress', () => {
   assert.equal(guideTopics.length, 8);
