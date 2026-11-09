@@ -1,17 +1,17 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const hre = require("hardhat");
 
 (async () => {
-  await hre.run("compile", { quiet: true });
+  const { default: hre } = await import("hardhat");
+  await hre.tasks.getTask("build").run({ quiet: true });
   const abiDir = path.join(__dirname, "..", "shared", "abi");
   fs.mkdirSync(abiDir, { recursive: true });
   const art = await hre.artifacts.readArtifact("FeatheralGold");
   const bridgeArt = await hre.artifacts.readArtifact("FthgGameBridge");
   const src = fs.readFileSync(path.join(__dirname, "..", "contracts", "FeatheralGold.sol"));
   const bridgeSrc = fs.readFileSync(path.join(__dirname, "..", "contracts", "FthgGameBridge.sol"));
-  const cfg = hre.config.solidity.compilers[0];
+  const cfg = hre.config.solidity.profiles.default.compilers[0];
   const out = {
     contractName: art.contractName,
     abi: art.abi,

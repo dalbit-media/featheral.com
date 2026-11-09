@@ -1,9 +1,16 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
+let ethers = require("ethers");
 
 const E = (value) => ethers.parseUnits(String(value), 18);
 
 describe("FthgGameBridge", () => {
+  let hre, connection;
+  before(async () => {
+    ({ default: hre } = await import("hardhat"));
+    connection = await hre.network.create();
+    ethers = connection.ethers;
+  });
+  after(async () => { await connection?.close(); });
   let token, bridge, sourceAdmin, reserveAdmin, gameService, user, recipient;
   const accountId = ethers.id("featheral-game-account");
 
@@ -29,7 +36,7 @@ describe("FthgGameBridge", () => {
     const crypto = require("node:crypto");
     const artifact = JSON.parse(fs.readFileSync("shared/abi/FthgGameBridge.json", "utf8"));
     const source = fs.readFileSync("contracts/FthgGameBridge.sol");
-    const compiled = await require("hardhat").artifacts.readArtifact("FthgGameBridge");
+    const compiled = await hre.artifacts.readArtifact("FthgGameBridge");
     expect(artifact.sourceSha256).to.equal(crypto.createHash("sha256").update(source).digest("hex"));
     expect(artifact.abi).to.deep.equal(compiled.abi);
     expect(artifact).not.to.have.property("bytecode");
@@ -45,7 +52,7 @@ describe("FthgGameBridge", () => {
   it("adds only deposited FTHG to the curve after an explicit admin sync", async () => {
     const bridgeAddress = await bridge.getAddress();
     await token.transfer(bridgeAddress, E(5));
-    await expect(bridge.connect(user).syncDepositedFthg()).to.be.reverted;
+    await expect(bridge.connect(user).syncDepositedFthg()).to.revert(ethers);
     await expect(bridge.connect(reserveAdmin).syncDepositedFthg())
       .to.emit(bridge, "FthgReserveAdded")
       .withArgs(E(5), E(105));
@@ -80,7 +87,7 @@ describe("FthgGameBridge", () => {
     const quote = await bridge.quoteFthgOut(E(100));
     const deadline = Math.floor(Date.now() / 1000) + 3600;
     await expect(bridge.connect(user).redeemFthDollar(E(100), quote, recipient.address, accountId, redemptionId, deadline))
-      .to.be.reverted;
+      .to.revert(ethers);
     await expect(bridge.connect(gameService).redeemFthDollar(E(100), quote, recipient.address, accountId, redemptionId, deadline))
       .to.emit(bridge, "FthDollarRedeemed")
       .withArgs(redemptionId, accountId, recipient.address, E(100), quote, E(100) - quote, E(100_100));
@@ -117,22 +124,22 @@ describe("FthgGameBridge", () => {
   it("allows either fixed admin to configure treasury settings and rejects unauthorized callers", async () => {
     await bridge.connect(reserveAdmin).setBaseAprBps(500);
     expect(await bridge.baseAprBps()).to.equal(500);
-    await expect(bridge.connect(user).addFthDollarBudget(E(1))).to.be.reverted;
-    await expect(bridge.connect(gameService).setGameYear(1)).not.to.be.reverted;
+    await expect(bridge.connect(user).addFthDollarBudget(E(1))).to.revert(ethers);
+    await expect(bridge.connect(gameService).setGameYear(1)).not.to.revert(ethers);
   });
 
   it("pauses new swaps and stakes while leaving matured principal claims available", async () => {
     await bridge.connect(sourceAdmin).pause();
     await token.transfer(user.address, E(1));
     await token.connect(user).approve(await bridge.getAddress(), E(1));
-    await expect(bridge.connect(user).convertFthg(E(1), 0, accountId)).to.be.reverted;
-    await expect(bridge.connect(user).stake(E(1), 1, accountId)).to.be.reverted;
+    await expect(bridge.connect(user).convertFthg(E(1), 0, accountId)).to.revert(ethers);
+    await expect(bridge.connect(user).stake(E(1), 1, accountId)).to.revert(ethers);
     await bridge.connect(gameService).setGameYear(1);
     await token.approve(await bridge.getAddress(), E(10));
     await bridge.connect(sourceAdmin).unpause();
     await bridge.connect(sourceAdmin).stake(E(10), 1, accountId);
     await bridge.connect(sourceAdmin).pause();
     await bridge.connect(gameService).setGameYear(2);
-    await expect(bridge.connect(user).claimStake(1)).not.to.be.reverted;
+    await expect(bridge.connect(user).claimStake(1)).not.to.revert(ethers);
   });
 });

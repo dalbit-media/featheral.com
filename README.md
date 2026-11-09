@@ -21,6 +21,35 @@ All frontend source lives under `sites/`, named by its public hostname. Common a
 
 Services are named by ownership: `database`, `gold`, `notes` (including Dollar and game funds), `identity`, `wallet`, `pay`, `media`, `cms`, and `operations`. Admin screen modules live in `sites/admin.featheral.com/pages/`. The redundant Dollar API wrapper and empty social placeholder pages have been removed; tests, migration tooling and private data are retained.
 
+### Dependency installation and contract tooling
+
+Use Node 24+ and `npm ci` at the repository root, then
+`npm ci --prefix sites/world.featheral.com/play`. Hardhat 3 uses the ESM root
+configuration with only the Ethers, Chai matchers and Mocha plugins.
+The application directories retain explicit CommonJS package scopes; ship
+their `package.json` files together with the root manifest. The World package
+remains ESM. `npm run compile`, `npm run abi` and `npm test` build/test locally;
+the Solidity 0.8.24 optimizer (200 runs) and Cancun target are unchanged.
+ABI export and bridge deployment load Hardhat asynchronously. No deployment
+or financial-policy migration is part of dependency installation.
+
+For npm 12, each manifest pins its reviewed `esbuild@0.28.2` install script;
+the root also permits the optional `ssh2@1.17.0` crypto binding build and denies
+the optional `cpu-features` native build. SSH retains its JavaScript fallback.
+Both packages deny the optional macOS `fsevents` build; file watching retains
+its portable fallback.
+Sharp 0.35.5 loads packaged native binaries without an install script.
+Review version changes with `npm install-scripts ls` and approve specific
+packages after inspection; do not approve all scripts or disable audit output.
+The regenerated lockfiles use the public npm registry rather than a
+machine-specific package mirror.
+
+The deprecated Hardhat 2/toolbox dependency chains are removed. At migration,
+root `npm audit` still reports 9 advisories (6 high, 3 moderate) inherited from
+Hardhat's Zod 3 and Mocha's glob/minimatch dependencies; their supported ranges
+do not yet contain fixes. Do not force incompatible Zod/glob/minimatch majors.
+World's separate dependency tree audits clean.
+
 ### Concurrent API capacity
 
 Run `node --experimental-strip-types scripts/performance-smoke.cjs` from the

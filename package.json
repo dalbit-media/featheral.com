@@ -10,7 +10,7 @@
     "build:world": "npm run build --prefix sites/world.featheral.com/play",
     "postbuild:world": "node scripts/build-admin-version.js",
     "build:logos": "node scripts/build-site-logos.js",
-    "compile": "hardhat compile",
+    "compile": "hardhat build",
     "abi": "node scripts/export-abi.js",
     "deploy:bridge": "node scripts/deploy-bridge.js",
     "generate:service-keys": "node services/identity/keygen.js",
@@ -30,7 +30,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "workspaces": [
     "services/cms"
   ],
@@ -39,12 +39,22 @@
   },
   "homepage": "https://github.com/dalbit-media/featheral.com#readme",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-ethers": "^4.2.2",
+    "@nomicfoundation/hardhat-ethers-chai-matchers": "^3.0.13",
+    "@nomicfoundation/hardhat-mocha": "^4.0.1",
     "@openzeppelin/contracts": "^5.6.1",
-    "hardhat": "^2.29.1"
+    "chai": "^6.3.0",
+    "hardhat": "^3.21.2",
+    "mocha": "^12.0.0"
   },
   "dependencies": {
     "ethers": "^6.17.0",
     "qrcode": "^1.5.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "ssh2@1.17.0": true,
+    "cpu-features": false,
+    "fsevents": false
   }
 }

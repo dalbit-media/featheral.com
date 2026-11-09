@@ -1,10 +1,17 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
+let ethers = require("ethers");
 
 const E = (n) => ethers.parseUnits(String(n), 18);
 const SUPPLY = E(216265000);
 
 describe("FeatheralGold", () => {
+  let hre, connection;
+  before(async () => {
+    ({ default: hre } = await import("hardhat"));
+    connection = await hre.network.create();
+    ethers = connection.ethers;
+  });
+  after(async () => { await connection?.close(); });
   let t, admin, a, b;
   beforeEach(async () => {
     [admin, a, b] = await ethers.getSigners();
@@ -15,7 +22,7 @@ describe("FeatheralGold", () => {
     const fs = require("fs"), crypto = require("crypto");
     const x = JSON.parse(fs.readFileSync("shared/abi/FeatheralGold.json", "utf8"));
     const src = fs.readFileSync("contracts/FeatheralGold.sol");
-    const art = await require("hardhat").artifacts.readArtifact("FeatheralGold");
+    const art = await hre.artifacts.readArtifact("FeatheralGold");
     expect(x.sourceSha256).to.equal(crypto.createHash("sha256").update(src).digest("hex"));
     expect(x.totalSupply).to.equal(SUPPLY.toString());
     expect(x.abi).to.deep.equal(art.abi);
@@ -38,15 +45,15 @@ describe("FeatheralGold", () => {
   });
 
   it("restricts privileged functions", async () => {
-    await expect(t.connect(a).pause()).to.be.reverted;
-    await expect(t.connect(a).setBlacklisted(b.address, true)).to.be.reverted;
-    await expect(t.connect(a).setRate(1)).to.be.reverted;
-    await expect(t.connect(a).setMetadataURI("x")).to.be.reverted;
+    await expect(t.connect(a).pause()).to.revert(ethers);
+    await expect(t.connect(a).setBlacklisted(b.address, true)).to.revert(ethers);
+    await expect(t.connect(a).setRate(1)).to.revert(ethers);
+    await expect(t.connect(a).setMetadataURI("x")).to.revert(ethers);
   });
 
   it("pauses transfers", async () => {
     await t.pause();
-    await expect(t.transfer(a.address, 1)).to.be.reverted;
+    await expect(t.transfer(a.address, 1)).to.revert(ethers);
     await t.unpause();
     await t.transfer(a.address, 1);
   });
