@@ -32,7 +32,7 @@ export function isMarketResource(asset: MarketAsset): asset is MarketResource {
 }
 export function isLiquidAsset(_asset: MarketAsset): boolean { return true; }
 export function isReserveMarketAsset(asset: MarketAsset): boolean {
-  return isLiquidAsset(asset) && !isAutoCraftingItem(asset) && !isBuilderItem(asset);
+  return isLiquidAsset(asset) && !isAutoCraftingItem(asset) && !isBuilderItem(asset) && asset !== 'refinement-core';
 }
 export function marketQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : isCollectible(asset) ? 1 : 10000; }
 export function marketStartingQuantity(asset: MarketAsset): number { return isCollectible(asset) ? 100 : 10000; }

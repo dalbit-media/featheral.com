@@ -154,6 +154,11 @@ still apply. Other crafting fees and all reserve-market seed prices are unchange
 
 ## Inventory workspace and equipment refinement
 
+Refinement Cores remain craftable and player-tradeable, but are excluded from
+automatic reserve funding alongside Merchant and Master Builder Charters.
+All eight historical reserve catalogs remain unchanged for deployment preflight;
+no ledger reset, key replacement or market-policy authorization is needed.
+
 The primary **Inventory** menu opens `/inventory/` as a full-page workspace:
 **Inventory**, **Craft**, and **Enhance**. Legacy settlement inventory/crafting
 links redirect to the corresponding tab. Settlement controls now focus on

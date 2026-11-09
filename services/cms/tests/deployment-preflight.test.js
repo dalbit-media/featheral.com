@@ -16,7 +16,7 @@ test("squad vouchers add exactly four pinned markets while preserving transport 
   const squads = ["squad-10", "squad-20", "squad-50", "squad-100"];
   const targets = transportLiquidityTargets();
   assert.equal(Object.keys(targets).length, 121);
-  assert.deepEqual(marketAssets.filter(asset => !isReserveMarketAsset(asset)), ["merchant-charter"]);
+  assert.deepEqual(marketAssets.filter(asset => !isReserveMarketAsset(asset)), ["merchant-charter", "builder-charter", "refinement-core"]);
   for (const asset of squads) {
     assert.equal(isLiquidAsset(asset), true, "player-funded pools remain available");
     for (const catalog of [liquidityTargets, authorizedLiquidityTargets, reserveLiquidityTargets,
@@ -35,6 +35,35 @@ test("squad vouchers add exactly four pinned markets while preserving transport 
   assert.deepEqual(verifyCompatibility("candidate", "running", { policy: name => name === "candidate" ? { ...policy, markets: next } : policy }), { marketExpansion: true });
   assert.throws(() => verifyCompatibility("candidate", "running", { policy: name => name === "candidate"
     ? { ...policy, markets: { ...next, wood: { ...next.wood, quantity: 9999 } } } : policy }), /Activation refused/);
+});
+
+test("refinement and builder items remain tradeable without changing any historical reserve catalog", () => {
+  const funds = require("../../notes/game-funds");
+  const { isMarketAsset, isLiquidAsset, isReserveMarketAsset, marketBasePrice, marketStartingQuantity } = require("../../../sites/world.featheral.com/play/src/market.ts");
+  for (const [catalog, size] of [
+    ["liquidityTargets", 32], ["authorizedLiquidityTargets", 60], ["reserveLiquidityTargets", 81],
+    ["craftingLiquidityTargets", 105], ["equipmentLiquidityTargets", 114], ["bulkCraftingLiquidityTargets", 118],
+    ["transportLiquidityTargets", 121], ["squadLiquidityTargets", 125],
+  ]) {
+    const targets = funds[catalog]();
+    assert.equal(Object.keys(targets).length, size, catalog);
+    for (const asset of ["merchant-charter", "builder-charter", "refinement-core"]) {
+      assert.equal(isMarketAsset(asset), true);
+      assert.equal(isLiquidAsset(asset), true);
+      assert.equal(isReserveMarketAsset(asset), false);
+      assert.equal(Object.hasOwn(targets, asset), false, `${catalog}: ${asset}`);
+    }
+  }
+  const markets = funds.squadLiquidityTargets();
+  const original = { monetaryPolicy: { scale: 10000 }, collectionPolicy: { version: 1 }, markets };
+  assert.deepEqual(verifyCompatibility("candidate", "running", { policy: () => original }), { marketExpansion: false });
+  const unauthorized = { ...original, markets: { ...markets, "refinement-core": {
+    quantity: marketStartingQuantity("refinement-core"),
+    pricePerLot: (BigInt(require("../../../sites/world.featheral.com/play/src/dollars.ts").dollarsUnits(marketBasePrice("refinement-core"))) * 10n ** 14n).toString(),
+  } } };
+  assert.throws(() => verifyCompatibility("candidate", "running", {
+    policy: name => name === "candidate" ? unauthorized : original,
+  }), /Live reserve authority market policy differs/);
 });
 
 test("live reserve seed prices stay genesis-compatible when market floors change", () => {
@@ -109,8 +138,8 @@ test("preflight permits only explicitly approved additive markets without changi
   const original = { monetaryPolicy: { scale: 10000 }, collectionPolicy: { version: 1 }, markets };
   const candidate = { ...original, markets: { ...markets, ...approvedMarkets } };
   const verify = next => verifyCompatibility("new", "old", { policy: name => name === "new" ? next : original });
-  assert.equal(Object.keys(approvedMarkets).length, 86);
-  const actual = bulkCraftingLiquidityTargets();
+  assert.equal(Object.keys(approvedMarkets).length, 93);
+  const actual = require("../../notes/game-funds").squadLiquidityTargets();
   for (const [asset, target] of Object.entries(approvedMarkets)) assert.deepEqual(actual[asset], target, asset);
   assert.doesNotThrow(() => verify(candidate));
   for (const next of [
@@ -126,9 +155,9 @@ test("preflight permits only explicitly approved additive markets without changi
   assert.equal(approvedMarketExpansion(markets, { ...markets, "title-pioneer": { ...approvedMarkets["title-pioneer"], extra: true } }), false);
 });
 test("identity/collector self-sync sees its unchanged catalog while the installer validates relic authorization", t => {
-  const original = authorizedLiquidityTargets(), full = bulkCraftingLiquidityTargets();
+  const original = authorizedLiquidityTargets(), full = require("../../notes/game-funds").squadLiquidityTargets();
   assert.equal(Object.keys(original).length, 60);
-  assert.equal(Object.keys(full).length, 118);
+  assert.equal(Object.keys(full).length, 125);
   assert.equal(approvedMarketExpansion(original, full), true);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "preflight-relic-bootstrap-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
