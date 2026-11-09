@@ -8,6 +8,7 @@ import { collectionItemDetails, isCollectionItem } from './collection.ts';
 import { activityItemDetails, automationItems, isActivityItem } from './automation.ts';
 import { dollarsScale } from './dollars.ts';
 import type { MarketAnalysis } from './market-analysis.ts';
+import type { BuyQuantityBudget } from './market-buy-quantity.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -84,6 +85,7 @@ export interface MarketFill {
 }
 export interface MarketQuote { quantity: number; dollars: number; available: boolean }
 export interface MarketSnapshot {
+  buyBudget?: BuyQuantityBudget;
   asset: MarketAsset; quantity: number;
   tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null; change24h?: number | null; change7d?: number | null; availableQuantity?: number }[];
   analysis?: MarketAnalysis | null;

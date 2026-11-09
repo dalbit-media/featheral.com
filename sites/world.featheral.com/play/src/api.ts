@@ -4,6 +4,8 @@ import type { HalfSaleResponse, MarketAsset, MarketCommand, MarketResponse } fro
 import type { ChatDirectory, ChatMessage, ChatProfile, ChatSettlement, ChatSubmission, RoomChatInfo } from './chat.ts';
 import type { WorldProfileLink } from './world-profile.ts';
 import { needsWalletSigner, publishWorldAccount } from './funds.ts';
+import type { AtlasSnapshot } from './atlas.ts';
+import type { BuyQuantityRequest } from './market-buy-quantity.ts';
 
 class HttpError extends Error {
   readonly status: number;
@@ -27,6 +29,7 @@ export async function connect(): Promise<ApiState> {
   }
 }
 export const refresh = (): Promise<ApiState> => request('state');
+export const readAtlas = (): Promise<AtlasSnapshot> => request('atlas');
 export const readCollection = (resource: Resource, quantity?: number): Promise<CollectionResponse> => request(`collection?asset=${resource}${quantity === undefined ? '' : `&quantity=${quantity}`}`);
 async function submit<T>(state: ApiState, command: Command | MarketCommand, path: string): Promise<T> {
   if (needsWalletSigner(state) && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
@@ -40,7 +43,8 @@ async function submit<T>(state: ApiState, command: Command | MarketCommand, path
   }
 }
 export const send = (state: ApiState, command: Command): Promise<ApiState> => submit(state, command, 'actions');
-export const readMarket = (asset: MarketAsset, quantity: number): Promise<MarketResponse> => request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}`);
+export const readMarket = (asset: MarketAsset, quantity: number, buying?: BuyQuantityRequest): Promise<MarketResponse> =>
+  request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}${buying ? `&budgetPercent=${buying.percent}${buying.price === undefined ? '' : `&price=${buying.price}`}` : ''}`);
 export const readHalfSale = (): Promise<HalfSaleResponse> => request('market/half');
 export const sendMarket = (state: ApiState, command: MarketCommand): Promise<MarketResponse> => submit(state, command, 'market/actions');
 export const linkFundWallet = (csrf: string, address: string, issuedAt: string, signature: string, moveGuestFunds = false, separateWorldFunds = false): Promise<ApiState> => request('wallet/link', {

@@ -15,6 +15,8 @@ import type { CollectionQuote, Command } from '../src/api-types.ts';
 import { consumeTransportVoucher, transportQuote } from '../src/transport-items.ts';
 import { activeMarketAnalysis, marketAnalysisDuration, marketAnalysisFee } from '../src/market-analysis.ts';
 import type { MarketAnalysis } from '../src/market-analysis.ts';
+import { affordableBuyingQuantity, buyingBudgetUnits } from '../src/market-buy-quantity.ts';
+import type { BuyQuantityBudget, BuyQuantityRequest } from '../src/market-buy-quantity.ts';
 
 interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
@@ -215,7 +217,22 @@ export class Exchange {
     const base = Number(reference?.price);
     return Number.isFinite(base) && base > 0 ? (last - base) / base * 100 : null;
   }
-  read(owner: string, account: Account, now: number, realTime: number, asset: MarketAsset, quantity: number): ExchangeResult {
+  read(owner: string, account: Account, now: number, realTime: number, asset: MarketAsset, quantity: number, buying?: BuyQuantityRequest): ExchangeResult {
+    let buyBudget: BuyQuantityBudget | undefined;
+    if (buying) {
+      const budget = buyingBudgetUnits(account.game.dollars, buying.percent), bag = inventory(account);
+      const blocked = !isMarketResource(asset) && (!inventoryFits(bag, asset)
+        || isCollectible(asset) && (bag.items.includes(asset) || bag.marketReserved?.includes(asset) || bag.pending.some(item => item === asset)));
+      const price = buying.price === undefined ? undefined : dollarsUnits(buying.price);
+      const selected = affordableBuyingQuantity(blocked ? 0 : marketQuantityLimit(asset), budget, amount => {
+        if (price !== undefined) return BigInt(price) * BigInt(amount);
+        const steps = this.plan(owner, asset, 'buy', amount, realTime);
+        if (steps.reduce((sum, step) => sum + step.quantity, 0) !== amount) return null;
+        return steps.reduce((sum, step) => sum + BigInt(step.dollars), 0n);
+      });
+      buyBudget = { ...buying, dollars: budget / dollarsScale, quantity: selected };
+      quantity = Math.max(1, selected);
+    }
     const pools = new Map(this.db.prepare('SELECT * FROM market_pools').all().map(row => [String(row.asset), row]));
     const depths = new Map(this.db.prepare('SELECT * FROM market_resource_depth').all().map(row => [String(row.asset), row]));
     const pinDepth = this.db.prepare('INSERT OR IGNORE INTO market_resource_depth VALUES(?,?,?)');
@@ -243,6 +260,7 @@ export class Exchange {
         dollars: Number(row.dollars) / dollarsScale, price: Number(row.price) / dollarsScale, time: Number(row.time),
         venue: row.venue === 'players' ? 'players' : 'system', ...(row.buyer !== undefined ? { side: row.buyer === owner ? 'buy' as const : 'sell' as const } : {}) }));
     const market: MarketSnapshot = {
+      ...(buyBudget ? { buyBudget } : {}),
       asset, quantity, bids: level('buy'), asks: level('sell'), quotes: { buy: quote('buy'), sell: quote('sell') },
       analysis: this.analysis(owner, now),
       tickers: marketAssets.map(asset => {

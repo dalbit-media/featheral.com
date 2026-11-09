@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { GameError } from '../src/engine.ts';
 import { accrue, ApiError, apply, parseActionEnvelope, parseCommand, snapshot } from './economy.ts';
 import type { Store } from './store.ts';
-import { isMarketAsset, isMarketResource, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
+import { isMarketAsset, isMarketResource, marketPriceFloor, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
 import { inventory } from './inventory.ts';
@@ -15,6 +15,7 @@ import { isAddress, verifyMessage } from 'ethers';
 import { walletLinkMessage } from '../src/funds.ts';
 import { verifyWorldProfileLink } from './world-profile.ts';
 import type { WorldProfile } from '../src/world-profile.ts';
+import { isMarketPercentage } from '../src/market-buy-quantity.ts';
 
 function equal(left: string, right: string): boolean {
   const a = Buffer.from(left), b = Buffer.from(right);
@@ -251,15 +252,29 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       const marketUrl = new URL(request.url ?? '/', origin), marketRead = marketUrl.pathname === '/api/market', marketAction = request.url === '/api/market/actions';
       const halfRead = marketUrl.pathname === '/api/market/half';
       const collectionRead = marketUrl.pathname === '/api/collection';
+      if (marketUrl.pathname === '/api/atlas') {
+        if (request.method !== 'GET') throw new ApiError(405, 'Method not allowed.');
+        if ([...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid atlas query.');
+        if (!store.atlasView) throw new ApiError(503, 'World atlas is unavailable.');
+        reply(response, 200, store.atlasView(token));
+        return;
+      }
       if (request.url !== '/api/state' && request.url !== '/api/actions' && !marketRead && !marketAction && !halfRead && !collectionRead) throw new ApiError(404, 'API route not found.');
       if (((request.url === '/api/state' || marketRead || halfRead || collectionRead) && request.method !== 'GET') || ((request.url === '/api/actions' || marketAction) && request.method !== 'POST')) throw new ApiError(405, 'Method not allowed.');
       if (halfRead && [...marketUrl.searchParams].length) throw new ApiError(400, 'Invalid half-sale query.');
       const asset = marketUrl.searchParams.get('asset') ?? 'wood', quantity = Number(marketUrl.searchParams.get('quantity') ?? '1');
+      const budgetPercent = Number(marketUrl.searchParams.get('budgetPercent'));
+      const buyingPrice = marketUrl.searchParams.has('price') ? Number(marketUrl.searchParams.get('price')) : undefined;
       if (collectionRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || marketUrl.searchParams.getAll('asset').length !== 1
         || marketUrl.searchParams.getAll('quantity').length > 1 || !isMarketAsset(asset) || !isMarketResource(asset)
         || marketUrl.searchParams.has('quantity') && (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset)))) throw new ApiError(400, 'Invalid collection query.');
-      if (marketRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || !isMarketAsset(asset)
-        || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset))) throw new ApiError(400, 'Invalid market query.');
+      if (marketRead && ([...marketUrl.searchParams.keys()].some(key => !['asset', 'quantity', 'budgetPercent', 'price'].includes(key))
+        || [...marketUrl.searchParams.keys()].some(key => marketUrl.searchParams.getAll(key).length !== 1) || !isMarketAsset(asset)
+        || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset)
+        || marketUrl.searchParams.has('budgetPercent') && !isMarketPercentage(budgetPercent)
+        || buyingPrice !== undefined && (!marketUrl.searchParams.has('budgetPercent') || !Number.isFinite(buyingPrice)
+          || buyingPrice < marketPriceFloor(asset) || buyingPrice > 1000000 || !/^\d+(?:\.\d{1,4})?$/.test(String(buyingPrice)))))
+        throw new ApiError(400, 'Invalid market query.');
       if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
       if (collectionRead && isMarketAsset(asset) && isMarketResource(asset) && marketUrl.searchParams.has('quantity')) {
         store.read(token, session => {
@@ -308,7 +323,8 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         })
         : store.transaction(token, (session, time, realTime, exchange, owner) => {
           accrue(session.account, time);
-          return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity) : snapshot(session.account)),
+          return { ...(collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity,
+            isMarketPercentage(budgetPercent) ? { percent: budgetPercent, ...(buyingPrice === undefined ? {} : { price: buyingPrice }) } : undefined) : snapshot(session.account)),
             csrf: session.csrf };
         });
       const lifetime = store.read(token, (session, _time, realTime) => session.expires - realTime);

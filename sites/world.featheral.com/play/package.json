@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "zip": "git archive --format=zip --output=featheral.zip HEAD",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --experimental-strip-types --test src/api.test.ts src/engine.test.ts src/environment.test.ts src/environment-layer.test.ts src/resource-forecast.test.ts src/physical-economy.test.ts src/site.test.ts src/count-up.test.ts src/i18n.test.ts src/game-pages.test.ts src/account.test.ts src/consumption.test.ts src/upgrade-view.test.ts src/resource-sale-quantity.test.ts src/marketplace-catalog.test.ts src/federation-view.test.ts src/world-identity.test.ts server/*.test.ts",
+    "test": "node --experimental-strip-types --test src/market-buy-quantity.test.ts src/atlas.test.ts src/api.test.ts src/engine.test.ts src/environment.test.ts src/environment-layer.test.ts src/resource-forecast.test.ts src/physical-economy.test.ts src/site.test.ts src/count-up.test.ts src/i18n.test.ts src/game-pages.test.ts src/account.test.ts src/consumption.test.ts src/upgrade-view.test.ts src/resource-sale-quantity.test.ts src/marketplace-catalog.test.ts src/federation-view.test.ts src/world-identity.test.ts server/*.test.ts",
     "server": "node ../../../scripts/serve.js --dev",
     "server:production": "node ../../../scripts/serve.js"
   },

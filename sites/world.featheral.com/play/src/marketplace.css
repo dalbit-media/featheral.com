@@ -106,6 +106,9 @@
 .ticket-stepper button{min-width:44px;min-height:44px;background:transparent;font-size:18px}
 .ticket-amounts{display:flex;gap:8px}
 .ticket-amounts button{flex:1;min-width:44px;min-height:44px;border:1px solid #c6e8a422;border-radius:8px;background:transparent;font-size:12px}
+.ticket-amounts button[aria-pressed=true]{background:#c6e8a420;border-color:var(--mint);color:var(--mint);font-weight:700}
+.ticket-amounts button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+[data-market-quantity-help]{line-height:1.7;overflow-wrap:anywhere}
 .exchange-order-entry .exchange-preview{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);align-items:center;margin:6px 0;gap:8px;font-size:12px}
 .exchange-preview strong{text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .exchange-preview .ticket-total{font-size:20px;font-weight:650;color:#d6edbf}

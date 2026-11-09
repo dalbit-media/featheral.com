@@ -3,6 +3,8 @@ import './settlement.css';
 import './marketplace.css';
 import './communicate.css';
 import './pages.css';
+import './atlas.css';
+import { AtlasPage } from './atlas-view.ts';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
@@ -89,6 +91,7 @@ let marketplace: Marketplace | null = null;
 let settlementSale: SettlementSale | null = null;
 let settlementResourceSale: SettlementSale | null = null;
 let inbox: Inbox | null = null;
+let atlasPage: AtlasPage | null = null;
 let settlementChat: SettlementChat | null = null;
 const visitingSettlement = settlementPage ? new URL(location.href).searchParams.get('visit') : null;
 let inventoryFilter: InventoryFilter = 'all';
@@ -847,6 +850,10 @@ function investigationButton(compact = false): string {
 }
 function renderCommunityPage(): void {
   const root = document.querySelector<HTMLElement>('#community-content')!;
+  if (navigationPage === 'hall' || navigationPage === 'atlas') {
+    atlasPage ??= new AtlasPage(root, language, navigationPage === 'atlas');
+    return;
+  }
   if (navigationPage === 'help') {
     if (!root.childElementCount) { root.innerHTML = guideContent(language); localize(root); wireGuide(root, language); }
     return;
@@ -891,6 +898,7 @@ function replaceContent(root: Element, content: string): void {
   const focusFilter = previous?.dataset.filter;
   const focusPage = previous?.dataset.page;
   const focusEntity = previous?.dataset.entity;
+  const focusFederation = previous?.dataset.federation;
   const focusDetail = previous?.matches('summary') ? previous.parentElement?.dataset.detail : undefined;
   const focusTask = previous?.dataset.settlementPanel;
   root.querySelectorAll<HTMLDetailsElement>('details[data-detail]').forEach(el => {
@@ -925,7 +933,7 @@ function replaceContent(root: Element, content: string): void {
   updateCrewSaveStatus();
   root.querySelectorAll<HTMLDetailsElement>('details').forEach(el => { el.open = disclosedDetails.has(el.dataset.detail ?? ''); });
   if (previous?.id) root.querySelector<HTMLElement>(`#${previous.id}`)?.focus({ preventScroll: true });
-  if (focusAction && !previous?.id) root.querySelector<HTMLElement>(`[data-action="${focusAction}"]${focusResource ? `[data-resource="${focusResource}"]` : ''}${focusItem ? `[data-item="${focusItem}"]` : ''}${focusFilter ? `[data-filter="${focusFilter}"]` : ''}${focusPage !== undefined ? `[data-page="${focusPage}"]` : ''}${focusEntity ? `[data-entity="${focusEntity}"]` : ''}`)?.focus({ preventScroll: true });
+  if (focusAction && !previous?.id) root.querySelector<HTMLElement>(`[data-action="${focusAction}"]${focusResource ? `[data-resource="${focusResource}"]` : ''}${focusItem ? `[data-item="${focusItem}"]` : ''}${focusFilter ? `[data-filter="${focusFilter}"]` : ''}${focusPage !== undefined ? `[data-page="${focusPage}"]` : ''}${focusEntity ? `[data-entity="${focusEntity}"]` : ''}${focusFederation ? `[data-federation="${focusFederation}"]` : ''}`)?.focus({ preventScroll: true });
   if (focusDetail) root.querySelector<HTMLElement>(`[data-detail="${focusDetail}"] > summary`)?.focus({ preventScroll: true });
   if (focusTask) root.querySelector<HTMLElement>(`[data-settlement-panel="${focusTask}"]`)?.focus({ preventScroll: true });
   if (focusAction === 'remove-layout' && !root.contains(document.activeElement)) root.querySelector<HTMLElement>('[data-action="prepare-layout"]')?.focus({ preventScroll: true });
@@ -1523,7 +1531,8 @@ app.addEventListener('click', event => {
         if (success && input) input.value = '';
       }); break;
     }
-    case 'gift': case 'join': case 'form': case 'vote': void act({ type: 'diplomacy', action }); break;
+    case 'join': void act({ type: 'diplomacy', action: 'join', ...(target.dataset.federation ? { federation: target.dataset.federation } : {}) }); break;
+    case 'gift': case 'form': case 'vote': void act({ type: 'diplomacy', action }); break;
     case 'claim': void act({ type: 'claim' }); break;
     case 'export': case 'legacy-export': {
       try {

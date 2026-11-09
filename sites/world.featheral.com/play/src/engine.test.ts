@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { build, claim, diplomacy, discover, gather, invite, isWater, move, newGame, parseSave, radius, recruitmentAmount, stages, terrainAt, terrainDetails, terrainResources, trade, upgrade } from './engine.ts';
+import { foundedFederationName } from './atlas.ts';
 import type { Game } from './engine.ts';
 import { isWaterFacility, waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { dollarsScale } from './dollars.ts';
@@ -283,7 +284,7 @@ test('founding requires strictly more than 10000 residents and consumes 5000 met
   g.stock.metal = 5000;
   diplomacy(g, 'form');
   assert.equal(g.stock.metal, 0);
-  assert.equal(g.federation, 'Verdant Federation');
+  assert.equal(g.federation, foundedFederationName(g.seed));
   assert.throws(() => diplomacy(g, 'form'), /already belongs/);
 });
 

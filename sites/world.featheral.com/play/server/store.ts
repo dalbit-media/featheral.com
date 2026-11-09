@@ -18,6 +18,8 @@ import { isTitleItem } from '../src/customization.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { FederationTreasury } from './federation.ts';
 import type { Command, FederationVault } from '../src/api-types.ts';
+import { WorldAtlas } from './atlas.ts';
+import type { AtlasSnapshot } from '../src/atlas.ts';
 
 export interface Session { csrf: string; expires: number; account: Account }
 export interface Store {
@@ -40,6 +42,7 @@ export interface Store {
   wallet(token: string): string | null;
   population(federation: string | null): PopulationTotals;
   publicTotals(): PublicTotals;
+  atlasView?(token: string): AtlasSnapshot;
   federationView?(token: string): FederationVault | null;
   contributeFederation?(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string;
   ensureLiquidity?(token: string, asset: MarketAsset, saleQuantity?: number): Promise<void>;
@@ -51,6 +54,7 @@ export class SqliteStore implements Store {
   private readonly exchange: Exchange;
   private readonly funds: GameFunds | null;
   private readonly federationTreasury: FederationTreasury;
+  private readonly atlas: WorldAtlas;
   readonly chat: ChatArchive;
   readonly chatDirectory: ChatDirectoryStore;
   private readonly clock: () => number;
@@ -74,6 +78,7 @@ export class SqliteStore implements Store {
       return isTitleItem(row?.title) ? row.title : undefined;
     });
     this.chatDirectory = new ChatDirectoryStore(this.db);
+    this.atlas = new WorldAtlas(this.db);
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.exchange = new Exchange(this.db, clockSpeed);
@@ -255,6 +260,10 @@ export class SqliteStore implements Store {
   federationView(token: string): FederationVault | null {
     return this.read(token, (session, now) => session.account.game.federation
       ? this.federationTreasury.view(session.account.game.federation, this.chatSession(token).owner, now) : null);
+  }
+  atlasView(token: string): AtlasSnapshot {
+    const { owner } = this.chatSession(token);
+    return this.atlas.view(owner, this.clock());
   }
   contributeFederation(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string {
     return this.federationTreasury.contribute(account, owner, command, now);

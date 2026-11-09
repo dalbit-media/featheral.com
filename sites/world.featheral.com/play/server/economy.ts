@@ -21,6 +21,7 @@ import type { ActivityKind } from '../src/automation.ts';
 import { findActivityItem, findCustomizationItem, useCustomization } from './inventory.ts';
 import { customizationName, isCustomizationItem, isTitleItem, titleItems } from '../src/customization.ts';
 import type { Customization } from '../src/customization.ts';
+import { startingFederations } from '../src/atlas.ts';
 import { expeditionFindPlan } from '../src/climate.ts';
 import { actionRemaining, actionThrottleMs, timedActionKey } from '../src/action-timing.ts';
 import type { TimedAction } from '../src/action-timing.ts';
@@ -572,7 +573,7 @@ export function parseCommand(value: unknown): Command {
   const c = object(value);
   const resourceClaim = c.type === 'claim' && Object.hasOwn(c, 'resource');
   const fields: Record<string, string[]> = {
-    move: ['x', 'y'], investigate: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: ['action'],
+    move: ['x', 'y'], investigate: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: Object.hasOwn(c, 'federation') ? ['action', 'federation'] : ['action'],
     upgrade: [], invite: [], home: [], gather: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
     assign: ['resource', 'workers'], automatic: ['enabled'],
     craft: Object.hasOwn(c, 'quantity') ? ['item', 'quantity'] : ['item'], 'map-collect': ['x', 'y'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
@@ -602,7 +603,8 @@ export function parseCommand(value: unknown): Command {
     || (c.type === 'activity-gear' && (!isEquipmentActivity(c.activity) || (c.item !== null && (!isActivityEquipment(c.item) || activityEquipmentItems[c.item].activity !== c.activity))))
     || (c.type === 'decorate' && (!isDecorationSlot(c.slot) || (c.item !== null && !isDecorationItem(c.item))))
     || (c.type === 'arrange' && !isSettlementEntity(c.entity))
-    || (c.type === 'diplomacy' && !oneOf(c.action, ['gift', 'join', 'form', 'vote']))
+    || (c.type === 'diplomacy' && (!oneOf(c.action, ['gift', 'join', 'form', 'vote'])
+      || Object.hasOwn(c, 'federation') && (c.action !== 'join' || !startingFederations.some(identity => identity.name === c.federation))))
     || (c.type === 'assign' && (!oneOf(c.resource, resources)
       || typeof c.workers !== 'number' || !Number.isSafeInteger(c.workers) || c.workers < 0 || c.workers > 1000000))
     || (c.type === 'automatic' && typeof c.enabled !== 'boolean')
@@ -773,7 +775,7 @@ function executeCommand(account: Account, command: Command, realTime: number,
       automation.nextAt = account.updatedAt;
       return note(game, command.enabled ? 'Activity automation resumed. Normal FTH$ fees still apply.' : 'Activity automation paused. Remaining time continues to expire.');
     }
-    case 'diplomacy': return diplomacy(game, command.action);
+    case 'diplomacy': return diplomacy(game, command.action, command.federation);
     case 'upgrade': {
       const establishing = game.stage < 0;
       const message = upgrade(game);

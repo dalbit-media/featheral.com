@@ -26,7 +26,7 @@ export type Command =
   | { type: 'activity-gear'; activity: EquipmentActivity; item: ActivityEquipment | null }
   | { type: 'decorate'; slot: DecorationSlot; item: DecorationItem | null }
   | { type: 'arrange'; entity: SettlementEntity; position: GridPosition | null }
-  | { type: 'diplomacy'; action: 'gift' | 'join' | 'form' | 'vote' }
+  | { type: 'diplomacy'; action: 'gift' | 'join' | 'form' | 'vote'; federation?: string }
   | { type: 'federation-contribute'; asset: Resource | 'dollars'; amount: number }
   | { type: 'claim'; resource?: Resource }
   | { type: 'collect-sell'; resource: Resource; quantity: number; minimumDollars: number }

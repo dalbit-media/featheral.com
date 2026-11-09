@@ -1,6 +1,22 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { connect, linkWorldProfile, readChatProfile } from './api.ts';
+import { connect, linkWorldProfile, readChatProfile, readMarket } from './api.ts';
+
+test('market quantity reads preserve manual requests and encode optional budget and limit price', async t => {
+  const requests: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    requests.push(url);
+    return Response.json({ market: {} });
+  });
+  await readMarket('metal', 123);
+  await readMarket('metal', 1, { percent: 25 });
+  await readMarket('torch', 1, { percent: 100, price: 3.0001 });
+  assert.deepEqual(requests, [
+    '/api/dollar/game/market?asset=metal&quantity=123',
+    '/api/dollar/game/market?asset=metal&quantity=1&budgetPercent=25',
+    '/api/dollar/game/market?asset=torch&quantity=1&budgetPercent=100&price=3.0001',
+  ]);
+});
 
 test('World profile reads, unlinking and reconnect accept a null profile', async t => {
   const requests: { url: string; init?: RequestInit }[] = [];

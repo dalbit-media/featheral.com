@@ -10,6 +10,25 @@
     return data;
   }
   const element = (tag, text) => { const node = document.createElement(tag); if (text) node.textContent = text; return node; };
+  function generateAvatar(seed, field) {
+    let hash = 2166136261;
+    for (const character of seed.toLowerCase()) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+    hash >>>= 0;
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = field.size;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Image processing is unavailable in this browser.");
+    context.fillStyle = "#17251f"; context.fillRect(0, 0, field.size, field.size);
+    context.fillStyle = `hsl(${hash % 360} 55% 65%)`;
+    const cell = field.size / 7;
+    for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
+      if (!(hash & (1 << (y * 3 + x)))) continue;
+      context.fillRect((x + 1) * cell, (y + 1) * cell, cell, cell);
+      context.fillRect((5 - x) * cell, (y + 1) * cell, cell, cell);
+    }
+    const avatar = canvas.toDataURL("image/png");
+    if (atob(avatar.split(",")[1]).length > field.maxBytes) throw new Error("Generated avatar exceeds the profile size limit.");
+    return avatar;
+  }
   async function resize(file, field) {
     if (!field.accept.split(",").includes(file.type) || file.size > 10 * 1024 * 1024) throw new Error("Choose a PNG, JPEG or WebP image up to 10 MiB.");
     const image = await createImageBitmap(file);
@@ -58,6 +77,13 @@
         const clear = element("button", "Choose another avatar"); clear.type = "button";
         clear.addEventListener("click", () => { if (!busy) input.click(); });
         label.append(clear);
+        const generate = element("button", "Generate avatar"); generate.type = "button";
+        generate.addEventListener("click", () => {
+          if (busy || !address) return;
+          try { avatar = generateAvatar(`${address}:${crypto.randomUUID()}`, field); preview.src = avatar; message.textContent = "Generated avatar ready. Save to publish."; }
+          catch (error) { report(error); }
+        });
+        label.append(generate);
       } else {
         if (field.type === "text") { input.type = "text"; input.autocomplete = "nickname"; input.pattern = field.pattern; input.minLength = field.minLength; }
         else input.rows = 4;
@@ -78,7 +104,7 @@
       const data = nextAddress ? await request(`/${nextAddress}`) : { profile: null };
       if (current !== generation) return;
       address = nextAddress || ""; const profile = data.profile;
-      avatar = profile?.avatar || ""; fields.get("username").value = profile?.username || ""; fields.get("bio").value = profile?.bio || "";
+      avatar = profile?.avatar || (address ? generateAvatar(address, model.fields.find(field => field.name === "avatar")) : ""); fields.get("username").value = profile?.username || ""; fields.get("bio").value = profile?.bio || "";
       preview.src = avatar || "/shared/logo-world.svg"; wallet.textContent = address ? `Wallet: ${address}` : "";
       connect.hidden = !!address; submit.hidden = !address; message.textContent = "";
       for (const input of fields.values()) input.disabled = !address;

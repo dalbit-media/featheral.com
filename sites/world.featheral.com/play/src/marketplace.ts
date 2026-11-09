@@ -15,7 +15,9 @@ import { catalogSorts, filterMarketCatalog, marketOwned, renderMarketCatalog, re
 import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 import { SettlementSale } from './settlement-sale.ts';
-import { ResourceSaleQuantity } from './resource-sale-quantity.ts';
+import { ResourceSaleQuantity, salePercentages, saleQuantity } from './resource-sale-quantity.ts';
+import { buyingBudgetUnits, isMarketPercentage } from './market-buy-quantity.ts';
+import type { BuyQuantityRequest, MarketPercentage } from './market-buy-quantity.ts';
 
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
@@ -50,6 +52,7 @@ export class Marketplace {
   private ownedOnly = false;
   private catalogMarkup = '';
   private priceEdited = false;
+  private quantityPercent: MarketPercentage | null = null;
   private historyCount = 120;
   private pending = false;
   private fresh = false;
@@ -68,7 +71,7 @@ export class Marketplace {
       <div class="exchange-main"><section class="exchange-card exchange-instrument"><div data-market-instrument></div></section>
       <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span><div class="catalog-view-switch" role="group" aria-label="Sale history range"><button type="button" data-market-history="20" aria-pressed="false">20</button><button type="button" data-market-history="60" aria-pressed="false">60</button><button type="button" data-market-history="120" aria-pressed="true">120</button></div></div><div data-market-chart></div></section>
       <div class="exchange-trading"><section class="exchange-card exchange-order-book"><h2>Player offers</h2><div data-market-book></div></section>
-      <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" min="1" max="10000" step="1" required value="1"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount"><button type="button" data-market-amount="10">10</button><button type="button" data-market-amount="100">100</button><button type="button" data-market-amount="1000">1,000</button><button type="button" data-market-max>Max</button></div><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>All items use demand-driven spot prices and player offers. One equipped or placed copy is protected; spare copies can be sold. Identical owned and waiting items share one bag slot. Collectibles trade one at a time.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
+      <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" inputmode="decimal" min="1" max="10000" step="1" required value="1" aria-describedby="market-quantity-help"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount">${salePercentages.map(percent => `<button type="button" data-market-percent="${percent}" aria-pressed="false">${percent}%</button>`).join('')}</div><p id="market-quantity-help" data-market-quantity-help class="fineprint"></p><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>All items use demand-driven spot prices and player offers. One equipped or placed copy is protected; spare copies can be sold. Identical owned and waiting items share one bag slot. Collectibles trade one at a time.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
       <section class="exchange-card exchange-history-card"><h2>My offers</h2><div data-market-orders></div></section><section class="exchange-card exchange-history-card"><h2>Recent purchases and sales</h2><div data-market-trades></div></section></div></div>`;
     const funding = document.createElement('section');
     funding.className = 'exchange-card';
@@ -128,7 +131,8 @@ export class Marketplace {
       if (target.closest('[data-market-resource-sale]')) return;
       if (target.hasAttribute('data-market-search')) { this.query = target.value.toLocaleLowerCase(); this.catalog(); return; }
       if (target.hasAttribute('data-market-price')) this.priceEdited = true;
-      if (target.hasAttribute('data-market-quantity')) {
+      if (target.hasAttribute('data-market-quantity')) this.quantityPercent = null;
+      if (target.hasAttribute('data-market-quantity') || target.hasAttribute('data-market-price')) {
         this.fresh = false; clearTimeout(this.debounce);
         this.debounce = setTimeout(() => { void this.refresh(); }, 250);
       }
@@ -203,9 +207,18 @@ export class Marketplace {
       if (button.dataset.marketSide === 'buy' || button.dataset.marketSide === 'sell') { this.side = button.dataset.marketSide; this.configureQuantity(true); this.preview(); this.rememberSelection(); void this.refresh(); }
       if (button.dataset.marketMode === 'spot' || button.dataset.marketMode === 'limit') { this.mode = button.dataset.marketMode; this.fresh = false; this.preview(); void this.refresh(); }
       if (button.dataset.marketStep) this.setQuantity(Math.max(1, Math.min(marketQuantityLimit(this.asset), (Number.isSafeInteger(this.quantity()) ? this.quantity() : 1) + Number(button.dataset.marketStep))));
-      if (button.dataset.marketAmount) this.setQuantity(Number(button.dataset.marketAmount));
-      if (button.hasAttribute('data-market-max')) this.setQuantity(Math.min(marketQuantityLimit(this.asset), isMarketResource(this.asset)
-        ? marketOwned(this.state(), this.asset) : sellableItemCount(this.state().inventory, this.asset)));
+      if (button.dataset.marketPercent) {
+        const percent = Number(button.dataset.marketPercent);
+        if (isMarketPercentage(percent)) {
+          this.quantityPercent = percent;
+          if (this.side === 'sell') this.setQuantity(saleQuantity(this.sellableMaximum(), percent), true);
+          else {
+            const input = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
+            if (!input.validity.valid || !Number.isSafeInteger(this.quantity())) input.value = input.min;
+            this.fresh = false; this.preview(); void this.refresh();
+          }
+        }
+      }
       if (button.dataset.marketLevel === 'buy' || button.dataset.marketLevel === 'sell') {
         this.side = button.dataset.marketLevel; this.mode = 'limit'; this.priceEdited = true;
         this.configureQuantity(true); this.fresh = false;
@@ -223,7 +236,9 @@ export class Marketplace {
       const quote = this.data.market.quotes[this.side];
       if (this.mode === 'limit') void this.execute({ type: 'limit', asset: this.asset, side: this.side, quantity, price });
       else if (quote.available && quote.quantity === quantity) void this.execute({ type: 'spot', asset: this.asset, side: this.side, quantity,
-        limitDollars: dollarsSlippage(quote.dollars, this.side) });
+        limitDollars: this.side === 'buy' && this.quantityPercent !== null
+          ? Math.min(dollarsSlippage(quote.dollars, this.side), buyingBudgetUnits(dollarsUnits(this.state().dollars), this.quantityPercent) / dollarsScale)
+          : dollarsSlippage(quote.dollars, this.side) });
     });
     this.balances();
     void this.refresh();
@@ -233,6 +248,10 @@ export class Marketplace {
   private money(value: number): string { return formatDollars(value, locale(this.language)); }
   private price(value: number, asset = this.asset): string { return `${formatResourcePrice(asset, value, locale(this.language))} FTH$/${tradingUnit(asset, locale(this.language))}`; }
   private name(asset: MarketAsset): string { return translate(marketAssetName(asset), this.language); }
+  private sellableMaximum(): number {
+    return Math.min(marketQuantityLimit(this.asset), isMarketResource(this.asset)
+      ? marketOwned(this.state(), this.asset) : sellableItemCount(this.state().inventory, this.asset));
+  }
   private art(asset: MarketAsset): string { return isMarketResource(asset) ? icon(asset) : itemArt(asset); }
   private quantity(): number { return isMarketResource(this.asset) && this.side === 'sell' && this.mode === 'limit'
     ? this.resourceQuantity.quantity : accountingQuantity(this.asset, Number(this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!.value)); }
@@ -240,8 +259,9 @@ export class Marketplace {
     const input = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
     if (isMarketResource(this.asset)) this.resourceQuantity.configure(this.asset, marketOwned(this.state(), this.asset), reset);
     input.min = input.step = String(displayQuantity(this.asset, 1));
+    input.inputMode = this.asset === 'metal' ? 'decimal' : 'numeric';
     input.max = String(displayQuantity(this.asset, marketQuantityLimit(this.asset)));
-    if (reset || !input.validity.valid) input.value = input.min;
+    if (reset || !input.validity.valid) { input.value = input.min; this.quantityPercent = null; }
     input.setAttribute('aria-label', `${translate('Amount', this.language)} (${tradingUnit(this.asset, locale(this.language))})`);
     input.closest('label')!.firstChild!.textContent = `${translate('Amount', this.language)} (${tradingUnit(this.asset, locale(this.language))})`;
     const price = this.root.querySelector<HTMLInputElement>('[data-market-price]')!;
@@ -254,11 +274,6 @@ export class Marketplace {
     price.max = String(displayPrice(this.asset, 1000000));
     price.closest('label')!.firstChild!.textContent = `${translate('Price each', this.language)} · FTH$/${tradingUnit(this.asset, locale(this.language))}`;
     this.root.querySelector('.exchange-chart-card .exchange-section-title > span')!.textContent = `FTH$/${tradingUnit(this.asset, locale(this.language))} · UTC`;
-    this.root.querySelectorAll<HTMLButtonElement>('[data-market-amount]').forEach((button, index) => {
-      const quantity = (isMarketResource(this.asset) ? [10, 100, 1000] : [1, 5, 10])[index];
-      button.dataset.marketAmount = String(quantity);
-      button.textContent = this.fmt(quantity);
-    });
     const fundingQuantity = this.root.querySelector<HTMLInputElement>('[data-pool-quantity]')!;
     fundingQuantity.min = fundingQuantity.step = input.step;
     fundingQuantity.setAttribute('aria-label', `${translate('Owned asset amount', this.language)} (${tradingUnit(this.asset, locale(this.language))})`);
@@ -267,12 +282,13 @@ export class Marketplace {
     const url = new URL(location.href); url.searchParams.set('asset', this.asset); url.searchParams.set('side', this.side);
     history.replaceState(history.state, '', url);
   }
-  private setQuantity(value: number): void {
+  private setQuantity(value: number, keepPercent = false): void {
     const input = this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!;
     if (!Number.isSafeInteger(value) || value < 1 || value > marketQuantityLimit(this.asset)) {
       this.notify(this.amountError(), true);
       return;
     }
+    if (!keepPercent) this.quantityPercent = null;
     input.value = String(displayQuantity(this.asset, value)); this.fresh = false; clearTimeout(this.debounce);
     this.preview(); void this.refresh();
   }
@@ -294,13 +310,16 @@ export class Marketplace {
       <p>${translate('Baseline upkeep per resident/week', this.language)}: ${this.fmt(economy.dailyConsumption * 7)} · ${this.money(economy.dailyConsumption * 7 * price)} FTH$</p>
       <small>${translate('Actual output and upkeep vary with climate, terrain and upgrades. Oil is used by construction and crafting, not daily resident upkeep.', this.language)}</small></details>` : '';
     this.root.querySelector('[data-market-instrument]')!.innerHTML = `${this.art(this.asset)}<div><h2>${this.name(this.asset)}</h2>${reference}<p>${translate('Last sale', this.language)} <strong>${ticker?.last == null ? '—' : this.price(ticker.last)}</strong></p>${ticker ? `<div class="catalog-changes instrument-changes">${renderPriceChange(ticker, '24h', this.language, true)}${renderPriceChange(ticker, '7d', this.language, true)}</div>` : ''}</div><span class="exchange-venue">Players + game shop</span>`;
-    if (!this.priceEdited && ticker) {
+    if (!this.priceEdited && ticker && !(this.side === 'buy' && this.mode === 'limit' && this.quantityPercent !== null)) {
       const value = marketPriceAvailable(price) ? price : marketPriceFloor(this.asset);
       if (value >= .0001 && value <= 1000000) this.root.querySelector<HTMLInputElement>('[data-market-price]')!.value = String(displayPrice(this.asset, value));
     }
   }
   balances(): void {
     if (isMarketResource(this.asset) && this.resourceQuantity.configure(this.asset, marketOwned(this.state(), this.asset))) this.fresh = false;
+    if (this.quantityPercent !== null && this.side === 'buy' && this.data?.market.buyBudget
+      && this.data.market.buyBudget.dollars !== buyingBudgetUnits(dollarsUnits(this.state().dollars), this.quantityPercent) / dollarsScale)
+      this.fresh = false;
     this.root.querySelector('[data-market-balance]')!.textContent = `FTH$ ${this.money(this.state().dollars)}`;
     this.catalog();
     this.preview();
@@ -356,10 +375,19 @@ export class Marketplace {
     const quantity = this.quantity(), bag = this.state().inventory, owned = marketOwned(this.state(), this.asset);
     this.root.querySelector('[data-market-order-side]')!.textContent = translate(this.side === 'buy' ? 'Buy' : 'Sell', this.language);
     this.root.querySelector('[data-market-order-asset]')!.textContent = this.name(this.asset);
-    this.root.querySelector<HTMLElement>('[data-market-amounts]')!.hidden = !isLiquidAsset(this.asset) || resources && this.side === 'sell';
-    const maximum = this.root.querySelector<HTMLButtonElement>('[data-market-max]')!;
-    maximum.hidden = this.side !== 'sell'; maximum.disabled = this.pending || (isMarketResource(this.asset) ? owned : sellableItemCount(bag, this.asset)) < 1;
-    this.root.querySelectorAll<HTMLButtonElement>('[data-market-mode], [data-market-side], [data-market-amount]').forEach(button => button.disabled = this.pending);
+    const percentages = this.root.querySelector<HTMLElement>('[data-market-amounts]')!;
+    percentages.hidden = resources && this.side === 'sell';
+    percentages.setAttribute('aria-label', translate(this.side === 'buy' ? 'Buy budget percentage' : 'Sale percentage', this.language));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-market-mode], [data-market-side]').forEach(button => button.disabled = this.pending);
+    this.root.querySelectorAll<HTMLButtonElement>('[data-market-percent]').forEach(button => {
+      button.disabled = this.pending || (this.side === 'buy' ? this.state().dollars <= 0 : this.sellableMaximum() < 1);
+      button.setAttribute('aria-pressed', String(Number(button.dataset.marketPercent) === this.quantityPercent));
+    });
+    const help = this.root.querySelector<HTMLElement>('[data-market-quantity-help]')!;
+    help.hidden = resourceSpotSale || resourceLimitSale;
+    const budget = this.quantityPercent === null || this.side !== 'buy' ? null
+      : buyingBudgetUnits(dollarsUnits(this.state().dollars), this.quantityPercent) / dollarsScale;
+    help.textContent = `${translate(this.side === 'buy' ? 'Percentages use your available FTH$ budget, rounded down to whole trading lots.' : 'Percentages use your sellable copies, rounded down to whole items.', this.language)} ${translate('Minimum amount', this.language)}: ${this.fmt(1)}.${budget === null ? '' : ` ${this.quantityPercent}% · ${translate('Spending limit', this.language)}: ${budget.toLocaleString(locale(this.language), { maximumFractionDigits: 4 })} FTH$.`}`;
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-step]').forEach(button => button.disabled = this.pending || (button.dataset.marketStep === '-1' ? quantity <= 1 : quantity >= marketQuantityLimit(this.asset)));
     const quote = this.data?.market.asset === this.asset && this.data.market.quantity === quantity ? this.data.market.quotes[this.side] : null;
     const dollars = this.mode === 'limit' && price.validity.valid && Number.isSafeInteger(quantity) && quantity > 0
@@ -380,6 +408,9 @@ export class Marketplace {
       ? this.side === 'sell' ? 'Backing is unavailable for this sale. Settle pending Gold transfers or wait for player-funded liquidity.'
         : 'Not enough resources in the market. Buy less or try again after players sell.'
       : 'The price changed or not enough items are available. Please try again.';
+    if ((!reason || reason === 'Not enough FTH$ for this order.') && this.side === 'buy' && this.quantityPercent !== null && this.fresh
+      && (!this.data?.market.buyBudget?.quantity || dollars !== undefined && budget !== null && dollars > budget))
+      reason = 'No whole trading lot fits the selected budget or available market.';
     this.root.querySelector('[data-market-requirement]')!.textContent = translate(reason, this.language);
     this.root.querySelector('[data-market-preview]')!.innerHTML = `<span class="ticket-total-label">${this.side === 'buy' ? 'You pay · FTH$' : 'You get · FTH$'}</span><strong class="ticket-total">${dollars === undefined || !this.fresh ? '—' : this.money(dollars)}</strong><span>${this.mode === 'spot' ? 'Average price' : 'Price each'}</span><strong>${dollars === undefined || !this.fresh || quantity < 1 ? '—' : this.price(dollars / quantity)}</strong><span>You own</span><strong>${this.fmt(owned)}</strong>${isMarketResource(this.asset) ? '' : `<span>Bag space used</span><strong>${inventoryUsed(bag)} / ${itemStorage[bag.storage].capacity}</strong>`}`;
     const button = this.root.querySelector<HTMLButtonElement>('[data-market-submit]')!;
@@ -434,10 +465,20 @@ export class Marketplace {
   private async refresh(): Promise<void> {
     const quantity = this.quantity();
     if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > (this.side === 'sell' ? marketSaleQuantityLimit(this.asset) : marketQuantityLimit(this.asset))) { this.fresh = false; this.catalog(); this.instrument(); this.preview(); return; }
-    const sequence = ++this.sequence, asset = this.asset;
+    const sequence = ++this.sequence, asset = this.asset, side = this.side, mode = this.mode, percent = this.quantityPercent;
+    const priceInput = this.root.querySelector<HTMLInputElement>('[data-market-price]')!;
+    const price = accountingPrice(asset, Number(priceInput.value));
+    if (side === 'buy' && percent !== null && mode === 'limit' && !priceInput.validity.valid) { this.fresh = false; this.preview(); return; }
+    const buying: BuyQuantityRequest | undefined = side === 'buy' && percent !== null ? { percent, ...(mode === 'limit' ? { price } : {}) } : undefined;
     try {
-      const data = await readMarket(asset, quantity);
-      if (sequence !== this.sequence || asset !== this.asset || quantity !== this.quantity()) return;
+      const data = await readMarket(asset, quantity, buying);
+      if (sequence !== this.sequence || asset !== this.asset || side !== this.side || mode !== this.mode || percent !== this.quantityPercent
+        || quantity !== this.quantity() || buying?.price !== undefined && price !== accountingPrice(asset, Number(priceInput.value))) return;
+      if (buying) {
+        if (!data.market.buyBudget || data.market.buyBudget.percent !== buying.percent || data.market.buyBudget.price !== buying.price)
+          throw new Error('Buying budget quote is unavailable. Refresh and try again.');
+        this.root.querySelector<HTMLInputElement>('[data-market-quantity]')!.value = String(displayQuantity(asset, data.market.quantity));
+      }
       this.data = data; this.receivedAt = Date.now(); this.fresh = true; this.update(data); this.paint();
       this.root.querySelector('[data-market-status]')!.textContent = translate('Prices update every 5 seconds.', this.language);
       this.root.querySelector<HTMLButtonElement>('[data-market-refresh]')!.hidden = true;

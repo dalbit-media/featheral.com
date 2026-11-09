@@ -30,8 +30,11 @@ signup asks only for a username and its existing wallet password. It unlocks and
 reuses that same wallet and backup without overwriting local storage or moving
 funds. Password login is enabled immediately, including on another device.
 Credential registration does not require a finished public profile; an
-uploaded avatar, valid username and nonblank profile description are still
+generated or uploaded avatar, valid username and nonblank profile description are still
 required before gameplay and Media writes.
+The profile editor generates a deterministic PNG avatar for new wallets and offers
+**Generate avatar** for variations. Existing uploaded avatars are never replaced
+automatically; generated previews are published only through the normal signed save.
 Media registration and editing also happen on World, with one shared public
 profile. Existing guest settlements and wallet balances are preserved: restoring
 a wallet-owned game moves no funds and refuses to discard guest money.
@@ -48,6 +51,48 @@ The original registration username remains the password sign-in name after a
 public profile rename. Server account sessions expire after seven days; no
 private key is stored unencrypted on the server or shared with Media. See the
 root README for the credential database and writer/reader deployment boundary.
+
+## Marketplace quantity presets
+
+Marketplace buy quantities use the same **25%, 50%, 75%, 100%** presets as
+resource sales. Buying percentages select the largest whole trading-lot quantity
+within that share of available game FTH$, using executable market depth rather
+than multiplying a one-lot ticker price. In **Choose price**, sizing uses the
+full limit-order escrow cost. Inventory restrictions, collectible uniqueness and
+the 10,000-lot buy cap still apply. **100%** never authorizes more than the
+available budget, including spot-price slippage. The ticket shows the minimum
+physical-unit increment and selected spending limit; editing quantity or using
+the stepper switches back to manual sizing. Item sale presets use sellable copies,
+excluding equipped/placed copies. Resource sale controls are unchanged.
+
+## Hall of Fame and settlement atlas
+
+The trophy rail link opens `/hall-of-fame/`: all persisted players or established
+settlements, ranked by population by default, net worth, FTH$ balance, tier,
+explored tiles or simulation points. Search, 25-row pagination and a 100 km
+nearby filter work across the complete directory. `/api/dollar/game/atlas` is
+session-authenticated and exposes public identities and ranking metrics, never
+session keys, signing credentials or wallet balances outside the game.
+
+Net worth uses fixed marketplace base valuations for owned resources/items,
+game FTH$ and open buy/sell escrow. It excludes uncollected production, buildings,
+permanent federation donations and external wallets. Rankings reflect each
+account's last saved state; visiting the leaderboard does not advance other
+players' production or create funds.
+
+`/atlas/` assigns each established settlement a persistent, unique coordinate
+in a 1,000 by 1,000 game-kilometer world. Distances are straight-line kilometers
+from your settlement. Existing saves acquire locations lazily without changing
+their local terrain, seed, home, exploration radius or chat/visit permissions.
+The map derives informational federation territories from the nearest member
+settlement on a 25 km display grid; independent settlements keep neutral areas.
+Empty federations have no territory. Borders are not player claims or ownership.
+
+Five starting federations have distinct procedural flags, shields and mottos.
+Choose one on Federation when the existing Village/50-relationship requirements
+are met; goodwill, membership bonuses, founding costs and voting gates remain.
+Newly founded federations get a seed-derived name and matching heraldry;
+existing federation names and vault balances are preserved.
 
 ## Languages
 

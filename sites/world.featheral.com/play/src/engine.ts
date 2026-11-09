@@ -10,6 +10,7 @@ import type { Construction } from './constructions.ts';
 import { recruitmentClimate, weeklyClimate } from './climate.ts';
 import { discountedActivityCost } from './activity-equipment.ts';
 import type { EquippedActivities } from './activity-equipment.ts';
+import { foundedFederationName, startingFederations } from './atlas.ts';
 
 export type Resource = 'wood' | 'water' | 'metal' | 'oil';
 export type Terrain = 'forest' | 'meadow' | 'water' | 'mountain' | 'oil' | 'lithium'
@@ -238,24 +239,25 @@ export function build(game: Game, kind: 'bank' | 'townhall' | 'light' | WaterFac
 export function trade(_game: Game, _resource: Resource, _direction: 'buy' | 'sell', _amount: number): string {
   throw new GameError('Use the marketplace to buy or sell resources.');
 }
-export function diplomacy(game: Game, action: 'gift' | 'join' | 'form' | 'vote'): string {
+export function diplomacy(game: Game, action: 'gift' | 'join' | 'form' | 'vote', federation = 'Evergreen Union'): string {
   if (action === 'gift') {
     pay(game, diplomacyCosts.gift);
     game.relationship = Math.min(100, game.relationship + 25);
     return note(game, 'A goodwill shipment reached Evergreen Union. Relations improved.');
   }
   if (action === 'join') {
+    if (!startingFederations.some(identity => identity.name === federation)) throw new GameError('Choose a starting federation.');
     if (game.federation) throw new GameError('Your community already belongs to a federation.');
     if (game.stage < 3 || game.relationship < 50) throw new GameError('A village and at least 50 relationship points are required to join.');
-    game.federation = 'Evergreen Union';
-    return note(game, 'Your community joined Evergreen Union. Together, we grow.');
+    game.federation = federation;
+    return note(game, `Your community joined ${federation}. Together, we grow.`);
   }
   if (action === 'form') {
     if (game.federation) throw new GameError('Your community already belongs to a federation.');
     if (game.stage < 6 || game.population <= 10000) throw new GameError('Founding requires a city with more than 10,000 residents.');
     pay(game, diplomacyCosts.form);
-    game.federation = 'Verdant Federation';
-    return note(game, 'Verdant Federation founded. A new chapter in shared governance.');
+    game.federation = foundedFederationName(game.seed);
+    return note(game, `${game.federation} founded. A new chapter in shared governance.`);
   }
   if (!game.federation || !game.townhall || game.stage < 4) throw new GameError('Join a federation and construct a town hall to vote.');
   if (game.votes.includes('watershed')) throw new GameError('Your community has already voted on this proposal.');

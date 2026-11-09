@@ -13,6 +13,8 @@ const paths: Record<string, string> = {
   home: '<path d="m3 11 9-7 9 7M5 10v10h14V10M10 20v-6h4v6"/>',
   market: '<path d="M4 10h16l-2-6H6l-2 6ZM5 10v10h14V10M9 20v-6h6v6M4 10c0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0 0 3 4 3 4 0"/>',
   federation: '<path d="m12 3 8 4v6c0 5-8 8-8 8s-8-3-8-8V7l8-4Z"/><path d="m8 12 3 3 5-6"/>',
+  hall: '<path d="M7 3h10v6a5 5 0 0 1-10 0V3ZM7 5H3v3a5 5 0 0 0 5 5M17 5h4v3a5 5 0 0 1-5 5M12 14v5M8 21h8M9 19h6"/>',
+  atlas: '<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5ZM9 3v16M15 5v16"/>',
   journal: '<path d="M5 4h13v17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM7 4v17M10 8h5M10 12h5"/>',
   wood: '<path d="m12 2-6 8h3l-5 7h6v5h4v-5h6l-5-7h3l-6-8Z"/>',
   water: '<path d="M12 2S5 10 5 15a7 7 0 0 0 14 0c0-5-7-13-7-13Z"/><path d="M8 15a4 4 0 0 0 4 4"/>',

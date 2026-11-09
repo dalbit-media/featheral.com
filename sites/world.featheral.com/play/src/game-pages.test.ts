@@ -4,9 +4,9 @@ import { test } from 'node:test';
 import { accountPageKeys, gamePage, gamePageKeys, gamePages, primaryGamePageKeys } from './game-pages.ts';
 import { guideContent, guideTopics } from './guide.ts';
 
-test('all nine game routes resolve directory and built entry URLs', () => {
-  assert.equal(gamePageKeys.length, 9);
-  assert.equal(new Set(Object.values(gamePages).map(page => page.path)).size, 9);
+test('all eleven game routes resolve directory and built entry URLs', () => {
+  assert.equal(gamePageKeys.length, 11);
+  assert.equal(new Set(Object.values(gamePages).map(page => page.path)).size, 11);
   for (const key of gamePageKeys) {
     assert.equal(gamePage(gamePages[key].path), key);
     assert.equal(gamePage(`${gamePages[key].path}index.html`), key);
@@ -22,7 +22,7 @@ test('crafting shares the chat bottom anchor and can cover the mobile header wit
 });
 test('community and guide routes have Korean-first refreshable production entries', () => {
   const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8');
-  for (const key of ['communicate', 'federation', 'journal', 'help', 'bank', 'contacts']) {
+  for (const key of ['communicate', 'federation', 'journal', 'help', 'bank', 'contacts', 'hall-of-fame', 'atlas']) {
     const html = readFileSync(new URL(`../${key}/index.html`, import.meta.url), 'utf8');
     assert.match(html, /<html lang="ko">/);
     assert.match(html, /noindex,follow/);
@@ -36,7 +36,7 @@ test('community and guide routes have Korean-first refreshable production entrie
   assert.match(localization, /Object\.values\(gamePages\)\.map\(page => page\.path\)/);
 });
 test('Journal and Help move into Account without losing their direct routes', () => {
-  assert.deepEqual(primaryGamePageKeys, ['world', 'home', 'market', 'communicate', 'federation']);
+  assert.deepEqual(primaryGamePageKeys, ['world', 'home', 'market', 'communicate', 'federation', 'hall', 'atlas']);
   assert.deepEqual(accountPageKeys, ['journal', 'help']);
   assert.equal(gamePage('/journal/'), 'journal');
   assert.equal(gamePage('/help/'), 'help');

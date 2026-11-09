@@ -6,6 +6,8 @@ export const gamePages = {
   communicate: { label: 'Inbox', path: '/communicate/' },
   contacts: { label: 'Contacts', path: '/contacts/' },
   federation: { label: 'Federation', path: '/federation/' },
+  hall: { label: 'Hall of Fame', path: '/hall-of-fame/' },
+  atlas: { label: 'Settlement atlas', path: '/atlas/' },
   journal: { label: 'Journal', path: '/journal/' },
   help: { label: 'Field guide', path: '/help/' },
 } as const;

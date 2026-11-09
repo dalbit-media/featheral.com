@@ -184,6 +184,8 @@ export default defineConfig({
         'market/index': resolve('market', 'index.html'),
         'communicate/index': resolve('communicate', 'index.html'),
         'federation/index': resolve('federation', 'index.html'),
+        'hall-of-fame/index': resolve('hall-of-fame', 'index.html'),
+        'atlas/index': resolve('atlas', 'index.html'),
         'contacts/index': resolve('contacts', 'index.html'),
         'journal/index': resolve('journal', 'index.html'),
         'help/index': resolve('help', 'index.html'),
