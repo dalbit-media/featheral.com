@@ -161,6 +161,8 @@ test('all upgrade stages enforce exact population thresholds and resource costs'
       assert.equal(g.stage, i - 1);
     }
     g.population = stage.population;
+    for (const resource of ['wood', 'water', 'metal', 'oil'] as const) g.stock[resource] = stage.cost[resource] ?? 0;
+    g.dollars = (stage.cost.dollars ?? 0) * dollarsScale;
     const before = { ...g.stock };
     upgrade(g);
     assert.equal(g.stage, i);
@@ -307,7 +309,7 @@ test('saves roundtrip and invalid or incomplete saves are explicitly rejected', 
   const g = wealthy();
   discover(g); upgrade(g); gather(g);
   assert.deepEqual(parseSave(JSON.stringify(g)), g);
-  for (const raw of ['null', '{}', 'not json', JSON.stringify({ ...g, stock: { wood: 10 } }), JSON.stringify({ ...g, stage: 9 }), JSON.stringify({ ...g, light: 3 }), JSON.stringify({ ...g, position: { x: 0.5, y: 0 } }), JSON.stringify({ ...g, explored: ['bad'] })]) {
+  for (const raw of ['null', '{}', 'not json', JSON.stringify({ ...g, stock: { wood: 10 } }), JSON.stringify({ ...g, stage: stages.length }), JSON.stringify({ ...g, light: 3 }), JSON.stringify({ ...g, position: { x: 0.5, y: 0 } }), JSON.stringify({ ...g, explored: ['bad'] })]) {
     assert.throws(() => parseSave(raw));
   }
 });

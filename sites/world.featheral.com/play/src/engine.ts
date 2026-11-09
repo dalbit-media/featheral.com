@@ -10,6 +10,7 @@ import type { Construction } from './constructions.ts';
 import { recruitmentClimate, weeklyClimate } from './climate.ts';
 import { discountedActivityCost } from './activity-equipment.ts';
 import type { EquippedActivities } from './activity-equipment.ts';
+import type { EnhancedEquipment, EnhancedEquipped } from './enhancement.ts';
 import { foundedFederationName, startingFederations } from './atlas.ts';
 
 export type Resource = 'wood' | 'water' | 'metal' | 'oil';
@@ -30,6 +31,13 @@ export const stages: Stage[] = [
   { name: 'City', population: 10000, cost: { wood: 3500, water: 2800, metal: 1500, dollars: monetaryPolicy.stageFees[6] } },
   { name: 'Metropolis', population: 25000, cost: { wood: 7000, water: 5500, metal: 4000, oil: 300, dollars: monetaryPolicy.stageFees[7] } },
   { name: 'Capital', population: 100000, cost: { wood: 15000, water: 12000, metal: 10000, dollars: monetaryPolicy.stageFees[8] } },
+  { name: 'Regional Hub', population: 250000, cost: { wood: 25000, water: 20000, metal: 18000, oil: 750, dollars: 1000 } },
+  { name: 'Urban Center', population: 500000, cost: { wood: 40000, water: 35000, metal: 30000, oil: 1500, dollars: 2000 } },
+  { name: 'Metropolitan Region', population: 1000000, cost: { wood: 60000, water: 50000, metal: 45000, oil: 2500, dollars: 3000 } },
+  { name: 'World City', population: 2000000, cost: { wood: 80000, water: 65000, metal: 60000, oil: 3500, dollars: 4000 } },
+  { name: 'Global City', population: 5000000, cost: { wood: 100000, water: 80000, metal: 75000, oil: 5000, dollars: 5000 } },
+  { name: 'Megacity', population: 10000000, cost: { wood: 300000, water: 250000, metal: 250000, oil: 20000, dollars: 15000 } },
+  { name: 'Great Megacity', population: 20000000, cost: { wood: 750000, water: 600000, metal: 650000, oil: 60000, dollars: 40000 } },
 ];
 export const prices = resourcePrices;
 export const buildingCosts = { bank: withDollarFee({ wood: 600, metal: 400 }), townhall: withDollarFee({ wood: 300, metal: 150 }) };
@@ -80,6 +88,8 @@ export interface Game {
   light: number;
   visibilityRadius?: number;
   activityEquipment?: EquippedActivities;
+  enhancedEquipment?: EnhancedEquipment[];
+  enhancedEquipped?: EnhancedEquipped;
   bank: boolean;
   townhall: boolean;
   waterFacilities?: Partial<Record<WaterFacility, boolean>>;
@@ -183,7 +193,7 @@ export function gather(game: Game): string {
 }
 export function upgrade(game: Game): string {
   const next = stages[game.stage + 1];
-  if (!next) throw new GameError('Your capital has reached the highest settlement tier.');
+  if (!next) throw new GameError('Your settlement has reached the highest settlement tier.');
   if (game.population < next.population) throw new GameError(`${next.population.toLocaleString()} residents are required for a ${next.name.toLowerCase()}.`);
   if (game.stage === -1 && isWater(terrainAt(game.position.x, game.position.y, game.seed))) throw new GameError('Choose dry land to establish your settlement.');
   pay(game, next.cost);
@@ -203,7 +213,7 @@ export function recruitmentAmount(population: number, housingLevel = 0, time?: n
 export function recruitmentMetal(population: number): number {
   return 10 + Math.ceil(population / 10);
 }
-export function recruitmentDollars(population: number, housingLevel = 0, time?: number, game?: Pick<Game, 'activityEquipment'>): number {
+export function recruitmentDollars(population: number, housingLevel = 0, time?: number, game?: Pick<Game, 'activityEquipment' | 'enhancedEquipment' | 'enhancedEquipped'>): number {
   const cost = recruitmentAmount(population, housingLevel, time) * monetaryPolicy.recruitmentPerResident;
   return game ? discountedActivityCost(game, 'attraction', cost) : cost;
 }

@@ -185,35 +185,35 @@ test('compact craft cards show batch consumption before collapsed recipe details
 });
 test('crafting loads one shared market catalog, throttles requests and surfaces failures without stale prices', async () => {
   const source = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  const code = stripTypeScriptTypes(source.slice(source.indexOf('async function refreshCraftingPrices'), source.indexOf('function renderSettlement')));
+  const code = stripTypeScriptTypes(source.slice(source.indexOf('async function refreshCraftingPrices'), source.indexOf('async function purchaseCraftingAnalysis')));
   let calls = 0, renders = 0, errors = 0, now = 0, fail = false;
   const tickers = [{ asset: 'bench', bid: 100, ask: 101, last: null, change7d: 5 }];
   const context = {
     Error,
     craftingPricesLoading: false, craftingPricesAttemptAt: -Infinity, craftingPricesError: '', craftingTickers: [],
-    document: { hidden: false }, settlementTask: 'crafting', busy: false, confirmationOpen: () => false,
+    document: { hidden: false }, inventoryMenuPage: true, inventoryTab: 'craft', busy: false, confirmationOpen: () => false,
     performance: { now: () => now }, serverSyncIntervalMs: 30000,
     readMarket: async (asset: string, quantity: number) => {
       calls++; assert.equal(asset, 'torch'); assert.equal(quantity, 1);
       if (fail) throw new Error('Market connection unavailable.');
       return { market: { tickers } };
     },
-    renderSettlement: () => { renders++; }, console: { error: () => { errors++; } },
+    renderInventoryPage: () => { renders++; }, console: { error: () => { errors++; } },
   };
   const refreshPrices = runInNewContext(`${code}; refreshCraftingPrices;`, context);
   await refreshPrices();
   assert.equal(calls, 1); assert.equal(context.craftingTickers, tickers);
   await refreshPrices(); assert.equal(calls, 1);
   context.document.hidden = true; now = 30000; await refreshPrices(); assert.equal(calls, 1);
-  context.document.hidden = false; context.settlementTask = 'inventory'; await refreshPrices(); assert.equal(calls, 1);
-  context.settlementTask = 'crafting'; fail = true; await refreshPrices();
+  context.document.hidden = false; context.inventoryTab = 'inventory'; await refreshPrices(); assert.equal(calls, 1);
+  context.inventoryTab = 'craft'; fail = true; await refreshPrices();
   assert.equal(calls, 2); assert.equal(context.craftingTickers.length, 0);
   assert.equal(context.craftingPricesError, 'Market connection unavailable.');
   assert.equal(errors, 1); assert.equal(context.craftingPricesLoading, false);
   fail = false; await refreshPrices(true); assert.equal(calls, 3); assert.equal(context.craftingPricesError, '');
   context.craftingPricesLoading = true; await refreshPrices(true); assert.equal(calls, 3);
   assert.equal(renders, 3);
-  assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers,/);
+  assert.match(source, /craftingPanel\(state, costChips, craftingFilter, 'explore', 1, language, craftingTickers,/);
   assert.match(source, /data-action="crafting-prices"/);
 });
 test('profit estimates stay hidden without an active paid analysis while sell prices remain visible', () => {

@@ -13,6 +13,13 @@ const homePositions: GridPosition[] = [
   { x: -7, y: 1 }, { x: 1, y: -7 }, { x: 6, y: -4 }, { x: 6, y: 2 },
   { x: -3, y: 6 }, { x: 4, y: 6 }, { x: -7, y: -3 }, { x: -7, y: 5 },
   { x: 4, y: -6 }, { x: -2, y: -7 }, { x: 7, y: -1 }, { x: 6, y: 5 },
+  { x: -8, y: -5 }, { x: -6, y: -7 }, { x: 8, y: -4 }, { x: 2, y: 8 },
+  { x: -8, y: 3 }, { x: -4, y: 8 }, { x: 5, y: -8 }, { x: 7, y: -6 },
+  { x: -9, y: -1 }, { x: -8, y: 7 }, { x: -1, y: 9 }, { x: 5, y: 8 },
+  { x: -5, y: -9 }, { x: 0, y: -9 }, { x: 9, y: -1 }, { x: 7, y: 8 },
+  { x: -9, y: -7 }, { x: -3, y: -9 }, { x: 3, y: -9 }, { x: 9, y: -7 },
+  { x: -9, y: 5 }, { x: -6, y: 9 }, { x: 1, y: 9 }, { x: 6, y: 9 },
+  { x: -9, y: 9 }, { x: -7, y: -9 }, { x: 7, y: -9 }, { x: 9, y: 1 },
 ];
 const services = {
   centre: { name: 'Settlement centre', x: 0, y: 0, task: 'overview' },
@@ -40,7 +47,7 @@ export const legacySpaceCells: Record<DecorationSlot, GridPosition> = {
   courtyard: { x: 3, y: -4 }, lane: { x: 4, y: 3 }, riverside: { x: 7, y: 6 },
 };
 export function homeCount(stage: number): number {
-  return stage < 0 ? 0 : [1, 2, 4, 6, 8, 10, 12, 16, 20][stage];
+  return stage < 0 ? 0 : [1, 2, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48][stage];
 }
 export function settlementBuildings(game: Game): SettlementBuildingInfo[] {
   if (game.stage < 0) return [];

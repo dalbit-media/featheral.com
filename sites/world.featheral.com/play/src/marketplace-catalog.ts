@@ -17,6 +17,7 @@ import { marketRarity, rarityLabel } from './market-analysis.ts';
 import { isCollectionItem } from './collection.ts';
 import { itemDetailRows } from './item-details.ts';
 import { isAutoCraftingItem } from './auto-crafting.ts';
+import { isBuilderItem } from './builder-items.ts';
 
 export const catalogCategories = [
   ['all', 'All markets'], ['resources', 'Resources'], ['equipment', 'Equipment'],
@@ -27,7 +28,7 @@ export const catalogCategories = [
 ] as const;
 export interface CatalogFilters { availability?: 'all' | 'buy' | 'sell'; rarity?: string; craftable?: boolean }
 export function marketCategory(asset: MarketAsset): string {
-  return isMarketResource(asset) ? 'Resources' : isSquadItem(asset) ? 'Squad vouchers'
+  return isMarketResource(asset) ? 'Resources' : isBuilderItem(asset) ? 'Bulk upgrades' : isSquadItem(asset) ? 'Squad vouchers'
     : isCollectionItem(asset) ? 'Collectors' : isTransportItem(asset) ? 'Transport vouchers'
     : isBulkCraftingItem(asset) || isAutoCraftingItem(asset) ? 'Bulk crafting' : isCustomizationItem(asset) ? 'Names & titles'
     : isActivityItem(asset) ? 'Automation' : isVisibilityItem(asset) ? 'Lighting'
@@ -71,10 +72,10 @@ export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language
   const terms = query.toLocaleLowerCase(locale(language)).trim().split(/\s+/).filter(Boolean);
   return tickers.filter(ticker => {
     const { asset } = ticker;
-    const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isCollectionItem(asset) ? 'collectors' : isAutomationItem(asset) || isBulkCraftingItem(asset) || isAutoCraftingItem(asset) || isTransportItem(asset) || isSquadItem(asset) ? 'automation' : isVisibilityItem(asset) || isActivityEquipment(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
+    const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isCollectionItem(asset) ? 'collectors' : isAutomationItem(asset) || isBulkCraftingItem(asset) || isAutoCraftingItem(asset) || isBuilderItem(asset) || isTransportItem(asset) || isSquadItem(asset) ? 'automation' : isVisibilityItem(asset) || isActivityEquipment(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
     const specialized = category === 'lighting' ? isVisibilityItem(asset) : category === 'efficiency' ? isActivityEquipment(asset)
       : category === 'collectors' ? isCollectionItem(asset) : category === 'squads' ? isSquadItem(asset)
-      : category === 'bulk' ? isBulkCraftingItem(asset) || isAutoCraftingItem(asset) : category === 'transport' ? isTransportItem(asset) : false;
+      : category === 'bulk' ? isBulkCraftingItem(asset) || isAutoCraftingItem(asset) || isBuilderItem(asset) : category === 'transport' ? isTransportItem(asset) : false;
     const search = `${name(asset)} ${marketAssetName(asset)} ${asset} ${asset.replaceAll('-', ' ')} ${marketCategory(asset)} ${translate(marketCategory(asset), language)}`.toLocaleLowerCase(locale(language));
     return (category === 'all' || category === group || specialized || category === 'items' && group !== 'resources')
       && terms.every(term => search.includes(term))

@@ -24,7 +24,8 @@ export const settlementUpkeepResources = ['wood', 'metal', 'oil'] as const;
 export type SettlementUpkeepResource = typeof settlementUpkeepResources[number];
 export const dailyUpkeepPerResident = { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption, oil: 0 } as const;
 export function oilConsumptionPerResident(stage: number): number {
-  return stage < 4 ? 0 : .001 * 2 ** (stage - 4);
+  return stage < 4 ? 0 : stage <= 8 ? .001 * 2 ** (stage - 4)
+    : [.024, .032, .04, .048, .064, .128, .256][stage - 9];
 }
 function upkeepRate(resource: SettlementUpkeepResource, stage: number): number {
   return resource === 'oil' ? oilConsumptionPerResident(stage) : dailyUpkeepPerResident[resource];

@@ -114,7 +114,7 @@
   .settlement-task-body .tier-cost,.settlement-task-body .cost{font-size:12px}
   .settlement-task-body small,.settlement-task-body .panel-section-heading>span,.settlement-task-body .stock-label>span,.settlement-task-body .completion-caption strong,.settlement-task-body .completion-caption small{font-size:12px;line-height:1.6}
   .settlement-task-body .eyebrow,.settlement-task-body .requirement,.settlement-task-body .mini-rule{font-size:12px;letter-spacing:0;line-height:1.6}
-  .notice.water-upkeep{height:164px;min-height:164px;grid-template-rows:20px 24px 32px 44px}
+  .notice.water-upkeep{height:auto;min-height:0;grid-auto-rows:auto}
   .water-upkeep-heading,.water-upkeep-countdown{font-size:12px}
   .water-upkeep-countdown strong{font-size:14px}
   .water-upkeep p{font-size:11px}

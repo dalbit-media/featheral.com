@@ -11,6 +11,7 @@ import type { ActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem, transportItems } from './transport-items.ts';
 import { isSquadItem, squadItems } from './exploration-squads.ts';
+import { isBuilderItem } from './builder-items.ts';
 import { isAutoCraftingItem } from './auto-crafting.ts';
 
 const activityEquipmentDrawings: Record<ActivityEquipment, string> = {
@@ -70,7 +71,15 @@ export function itemArt(id: ItemId): string {
   let drawing = '', badge = '', kind = '', accent = '#e0bc84';
   const emblem = (symbol: string) => `<g transform="translate(19 18) scale(1.1)">${icon(symbol).replace(/^<svg[^>]*>/, '').replace('</svg>', '')}</g>`;
   const permit = (symbol: string) => `<path d="M15 7h29l7 7v42H15Z" fill="#e6d7b2" stroke="#ac9365" stroke-width="2"/><path d="M44 7v9h7M21 45h23M21 50h15" fill="none" stroke="#ac9365" stroke-width="2"/><g color="${accent}">${emblem(symbol)}</g>`;
-  if (isAutoCraftingItem(id)) {
+  if (id === 'refinement-core') {
+    kind = 'refinement-core-art'; accent = '#b7a2eb';
+    drawing = '<path d="m32 5 19 14-6 28-13 12-13-12-6-28Z" fill="#7668a8" stroke="#dac9ff" stroke-width="2"/><path d="m32 5 5 23 14-9-19 40-19-40 14 9Z" fill="#bba9e8"/><path d="m32 17 10 15-10 15-10-15Z" fill="#e1d9ff"/><path d="M32 24v16m-8-8h16" stroke="#7865aa" stroke-width="3"/>';
+  }
+  else if (isBuilderItem(id)) {
+    kind = 'builder-charter-art'; accent = '#6b969c';
+    drawing = permit('tools') + '<path d="M7 53h50M23 40v13m9-20v20m9-14v14" stroke="#577f85" stroke-width="3"/><circle cx="48" cy="48" r="9" fill="#c4dba6" stroke="#577f85" stroke-width="2"/><path d="m43 48 3 3 6-7" fill="none" stroke="#34585d" stroke-width="2"/>';
+  }
+  else if (isAutoCraftingItem(id)) {
     kind = 'merchant-charter-art'; accent = '#efd183';
     drawing = `<path d="M10 8h39l6 9v38H10Z" fill="#e6d8b3" stroke="#ae8b46" stroke-width="2"/><path d="M49 8v10h6M17 44h28M17 49h20" fill="none" stroke="#ae8b46" stroke-width="2"/><path d="m18 18 7 7 7-12 7 12 7-7-3 17H21Z" fill="#d3a947" stroke="#8a6b28" stroke-width="2"/><circle cx="43" cy="51" r="10" fill="#d3a947" stroke="#f2dfa1" stroke-width="2"/><g color="#755321" transform="translate(35 43) scale(.67)">${icon('market').replace(/^<svg[^>]*>/, '').replace('</svg>', '')}</g>`;
   }

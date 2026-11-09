@@ -60,13 +60,58 @@ export function drawTree(c: CanvasRenderingContext2D, x: number, y: number, h: n
     c.fillStyle = '#b7c88b18'; c.beginPath(); c.moveTo(x, top); c.lineTo(x - w, top + h * .55); c.lineTo(x - 2, top + h * .45); c.fill();
   }
 }
-export interface HouseAppearance { kind: 'home' | 'centre' | 'workshop' | 'supplies' | 'bank' | 'townhall'; urban: boolean; night: boolean }
+export interface HouseAppearance { kind: 'home' | 'centre' | 'workshop' | 'supplies' | 'bank' | 'townhall' | 'market-stall' | 'trade-hub'; urban: boolean; night: boolean; stage?: number }
+export function houseHeight(stage: number): number {
+  return stage >= 9 ? 44 + (stage - 8) * 5 : stage >= 6 ? 38 + (stage - 6) * 3 : 24;
+}
 export function drawHouse(c: CanvasRenderingContext2D, x: number, y: number, size = 1, appearance?: HouseAppearance): void {
   c.save(); c.translate(x, y); c.scale(size, size);
   if (appearance) {
     c.fillStyle = '#142e2840'; c.beginPath(); c.ellipse(2, 13, 26, 10, 0, 0, Math.PI * 2); c.fill();
   }
-  const lift = appearance?.urban ? 16 : 0;
+  const stage = appearance?.stage ?? (appearance?.urban ? 6 : 0);
+  if (appearance && stage >= 6) {
+    const height = houseHeight(stage), civic = appearance.kind === 'centre' || appearance.kind === 'townhall' || appearance.kind === 'bank';
+    const industrial = appearance.kind === 'workshop' || appearance.kind === 'supplies' || appearance.kind === 'trade-hub';
+    const tower = (dx: number, dy: number, h: number, width: number) => {
+      c.fillStyle = industrial ? '#5e7970' : '#416573';
+      c.beginPath(); c.moveTo(dx - width, dy - h); c.lineTo(dx, dy - h + 8); c.lineTo(dx, dy + 18); c.lineTo(dx - width, dy + 10); c.closePath(); c.fill();
+      c.fillStyle = civic ? '#c2baa0' : '#85aeb5';
+      c.beginPath(); c.moveTo(dx, dy - h + 8); c.lineTo(dx + width, dy - h); c.lineTo(dx + width, dy + 10); c.lineTo(dx, dy + 18); c.closePath(); c.fill();
+      c.fillStyle = '#729c83';
+      c.beginPath(); c.moveTo(dx - width, dy - h); c.lineTo(dx, dy - h - 8); c.lineTo(dx + width, dy - h); c.lineTo(dx, dy - h + 8); c.closePath(); c.fill();
+      c.strokeStyle = appearance.night ? '#f3d68b' : '#b8d9dd'; c.lineWidth = 1.8;
+      c.beginPath();
+      for (let row = dy - h + 14; row < dy + 7; row += 6) {
+        c.moveTo(dx - width + 4, row - 5); c.lineTo(dx - 4, row);
+        c.moveTo(dx + 4, row); c.lineTo(dx + width - 4, row - 5);
+      }
+      c.stroke();
+    };
+    if (stage >= 14 && appearance.kind === 'home') tower(-13, -4, height * .65, 9);
+    tower(0, 0, industrial ? height * .65 : height, 17);
+    if (stage >= 9) {
+      const roofHeight = industrial ? height * .65 : height;
+      c.fillStyle = '#a1c688'; c.fillRect(-10, -roofHeight - 3, 7, 3); c.fillRect(4, -roofHeight - 3, 7, 3);
+    }
+    if (civic) {
+      c.strokeStyle = '#e2d9ab'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(0, -height - 8); c.lineTo(0, -height - 22); c.stroke();
+      c.fillStyle = '#c6e8a4'; c.beginPath(); c.moveTo(1, -height - 22); c.lineTo(14, -height - 18); c.lineTo(1, -height - 13); c.closePath(); c.fill();
+      if (appearance.kind === 'bank') {
+        c.fillStyle = '#e5c376'; c.beginPath(); c.arc(10, -height + 12, 4, 0, Math.PI * 2); c.fill();
+      }
+    } else if (industrial) {
+      c.fillStyle = '#394f50'; c.fillRect(-10, -height * .65 - 15, 5, 16);
+      c.fillStyle = '#d1b37b'; c.fillRect(10, 5, 12, 10);
+      if (appearance.kind === 'supplies') { c.strokeStyle = '#f0cc90'; c.strokeRect(10, 5, 12, 10); }
+      if (appearance.kind === 'trade-hub') { c.fillStyle = '#c4b391'; c.fillRect(-24, 8, 48, 4); }
+    } else if (appearance.kind === 'market-stall') {
+      c.fillStyle = '#d6aa74'; c.fillRect(-18, 2, 36, 6);
+    }
+    c.restore();
+    return;
+  }
+  const lift = stage >= 3 ? 6 : 0;
   c.fillStyle = '#c1ad79'; c.beginPath(); c.moveTo(-14, -5 - lift); c.lineTo(0, 3 - lift); c.lineTo(0, 20); c.lineTo(-14, 12); c.fill();
   c.fillStyle = '#e0cf97'; c.beginPath(); c.moveTo(0, 3 - lift); c.lineTo(19, -7 - lift); c.lineTo(19, 10); c.lineTo(0, 20); c.fill();
   c.save(); c.translate(0, -lift);
@@ -101,8 +146,8 @@ export function drawHouse(c: CanvasRenderingContext2D, x: number, y: number, siz
   }
   c.restore();
 }
-export function drawWaterFacility(c: CanvasRenderingContext2D, x: number, y: number, kind: WaterFacility, night: boolean): void {
-  if (kind === 'pumpingStation') drawHouse(c, x - 10, y - 8, 1.1, { kind: 'workshop', urban: false, night });
+export function drawWaterFacility(c: CanvasRenderingContext2D, x: number, y: number, kind: WaterFacility, night: boolean, stage = 0): void {
+  if (kind === 'pumpingStation') drawHouse(c, x - 10, y - 8, 1.1, { kind: 'workshop', urban: stage >= 6, stage, night });
   c.save(); c.translate(x, y); c.scale(1.35, 1.35);
   c.fillStyle = '#142e2840'; c.beginPath(); c.ellipse(2, 12, 25, 9, 0, 0, Math.PI * 2); c.fill();
   if (kind === 'well') {
@@ -116,13 +161,14 @@ export function drawWaterFacility(c: CanvasRenderingContext2D, x: number, y: num
   } else {
     const offset = kind === 'pumpingStation' ? 16 : 0;
     c.translate(offset, 0);
-    c.fillStyle = '#527d82'; c.fillRect(-12, -20, 24, 30);
+    const tankTop = stage >= 6 ? -28 - Math.max(0, stage - 8) * 4 : -20;
+    c.fillStyle = '#527d82'; c.fillRect(-12, tankTop, 24, 10 - tankTop);
     c.beginPath(); c.ellipse(0, 10, 12, 6, 0, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#8bc5c8'; c.beginPath(); c.ellipse(0, -20, 12, 6, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#8bc5c8'; c.beginPath(); c.ellipse(0, tankTop, 12, 6, 0, 0, Math.PI * 2); c.fill();
     c.strokeStyle = '#b7c8ad'; c.lineWidth = 2; c.beginPath(); c.ellipse(0, -10, 12, 6, 0, 0, Math.PI); c.stroke();
     if (kind === 'rainCollector') {
-      c.fillStyle = '#91b5a4'; c.beginPath(); c.moveTo(-22, -35); c.lineTo(22, -35); c.lineTo(6, -23); c.lineTo(-6, -23); c.closePath(); c.fill();
-      c.strokeStyle = '#648e85'; c.lineWidth = 2; c.beginPath(); c.moveTo(0, -32); c.lineTo(0, -20); c.stroke();
+      c.fillStyle = '#91b5a4'; c.beginPath(); c.moveTo(-22, tankTop - 15); c.lineTo(22, tankTop - 15); c.lineTo(6, tankTop - 3); c.lineTo(-6, tankTop - 3); c.closePath(); c.fill();
+      c.strokeStyle = '#648e85'; c.lineWidth = 2; c.beginPath(); c.moveTo(0, tankTop - 12); c.lineTo(0, tankTop); c.stroke();
     } else {
       c.strokeStyle = '#b1b5a2'; c.lineWidth = 4; c.beginPath(); c.moveTo(-12, -5); c.lineTo(-23, -5); c.lineTo(-23, 8); c.stroke();
       c.strokeStyle = '#d5b869'; c.lineWidth = 2; c.beginPath(); c.arc(-23, -5, 5, 0, Math.PI * 2); c.stroke();

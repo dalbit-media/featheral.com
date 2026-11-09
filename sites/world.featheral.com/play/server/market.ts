@@ -1,5 +1,5 @@
 import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
-import { accrue, ApiError, parseActionEnvelope, restoreSnapshotUpkeep, snapshot } from './economy.ts';
+import { accrue, ApiError, apply, parseActionEnvelope, restoreSnapshotUpkeep, snapshot } from './economy.ts';
 import type { Account } from './economy.ts';
 import { craft, inventory } from './inventory.ts';
 import { canAfford, note } from '../src/engine.ts';
@@ -21,6 +21,8 @@ import { createHash } from 'node:crypto';
 import { autoCraftableOutput, merchantCharter, merchantSpendingLimit } from '../src/auto-crafting.ts';
 import type { AutoCraftQuote } from '../src/auto-crafting.ts';
 import { bulkCraftingItems, bulkCraftingKeys } from '../src/bulk-crafting.ts';
+import { isEquipmentId, validEnhancedEquipment } from '../src/enhancement.ts';
+import type { EnhancedEquipment, EnhancementMarketCommand } from '../src/enhancement.ts';
 
 interface Pool { units: number; dollars: number; depthUnits?: bigint; depthDollars?: bigint }
 interface Order extends MarketOrder { owner: string }
@@ -39,6 +41,14 @@ function orderRow(row: Record<string, unknown>): Order {
 }
 export function parseMarketCommand(value: unknown): MarketCommand {
   const c = object(value);
+  if (c.type === 'enhancement-list' || c.type === 'enhancement-cancel' || c.type === 'enhancement-buy') {
+    const fields = c.type === 'enhancement-list' ? 'equipmentId,price,type'
+      : c.type === 'enhancement-buy' ? 'listingId,price,type' : 'listingId,type';
+    if (Object.keys(c).sort().join() !== fields
+      || (c.type === 'enhancement-list' ? !isEquipmentId(c.equipmentId) : !positive(c.listingId, Number.MAX_SAFE_INTEGER)))
+      throw new ApiError(400, 'Invalid enhanced equipment market command.');
+    return { ...c, ...(c.type === 'enhancement-cancel' ? {} : { price: paymentUnits(c.price, 10000000000) }) } as EnhancementMarketCommand;
+  }
   if (c.type === 'auto-craft') {
     if (Object.keys(c).sort().join() !== 'fingerprint,type' || typeof c.fingerprint !== 'string' || !/^[0-9a-f]{64}$/.test(c.fingerprint))
       throw new ApiError(400, 'Invalid automatic crafting command.');
@@ -138,6 +148,16 @@ export class Exchange {
       CREATE INDEX IF NOT EXISTS market_fills_buyer ON market_fills(buyer, id);
       CREATE INDEX IF NOT EXISTS market_fills_seller ON market_fills(seller, id);
       CREATE TABLE IF NOT EXISTS market_receipts (owner TEXT NOT NULL, id TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,id));`);
+    db.exec(`CREATE TABLE IF NOT EXISTS enhancement_listings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, equipmentId TEXT NOT NULL,
+      equipment TEXT NOT NULL, price INTEGER NOT NULL CHECK(price>0), createdAt INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('open','filled','cancelled')));
+      CREATE UNIQUE INDEX IF NOT EXISTS enhancement_escrow_identity ON enhancement_listings(equipmentId) WHERE status='open';
+      CREATE INDEX IF NOT EXISTS enhancement_listing_book ON enhancement_listings(status,id);`);
+    db.exec(`CREATE TABLE IF NOT EXISTS enhancement_receipts (
+      owner TEXT NOT NULL, id TEXT NOT NULL, request TEXT NOT NULL, result TEXT NOT NULL, PRIMARY KEY(owner,id));`);
+    db.exec(`CREATE TABLE IF NOT EXISTS enhancement_sales (
+      listingId INTEGER PRIMARY KEY, buyer TEXT NOT NULL, seller TEXT NOT NULL, dollars INTEGER NOT NULL, time INTEGER NOT NULL);`);
     db.exec('CREATE TABLE IF NOT EXISTS market_resource_depth (asset TEXT PRIMARY KEY, units TEXT NOT NULL, dollars TEXT NOT NULL)');
     const insert = db.prepare('INSERT OR IGNORE INTO market_pools VALUES (?, ?, ?)');
     for (const asset of marketAssets) {
@@ -272,6 +292,9 @@ export class Exchange {
         dollars: Number(row.dollars) / dollarsScale, price: Number(row.price) / dollarsScale, time: Number(row.time),
         venue: row.venue === 'players' ? 'players' : 'system', ...(row.buyer !== undefined ? { side: row.buyer === owner ? 'buy' as const : 'sell' as const } : {}) }));
     const market: MarketSnapshot = {
+      enhancedListings: this.db.prepare("SELECT * FROM enhancement_listings WHERE status='open' ORDER BY (owner=?) DESC,id DESC LIMIT 200").all(owner)
+        .map(row => ({ id: Number(row.id), equipment: JSON.parse(String(row.equipment)) as EnhancedEquipment,
+          price: Number(row.price) / dollarsScale, createdAt: Number(row.createdAt), yours: row.owner === owner })),
       ...(buyBudget ? { buyBudget } : {}),
       asset, quantity, bids: level('buy'), asks: level('sell'), quotes: { buy: quote('buy'), sell: quote('sell') },
       analysis: this.analysis(owner, now),
@@ -478,6 +501,20 @@ export class Exchange {
     this.check(account);
     return note(account.game, 'Completed resources sold. FTH$ transport deducted from proceeds.');
   }
+  enhancementAction(owner: string, account: Account, value: unknown, now: number, realTime: number): Snapshot & { message: string } {
+    const body = parseActionEnvelope(value);
+    const request = JSON.stringify({ revision: body.revision, command: body.command });
+    const receipt = this.db.prepare('SELECT request,result FROM enhancement_receipts WHERE owner=? AND id=?').get(owner, body.id);
+    if (receipt) {
+      if (receipt.request !== request) throw new ApiError(409, 'Idempotency key already used for a different request.');
+      return JSON.parse(String(receipt.result)) as Snapshot & { message: string };
+    }
+    const command = object(body.command);
+    if (command.type !== 'refine-equipment' && command.type !== 'enhanced-gear') throw new ApiError(400, 'Invalid enhancement command.');
+    const result = apply(account, value, now, realTime);
+    this.db.prepare('INSERT INTO enhancement_receipts VALUES(?,?,?,?)').run(owner, body.id, request, JSON.stringify(result));
+    return result;
+  }
   action(owner: string, session: Session, value: unknown, now: number, realTime: number): ExchangeResult {
     const body = parseActionEnvelope(value), account = session.account;
     const request = JSON.stringify({ revision: body.revision, command: body.command });
@@ -496,7 +533,9 @@ export class Exchange {
     if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
     let asset: MarketAsset;
     let autoCraft: AutoCraftQuote | undefined;
-    if (command.type === 'auto-craft') {
+    if (command.type === 'enhancement-list' || command.type === 'enhancement-cancel' || command.type === 'enhancement-buy') {
+      asset = this.equipmentTrade(owner, account, command, now);
+    } else if (command.type === 'auto-craft') {
       asset = merchantCharter;
       autoCraft = this.executeAutoCraft(owner, account, command.fingerprint, now, realTime);
     } else if (command.type === 'profit-analysis') {
@@ -527,7 +566,10 @@ export class Exchange {
     }
     this.check(account);
     account.revision++; account.lastActionAt = realTime;
-    const message = note(account.game, command.type === 'auto-craft' ? 'Automatic crafting and immediate sales completed.'
+    const message = note(account.game, command.type === 'enhancement-list' ? 'Enhanced equipment listed at a fixed player price.'
+      : command.type === 'enhancement-cancel' ? 'Enhanced equipment listing cancelled. Your equipment was returned.'
+      : command.type === 'enhancement-buy' ? 'Enhanced equipment purchased from another player.'
+      : command.type === 'auto-craft' ? 'Automatic crafting and immediate sales completed.'
       : command.type === 'profit-analysis' ? 'Latest profit analysis purchased. Access expires after one game day.'
       : command.type === 'cancel' ? 'Market order cancelled. Escrow returned.'
       : command.type === 'fund-pool' ? 'Existing FTH$ and owned assets donated to market liquidity.'
@@ -535,6 +577,51 @@ export class Exchange {
     const result = { ...this.read(owner, account, now, realTime, asset, 1), message, ...(autoCraft ? { autoCraft } : {}) };
     this.db.prepare('INSERT INTO market_receipts VALUES (?,?,?,?)').run(owner, body.id, request, JSON.stringify(result));
     return result;
+  }
+  private equipmentTrade(owner: string, account: Account, command: EnhancementMarketCommand, now: number): MarketAsset {
+    const bag = inventory(account), copies = bag.enhancedEquipment ??= [];
+    if (command.type === 'enhancement-list') {
+      const copy = copies.find(copy => copy.id === command.equipmentId);
+      if (!copy) throw new ApiError(409, 'Enhanced equipment is not owned or is already listed.');
+      if (Object.values(bag.enhancedEquipped ?? {}).includes(copy.id)) throw new ApiError(409, 'Unequip enhanced equipment before listing it.');
+      if (Number(this.db.prepare("SELECT COUNT(*) AS count FROM enhancement_listings WHERE owner=? AND status='open'").get(owner)!.count) >= 50)
+        throw new ApiError(409, 'Cancel an enhanced equipment listing before placing more. Maximum 50.');
+      this.db.prepare("INSERT INTO enhancement_listings(owner,equipmentId,equipment,price,createdAt,status) VALUES(?,?,?,?,?,'open')")
+        .run(owner, copy.id, JSON.stringify(copy), command.price, now);
+      copies.splice(copies.indexOf(copy), 1);
+      inventory(account);
+      return copy.item;
+    }
+    const row = this.db.prepare("SELECT * FROM enhancement_listings WHERE id=? AND status='open'").get(command.listingId);
+    if (!row) throw new ApiError(409, 'Open enhanced equipment listing not found.');
+    const copy = JSON.parse(String(row.equipment)) as EnhancedEquipment;
+    if (!validEnhancedEquipment(copy) || copy.id !== row.equipmentId) throw new ApiError(409, 'Invalid equipment listing.');
+    if (copies.some(owned => owned.id === copy.id)) throw new ApiError(409, 'Equipment identity is already owned.');
+    if (command.type === 'enhancement-cancel') {
+      if (row.owner !== owner) throw new ApiError(409, 'Only the seller may cancel this listing.');
+    } else {
+      if (row.owner === owner) throw new ApiError(409, 'You cannot buy your own equipment.');
+      const price = Number(row.price);
+      if (command.price !== price) throw new ApiError(409, 'Equipment price changed. Refresh and confirm again.');
+      if (account.game.dollars < price) throw new ApiError(409, 'Not enough FTH$ to buy this equipment.');
+      const sellerRow = this.db.prepare('SELECT data FROM sessions WHERE id=?').get(row.owner!);
+      if (!sellerRow) throw new ApiError(409, 'Equipment seller is unavailable.');
+      const seller = JSON.parse(String(sellerRow.data)) as Session;
+      if (!Number.isSafeInteger(seller.account.game.dollars + price)) throw new ApiError(409, 'Seller account limit reached.');
+      seller.account.game.dollars += price;
+      seller.account.revision++;
+      note(seller.account.game, 'Enhanced equipment sold to another player.');
+      this.check(seller.account);
+      this.db.prepare('UPDATE public_totals SET dollars=dollars+? WHERE id=1').run(price);
+      this.db.prepare('UPDATE sessions SET data=? WHERE id=?').run(JSON.stringify(seller), row.owner!);
+      account.game.dollars -= price;
+      this.db.prepare('INSERT INTO enhancement_sales VALUES(?,?,?,?,?)').run(command.listingId, owner, row.owner!, price, now);
+    }
+    copies.push(copy);
+    this.db.prepare('UPDATE enhancement_listings SET status=? WHERE id=? AND status=\'open\'')
+      .run(command.type === 'enhancement-cancel' ? 'cancelled' : 'filled', command.listingId);
+    inventory(account);
+    return copy.item;
   }
   fundPool(account: Account, asset: MarketAsset, quantity: number, dollars: number): void {
     if (!isLiquidAsset(asset) || !Number.isSafeInteger(quantity) || quantity <= 0 || !Number.isSafeInteger(dollars) || dollars <= 0) throw new ApiError(400, 'Pool funding requires positive owned assets and FTH$.');

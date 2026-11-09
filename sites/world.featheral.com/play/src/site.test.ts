@@ -159,7 +159,7 @@ test('deadline refresh includes off-cycle crews and retries without polling hidd
   let timestamp = 999, realTime = 0, requests = 0, confirming = false;
   const context = {
     state: { workforce: { cycleAt: 60000, crews, expeditions: [{ readyAt: 2000 }] }, recruitment: { readyAt: 3000 }, serverTime: 0, clockSpeed: 168 },
-    game: { stage: 0 }, document: { hidden: false }, busy: false, synchronizedAt: 0,
+    game: { stage: 0 }, document: { hidden: false }, busy: false, synchronizedAt: 0, inventoryMenuPage: false,
     performance: { now: () => realTime }, renderEnvironment: () => {},
     displayServerTime: () => timestamp, confirmationOpen: () => confirming,
     syncProduction: () => { requests++; },
@@ -336,7 +336,7 @@ test('settlement has a dedicated production entry and the header has individual 
   assert.match(page, /noindex,follow/);
   assert.match(page, /src="\/src\/main.ts"/);
   assert.match(vite, /'settlement\/index': resolve\('settlement', 'index.html'\)/);
-  assert.match(main, /href="\/settlement\/#inventory"/);
+  assert.match(main, /href="\/inventory\/"/);
   assert.doesNotMatch(main, /claim-all/);
   assert.match(main, /data-action="resource-management"/);
   assert.match(main, /data-action="funds-management"/);
@@ -584,7 +584,7 @@ test('settlement tasks support direct and legacy links with safe typed navigatio
   }
   for (const invalid of ['constructor', '__proto__', 'toString', '', null, undefined]) assert.equal(isSettlementTask(invalid), false);
   assert.equal(settlementTaskFromHash('#constructor'), 'overview');
-  assert.deepEqual(settlementDockTasks, ['inventory', 'crafting', 'decorate']);
+  assert.deepEqual(settlementDockTasks, ['overview', 'residents', 'production', 'buildings', 'decorate']);
 });
 test('settlement scene stays separate from focused tasks and buildings open task controls', () => {
   const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'ui-test', population: { global: 0, federation: null }, clockSpeed: 1 };
@@ -721,7 +721,8 @@ test('Explore sidebar prioritizes recurring actions and links to detailed settle
   assert.match(readFileSync(new URL('./explore-layout.css', import.meta.url), 'utf8'), /\.sidebar-action-row\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(sidebar, /recruitmentButton\(true\)/);
   assert.match(sidebar, /class="button sidebar-upgrade"/);
-  for (const task of ['residents', 'production', 'crafting']) assert.match(sidebar, new RegExp(`href="/settlement/#${task}"`));
+  for (const task of ['residents', 'production']) assert.match(sidebar, new RegExp(`href="/settlement/#${task}"`));
+  assert.match(sidebar, /href="\/inventory\/#craft"/);
   assert.doesNotMatch(sidebar, /workforcePanel\(|storagePanel\(|inventoryPanel\(|craftingPanel\(|buildingsPanel\(|data-sidebar-task/);
   assert.match(sidebar, /bag\.pending\.some\(item => !bag\.marketReserved\?\.includes\(item\)\)/);
   assert.doesNotMatch(main, /toggle-sidebar|close-sidebar|sidebar-open/);
@@ -968,7 +969,7 @@ test('mobile settlement tasks share a larger workspace and Water upkeep cannot i
   assert.match(css, /\.settlement-dock>button\{[^}]*min-height:48px/);
   assert.match(css, /\.settlement-view:has\(\.settlement-task-panel:not\(\[hidden\]\)\) \.settlement-panorama\{bottom:132px;visibility:hidden\}/);
   assert.match(settlement, /\.settlement-task-body \.notice:not\(\.water-upkeep\)\{display:flex/);
-  assert.match(css, /\.notice\.water-upkeep\{height:164px;min-height:164px;grid-template-rows:20px 24px 32px 44px/);
+  assert.match(css, /\.notice\.water-upkeep\{height:auto;min-height:0;grid-auto-rows:auto/);
 });
 test('mobile marketplace prioritizes trading and retains searchable selection and scrolling across refreshes', () => {
   const market = readFileSync(new URL('./marketplace.ts', import.meta.url), 'utf8');
@@ -1093,7 +1094,7 @@ test('desktop modals use wider workspaces while retaining scroll access for cons
   assert.match(confirmation, /\.consumption-dialog\[open\]\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(confirmation, /\.consumption-dialog\{[^}]*overflow:auto/);
 });
-test('Water and server-clock cards have stable heights with compact, accessible upkeep timing', () => {
+test('Water cards grow with content and retain compact accessible upkeep timing', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
   const panel = main.slice(main.indexOf('function waterUpkeepPanel('), main.indexOf('function workforcePanel()'));
@@ -1102,7 +1103,7 @@ test('Water and server-clock cards have stable heights with compact, accessible 
   assert.match(panel, /data-ready-at="\$\{upkeep\.readyAt\}" data-compact-time/);
   assert.match(main, /remaining \? compactServerCountdown\(remaining\) : 'Confirming'/);
   assert.match(main, /el\.setAttribute\('aria-label', detailed\)/);
-  assert.match(css, /\.notice\.water-upkeep\{[^}]*height:140px;min-height:140px;flex-shrink:0/);
+  assert.match(css, /\.notice\.water-upkeep\{[^}]*height:auto;min-height:0;flex-shrink:0/);
   assert.match(css, /\.server-clock\{[^}]*height:42px/);
 });
 test('Explore Water upkeep uses a compact daily row with server-timed animated progress', () => {

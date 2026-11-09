@@ -13,12 +13,12 @@ export const settlementTasks = {
   buildings: { label: 'Buildings', icon: 'warehouse', description: 'Compare current benefits, next-level effects and missing supplies.' },
 } as const;
 export type SettlementTask = keyof typeof settlementTasks;
-export const settlementDockTasks: SettlementTask[] = ['inventory', 'crafting', 'decorate'];
+export const settlementDockTasks: SettlementTask[] = ['overview', 'residents', 'production', 'buildings', 'decorate'];
 export function isSettlementTask(value: unknown): value is SettlementTask {
   return typeof value === 'string' && Object.hasOwn(settlementTasks, value);
 }
 export function settlementSectionNavigation(current: SettlementTask | null, language: Language): string {
-  return `<nav class="settlement-panel-navigation" aria-label="${translate('Settlement sections', language)}">${(Object.keys(settlementTasks) as SettlementTask[]).map(task => `<button type="button" data-settlement-panel="${task}" aria-controls="settlement-task-panel" aria-pressed="${task === current}">${icon(settlementTasks[task].icon)}<span>${translate(settlementTasks[task].label, language)}</span></button>`).join('')}</nav>`;
+  return `<nav class="settlement-panel-navigation" aria-label="${translate('Settlement sections', language)}">${(Object.keys(settlementTasks) as SettlementTask[]).filter(task => task !== 'inventory' && task !== 'crafting').map(task => `<button type="button" data-settlement-panel="${task}" aria-controls="settlement-task-panel" aria-pressed="${task === current}">${icon(settlementTasks[task].icon)}<span>${translate(settlementTasks[task].label, language)}</span></button>`).join('')}</nav>`;
 }
 export function settlementTaskFromHash(hash: string): SettlementTask | null {
   if (hash === '#settlement-scene' || hash === '') return null;

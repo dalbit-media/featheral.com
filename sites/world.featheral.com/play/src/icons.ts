@@ -30,6 +30,7 @@ const paths: Record<string, string> = {
   minus: '<path d="M5 12h14"/>',
   locate: '<circle cx="12" cy="12" r="5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
   layers: '<path d="m12 3 10 6-10 6L2 9l10-6ZM2 13l10 6 10-6M2 17l10 6 10-6"/>',
+  inventory: '<rect x="4" y="6" width="16" height="15" rx="3"/><path d="M8 6V4h8v2M4 13h16M9 11v4h6v-4"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3M4 4l2 2M18 18l2 2M4 20l2-2M18 6l2-2"/>',
   moon: '<path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10Z"/>',
   flower: '<circle cx="12" cy="10" r="2"/><path d="M12 8c-5-8-10 0-5 3-5 5 3 10 5 3 3 7 11 2 5-3 5-3 0-11-5-3ZM12 16v6m0-2 5-3"/>',

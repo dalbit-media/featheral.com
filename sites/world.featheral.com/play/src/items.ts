@@ -17,6 +17,9 @@ import { bulkCraftingItems, bulkCraftingPermit, isBulkCraftingItem } from './bul
 import { transportItems, isTransportItem } from './transport-items.ts';
 import { squadItems } from './exploration-squads.ts';
 import { autoCraftingItems, isAutoCraftingItem } from './auto-crafting.ts';
+import { builderItems, isBuilderItem } from './builder-items.ts';
+import { refinementItems } from './enhancement.ts';
+import type { EnhancedEquipment, EnhancedEquipped } from './enhancement.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: { wood: 15, dollars: 0 }, symbol: 'sun' },
@@ -58,7 +61,7 @@ export const decorationItems = {
   skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
 } satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems, ...squadItems, ...autoCraftingItems };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems, ...squadItems, ...autoCraftingItems, ...builderItems, ...refinementItems };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {
@@ -81,6 +84,8 @@ export interface ItemInventory {
   pending: ExplorationFind[];
   equipped: VisibilityItem | null;
   activityEquipment?: EquippedActivities;
+  enhancedEquipment?: EnhancedEquipment[];
+  enhancedEquipped?: EnhancedEquipped;
   placements?: Partial<Record<DecorationSlot, DecorationItem>>;
   layout?: SettlementLayout;
   marketReserved?: ItemId[];
@@ -156,7 +161,7 @@ export function recipeDiscovered(game: Game, item: CraftableItem): boolean {
   return resources.every(resource => found.has(resource as Resource));
 }
 export function craftingStage(item: CraftableItem): number {
-  return isAutoCraftingItem(item) ? autoCraftingItems[item].stage : isTransportItem(item) ? transportItems[item].stage : isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
+  return isBuilderItem(item) ? builderItems[item].stage : isAutoCraftingItem(item) ? autoCraftingItems[item].stage : isTransportItem(item) ? transportItems[item].stage : isBulkCraftingItem(item) ? bulkCraftingItems[item].stage : isActivityEquipment(item) ? activityEquipmentItems[item].stage : isDecorationItem(item) ? decorationItems[item].stage : 0;
 }
 export function craftingStageName(item: CraftableItem): string {
   return stages[craftingStage(item)].name;

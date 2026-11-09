@@ -51,7 +51,7 @@ test('charter is the most expensive recipe, has localized art, and never expands
   for (const item of craftableKeys.filter(item => item !== merchantCharter)) assert.ok(craftingCost(item).dollars! < merchantCharterFee, item);
   assert.ok(isLiquidAsset(merchantCharter));
   assert.equal(isReserveMarketAsset(merchantCharter), false);
-  assert.deepEqual(marketAssets.filter(isReserveMarketAsset), marketAssets.filter(item => item !== merchantCharter));
+  assert.deepEqual(marketAssets.filter(isReserveMarketAsset), marketAssets.filter(item => item !== merchantCharter && item !== 'builder-charter'));
   assert.notEqual(translate(itemName(merchantCharter), 'ko'), itemName(merchantCharter));
   assert.equal((itemArt(merchantCharter).match(/<svg/g) ?? []).length, 1);
   const h = setup();

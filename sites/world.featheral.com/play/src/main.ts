@@ -46,7 +46,8 @@ import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { autoCraftConsumption, claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
-import { chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption, showOperationProgress } from './confirmation.ts';
+import { hasBuilderCharter, isUpgradeTarget, maxUpgradePlan } from './max-upgrades.ts';
+import { chooseUpgradeMode, chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption, showOperationProgress } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
 import { activityKinds, activityName, isActivityItem, isActivityKind } from './automation.ts';
@@ -58,6 +59,11 @@ import './game-layout.css';
 import './world-chat.css';
 import './explore-layout.css';
 import './game-polish.css';
+import './interface.css';
+import { inventoryPageFrame, inventoryTabFromHash } from './inventory-page.ts';
+import { enhancedInventoryPanel, enhancementPanel } from './enhancement-view.ts';
+import { enhancementQuote } from './enhancement.ts';
+import type { EnhancementMarketCommand } from './enhancement.ts';
 import { collectionClaimReason, collectionDurations, collectionItemDetails, collectionReceiptQuantity, isCollectionItem } from './collection.ts';
 import { formatResourceAmount, isResource } from './resource-units.ts';
 import { chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
@@ -88,8 +94,13 @@ document.addEventListener('focusin', prefetchGamePage);
 const navigationPage = gamePage(location.pathname);
 const settlementPage = navigationPage === 'home', marketPage = navigationPage === 'market';
 const bankPage = navigationPage === 'bank';
+const inventoryMenuPage = navigationPage === 'inventory';
 const explorePage = navigationPage === 'world';
-const communityPage = !explorePage && !settlementPage && !marketPage && !bankPage;
+const communityPage = !explorePage && !settlementPage && !marketPage && !bankPage && !inventoryMenuPage;
+if (settlementPage && ['#inventory', '#crafting'].includes(location.hash)) {
+  location.replace(`/inventory/${location.search}${location.hash === '#crafting' ? '#craft' : '#inventory'}`);
+}
+let inventoryTab = inventoryTabFromHash(location.hash);
 let marketplace: Marketplace | null = null;
 let settlementSale: SettlementSale | null = null;
 let settlementResourceSale: SettlementSale | null = null;
@@ -100,6 +111,13 @@ const visitingSettlement = settlementPage ? new URL(location.href).searchParams.
 let inventoryFilter: InventoryFilter = 'all';
 let inventoryPage = 0;
 let inventorySelection: ItemId | null = null;
+let inventorySearch = '';
+let craftingSearch = '';
+let enhancementSelection: string | null = null;
+let enhancementMarket: MarketSnapshot | null = null;
+let enhancementMarketLoading = false;
+let enhancementMarketAttemptAt = -Infinity;
+let enhancementMarketError = '';
 let selectedBuilding: SettlementEntity = 'centre';
 let settlementTask = settlementTaskFromHash(location.hash);
 let craftingFilter: CraftingFilter = 'all';
@@ -158,6 +176,7 @@ app.classList.toggle('settlement-page', settlementPage);
 app.classList.toggle('marketplace-page', marketPage || bankPage);
 app.classList.toggle('explore-page', explorePage);
 app.classList.toggle('community-page', communityPage);
+app.classList.toggle('inventory-page', inventoryMenuPage);
 app.classList.toggle('guide-page', navigationPage === 'help');
 app.classList.toggle('has-world-chat', explorePage || settlementPage || navigationPage === 'atlas');
 app.classList.toggle('atlas-page', navigationPage === 'atlas');
@@ -210,6 +229,7 @@ app.innerHTML = `
     <div class="map-bottom"><span>${icon('compass')} Drag to look around <b>·</b> Click to explore <b>·</b> WASD to move</span><span>PROCEDURAL WORLD <i></i> ENDLESS POSSIBILITIES</span></div>
   </main>
   ${settlementPage ? '<main class="settlement-view" id="settlement-content" aria-label="Settlement"></main>' : ''}
+  ${inventoryMenuPage ? '<main class="inventory-view" id="inventory-content" aria-label="Inventory"></main>' : ''}
   ${marketPage ? '<main class="marketplace-view" id="marketplace-content" aria-label="Marketplace"></main>' : ''}
   ${bankPage ? '<main class="marketplace-view featheral-bank-view" id="bank-content" aria-label="Wallet and staking"></main>' : ''}
   ${communityPage ? '<main class="community-view" id="community-content" tabindex="-1"></main>' : ''}
@@ -392,6 +412,12 @@ async function act(command: Command, recenter = false): Promise<boolean> {
   const submittedDraft = command.type === 'assign' && assignmentDraft !== undefined && Number(assignmentDraft) === command.workers ? assignmentDraft : undefined;
   busy = true;
   try {
+    if (isUpgradeTarget(command) && hasBuilderCharter(state)) {
+      const choice = await chooseUpgradeMode(command, maxUpgradePlan(state, command), language, gameConsumption(state, command)?.subject ?? 'Master Builder Charter');
+      if (!choice) return false;
+      command = choice;
+      timedKey = timedActionKey(command);
+    }
     const activity = fieldMissionActivity(command, state.game);
     if (activity) {
       const options = squadOptions(state, activity);
@@ -459,6 +485,7 @@ async function act(command: Command, recenter = false): Promise<boolean> {
     pendingTimedAction = null;
     app.classList.remove('action-pending');
     renderActionTiming();
+    if (inventoryMenuPage) renderInventoryPage();
     void saveCrewAssignments();
   }
 }
@@ -490,6 +517,7 @@ function render(): void {
   if (explorePage) renderSidebar();
   renderPopulation();
   if (settlementPage) renderSettlement();
+  if (inventoryMenuPage) renderInventoryPage();
   renderManagement();
   renderClaimControls();
   if (marketPage) marketplace?.balances();
@@ -797,7 +825,7 @@ function renderManagement(): void {
         const item = state.inventory.items.find(id => matches(id, resource)) ?? state.inventory.items.find(id => matches(id, 'all'));
         const all = item && isCollectionItem(item) && collectionItemDetails(item).resource === 'all';
         return `<button class="button automation-item" data-action="activate-collection" ${item ? `data-item="${item}"` : 'disabled'}>${icon('warehouse')}<strong>${weeks}w</strong><small>${all ? 'All resources' : item ? 'Activate' : 'Find or craft'}</small></button>`;
-      }).join('')}</div><a class="button" href="/settlement/#inventory">Manage collector items</a><p class="fineprint">Find, craft or trade collection items for up to 52 game weeks. All-resource bundles cover all four resources. Transport always costs FTH$.</p></section>
+      }).join('')}</div><a class="button" href="/inventory/">Manage collector items</a><details class="disclosure" data-detail="collection-help"><summary>Collection rules ${icon('chevron')}</summary><p class="fineprint">Find, craft or trade collection items for up to 52 game weeks. All-resource bundles cover all four resources. Transport always costs FTH$.</p></details></section>
       <section class="resource-allocation"><h3>Crew allocation</h3><p class="fineprint">${fmt(state.availableWorkers)} ${translate('Available now', language)} · ${fmt(game.population)} ${translate('Population', language)}</p>
       <button class="button wide" data-action="automatic" aria-pressed="${state.workforce.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</button>
       ${crewManagementCard(resource, false)}</section><section class="resource-trading"><div data-resource-sale="${resource}"></div>
@@ -818,7 +846,7 @@ async function collectAndSell(resource: Resource): Promise<void> {
   managementDialog.querySelector<HTMLElement>('.resource-sale')?.scrollIntoView({ block: 'nearest' });
 }
 function gearCard(): string {
-  return `<a class="sidebar-gear" href="/settlement/#inventory">${icon('layers')}<span><strong>Item inventory</strong><small><span>${state.inventory.equipped ? translate(itemName(state.inventory.equipped), language) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></small></span>${icon('chevron')}</a>`;
+  return `<a class="sidebar-gear" href="/inventory/">${icon('layers')}<span><strong>Item inventory</strong><small><span>${state.inventory.equipped ? translate(itemName(state.inventory.equipped), language) : 'No item equipped'}</span> · <span>${radius(game)}-tile view</span></small></span>${icon('chevron')}</a>`;
 }
 function renderSidebar(): void {
   const next = stages[game.stage + 1], quote = nextExploration(game, state.workforce.expeditions);
@@ -833,7 +861,7 @@ function renderSidebar(): void {
   replaceContent(root, `
     <div class="explore-summary"><div class="settlement-card"><div class="settlement-card-body"><span class="mini-tag">${game.stage < 0 ? 'UNSETTLED' : stages[game.stage].name.toUpperCase()}</span>
     <div class="sidebar-stats"><span role="img" aria-label="${fmt(game.population)} residents">${icon('people')}<strong>${fmt(game.population)}</strong></span><span role="img" aria-label="${fmt(game.explored.length)} explored tiles">${icon('compass')}<strong>${fmt(game.explored.length)}</strong></span></div>
-    ${next ? `<div class="next-stage"><span>${icon('arrow')} ${next.name}</span>${next.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} ${icon('people')}</span>` : ''}</div>${next.population ? meter(game.population, next.population, `Residents for ${next.name}`) : requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed)))}` : '<div class="complete-label">Capital complete</div>'}</div></div>
+    ${next ? `<div class="next-stage"><span>${icon('arrow')} ${next.name}</span>${next.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} ${icon('people')}</span>` : ''}</div>${next.population ? meter(game.population, next.population, `Residents for ${next.name}`) : requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed)))}` : '<div class="complete-label">Great Megacity complete</div>'}</div></div>
     </div>
     <div class="sidebar-primary-actions" role="group" aria-label="Frequent actions">
       ${game.stage < 0 ? foundingPanel() : `
@@ -852,7 +880,7 @@ function renderSidebar(): void {
       ${game.stage >= 0 && next ? `<button class="button sidebar-upgrade" data-action="upgrade" ${upgradeReady ? '' : 'disabled'}>${icon('plus')} Upgrade ${costChips(next.cost)}</button>` : ''}
       <a class="button" href="/settlement/#residents">${icon('people')} Residents</a>
       <a class="button" href="/settlement/#production">${icon('warehouse')} Storage</a>
-      <a class="button" href="/settlement/#crafting">${icon('spark')} Crafting</a>
+      <a class="button" href="/inventory/#craft">${icon('spark')} Crafting</a>
     </div>
     ${gearCard()}`);
   renderRecruitment(); renderWorkTimers(); localize(root);
@@ -916,6 +944,8 @@ function replaceContent(root: Element, content: string): void {
   const oldTaskBody = root.querySelector<HTMLElement>('.settlement-task-body');
   if (isSettlementTask(oldTaskBody?.dataset.task)) taskScroll.set(oldTaskBody.dataset.task, oldTaskBody.scrollTop);
   const previous = document.activeElement instanceof HTMLElement && root.contains(document.activeElement) ? document.activeElement : null;
+  const selectionStart = previous instanceof HTMLInputElement && previous.type === 'search' ? previous.selectionStart : null;
+  const selectionEnd = previous instanceof HTMLInputElement && previous.type === 'search' ? previous.selectionEnd : null;
   const focusAction = previous?.dataset.action;
   const focusResource = previous?.dataset.resource;
   const focusItem = previous?.dataset.item;
@@ -923,6 +953,8 @@ function replaceContent(root: Element, content: string): void {
   const focusPage = previous?.dataset.page;
   const focusEntity = previous?.dataset.entity;
   const focusFederation = previous?.dataset.federation;
+  const focusCopy = previous?.dataset.copy;
+  const focusListing = previous?.dataset.listing;
   const focusDetail = previous?.matches('summary') ? previous.parentElement?.dataset.detail : undefined;
   const focusTask = previous?.dataset.settlementPanel;
   root.querySelectorAll<HTMLDetailsElement>('details[data-detail]').forEach(el => {
@@ -930,6 +962,7 @@ function replaceContent(root: Element, content: string): void {
   });
   const drafts = new Map([...crewDrafts, ...layoutDrafts]);
   root.querySelectorAll<HTMLInputElement>('[data-customization-name]').forEach(input => drafts.set(input.id, input.value));
+  root.querySelectorAll<HTMLInputElement>('[data-preserve-draft]').forEach(input => drafts.set(input.id, input.value));
   root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#federation-asset,#federation-amount').forEach(input => drafts.set(input.id, input.value));
   const scrollTop = root.scrollTop;
   const canvas = root.querySelector<HTMLCanvasElement>('#settlement-world');
@@ -958,7 +991,11 @@ function replaceContent(root: Element, content: string): void {
   updateCrewSaveStatus();
   root.querySelectorAll<HTMLDetailsElement>('details').forEach(el => { el.open = disclosedDetails.has(el.dataset.detail ?? ''); });
   if (previous?.id) root.querySelector<HTMLElement>(`#${previous.id}`)?.focus({ preventScroll: true });
-  if (focusAction && !previous?.id) root.querySelector<HTMLElement>(`[data-action="${focusAction}"]${focusResource ? `[data-resource="${focusResource}"]` : ''}${focusItem ? `[data-item="${focusItem}"]` : ''}${focusFilter ? `[data-filter="${focusFilter}"]` : ''}${focusPage !== undefined ? `[data-page="${focusPage}"]` : ''}${focusEntity ? `[data-entity="${focusEntity}"]` : ''}${focusFederation ? `[data-federation="${focusFederation}"]` : ''}`)?.focus({ preventScroll: true });
+  if (selectionStart !== null && previous?.id) {
+    const restored = root.querySelector<HTMLInputElement>(`#${previous.id}`);
+    restored?.setSelectionRange(selectionStart, selectionEnd);
+  }
+  if (focusAction && !previous?.id) root.querySelector<HTMLElement>(`[data-action="${focusAction}"]${focusResource ? `[data-resource="${focusResource}"]` : ''}${focusItem ? `[data-item="${focusItem}"]` : ''}${focusFilter ? `[data-filter="${focusFilter}"]` : ''}${focusPage !== undefined ? `[data-page="${focusPage}"]` : ''}${focusEntity ? `[data-entity="${focusEntity}"]` : ''}${focusFederation ? `[data-federation="${focusFederation}"]` : ''}${focusCopy ? `[data-copy="${focusCopy}"]` : ''}${focusListing ? `[data-listing="${focusListing}"]` : ''}`)?.focus({ preventScroll: true });
   if (focusDetail) root.querySelector<HTMLElement>(`[data-detail="${focusDetail}"] > summary`)?.focus({ preventScroll: true });
   if (focusTask) root.querySelector<HTMLElement>(`[data-settlement-panel="${focusTask}"]`)?.focus({ preventScroll: true });
   if (focusAction === 'remove-layout' && !root.contains(document.activeElement)) root.querySelector<HTMLElement>('[data-action="prepare-layout"]')?.focus({ preventScroll: true });
@@ -967,6 +1004,10 @@ function replaceContent(root: Element, content: string): void {
   if (taskBody && isSettlementTask(taskBody.dataset.task)) taskBody.scrollTop = taskScroll.get(taskBody.dataset.task) ?? 0;
 }
 function showSettlementTask(task: SettlementTask | null, focus = true): void {
+  if (task === 'inventory' || task === 'crafting') {
+    location.assign(`/inventory/?lang=${language}#${task === 'crafting' ? 'craft' : 'inventory'}`);
+    return;
+  }
   if (task) setChatExpanded(false);
   const previous = settlementTask;
   settlementTask = task;
@@ -1007,7 +1048,7 @@ function selectSettlementCell(entity: SettlementEntity | null, position: GridPos
   showSettlementTask(settlementTask === 'decorate' || !building ? 'decorate' : building.task);
 }
 async function refreshCraftingPrices(force = false): Promise<void> {
-  if (busy || craftingPricesLoading || document.hidden || settlementTask !== 'crafting'
+  if (busy || craftingPricesLoading || document.hidden || !inventoryMenuPage || inventoryTab !== 'craft'
     || !force && performance.now() - craftingPricesAttemptAt < serverSyncIntervalMs) return;
   craftingPricesLoading = true;
   craftingPricesAttemptAt = performance.now();
@@ -1022,7 +1063,7 @@ async function refreshCraftingPrices(force = false): Promise<void> {
     console.error('Crafting market prices unavailable:', error);
   } finally {
     craftingPricesLoading = false;
-    if (settlementTask === 'crafting' && !busy && !confirmationOpen() && !document.hidden) renderSettlement();
+    if (inventoryMenuPage && inventoryTab === 'craft' && !busy && !confirmationOpen() && !document.hidden) renderInventoryPage();
   }
 }
 async function purchaseCraftingAnalysis(): Promise<void> {
@@ -1044,7 +1085,7 @@ async function purchaseCraftingAnalysis(): Promise<void> {
     toast(error instanceof Error ? error.message : 'The analysis could not be completed.', true);
   } finally {
     busy = false;
-    if (settlementTask === 'crafting') renderSettlement();
+    if (inventoryMenuPage && inventoryTab === 'craft') renderInventoryPage();
   }
 }
 async function automaticCraftAndSell(): Promise<void> {
@@ -1069,7 +1110,76 @@ async function automaticCraftAndSell(): Promise<void> {
   } finally {
     finishProgress?.();
     busy = false;
-    renderSettlement();
+    render();
+  }
+}
+function renderInventoryPage(): void {
+  const root = document.querySelector('#inventory-content')!;
+  let content = '';
+  if (inventoryTab === 'inventory') content = enhancedInventoryPanel(state, language)
+    + inventoryPanel(state, costChips, inventoryFilter, language, 'explore', inventoryPage, inventorySelection, inventorySearch);
+  else if (inventoryTab === 'craft') {
+    void refreshCraftingPrices();
+    content = `<p class="fineprint crafting-market-status" role="status">${translate(craftingPricesError ? 'Prices unavailable' : craftingPricesLoading ? 'Loading prices...' : 'Live market prices', language)}${craftingPricesError ? `: ${escape(craftingPricesError)} <button class="button" data-action="crafting-prices">${translate('Retry', language)}</button>` : ''}</p>`
+      + craftingPanel(state, costChips, craftingFilter, 'explore', 1, language, craftingTickers, craftingAnalysis,
+        displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed), busy, craftingPricesLoading, craftingSearch);
+  }
+  else {
+    void refreshEnhancementMarket();
+    content = enhancementPanel(state, enhancementSelection, enhancementMarket, enhancementMarketLoading, enhancementMarketError, busy || enhancementMarketLoading, language, costChips);
+  }
+  replaceContent(root, inventoryPageFrame(inventoryTab, content, language));
+  const inventorySearchInput = root.querySelector<HTMLInputElement>('#inventory-search');
+  if (inventorySearchInput) inventorySearchInput.value = inventorySearch;
+  const craftingSearchInput = root.querySelector<HTMLInputElement>('#crafting-search');
+  if (craftingSearchInput) craftingSearchInput.value = craftingSearch;
+  localize(root);
+  renderActionTiming();
+}
+async function refreshEnhancementMarket(force = false): Promise<void> {
+  if (busy || confirmationOpen() || enhancementMarketLoading || document.hidden
+    || !inventoryMenuPage || inventoryTab !== 'enhance'
+    || !force && performance.now() - enhancementMarketAttemptAt < serverSyncIntervalMs) return;
+  enhancementMarketLoading = true;
+  enhancementMarketAttemptAt = performance.now();
+  try {
+    const response = await readMarket('torch', 1);
+    enhancementMarket = response.market;
+    if (response.revision >= state.revision) synchronize(response);
+    enhancementMarketError = '';
+  } catch (error) {
+    enhancementMarket = null;
+    enhancementMarketError = error instanceof Error ? error.message : 'Equipment listings unavailable.';
+    console.error('Equipment listings unavailable:', error);
+  } finally {
+    enhancementMarketLoading = false;
+    if (inventoryMenuPage && inventoryTab === 'enhance' && !confirmationOpen()) renderInventoryPage();
+  }
+}
+async function tradeEnhancedEquipment(command: EnhancementMarketCommand): Promise<void> {
+  if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return; }
+  busy = true;
+  let finishProgress: (() => void) | undefined;
+  try {
+    const quote = marketConsumption(command, state, enhancementMarket ?? undefined);
+    if (!quote || !await confirmConsumption(quote, language)) return;
+    finishProgress = showOperationProgress('Updating equipment market', 'Please wait for the server to confirm this trade.', language);
+    const response = await sendMarket(state, command);
+    synchronize(response);
+    enhancementMarket = response.market;
+    enhancementMarketError = '';
+    enhancementMarketAttemptAt = performance.now();
+    if (state.message) toast(state.message);
+  } catch (error) {
+    toast(error instanceof Error ? error.message : 'Equipment trade failed.', true);
+    enhancementMarket = null;
+    enhancementMarketAttemptAt = -Infinity;
+    try { synchronize(await refresh()); }
+    catch (refreshError) { toast(`Server state unavailable; reconnect before retrying. ${refreshError instanceof Error ? refreshError.message : ''}`, true); }
+  } finally {
+    finishProgress?.();
+    busy = false;
+    renderInventoryPage();
   }
 }
 function renderSettlement(): void {
@@ -1091,27 +1201,20 @@ function renderSettlement(): void {
   else if (settlementTask === 'residents') content = management && management !== 'funds' ? '<button class="button" data-action="population-management">Population management</button>' : populationManagement();
   else if (settlementTask === 'production') content = storagePanel();
   else if (settlementTask === 'sell') content = '<div data-settlement-resource-sale></div>';
-  else if (settlementTask === 'inventory') content = inventoryPanel(state, costChips, inventoryFilter, language, 'settlement', inventoryPage, inventorySelection);
-  else if (settlementTask === 'crafting') {
-    void refreshCraftingPrices();
-    content = `<p class="fineprint crafting-market-status" role="status">${translate(craftingPricesError ? 'Prices unavailable' : craftingPricesLoading ? 'Loading prices...' : 'Live market prices', language)}${craftingPricesError ? `: ${escape(craftingPricesError)} <button class="button" data-action="crafting-prices">${translate('Retry', language)}</button>` : ''}</p>`
-      + craftingPanel(state, costChips, craftingFilter, 'settlement', 1, language, craftingTickers, craftingAnalysis,
-        displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed), busy, craftingPricesLoading);
-  }
   else if (settlementTask === 'decorate') content = settlementLayoutPanel(state, selectedBuilding, language);
   else if (settlementTask === 'buildings') content = `${progressionPanel()}${buildingsPanel()}`;
   if (settlementTask === 'buildings' || settlementTask === 'production') content += '<div data-settlement-sale></div>';
   const goal = next ? game.stage < 0 || game.population >= next.population
     ? `<button class="button primary" data-settlement-panel="buildings">${icon('layers')} ${next.name} ${icon('arrow')}</button>`
-    : recruitmentButton() : '<strong>Capital complete</strong>';
+    : recruitmentButton() : '<strong>Great Megacity complete</strong>';
   replaceContent(root, `
     ${settlementScene(state, language, settlementTask === 'decorate' || pendingPlacement !== null)}
-    <div class="settlement-goal"><small>NEXT TIER</small><strong>${next?.name ?? 'Capital'}</strong>${next?.population ? meter(game.population, next.population, `Residents for ${next.name}`) : ''}${next?.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} residents</span>` : ''}${goal}</div>
+    <div class="settlement-goal"><small>NEXT TIER</small><strong>${next?.name ?? stages.at(-1)!.name}</strong>${next?.population ? meter(game.population, next.population, `Residents for ${next.name}`) : ''}${next?.population ? `<span>${fmt(game.population)} / ${fmt(next.population)} residents</span>` : ''}${goal}</div>
     ${pendingPlacement ? `<div class="placement-prompt" role="status"><span>${translate(`Choose an empty land cell for ${settlementEntityName(pendingPlacement.entity)}.`, language)}</span><button class="button" data-action="cancel-placement">Cancel placement</button></div>` : ''}
     <section class="settlement-task-panel" id="settlement-task-panel" role="region" aria-labelledby="settlement-task-title" ${settlementTask ? '' : 'hidden'}>
       <header class="settlement-task-heading"><h2 id="settlement-task-title" tabindex="-1">${icon(settlementTasks[settlementTask ?? 'overview'].icon)}${settlementTasks[settlementTask ?? 'overview'].label}</h2><button class="task-close" data-action="close-settlement-task" aria-label="Close settlement panel">${icon('close')}</button></header>
-      ${settlementTask === 'inventory' ? '' : settlementSectionNavigation(settlementTask, language)}
-      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}">${settlementTask === 'inventory' ? '' : `<p class="settlement-task-description">${translate(settlementTasks[settlementTask ?? 'overview'].description, language)}</p>`}${content}</div>
+      ${settlementSectionNavigation(settlementTask, language)}
+      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}">${content}</div>
     </section>
     <nav class="settlement-dock" aria-label="Settlement actions">${settlementDockTasks.map(task => {
       const badge = task === 'inventory' ? state.inventory.pending.length : 0;
@@ -1137,7 +1240,7 @@ function waterUpkeepPanel(compact = false): string {
   return `<div class="notice water-upkeep" role="status"><div class="water-upkeep-heading"><strong>Daily Water</strong>${costChips({ water: upkeep.dailyConsumption })}</div>
     <div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>
     <div class="water-upkeep-impact"><p class="fineprint">50 L per resident / day before climate adjustments.</p>${upkeep.paused ? '<p class="water-shortage-text">Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.</p>' : ''}</div>
-    ${state.populationCycle ? `<div class="water-upkeep-countdown"><span>${translate('Next population update', language)}</span><strong data-ready-at="${state.populationCycle.readyAt}" data-compact-time></strong></div><p class="fineprint">${translate('Fully supplied settlements grow 1% per game week, minimum one resident. Shortages reduce population by up to 5% per week; fractional losses carry forward. Below half the current tier requirement, settlements downgrade while keeping buildings and items.', language)}</p><p class="fineprint">${translate('Last weekly population change', language)}: ${state.populationCycle.lastChange > 0 ? '+' : ''}${fmt(state.populationCycle.lastChange)}</p>` : ''}
+    ${state.populationCycle ? `<div class="water-upkeep-countdown"><span>${translate('Next population update', language)}</span><strong data-ready-at="${state.populationCycle.readyAt}" data-compact-time></strong></div><p class="fineprint">${translate('Last weekly population change', language)}: ${state.populationCycle.lastChange > 0 ? '+' : ''}${fmt(state.populationCycle.lastChange)}</p><details class="disclosure" data-detail="population-growth"><summary>${translate('Growth rules', language)} ${icon('chevron')}</summary><p class="fineprint">${translate('Fully supplied settlements grow 1% per game week, minimum one resident. Shortages reduce population by up to 5% per week; fractional losses carry forward. Below half the current tier requirement, settlements downgrade while keeping buildings and items.', language)}</p></details>` : ''}
     <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>${settlementUpkeepPanel()}`;
 }
 function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal' | 'oil'): string {
@@ -1151,11 +1254,11 @@ function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal' | 'oil')
     const explanation = resource === 'wood'
       ? 'Heating baseline: 2 kg of Wood per resident per day at the reference heating demand. Cold, wet and stormy conditions increase use.'
       : resource === 'metal' ? 'Repair baseline: 0.2 kg of Metal per resident per day. Rain, snow, storms and extreme temperatures increase maintenance.'
-      : 'Oil fuel per resident per game day: Town 0.001 bbl, District 0.002, City 0.004, Metropolis 0.008, Capital 0.016. Demand is not climate-adjusted.';
+      : 'Oil fuel per resident per game day: Town 0.001 bbl, District 0.002, City 0.004, Metropolis 0.008, Capital 0.016, Regional Hub 0.024, Urban Center 0.032, Metropolitan Region 0.040, World City 0.048, Global City 0.064, Megacity 0.128, Great Megacity 0.256. Demand is not climate-adjusted.';
     return `<div class="${compact ? 'water-upkeep-row' : 'notice water-upkeep'}${use.shortage ? ' supply-shortage' : ''}">
       <span class="water-upkeep-use" title="${escape(translate(explanation, language))}">${icon(resource)}<strong>${translate(label, language)} · ${resourceFmt(resource, use.dailyConsumption)}<small>/${translate(resource === 'oil' ? 'game day' : 'day', language)}</small></strong></span>
       ${compact ? completionMeter(readyAt - worldDayMs, readyAt, 'Next consumption', true)
-        : `<p class="fineprint">${translate(explanation, language)}</p><div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${readyAt}" data-compact-time></strong></div>`}
+        : `<div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${readyAt}" data-compact-time></strong></div><details class="disclosure" data-detail="upkeep-${resource}"><summary>${translate('Consumption rules', language)} ${icon('chevron')}</summary><p class="fineprint">${translate(explanation, language)}</p></details>`}
       <a href="/market/?asset=${resource}&amp;side=buy">${icon('plus')}${translate(resource === 'wood' ? 'Buy Wood' : resource === 'metal' ? 'Buy Metal' : 'Buy Oil', language)}</a>
       ${use.shortage ? `<small role="status">${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}</small>` : ''}</div>`;
   }).join('');
@@ -1190,18 +1293,18 @@ function workforcePanel(): string {
     : counts.available < 2 ? 'Exploration requires two available residents.'
       : !next ? 'No nearby destination' : state.dollars < next.dollars ? 'Not enough FTH$.' : '');
   return `<div class="population-workspace"><section class="population-overview"><div class="management-metrics"><div>${icon('people')}<small>Population</small><strong>${fmt(game.population)}</strong></div><div><small>Gathering now</small><strong>${fmt(counts.gathering)}</strong></div><div><small>Exploring now</small><strong>${fmt(counts.exploring)}</strong></div><div><small>Available now</small><strong>${fmt(counts.available)}</strong></div></div>
-    <p class="fineprint">Available residents are not inactive or lost. They can join a two-person expedition now; gathering assignments start at the next work-week boundary.</p>
+    <p class="fineprint">Available residents can explore now. Crew changes start next week.</p>
     <div class="management-supply"><span>Water reserve</span>${meter(game.stock.water, state.waterUpkeep?.weeklyConsumption ?? 0, 'Weekly Water reserve', 'water')}</div>
     ${recruitmentButton()}
     <h3 class="panel-section-heading">${translate(work.automatic ? 'Gathering now' : 'Next-week assignment', language)} <span>${plannedTotal} / ${counts.assignmentCapacity}</span></h3>
     ${waterUpkeepPanel()}
     <button class="button wide" data-action="automatic" aria-pressed="${work.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${work.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}${work.automatic ? '<span class="allocation-target">50%</span>' : ''}</button>
-    ${work.automatic ? '<p class="fineprint">Auto uses up to half the population, including explorers. The rest stay available. Auto recalculates next week.</p>' : ''}
-    <p class="fineprint">Edits save automatically and switch to manual. Current gathering and expeditions finish unchanged; reducing next-week assignments does not free residents immediately.</p>
-    <p class="fineprint">Gathering leaves room for at least two explorers in total. Residents already exploring count toward that reserve, not in addition to it.</p>
+    <p class="fineprint">${work.automatic ? 'Auto targets 50% utilization. Recalculates next week.' : 'Edits save automatically. Active jobs finish unchanged.'}</p>
     <details class="disclosure" data-detail="workforce-help"><summary>Allocation & automation ${icon('chevron')}</summary>${activityKinds.map(activityAutomationPanel).join('')}
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
+    <p class="fineprint">Edits save automatically and switch to manual. Current gathering and expeditions finish unchanged; reducing next-week assignments does not free residents immediately.</p>
+    <p class="fineprint">Gathering leaves room for at least two explorers in total. Residents already exploring count toward that reserve, not in addition to it.</p>
     <p class="fineprint">Every crew needs active residents and a full game week. Collect each resource to pay FTH$ transport for all workers. Auto-collection requires an active resource-specific item. Full storage pauses new work.</p>
     <p class="fineprint">Residents consume Water, heating Wood and repair Metal daily, plus Oil fuel from Town onward. Oil demand doubles each tier through Capital. Shortages pause new exploration and recruitment and gradually reduce population; paid jobs remain.</p>
     </details></details>
@@ -1242,7 +1345,7 @@ function progressionPanel(): string {
   const ready = next && canAfford(game, next.cost) && game.population >= next.population
     && (game.stage >= 0 || !isWater(terrainAt(game.position.x, game.position.y, game.seed)));
   return `
-    ${next ? `<div class="upgrade-card settlement-tier-card"><div class="upgrade-target">${icon('layers')}<div><small>NEXT TIER</small><h3>${next.name}</h3></div>${icon('arrow')}</div><div class="requirement-list">${requirement('people', `${fmt(next.population)} residents`, game.population >= next.population)}${game.stage < 0 ? requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed))) : ''}</div><div class="consumption-costs">${costChips(next.cost)}</div><button class="button primary compact-item-action" data-action="upgrade" data-action-eligible="${Boolean(ready)}" aria-label="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" title="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" ${ready ? '' : 'disabled'}>${icon(ready ? 'plus' : 'lock')}</button></div>` : `<div class="notice">${icon('check')} Capital complete</div>`}
+    ${next ? `<div class="upgrade-card settlement-tier-card"><div class="upgrade-target">${icon('layers')}<div><small>NEXT TIER</small><h3>${next.name}</h3></div>${icon('arrow')}</div><div class="requirement-list">${requirement('people', `${fmt(next.population)} residents`, game.population >= next.population)}${game.stage < 0 ? requirement('home', 'Dry land', !isWater(terrainAt(game.position.x, game.position.y, game.seed))) : ''}</div><div class="consumption-costs">${costChips(next.cost)}</div><button class="button primary compact-item-action" data-action="upgrade" data-action-eligible="${Boolean(ready)}" aria-label="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" title="${escape(translate(game.stage < 0 ? 'Settle' : 'Upgrade', language))}: ${escape(translate(next.name, language))}" ${ready ? '' : 'disabled'}>${icon(ready ? 'plus' : 'lock')}</button></div>` : `<div class="notice">${icon('check')} Great Megacity complete</div>`}
     ${game.stage < 0 ? `<a class="button wide" href="/explore/">Gather founding supplies ${icon('arrow')}</a>` : next && !ready ? `<p class="upgrade-guidance">Meet the highlighted requirements to upgrade.</p><button class="button wide" data-settlement-panel="${game.population < next.population ? 'residents' : 'production'}">${game.population < next.population ? 'Manage residents' : 'Manage production'} ${icon('arrow')}</button>` : ''}`;
 }
 function buildingsPanel(): string {
@@ -1374,6 +1477,14 @@ app.addEventListener('keydown', event => {
   }
 });
 app.addEventListener('input', event => {
+  if (event.target instanceof HTMLInputElement && event.target.hasAttribute('data-inventory-search')) {
+    inventorySearch = event.target.value; inventoryPage = 0;
+    renderInventoryPage();
+  }
+  if (event.target instanceof HTMLInputElement && event.target.hasAttribute('data-crafting-search')) {
+    craftingSearch = event.target.value;
+    renderInventoryPage();
+  }
   if (event.target instanceof HTMLInputElement && event.target.id === 'journal-search') {
     journalQuery = event.target.value.trim().toLocaleLowerCase(languageLocale);
     renderJournal();
@@ -1394,12 +1505,52 @@ app.addEventListener('click', event => {
   if (!target) return;
   if (isSettlementTask(target.dataset.settlementPanel)) {
     const task = target.dataset.settlementPanel;
-    if (settlementPage) showSettlementTask(target.closest('.settlement-dock') && task === settlementTask ? null : task);
+    if (task === 'inventory' || task === 'crafting') location.assign(`/inventory/?lang=${language}#${task === 'crafting' ? 'craft' : 'inventory'}`);
+    else if (settlementPage) showSettlementTask(target.closest('.settlement-dock') && task === settlementTask ? null : task);
     else location.assign(`/settlement/?lang=${language}#${task}`);
     return;
   }
   const action = target.dataset.action;
   switch (action) {
+    case 'enhance-select':
+      enhancementSelection = target.dataset.copy ?? null;
+      if (inventoryTab !== 'enhance') location.hash = 'enhance';
+      else renderInventoryPage();
+      break;
+    case 'enhancement-refresh': void refreshEnhancementMarket(true); break;
+    case 'refine-equipment': {
+      const selected = target.dataset.copy;
+      if (!selected) break;
+      const quote = enhancementQuote(game, state.inventory, selected);
+      if (!quote.eligible) { toast(quote.reason ?? 'Enhancement unavailable.', true); break; }
+      const originalIds = new Set(state.inventory.enhancedEquipment?.map(copy => copy.id));
+      void act({ type: 'refine-equipment', target: selected, fingerprint: quote.fingerprint }).then(accepted => {
+        if (accepted) {
+          enhancementSelection = state.inventory.enhancedEquipment?.find(copy => !originalIds.has(copy.id))?.id ?? selected;
+          renderInventoryPage();
+        }
+      });
+      break;
+    }
+    case 'enhanced-gear':
+      if (isEquipmentActivity(target.dataset.activity) && target.dataset.copy)
+        void act({ type: 'enhanced-gear', activity: target.dataset.activity, id: target.hasAttribute('data-unequip') ? null : target.dataset.copy });
+      break;
+    case 'enhancement-list': {
+      const id = target.dataset.copy;
+      if (!id) break;
+      const input = document.getElementById(`equipment-price-${id}`);
+      if (!(input instanceof HTMLInputElement) || !input.reportValidity()) break;
+      void tradeEnhancedEquipment({ type: 'enhancement-list', equipmentId: id, price: Number(input.value) });
+      break;
+    }
+    case 'enhancement-buy': case 'enhancement-cancel': {
+      const id = Number(target.dataset.listing);
+      const listing = enhancementMarket?.enhancedListings?.find(listing => listing.id === id);
+      if (!listing) { toast('Equipment listing changed. Refresh and try again.', true); break; }
+      void tradeEnhancedEquipment(action === 'enhancement-buy' ? { type: action, listingId: id, price: listing.price } : { type: action, listingId: id });
+      break;
+    }
     case 'crafting-prices':
       void refreshCraftingPrices(true);
       break;
@@ -1528,7 +1679,7 @@ app.addEventListener('click', event => {
       const filter = target.dataset.filter;
       if (filter === 'all' || filter === 'utility' || filter === 'efficiency' || filter === 'bulk' || filter === 'decoration' || filter === 'collectible' || filter === 'collectors' || filter === 'customization') {
         inventoryFilter = filter; inventoryPage = 0; inventorySelection = null;
-        if (settlementPage) renderSettlement(); else renderSidebar();
+        render();
       }
       break;
     }
@@ -1536,7 +1687,7 @@ app.addEventListener('click', event => {
       const page = Number(target.dataset.page);
       if (Number.isSafeInteger(page) && page >= 0 && page < itemStorage[state.inventory.storage].capacity / inventoryPageSize) {
         inventoryPage = page; inventorySelection = null;
-        renderSettlement();
+        render();
       }
       break;
     }
@@ -1544,7 +1695,7 @@ app.addEventListener('click', event => {
       const item = state.inventory.items.find(id => id === target.dataset.item);
       if (item) {
         inventorySelection = item;
-        if (settlementPage) renderSettlement(); else renderSidebar();
+        render();
         document.querySelector<HTMLButtonElement>(`[data-action="inventory-select"][data-item="${item}"]`)?.focus({ preventScroll: true });
       }
       break;
@@ -1553,7 +1704,7 @@ app.addEventListener('click', event => {
       const filter = target.dataset.filter;
       if (filter === 'all' || filter === 'utility' || filter === 'efficiency' || filter === 'bulk' || filter === 'decoration' || filter === 'affordable' || filter === 'collectors' || filter === 'customization') {
         craftingFilter = filter;
-        if (settlementPage) renderSettlement(); else renderSidebar();
+        render();
       }
       break;
     }
@@ -1626,6 +1777,11 @@ document.addEventListener('keydown', event => {
 });
 window.addEventListener('hashchange', () => {
   if (settlementPage) showSettlementTask(settlementTaskFromHash(location.hash));
+  if (inventoryMenuPage) {
+    inventoryTab = inventoryTabFromHash(location.hash);
+    renderInventoryPage();
+    document.querySelector<HTMLElement>('.inventory-tabs [aria-current="page"]')?.focus({ preventScroll: true });
+  }
 });
 window.addEventListener('pagehide', () => { inbox?.close(); settlementChat?.close(); atlasChat?.close(); });
 window.addEventListener('focus', async () => {
@@ -1633,7 +1789,7 @@ window.addEventListener('focus', async () => {
   busy = true;
   try { synchronize(await refresh()); render(); }
   catch (error) { toast(`Could not sync wallet balance: ${error instanceof Error ? error.message : 'Connection failed.'}`, true); }
-  finally { busy = false; }
+  finally { busy = false; if (inventoryMenuPage) renderInventoryPage(); }
 });
 window.addEventListener('pageshow', event => {
   if (event.persisted && (navigationPage === 'communicate' || navigationPage === 'contacts' || explorePage)) {
@@ -1649,7 +1805,7 @@ async function syncProduction(): Promise<void> {
   busy = true;
   try { synchronize(await refresh()); render(); }
   catch (error) { toast(`Could not sync server production: ${error instanceof Error ? error.message : 'Connection failed.'}`, true); }
-  finally { busy = false; void saveCrewAssignments(); }
+  finally { busy = false; if (inventoryMenuPage) renderInventoryPage(); void saveCrewAssignments(); }
 }
 window.addEventListener('storage', event => {
   if (event.key === 'featheral-wallet-updated' || event.key === 'featheral-world-account') void syncProduction();
@@ -1670,7 +1826,7 @@ setInterval(() => {
     ...state.workforce.expeditions.map(expedition => expedition.readyAt)];
   const due = Math.min(...deadlines);
   const timestamp = displayServerTime(state.serverTime, performance.now() - synchronizedAt, state.clockSpeed);
-  if (settlementTask === 'crafting' && craftingAnalysis && craftingAnalysis.expiresAt <= timestamp
+  if (inventoryMenuPage && inventoryTab === 'craft' && craftingAnalysis && craftingAnalysis.expiresAt <= timestamp
     && app.querySelector('.crafting-analysis-access[data-analysis-state="active"]') && !busy && !confirmationOpen()) render();
   if (game.stage >= 0 && due <= timestamp && performance.now() >= nextDeadlineSyncAt && !busy && !confirmationOpen()) {
     nextDeadlineSyncAt = performance.now() + 5000;

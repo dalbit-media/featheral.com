@@ -316,7 +316,10 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         ? store.transaction(token, (session, time, realTime, exchange, owner) => {
           const csrf = request.headers['x-csrf-token'];
           if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
-          return { ...(marketAction ? exchange.action(owner, session, body, time, realTime) : apply(session.account, body, time, realTime,
+          const command = marketAction ? null : parseCommand(parseActionEnvelope(body).command);
+          return { ...(marketAction ? exchange.action(owner, session, body, time, realTime)
+            : command?.type === 'refine-equipment' || command?.type === 'enhanced-gear'
+              ? exchange.enhancementAction(owner, session.account, body, time, realTime) : apply(session.account, body, time, realTime,
             command => exchange.collectSell(owner, session.account, command, time, realTime),
             command => {
               if (!store.contributeFederation) throw new ApiError(503, 'Federation vault is unavailable.');

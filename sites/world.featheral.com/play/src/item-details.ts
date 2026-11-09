@@ -11,8 +11,15 @@ import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { escapeAtlas } from './atlas.ts';
 import { isAutoCraftingItem } from './auto-crafting.ts';
+import { isBuilderItem } from './builder-items.ts';
 
 export function itemDescription(id: ItemId): { category: string; effect: string; use: string } {
+  if (id === 'refinement-core') return { category: 'Refinement materials',
+    effect: 'One core per permanent equipment refinement attempt. Failure never destroys equipment or removes levels.',
+    use: 'Open Enhance in inventory. Review the chance and escalating resource costs before confirming.' };
+  if (isBuilderItem(id)) return { category: 'Bulk upgrades',
+    effect: 'Upgrade the selected target as far as current materials and dollars allow. No discounts or free levels.',
+    use: 'Click any upgrade or build button and choose Max upgrade. One unused charter is consumed after confirmation. Population requirements and level caps still apply.' };
   if (isAutoCraftingItem(id)) return { category: 'Bulk crafting', effect: 'Fresh profit analysis, automatic bulk crafting and immediate sales. Highest estimated profit per copy first.',
     use: 'Activate in inventory to review totals. Consumes one charter and eligible owned bulk permits. Uses only your starting balance; sale proceeds are not reinvested.' };
   if (isSquadItem(id)) return { category: 'Squad vouchers', effect: 'Automatic targets. Two residents per mission. Existing concurrency fees apply.',

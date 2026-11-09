@@ -6,13 +6,16 @@ import { isTitleItem } from './customization.ts';
 import { explorationCount, explorationQuote, investigationQuote } from './workforce.ts';
 import { activityItemDetails, activityName } from './automation.ts';
 import { isWaterFacility, waterFacilities } from './water-facilities.ts';
-import type { MarketAsset, MarketCommand } from './market.ts';
+import type { MarketAsset, MarketCommand, MarketSnapshot } from './market.ts';
 import { marketAssetName } from './market.ts';
 import { fthgScale, fthgUnits } from './fthg.ts';
 import { incomeFacilities, isIncomeFacility } from './income.ts';
 import { constructionCost, constructionLevel, constructions } from './constructions.ts';
 import { collectionItemDetails } from './collection.ts';
 import { dollarsScale } from './dollars.ts';
+import { maxUpgradePlan } from './max-upgrades.ts';
+import { builderCharter } from './builder-items.ts';
+import { enhancementQuote } from './enhancement.ts';
 import { activityEquipmentBenefit, activityEquipmentDiscount, isActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem, transportBenefit } from './transport-items.ts';
@@ -66,7 +69,7 @@ export function autoCraftConsumption(quote: AutoCraftQuote, language: Language):
 }
 export const transportRecommendations = [
   { label: 'Upgrade Trade hub routes', href: '/settlement/#buildings' },
-  { label: 'Craft transport vouchers', href: '/settlement/#crafting' },
+  { label: 'Craft transport vouchers', href: '/inventory/#craft' },
   { label: 'Buy transport vouchers', href: '/market/?asset=transport-convoy&side=buy' },
 ];
 export function claimConsumption(state: Snapshot, resource: Resource, quote: CollectionQuote, language: Language): ConsumptionQuote {
@@ -171,6 +174,31 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           'Season, daily weather and temperature affect new recruitment. The paid arrival count is locked at departure.',
           ...(activityEquipmentDiscount(game, 'attraction') ? [`Equipped gear reduces attraction fees by ${activityEquipmentDiscount(game, 'attraction')}%. Paid jobs stay unchanged.`] : [])]), weeks: 1,
         arrivals: recruitmentAmount(game.population, constructionLevel(game, 'housing'), state.physicalVersion ? state.serverTime : undefined) };
+    case 'max-upgrade': {
+      const plan = maxUpgradePlan(state, command.target);
+      return { title: 'Max upgrade', subject: gameConsumption(state, command.target)?.subject ?? 'Master Builder Charter',
+        costs: [...amounts(plan.costs), { asset: builderCharter, amount: 1 }], weeks: 0,
+        notes: [`${plan.count} upgrades · Final level: ${plan.finalLevel}`,
+          ...(command.target.type === 'upgrade' && plan.count ? [`Final tier: ${stages[plan.finalLevel].name}`] : []),
+          'Max upgrades the selected target using current materials and dollars. Population requirements and level caps still apply. One charter is consumed only after confirmation.'],
+        ...(plan.fingerprint !== command.fingerprint ? { warning: 'Upgrade requirements changed. Review the maximum upgrade again.' } : {}) };
+    }
+    case 'refine-equipment': {
+      const refinement = enhancementQuote(game, state.inventory, command.target);
+      return { title: 'Review enhancement', subject: refinement.item ? itemName(refinement.item) : 'Enhanced equipment', weeks: 0,
+        costs: [...amounts(refinement.cost), { asset: 'refinement-core', amount: refinement.cores }],
+        details: [
+          { label: 'Current level', value: String(refinement.level) },
+          { label: 'Success chance', value: `${refinement.chance}%` },
+          { label: 'Current savings', value: `${refinement.discount.toFixed(2)}%` },
+          { label: 'On success', value: `${refinement.nextDiscount.toFixed(2)}%` },
+          ...(refinement.target !== refinement.item ? [{ label: 'Equipment ID', value: refinement.target }] : []),
+        ],
+        warning: refinement.fingerprint !== command.fingerprint ? 'Enhancement requirements changed. Review again.' : refinement.reason ?? 'Failure consumes all listed costs. Equipment and level are retained.',
+        notes: ['One attempt only. The server determines the result after confirmation.',
+          'Each successful level adds 0.1% of the original discount, not 0.1 percentage points. Savings are capped at 99%.',
+          'Enhanced copies keep their identity and level when traded. New actions only; paid jobs stay unchanged.'] };
+    }
     case 'construction': {
       const cost = constructionCost(game, command.kind);
       return cost ? quote('Upgrade construction', constructions[command.kind].name, cost,
@@ -214,7 +242,20 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
     default: return null;
   }
 }
-export function marketConsumption(command: MarketCommand): ConsumptionQuote | null {
+export function marketConsumption(command: MarketCommand, state?: Snapshot, market?: MarketSnapshot): ConsumptionQuote | null {
+  if (command.type === 'enhancement-list' || command.type === 'enhancement-buy' || command.type === 'enhancement-cancel') {
+    const equipment = command.type === 'enhancement-list' ? state?.inventory.enhancedEquipment?.find(copy => copy.id === command.equipmentId)
+      : market?.enhancedListings?.find(listing => listing.id === command.listingId)?.equipment;
+    return { title: command.type === 'enhancement-list' ? 'List enhanced equipment' : command.type === 'enhancement-buy' ? 'Buy enhanced equipment' : 'Cancel equipment listing',
+      subject: equipment ? itemName(equipment.item) : 'Enhanced equipment', weeks: 0,
+      costs: command.type === 'enhancement-buy' ? [{ asset: 'dollars', amount: command.price }] : [],
+      details: [...(equipment ? [{ label: 'Level', value: String(equipment.level) }] : []),
+        ...(equipment ? [{ label: 'Equipment ID', value: equipment.id }] : []),
+        ...(command.type === 'enhancement-list' ? [{ label: 'Asking price', value: `FTH$ ${formatDollars(command.price, 'en-US')}` }] : [])],
+      notes: [command.type === 'enhancement-list' ? 'The exact copy is reserved until sold or cancelled. No system-funded purchases.'
+        : command.type === 'enhancement-buy' ? 'Transfers this exact copy and its level. The seller receives existing FTH$.'
+          : 'Returns the reserved equipment with its identity and level unchanged.'] };
+  }
   if (command.type === 'auto-craft') return null;
   if (command.type === 'profit-analysis') return {
     title: 'Latest profit analysis', subject: 'Crafting', weeks: 0, costs: [{ asset: 'dollars', amount: marketAnalysisFee }],

@@ -1,6 +1,7 @@
 export const gamePages = {
   world: { label: 'Explore', path: '/explore/' },
   home: { label: 'Settlement', path: '/settlement/' },
+  inventory: { label: 'Inventory', path: '/inventory/' },
   market: { label: 'Market', path: '/market/' },
   bank: { label: 'Wallet and staking', path: '/bank/' },
   communicate: { label: 'Inbox', path: '/communicate/' },

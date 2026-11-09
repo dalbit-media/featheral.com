@@ -120,14 +120,15 @@ test('settlement object inspectors explain every active building and deduplicate
   assert.deepEqual(state, before);
   for (const task of Object.values(settlementTasks)) assert.notEqual(translate(task.description, 'ko'), task.description);
 });
-test('settlement section navigation exposes all tasks, current selection and translated labels', () => {
-  for (const task of Object.keys(settlementTasks) as (keyof typeof settlementTasks)[]) {
+test('settlement section navigation excludes dedicated inventory and crafting pages', () => {
+  for (const task of (Object.keys(settlementTasks) as (keyof typeof settlementTasks)[]).filter(task => task !== 'inventory' && task !== 'crafting')) {
     const markup = settlementSectionNavigation(task, 'en');
     assert.equal((markup.match(/aria-pressed="true"/g) ?? []).length, 1);
     assert.match(markup, new RegExp(`data-settlement-panel="${task}"[^>]*aria-pressed="true"`));
-    assert.equal((markup.match(/aria-controls="settlement-task-panel"/g) ?? []).length, 8);
+    assert.equal((markup.match(/aria-controls="settlement-task-panel"/g) ?? []).length, 6);
   }
-  const korean = settlementSectionNavigation('inventory', 'ko');
+  const korean = settlementSectionNavigation('residents', 'ko');
   assert.ok(korean.includes(translate('Settlement sections', 'ko')));
-  assert.ok(korean.includes(translate('Inventory', 'ko')));
+  assert.ok(korean.includes(translate('Residents', 'ko')));
+  assert.doesNotMatch(korean, /data-settlement-panel="(?:inventory|crafting)"/);
 });

@@ -17,6 +17,7 @@ import { activityEquipmentItems, equipmentActivities, isActivityEquipment } from
 import type { ActivityEquipment, EquipmentActivity } from '../src/activity-equipment.ts';
 import { bulkCraftingPermit, isBulkCraftingItem, validCraftingQuantity } from '../src/bulk-crafting.ts';
 import { isTransportItem } from '../src/transport-items.ts';
+import { validEnhancedEquipment } from '../src/enhancement.ts';
 
 export function inventory(account: Account): ItemInventory {
   if (!account.inventory) {
@@ -29,12 +30,20 @@ export function inventory(account: Account): ItemInventory {
   Object.assign(account.inventory.layout.positions, positions);
   account.game.visibilityRadius = account.inventory.equipped ? visibilityItems[account.inventory.equipped].radius : 4;
   const equipped = account.inventory.activityEquipment ?? {};
+  const copies = account.inventory.enhancedEquipment ?? [], enhanced = account.inventory.enhancedEquipped ?? {};
+  if (copies.some(copy => !validEnhancedEquipment(copy)) || new Set(copies.map(copy => copy.id)).size !== copies.length)
+    throw new GameError('Invalid enhanced equipment in inventory.');
   for (const activity of equipmentActivities) {
+    const id = enhanced[activity], copy = copies.find(copy => copy.id === id);
+    if (id !== undefined && (!copy || activityEquipmentItems[copy.item].activity !== activity || equipped[activity] !== undefined))
+      throw new GameError('Invalid equipped enhanced equipment.');
     const item = equipped[activity];
     if (item !== undefined && (!isActivityEquipment(item) || activityEquipmentItems[item].activity !== activity || !account.inventory.items.includes(item)))
       throw new GameError('Invalid activity equipment in inventory.');
   }
   account.game.activityEquipment = { ...equipped };
+  account.game.enhancedEquipment = copies.map(copy => ({ ...copy }));
+  account.game.enhancedEquipped = { ...enhanced };
   return account.inventory;
 }
 export function craft(account: Account, item: CraftableItem, quantity = 1): string {
@@ -106,7 +115,8 @@ export function equipActivity(account: Account, activity: EquipmentActivity, ite
   if (item !== null && (!isActivityEquipment(item) || activityEquipmentItems[item].activity !== activity || !bag.items.includes(item)))
     throw new GameError('Own matching activity equipment before equipping it.');
   const equipped = bag.activityEquipment ??= {};
-  if ((equipped[activity] ?? null) === item) throw new GameError('Activity equipment selection is unchanged.');
+  if ((equipped[activity] ?? null) === item && !bag.enhancedEquipped?.[activity]) throw new GameError('Activity equipment selection is unchanged.');
+  if (bag.enhancedEquipped) delete bag.enhancedEquipped[activity];
   if (item === null) delete equipped[activity];
   else equipped[activity] = item;
   inventory(account);

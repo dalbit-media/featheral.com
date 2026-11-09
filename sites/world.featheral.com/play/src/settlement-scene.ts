@@ -38,8 +38,9 @@ function settlementObjectSymbol(id: SettlementEntity): string {
 export function settlementProfile(stage: number): { name: string; homes: number; style: string; description: string } {
   return {
     name: stage < 0 ? 'Unsettled' : stages[stage].name, homes: homeCount(stage),
-    style: stage >= 6 ? 'city' : stage >= 4 ? 'town' : stage >= 3 ? 'village' : 'camp',
-    description: stage >= 6 ? 'A city of busy streets and little places to call your own.'
+    style: stage >= 14 ? 'megacity' : stage >= 12 ? 'global-city' : stage >= 6 ? 'city' : stage >= 4 ? 'town' : stage >= 3 ? 'village' : 'camp',
+    description: stage >= 9 ? 'A growing skyline of connected districts, green rooftops and millions of residents.'
+      : stage >= 6 ? 'A city of busy streets and little places to call your own.'
       : stage >= 3 ? 'Gather around the square. Make every corner feel like home.'
         : 'A quiet clearing today. A place full of life tomorrow.',
   };
@@ -64,7 +65,7 @@ export function settlementScene(state: ApiState, language: Language, editing = f
         <div><small>${translate('Buildings', language)}</small><strong>${buildings.toLocaleString(locale(language))}</strong><span>${decorations.toLocaleString(locale(language))} ${translate('decorations', language)}</span></div>
       </div>
       <div class="settlement-command-health" data-shortage="${shortage}">${icon(shortage ? 'help' : 'check')}<span>${translate(game.stage < 0 ? 'Establish your settlement to begin production.' : shortage ? 'Supplies need attention. Check Production before dispatching crews.' : 'No active upkeep shortage.', language)}</span></div>
-      ${next?.population ? `<div class="settlement-tier-progress"><div><small>${translate('NEXT TIER', language)}</small><strong>${translate(next.name, language)}</strong><span>${game.population.toLocaleString(locale(language))} / ${next.population.toLocaleString(locale(language))}</span></div><progress value="${Math.min(game.population, next.population)}" max="${next.population}" aria-label="${translate('Residents', language)}: ${game.population} / ${next.population}"></progress></div>` : `<div class="settlement-tier-progress settlement-complete"><strong>${translate('Capital complete', language)}</strong></div>`}
+      ${next?.population ? `<div class="settlement-tier-progress"><div><small>${translate('NEXT TIER', language)}</small><strong>${translate(next.name, language)}</strong><span>${game.population.toLocaleString(locale(language))} / ${next.population.toLocaleString(locale(language))}</span></div><progress value="${Math.min(game.population, next.population)}" max="${next.population}" aria-label="${translate('Residents', language)}: ${game.population} / ${next.population}"></progress></div>` : `<div class="settlement-tier-progress settlement-complete"><strong>${translate('Great Megacity complete', language)}</strong></div>`}
       <nav class="settlement-command-actions" aria-label="${translate('Settlement actions', language)}">
         <button class="button" data-settlement-panel="residents">${icon('people')}<span>${translate('Residents', language)}</span></button>
         <button class="button" data-settlement-panel="production">${icon('water')}<span>${translate('Production', language)}</span>${readyResources ? `<b class="task-badge">${readyResources}</b>` : ''}</button>
@@ -86,7 +87,7 @@ export function settlementLayoutPanel(state: ApiState, selected: SettlementEntit
   const position = positions[selected], building = buildings.find(building => building.id === selected);
   const name = (id: SettlementEntity) => translate(settlementEntityName(id), language);
   return `<p class="fineprint layout-intro">Move any owned building or decoration to an empty land cell. Moving is free and does not change production or building effects.</p>
-    <section class="layout-inspector" aria-labelledby="layout-selection-title"><div class="layout-inspector-art">${isDecorationItem(selected) ? itemArt(selected) : buildingArt(settlementObjectSymbol(selected))}<div><h3 id="layout-selection-title">${name(selected)}</h3><p>${position ? translate(`Placed at ${position.x}, ${position.y}`, language) : translate('Not placed', language)}</p></div></div>
+    <section class="layout-inspector" aria-labelledby="layout-selection-title"><div class="layout-inspector-art">${isDecorationItem(selected) ? itemArt(selected) : buildingArt(settlementObjectSymbol(selected), game.stage)}<div><h3 id="layout-selection-title">${name(selected)}</h3><p>${position ? translate(`Placed at ${position.x}, ${position.y}`, language) : translate('Not placed', language)}</p></div></div>
       <p class="layout-inspector-description">${translate(settlementObjectDescription(selected), language)}</p>
       <div class="layout-selection-actions"><button class="button primary wide" data-action="prepare-layout" data-entity="${selected}">Move on map ${icon('compass')}</button>
       ${building ? `<button class="button wide" data-settlement-panel="${building.task}">Manage building ${icon('arrow')}</button>` : position ? `<button class="button wide" data-action="remove-layout" data-entity="${selected}">Return to inventory ${icon('minus')}</button>` : ''}</div>
@@ -95,6 +96,6 @@ export function settlementLayoutPanel(state: ApiState, selected: SettlementEntit
         <button class="button" data-action="arrange-coordinates" data-entity="${selected}">Save position</button></div></details>
     </section>
     <h3 class="panel-section-heading">Your buildings and decorations</h3>
-    <div class="layout-entities" role="group" aria-label="Settlement buildings and decorations">${[...new Set(ids)].map(id => `<button class="layout-entity ${id === selected ? 'selected' : ''}" data-action="select-building" data-entity="${id}" aria-pressed="${id === selected}">${isDecorationItem(id) ? itemArt(id) : buildingArt(settlementObjectSymbol(id))}<span><strong>${name(id)}</strong><small>${positions[id] ? translate(`Placed at ${positions[id]!.x}, ${positions[id]!.y}`, language) : translate('Not placed', language)}</small></span>${icon('chevron')}</button>`).join('')}</div>
+    <div class="layout-entities" role="group" aria-label="Settlement buildings and decorations">${[...new Set(ids)].map(id => `<button class="layout-entity ${id === selected ? 'selected' : ''}" data-action="select-building" data-entity="${id}" aria-pressed="${id === selected}">${isDecorationItem(id) ? itemArt(id) : buildingArt(settlementObjectSymbol(id), game.stage)}<span><strong>${name(id)}</strong><small>${positions[id] ? translate(`Placed at ${positions[id]!.x}, ${positions[id]!.y}`, language) : translate('Not placed', language)}</small></span>${icon('chevron')}</button>`).join('')}</div>
     <details class="disclosure" data-detail="layout-help"><summary>Layout controls ${icon('chevron')}</summary><p>In Layout, drag a building onto an empty land cell, or select Move on map and tap a destination. Drag empty ground to pan. Use coordinates for precise placement. Buildings cannot be demolished; decorations can return to inventory.</p><p>This is your settlement parcel, not unexplored world territory. Rearranging never discovers resources or changes exploration.</p></details>`;
 }

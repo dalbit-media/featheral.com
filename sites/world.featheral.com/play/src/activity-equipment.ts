@@ -2,6 +2,7 @@ import type { Cost, Game } from './engine.ts';
 import type { DecorationItem } from './items.ts';
 import type { CollectionItem } from './collection.ts';
 import { dollarsScale } from './dollars.ts';
+import { enhancedDiscount, validEnhancedEquipment } from './enhancement.ts';
 
 export const equipmentActivities = ['investigation', 'exploration', 'attraction'] as const;
 export type EquipmentActivity = typeof equipmentActivities[number];
@@ -41,12 +42,15 @@ export function isActivityEquipment(value: unknown): value is ActivityEquipment 
 export function isEquipmentActivity(value: unknown): value is EquipmentActivity {
   return equipmentActivities.some(activity => activity === value);
 }
-export function activityEquipmentDiscount(game: Pick<Game, 'activityEquipment'>, activity: EquipmentActivity): number {
+export function activityEquipmentDiscount(game: Pick<Game, 'activityEquipment' | 'enhancedEquipment' | 'enhancedEquipped'>, activity: EquipmentActivity): number {
+  const copy = game.enhancedEquipment?.find(copy => copy.id === game.enhancedEquipped?.[activity]);
+  if (copy && validEnhancedEquipment(copy) && activityEquipmentItems[copy.item].activity === activity)
+    return enhancedDiscount(copy.item, copy.level);
   const item = game.activityEquipment?.[activity];
   return isActivityEquipment(item) && activityEquipmentItems[item].activity === activity
     ? Math.min(50, activityEquipmentItems[item].discount) : 0;
 }
-export function discountedActivityCost(game: Pick<Game, 'activityEquipment'>, activity: EquipmentActivity, dollars: number): number {
+export function discountedActivityCost(game: Pick<Game, 'activityEquipment' | 'enhancedEquipment' | 'enhancedEquipped'>, activity: EquipmentActivity, dollars: number): number {
   const percent = activityEquipmentDiscount(game, activity);
   if (!percent) return dollars;
   return Math.ceil(Math.round(dollars * dollarsScale) * (100 - percent) / 100) / dollarsScale;

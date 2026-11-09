@@ -4,7 +4,7 @@ import type { Environment } from './environment.ts';
 import { decorationDrawing } from './item-art.ts';
 import { decorationItems, isDecorationItem } from './items.ts';
 import type { DecorationItem } from './items.ts';
-import { drawDiamond, drawHouse, drawTree, drawWaterFacility, project, tileColor, unproject } from './map-art.ts';
+import { drawDiamond, drawHouse, drawTree, drawWaterFacility, houseHeight, project, tileColor, unproject } from './map-art.ts';
 import { EnvironmentLayer } from './environment-layer.ts';
 import { isWaterFacility } from './water-facilities.ts';
 import { arrangementError, cellKey, positionEntries, settlementEntityName, settlementPositions, settlementRadius, settlementTerrain } from './settlement-layout.ts';
@@ -37,6 +37,7 @@ export class SettlementMap {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Your browser does not support the canvas renderer.');
     this.ctx = ctx; this.canvas = canvas; this.getState = getState; this.select = select; this.move = move; this.language = language;
+    this.zoom = getState().state.game.stage >= 9 ? 1.4 : 2.4;
     for (const id of Object.keys(decorationItems) as DecorationItem[]) {
       const image = new Image();
       image.onload = () => { this.artworkRevision++; };
@@ -106,7 +107,7 @@ export class SettlementMap {
     const entries = positionEntries(settlementPositions(state.game, state.inventory)).sort(([, a], [, b]) => b.x + b.y - a.x - a.y);
     for (const [id, position] of entries) {
       const screen = project(position.x - this.camera.x, position.y - this.camera.y);
-      const height = isDecorationItem(id) ? 48 : id === 'centre' || state.game.stage >= 6 ? 85 : 55;
+      const height = isDecorationItem(id) ? 48 : state.game.stage >= 6 ? (houseHeight(state.game.stage) + 22) * (id === 'centre' ? 1.6 : 1.35) + 8 : id === 'centre' ? 85 : 55;
       if (Math.abs(point.x - screen.x) < 30 && point.y >= screen.y - height && point.y <= screen.y + 22) return id;
     }
     return null;
@@ -124,11 +125,11 @@ export class SettlementMap {
       const image = this.images.get(id)!;
       if (image.complete && image.naturalWidth) c.drawImage(image, x - 27, y - 45, 54, 54);
     } else if (isWaterFacility(id)) {
-      drawWaterFacility(c, x, y - 8, id, environment.daylight < .5);
+      drawWaterFacility(c, x, y - 8, id, environment.daylight < .5, state.game.stage);
     } else {
       const kind = id.startsWith('home-') || id === 'housing' ? 'home' : id === 'cistern' ? 'supplies' : id;
       drawHouse(c, x, y - 8, kind === 'centre' ? 1.6 : kind === 'home' ? 1.15 : 1.35,
-        { kind: kind as 'home' | 'centre' | 'workshop' | 'supplies' | 'bank' | 'townhall', urban: state.game.stage >= 6 || (kind === 'centre' && state.game.stage >= 4), night: environment.daylight < .5 });
+        { kind: kind as 'home' | 'centre' | 'workshop' | 'supplies' | 'bank' | 'townhall' | 'market-stall' | 'trade-hub', urban: state.game.stage >= 6 || (kind === 'centre' && state.game.stage >= 4), stage: state.game.stage, night: environment.daylight < .5 });
     }
   }
   private frame = (time: number): void => {
@@ -151,7 +152,7 @@ export class SettlementMap {
     const tiles = [];
     for (let y = -settlementRadius; y <= settlementRadius; y++) for (let x = -settlementRadius; x <= settlementRadius; x++) {
       const screen = project(x - this.camera.x, y - this.camera.y), terrain = settlementTerrain(x, y, game.seed);
-      if (Math.abs(screen.x) > this.width / this.zoom / 2 + 90 || Math.abs(screen.y) > this.height / this.zoom / 2 + 110) continue;
+      if (Math.abs(screen.x) > this.width / this.zoom / 2 + 90 || Math.abs(screen.y) > this.height / this.zoom / 2 + Math.max(110, (houseHeight(game.stage) + 22) * 1.6 + 8)) continue;
       const road = (x === 0 || y === 0) && terrain !== 'river';
       drawDiamond(c, screen.x, screen.y, road ? game.stage >= 4 ? '#9a9f89' : '#aa9e77' : tileColor(terrain, Math.floor(hash(x, y, game.seed + 7) * 3), view.environment.season));
       if (view.editing) { c.strokeStyle = '#d5ebad50'; c.lineWidth = .8; c.stroke(); }

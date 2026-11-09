@@ -77,7 +77,7 @@ export class AccountPane {
     document.body.append(this.dialog);
     const identity = document.createElement('section');
     identity.className = 'account-section';
-    identity.innerHTML = '<h3>Settlement identity</h3><p data-custom-settlement data-no-localize></p><p data-custom-region data-no-localize></p><p data-custom-title></p><a class="button" href="/settlement/#inventory">Use naming permits and title badges</a>';
+    identity.innerHTML = '<h3>Settlement identity</h3><p data-custom-settlement data-no-localize></p><p data-custom-region data-no-localize></p><p data-custom-title></p><a class="button" href="/inventory/">Use naming permits and title badges</a>';
     this.dialog.querySelector('.account-profile')!.after(identity);
     const switchAccount = document.createElement('a');
     switchAccount.className = 'button wide';

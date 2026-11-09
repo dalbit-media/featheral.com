@@ -12,8 +12,12 @@ import type { ActionReadyAt } from './action-timing.ts';
 import type { ActivityEquipment, EquipmentActivity } from './activity-equipment.ts';
 import type { TransportItem } from './transport-items.ts';
 import type { SquadActivity, SquadItem } from './exploration-squads.ts';
+import type { UpgradeTarget } from './max-upgrades.ts';
 
 export type Command =
+  | { type: 'refine-equipment'; target: string; fingerprint: string }
+  | { type: 'enhanced-gear'; activity: EquipmentActivity; id: string | null }
+  | { type: 'max-upgrade'; target: UpgradeTarget; fingerprint: string }
   | { type: 'move'; x: number; y: number }
   | { type: 'investigate'; x: number; y: number }
   | { type: 'dispatch-squad'; item: SquadItem; activity: SquadActivity; quantity: number; maximumDollars: number }

@@ -12,6 +12,16 @@ import { itemName } from './items.ts';
 import type { Command } from './api-types.ts';
 import type { SquadOption } from './squad-options.ts';
 import { squadItems } from './exploration-squads.ts';
+import type { MaxUpgradePlan, UpgradeTarget } from './max-upgrades.ts';
+
+export function chooseUpgradeMode(target: UpgradeTarget, plan: MaxUpgradePlan, language: Language, subject: string): Promise<Command | null> {
+  const t = (text: string) => translate(text, language);
+  return chooseOperation('Choose upgrade size', subject,
+    'Max upgrades the selected target using current materials and dollars. Population requirements and level caps still apply. One charter is consumed only after confirmation.',
+    [{ value: 'single', label: t('Upgrade once'), detail: t('No permit required'), disabled: false },
+      { value: 'max', label: `${t('Max upgrade')} · ${plan.count}`, detail: `${t('Master Builder Charter')} · ${t('Final level')}: ${plan.finalLevel} · ${t('Consumes one permit')}`, disabled: plan.count === 0 }],
+    language, 'upgradeMode').then(value => value === 'single' ? target : value === 'max' ? { type: 'max-upgrade', target, fingerprint: plan.fingerprint } : null);
+}
 
 let activeDialog: HTMLDialogElement | null = null;
 export const confirmationOpen = (): boolean => activeDialog !== null;

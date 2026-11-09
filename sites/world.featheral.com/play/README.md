@@ -116,12 +116,92 @@ pointer clicks. Select an item to read its full details below the grid.
 The inventory panel uses compact icon filters and omits the redundant section
 tabs; the settlement dock still provides navigation.
 
+## Civilization progression and building designs
+
+Capital is followed by seven finer milestones:
+
+| Tier | Residents | Upgrade fee |
+| --- | ---: | ---: |
+| Regional Hub | 250,000 | FTH$1,000 |
+| Urban Center | 500,000 | FTH$2,000 |
+| Metropolitan Region | 1,000,000 | FTH$3,000 |
+| World City | 2,000,000 | FTH$4,000 |
+| Global City | 5,000,000 | FTH$5,000 |
+| Megacity | 10,000,000 | FTH$15,000 |
+| Great Megacity | 20,000,000 | FTH$40,000 |
+
+Each upgrade also requires the
+materials shown in Buildings. These are new-tier costs only: the original
+nine tier costs, monetary policy and reserve catalogs remain unchanged.
+Population can keep growing after the final tier; twenty million is an upgrade
+threshold, not a population cap.
+
+Oil upkeep doubles from Town through Capital, then rises in smaller steps:
+0.024, 0.032, 0.040, 0.048, 0.064, 0.128 and 0.256 barrels per resident per
+game day respectively. Global City, Megacity and Great Megacity retain their
+landmark rates. Keep production and reserves supplied.
+Settlement designs progress from pitched-roof homes to glazed urban towers,
+green rooftops and paired megacity towers. The map uses at most 48 representative
+residential blocks, not one building per resident. Existing placed buildings
+retain their positions. Layout inspectors and upgrade cards use tier-aware art.
+
 ## Dollar-free starter crafting
 
 Starter crafting at the first settlement tier needs no FTH$ for the Campfire
 kit (2 Wood), Torch (1 Wood), Log seat (1 Wood), or Wildflower bed (1 Wood,
 2 Water). Material discovery, inventory capacity and bulk-permit requirements
 still apply. Other crafting fees and all reserve-market seed prices are unchanged.
+
+## Inventory workspace and equipment refinement
+
+The primary **Inventory** menu opens `/inventory/` as a full-page workspace:
+**Inventory**, **Craft**, and **Enhance**. Legacy settlement inventory/crafting
+links redirect to the corresponding tab. Settlement controls now focus on
+residents, production, buildings and layout. Upkeep cards grow with their content;
+growth, consumption and allocation explanations use expandable disclosures.
+
+Only permanent fee-saving equipment can be refined. Each refined copy has its
+own persistent identity and level; ordinary stacks, batch permits, automation
+timers, charters and cosmetic items remain unchanged. A successful level adds
+**0.1% of the original discount**, not 0.1 percentage points: a base 10% discount
+becomes 10.01% at level 1. Level 1,000 is the maximum; effective fee savings are
+capped at 99%. Benefits affect newly priced actions, never previously paid jobs.
+
+Each attempt consumes **one Refinement Core** and the following resources times
+`current level + 1`: 1,000 Wood, 500 Water, 500 Metal, 100 Oil and FTH$100.
+Craft a core at Settlement for 100 Wood, 50 Metal, 10 Oil and FTH$25. Success
+starts at 90% and decreases to a 10% floor; the exact next-attempt chance,
+cost and benefit are shown before confirmation. Failure consumes the confirmed
+cost but never destroys equipment or removes levels. Results are determined by
+the server; retries of the same accepted operation return the original result.
+There is no automatic repeated spending.
+
+Enhanced copies trade through separate, fixed-price player listings. Unequip
+before listing. A listing reserves the exact copy and its level; cancellation
+returns it unchanged. Purchases transfer existing FTH$ to the seller and that
+copy to the buyer. Enhanced copies never enter ordinary item pools, base-price
+orders, automatic merchant crafting or system-funded liquidity. Refinement is a
+resource/FTH$ spending sink, not a promise of profit or resale liquidity. Existing
+reserve catalogs, genesis prices, balances and financial authorization policies
+are preserved.
+
+## Master Builder Charter
+
+Craft `builder-charter` at Settlement for 20 Wood, 10 Metal and FTH$100.
+The consumable is stackable and player-tradeable, with unique blueprint artwork.
+It does not add any automatic reserve market or change existing financial policies.
+
+With an unused charter in inventory, click any upgrade/build button and choose
+**Upgrade once** (no charter) or **Max upgrade**. Max targets only that selected
+upgrade: settlement tiers, resource warehouse, inventory storage, every
+construction, civic/commercial building or Water facility. Single-build facilities
+can only be built once, so their maximum run is one build.
+
+The preview totals every successive level's material and FTH$ cost, final level,
+and one charter. Population/unlock requirements, normal costs and existing level
+caps still apply. The server recomputes the exact plan and rejects changed totals.
+One atomic action consumes the charter only after all planned upgrades succeed;
+receipt retries never spend again. Reserved or pending charters cannot be used.
 
 ## Master Merchant Charter
 
@@ -373,7 +453,7 @@ historically accepted retry receipts remain valid.
 
 - `/` is the search-readable landing page with optional live public totals; legacy `/about/` redirects there. Anonymous `/api/stats` reads remain available without cookies or a gameplay session, and the page stays readable if statistics are unavailable.
 - `/` opens the simulator; all Start/Play calls to action go there and resume the same browser session.
-- `/settlement/` uses the exploration map's shared isometric projection, tile palette, trees, house artwork and weather renderer. Its 21-by-21 local parcel grows through all nine tiers, including built banks and town halls. The six-action dock opens residents, production, inventory, crafting, Layout and buildings in focused panels (bottom sheets on smaller screens). Click buildings to manage them. In Layout, drag buildings or owned decorations to empty land cells, or choose Move on map and tap a destination. Coordinate inputs provide precise and keyboard-accessible placement; arrow keys and Enter also select grid cells. Pan by dragging empty ground and zoom with the wheel or buttons. Moves cost nothing and change no gameplay effects. Buildings cannot be demolished or duplicated; decorations can return to inventory without losing their item slot. Occupied cells, water and out-of-bounds positions are rejected by both client and authoritative API. Positions persist across reloads, retries and restarts; legacy six-space decorations migrate without losing items or paid work. New tier buildings find empty cells without displacing custom layouts. The parcel is cosmetic local space, not newly revealed exploration territory. The canvas and camera survive task changes and server refreshes alongside crew drafts, filters, disclosures and panel scroll. Direct `#inventory`, `#crafting`, `#management` and task links, sessions and language preferences remain supported.
+- `/settlement/` uses the exploration map's shared isometric projection, tile palette, trees, house artwork and weather renderer. Its 21-by-21 local parcel grows through all sixteen tiers, including built banks and town halls. The settlement dock and section navigation open focused panels. Click buildings to manage them. In Layout, drag buildings or owned decorations to empty land cells, or choose Move on map and tap a destination. Coordinate inputs provide precise and keyboard-accessible placement; arrow keys and Enter also select grid cells. Pan by dragging empty ground and zoom with the wheel or buttons. Moves cost nothing and change no gameplay effects. Buildings cannot be demolished or duplicated; decorations can return to inventory without losing their item slot. Occupied cells, water and out-of-bounds positions are rejected by both client and authoritative API. Positions persist across reloads, retries and restarts; legacy six-space decorations migrate without losing items or paid work. New tier buildings find empty cells without displacing custom layouts. The parcel is cosmetic local space, not newly revealed exploration territory. The canvas and camera survive task changes and server refreshes alongside crew drafts, filters, disclosures and panel scroll. Direct `#inventory`, `#crafting`, `#management` and task links, sessions and language preferences remain supported.
 - The complete white paper is a dedicated reading page at `/whitepaper/`, English by default, with Korean at `/whitepaper/?lang=ko`, a chapter table of contents, mobile-friendly tables and print styling. Both languages are rendered at build time from the [Korean source](./public/WHITEPAPER.ko.md) and [English source](./public/WHITEPAPER.md), keeping all rules and disclosures intact. The Korean fallback is readable without JavaScript; the language selector uses the site's existing preference. Site navigation no longer opens raw Markdown; both source documents remain available below `/`.
 - The homepage includes an original illustrated world, keyboard-accessible gameplay tabs, native FAQ disclosures, community placeholders, and explicit token/simulation disclosures. The simulator's brand link and Field guide link back to the homepage.
 - Landing copy leads with playable exploration, resident assignments, weekly gathering, and settlement-to-capital progression in both languages. Calls to action start the free browser game now; do not imply instant production, live multiplayer, token earnings, or active community links that do not exist.

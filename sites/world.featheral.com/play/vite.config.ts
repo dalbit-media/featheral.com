@@ -181,6 +181,7 @@ export default defineConfig({
         'register/index': resolve('register', 'index.html'),
         'explore/index': resolve('explore', 'index.html'),
         'settlement/index': resolve('settlement', 'index.html'),
+        'inventory/index': resolve('inventory', 'index.html'),
         'market/index': resolve('market', 'index.html'),
         'communicate/index': resolve('communicate', 'index.html'),
         'federation/index': resolve('federation', 'index.html'),

@@ -11,6 +11,8 @@ import type { MarketAnalysis } from './market-analysis.ts';
 import type { BuyQuantityBudget } from './market-buy-quantity.ts';
 import { isAutoCraftingItem } from './auto-crafting.ts';
 import type { AutoCraftQuote } from './auto-crafting.ts';
+import { isBuilderItem } from './builder-items.ts';
+import type { EnhancementListing, EnhancementMarketCommand } from './enhancement.ts';
 
 export type MarketResource = Resource;
 export type MarketAsset = MarketResource | ItemId;
@@ -30,7 +32,7 @@ export function isMarketResource(asset: MarketAsset): asset is MarketResource {
 }
 export function isLiquidAsset(_asset: MarketAsset): boolean { return true; }
 export function isReserveMarketAsset(asset: MarketAsset): boolean {
-  return isLiquidAsset(asset) && !isAutoCraftingItem(asset);
+  return isLiquidAsset(asset) && !isAutoCraftingItem(asset) && !isBuilderItem(asset);
 }
 export function marketQuantityLimit(asset: MarketAsset): number { return isMarketResource(asset) ? Number.MAX_SAFE_INTEGER : isCollectible(asset) ? 1 : 10000; }
 export function marketStartingQuantity(asset: MarketAsset): number { return isCollectible(asset) ? 100 : 10000; }
@@ -75,6 +77,7 @@ export interface HalfSaleQuote {
 }
 export interface HalfSaleResponse extends ApiState { halfSale: HalfSaleQuote }
 export type MarketCommand =
+  | EnhancementMarketCommand
   | { type: 'auto-craft'; fingerprint: string }
   | { type: 'profit-analysis' }
   | { type: 'fund-pool'; asset: MarketAsset; quantity: number; dollars: number }
@@ -92,6 +95,7 @@ export interface MarketFill {
 }
 export interface MarketQuote { quantity: number; dollars: number; available: boolean }
 export interface MarketSnapshot {
+  enhancedListings?: EnhancementListing[];
   buyBudget?: BuyQuantityBudget;
   asset: MarketAsset; quantity: number;
   tickers: { asset: MarketAsset; bid: number; ask: number; last: number | null; change24h?: number | null; change7d?: number | null; availableQuantity?: number }[];

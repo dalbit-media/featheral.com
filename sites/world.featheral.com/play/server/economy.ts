@@ -26,8 +26,12 @@ import { expeditionFindPlan } from '../src/climate.ts';
 import { actionRemaining, actionThrottleMs, timedActionKey } from '../src/action-timing.ts';
 import type { TimedAction } from '../src/action-timing.ts';
 import { activityEquipmentItems, isActivityEquipment, isEquipmentActivity } from '../src/activity-equipment.ts';
+import { isEquipmentId } from '../src/enhancement.ts';
+import { equipEnhanced, refineEquipment } from './enhancement.ts';
 import { validCraftingQuantity } from '../src/bulk-crafting.ts';
 import { consumeTransportVoucher, transportQuote } from '../src/transport-items.ts';
+import { hasBuilderCharter, isUpgradeTarget, maxUpgradePlan } from '../src/max-upgrades.ts';
+import { builderCharter } from '../src/builder-items.ts';
 import { isSquadActivity, isSquadItem, planSquad, squadItems } from '../src/exploration-squads.ts';
 import type { SquadActivity, SquadMission } from '../src/exploration-squads.ts';
 
@@ -380,13 +384,14 @@ function activityReason(account: Account, activity: ActivityKind): string | null
     if (availableWorkers(account) < 2) return 'Waiting for idle residents';
     const next = nextExploration(account.game, work.expeditions);
     if (!next) return 'No reachable unexplored terrain';
-    if (account.game.dollars < next.dollars * dollarsScale) return 'Not enough FTH$ for this expedition.';
+    if (account.game.dollars < Math.round(next.dollars * dollarsScale)) return 'Not enough FTH$ for this expedition.';
   } else {
     if (account.recruitment) return 'Waiting for recruitment arrival';
     const amount = recruitmentAmount(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account));
     const cost = recruitmentDollars(account.game.population, constructionLevel(account.game, 'housing'), climateTime(account), account.game);
-    if (!Number.isSafeInteger(account.game.population + amount) || !Number.isSafeInteger(cost * dollarsScale)) return 'Population limit reached';
-    if (account.game.dollars < cost * dollarsScale) return 'Not enough FTH$ for recruitment.';
+    const units = Math.round(cost * dollarsScale);
+    if (!Number.isSafeInteger(account.game.population + amount) || !Number.isSafeInteger(units)) return 'Population limit reached';
+    if (account.game.dollars < units) return 'Not enough FTH$ for recruitment.';
   }
   return null;
 }
@@ -595,17 +600,31 @@ export function parseCommand(value: unknown): Command {
     'use-customization': ['item', 'value'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
     'activity-gear': ['activity', 'item'],
+    'enhanced-gear': ['activity', 'id'],
+    'refine-equipment': ['target', 'fingerprint'],
     'dispatch-squad': ['item', 'activity', 'quantity', 'maximumDollars'],
     'federation-contribute': ['asset', 'amount'],
+    'max-upgrade': ['target', 'fingerprint'],
   };
   if (typeof c.type !== 'string' || !Object.hasOwn(fields, c.type)
     || Object.keys(c).sort().join() !== ['type', ...fields[c.type]].sort().join()) throw new ApiError(400, 'Invalid command fields.');
   const oneOf = (value: unknown, choices: readonly string[]): boolean => typeof value === 'string' && choices.includes(value);
+  if (c.type === 'max-upgrade') {
+    const target = object(c.target);
+    if (!oneOf(target.type, ['upgrade', 'warehouse', 'item-storage', 'construction', 'build'])
+      || typeof c.fingerprint !== 'string' || c.fingerprint.length > 2000) throw new ApiError(400, 'Invalid maximum upgrade command.');
+    const parsed = parseCommand(target);
+    if (!isUpgradeTarget(parsed)) throw new ApiError(400, 'Invalid maximum upgrade target.');
+    return { type: 'max-upgrade', target: parsed, fingerprint: c.fingerprint };
+  }
   if (c.type === 'arrange' && c.position !== null) {
     const position = object(c.position);
     if (Object.keys(position).sort().join() !== 'x,y' || ![position.x, position.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000)) throw new ApiError(400, 'Invalid command values.');
   }
   if (((c.type === 'move' || c.type === 'map-collect' || c.type === 'investigate') && ![c.x, c.y].every(n => typeof n === 'number' && Number.isSafeInteger(n) && Math.abs(n) <= 1000000))
+    || (c.type === 'refine-equipment' && ((!isActivityEquipment(c.target) && !isEquipmentId(c.target))
+      || typeof c.fingerprint !== 'string' || c.fingerprint.length > 2000))
+    || (c.type === 'enhanced-gear' && (!isEquipmentActivity(c.activity) || (c.id !== null && !isEquipmentId(c.id))))
     || (c.type === 'federation-contribute' && (!oneOf(c.asset, [...resources, 'dollars']) || typeof c.amount !== 'number'
       || !Number.isFinite(c.amount) || c.amount <= 0 || c.amount > 100000000
       || (c.asset === 'dollars' ? !/^\d+(?:\.\d{1,4})?$/.test(String(c.amount)) : !Number.isSafeInteger(c.amount))))
@@ -665,6 +684,19 @@ function executeCommand(account: Account, command: Command, realTime: number,
   contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
   const game = account.game;
   switch (command.type) {
+    case 'max-upgrade': {
+      const bag = inventory(account), state = { game, inventory: bag, warehouse: account.warehouse };
+      if (!hasBuilderCharter(state)) throw new ApiError(409, 'An unused Master Builder Charter is required.');
+      const plan = maxUpgradePlan(state, command.target);
+      if (!plan.count) throw new ApiError(409, 'No affordable upgrades are available for this target.');
+      if (plan.fingerprint !== command.fingerprint) throw new ApiError(409, 'Upgrade requirements changed. Review the maximum upgrade again.');
+      const draft = structuredClone(account);
+      for (let index = 0; index < plan.count; index++) executeCommand(draft, command.target, realTime);
+      const draftBag = inventory(draft);
+      draftBag.items.splice(draftBag.items.indexOf(builderCharter), 1);
+      Object.assign(account, draft);
+      return note(account.game, `${plan.count} upgrades completed. One Master Builder Charter consumed.`);
+    }
     case 'dispatch-squad': {
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before sending a squad.');
       const supplyReason = settlementSupplyReason(account);
@@ -773,6 +805,8 @@ function executeCommand(account: Account, command: Command, realTime: number,
     case 'craft': return craft(account, command.item, command.quantity);
     case 'equip': return equip(account, command.item);
     case 'activity-gear': return equipActivity(account, command.activity, command.item);
+    case 'enhanced-gear': return equipEnhanced(account, command.activity, command.id);
+    case 'refine-equipment': return refineEquipment(account, command.target, command.fingerprint);
     case 'decorate': return decorate(account, command.slot, command.item);
     case 'arrange': return arrange(account, command.entity, command.position);
     case 'item-storage': return expandInventory(account);

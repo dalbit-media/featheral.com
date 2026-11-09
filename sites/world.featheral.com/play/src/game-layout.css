@@ -38,7 +38,7 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 #app :is(.community-view,.marketplace-view)>*:not(dialog){box-sizing:border-box;width:100%;max-width:var(--game-content-width);margin-inline:auto}
 #app :is(.page-heading,.exchange-heading,.bank-heading,.exchange-layout,.federation-page-content,.journal-tools,.journal-page-list,.community-chat-layout,.guide-hero,.guide-layout,.settlement-section,.world-dollar-wallet,.featheral-bank-view>p){max-width:var(--game-content-width)}
 #app .market-bank-link{width:100%;max-width:var(--game-content-width)}
-#app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:88px;--game-header-height:96px;--game-footer-height:0px;--layout-gap:20px;position:relative;height:100dvh;min-height:0;grid-template-columns:var(--game-rail-width) minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr);font-size:14px;background:#0e1914}
+#app:is(.explore-page,.settlement-page,.community-page,.marketplace-page,.inventory-page){--game-rail-width:88px;--game-header-height:96px;--game-footer-height:0px;--layout-gap:20px;position:relative;height:100dvh;min-height:0;grid-template-columns:var(--game-rail-width) minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr);font-size:14px;background:#0e1914}
 #app .rail{grid-column:1;grid-row:1/-1;padding:20px 10px 16px;border-color:var(--surface-border);background:#101d17}
 .game-brand{display:flex;flex-direction:column;align-items:center;gap:4px;text-decoration:none;color:var(--mint);font:800 30px 'Manrope',sans-serif;line-height:1}
 .game-brand span{font:600 9px 'DM Sans',sans-serif;letter-spacing:2px}
@@ -98,7 +98,7 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 .management-dialog>header,.account-heading{border-color:var(--surface-border)}
 .management-content,.account-content{scrollbar-width:thin;scrollbar-color:#607d69 transparent}
 @media(max-width:1199px){
-  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:76px;--game-header-height:132px;--layout-gap:16px}
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page,.inventory-page){--game-rail-width:76px;--game-header-height:132px;--layout-gap:16px}
   #app .topbar{grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:48px 56px;gap:8px 12px;padding:10px 16px}
   #app .topbar .population-health{grid-column:2;grid-row:1;min-height:44px}
   #app .topbar-account{grid-column:3;grid-row:1}
@@ -118,7 +118,7 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
   #app .clock-calendar{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 }
 @media(max-width:650px){
-  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page){--game-rail-width:0px;--game-header-height:124px;--game-footer-height:calc(68px + env(safe-area-inset-bottom));--layout-gap:12px;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr) var(--game-footer-height)}
+  #app:is(.explore-page,.settlement-page,.community-page,.marketplace-page,.inventory-page){--game-rail-width:0px;--game-header-height:124px;--game-footer-height:calc(68px + env(safe-area-inset-bottom));--layout-gap:12px;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--game-header-height) minmax(0,1fr) var(--game-footer-height)}
   #app .rail{position:absolute;inset:auto 0 0;grid-column:1;grid-row:3;height:var(--game-footer-height);padding:0 8px env(safe-area-inset-bottom);border:0;border-top:1px solid var(--surface-border)}
   #app .game-brand{display:none}
   #app .rail-links{flex-direction:row;align-items:stretch;margin:0;gap:4px;height:68px}
