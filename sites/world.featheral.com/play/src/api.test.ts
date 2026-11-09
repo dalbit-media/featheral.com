@@ -1,6 +1,62 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { connect, linkWorldProfile, readChatProfile, readMarket } from './api.ts';
+import { connect, linkWorldProfile, readAutoCraft, readChatProfile, readMarket, sendMarket } from './api.ts';
+import { createAccount, snapshot } from '../server/economy.ts';
+
+function merchantState() {
+  return { ...snapshot(createAccount(1000000)), csrf: 'csrf', clockSpeed: 1 as const, population: { global: 0, federation: null } };
+}
+
+test('merchant review and execution allow 60 seconds while ordinary market requests retain 10 seconds', async t => {
+  const deadlines: number[] = [];
+  t.mock.method(AbortSignal, 'timeout', (ms: number) => { deadlines.push(ms); return new AbortController().signal; });
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ autoCraft: {} }));
+  await readAutoCraft();
+  await sendMarket(merchantState(), { type: 'auto-craft', fingerprint: 'review' });
+  await readMarket('wood', 1);
+  assert.deepEqual(deadlines, [60000, 60000, 10000]);
+});
+
+test('lost merchant responses retry the exact receipt ID, revision and fingerprint without duplicate spending', async t => {
+  const requests: RequestInit[] = [], deadlines: number[] = [];
+  t.mock.method(AbortSignal, 'timeout', (ms: number) => { deadlines.push(ms); return new AbortController().signal; });
+  t.mock.method(globalThis, 'fetch', async (_url: string, init: RequestInit) => {
+    requests.push(init);
+    if (requests.length === 1) throw new DOMException('signal timed out', 'TimeoutError');
+    return Response.json({ autoCraft: { estimatedProfit: 42 } });
+  });
+  const state = merchantState();
+  const result = await sendMarket(state, { type: 'auto-craft', fingerprint: 'review' });
+  assert.equal(result.autoCraft?.estimatedProfit, 42);
+  assert.deepEqual(deadlines, [60000, 60000]);
+  assert.equal(requests[0].body, requests[1].body);
+  const body = JSON.parse(String(requests[0].body));
+  assert.match(body.id, /^[0-9a-f-]{36}$/);
+  assert.equal(body.revision, state.revision);
+  assert.deepEqual(body.command, { type: 'auto-craft', fingerprint: 'review' });
+});
+
+test('merchant timeouts distinguish an unspent preview from a potentially completed confirmation', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    throw new DOMException('signal timed out', 'TimeoutError');
+  });
+  await assert.rejects(readAutoCraft(), /Nothing was consumed/);
+  assert.equal(calls, 1);
+  await assert.rejects(sendMarket(merchantState(), { type: 'auto-craft', fingerprint: 'review' }), /may have completed.*Refresh inventory/);
+  assert.equal(calls, 3);
+});
+
+test('merchant HTTP failures surface immediately without retrying a rejected operation', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return Response.json({ error: 'Quote changed. Review again.' }, { status: 409 });
+  });
+  await assert.rejects(sendMarket(merchantState(), { type: 'auto-craft', fingerprint: 'review' }), /Quote changed/);
+  assert.equal(calls, 1);
+});
 
 test('market quantity reads preserve manual requests and encode optional budget and limit price', async t => {
   const requests: string[] = [];

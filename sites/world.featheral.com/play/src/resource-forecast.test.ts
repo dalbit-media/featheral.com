@@ -26,6 +26,7 @@ test('reserve charts use owned reserves and authoritative weekly demand with cle
   state.settlementUpkeep = { readyAt: 1, paused: false, resources: {
     wood: { dailyConsumption: 1, weeklyConsumption: 7, shortage: 0 },
     metal: { dailyConsumption: 1, weeklyConsumption: 7, shortage: 0 },
+    oil: { dailyConsumption: 0, weeklyConsumption: 0, shortage: 0 },
   } };
   state.game.stock.water = 35;
   state.pending.water = 100000;

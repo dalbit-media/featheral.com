@@ -9,7 +9,7 @@ import type { ItemInventory } from '../src/items.ts';
 import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
 import { isSettlementEntity } from '../src/settlement-layout.ts';
 import { fthgScale } from '../src/fthg.ts';
-import { dailyWaterPerResident, settlementConsumptionForDays, settlementUpkeep, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
+import { dailyWaterPerResident, settlementConsumptionForDays, settlementUpkeep, settlementUpkeepResources, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
 import { isWaterFacility } from '../src/water-facilities.ts';
 import { isIncomeFacility, weeklyIncome } from '../src/income.ts';
 import { maximumUpgradeLevel, warehouseCost } from '../src/costs.ts';
@@ -68,8 +68,8 @@ export interface Account {
   incomeReadyAt: number;
   recruitment?: Snapshot['recruitment'];
   waterUpkeep?: { version?: 2; readyAt: number; lastPopulationLoss: number; paused?: boolean };
-  settlementUpkeep?: { version: 1; readyAt: number; remainder: { wood: number; metal: number } };
-  populationCycle?: { readyAt: number; required: Record<'water' | 'wood' | 'metal', number>; shortage: Record<'water' | 'wood' | 'metal', number>; lossRemainder: number; lastChange: number };
+  settlementUpkeep?: { version: 1; readyAt: number; oilStartedAt?: number; remainder: { wood: number; metal: number; oil?: number } };
+  populationCycle?: { readyAt: number; required: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; shortage: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; lossRemainder: number; lastChange: number };
   workforce?: StoredWorkforce;
   inventory?: ItemInventory;
   receipt: { id: string; request: string; result: Omit<Snapshot, 'workforce' | 'inventory' | 'waterUpkeep'> & { workforce?: StoredWorkforce; inventory?: ItemInventory; waterUpkeep?: StoredSnapshotUpkeep | null; message: string } } | null;
@@ -100,6 +100,7 @@ export function migrateClock(account: Account, realTime: number, serverTime: num
   }
   if (account.waterUpkeep) account.waterUpkeep.readyAt += shift;
   if (account.settlementUpkeep) account.settlementUpkeep.readyAt += shift;
+  if (account.settlementUpkeep?.oilStartedAt !== undefined) account.settlementUpkeep.oilStartedAt += shift;
   if (account.populationCycle) account.populationCycle.readyAt += shift;
   if (account.physicalStartedAt !== undefined) account.physicalStartedAt += shift;
   if (account.activityAutomation) for (const automation of Object.values(account.activityAutomation)) {
@@ -219,34 +220,40 @@ export function initializeUpkeep(account: Account, now: number): void {
   if (account.game.stage >= 0 && !account.settlementUpkeep) {
     account.settlementUpkeep = { version: 1, readyAt: now + worldDayMs, remainder: { wood: 0, metal: 0 } };
   }
+  if (account.settlementUpkeep && account.settlementUpkeep.oilStartedAt === undefined) {
+    account.settlementUpkeep.oilStartedAt = now + worldDayMs;
+    account.settlementUpkeep.remainder.oil = 0;
+  }
   if (account.game.stage >= 0 && !account.populationCycle) {
     account.populationCycle = { readyAt: now + worldWeekMs, required: { water: 0, wood: 0, metal: 0 },
       shortage: { water: 0, wood: 0, metal: 0 }, lossRemainder: 0, lastChange: 0 };
   }
 }
-function recordPopulationSupply(account: Account, resource: 'water' | 'wood' | 'metal', required: number, shortage: number, firstDay: number, days: number): void {
+function recordPopulationSupply(account: Account, resource: Resource, required: number, shortage: number, firstDay: number, days: number): void {
   const cycle = account.populationCycle;
   if (!cycle || !account.game.population) return;
   const ignoredDays = Math.min(days, Math.max(0, 1 + Math.floor((cycle.readyAt - worldWeekMs - firstDay) / worldDayMs)));
   if (ignoredDays === days) return;
   if (ignoredDays) {
     required -= resource === 'water' ? waterForDays(account, ignoredDays)
-      : settlementConsumptionForDays(resource, account.game.population, firstDay, ignoredDays);
+      : settlementConsumptionForDays(resource, account.game.population, firstDay, ignoredDays, account.game.stage);
     shortage = Math.min(required, shortage);
   }
-  cycle.required[resource] += required;
-  cycle.shortage[resource] += shortage;
+  cycle.required[resource] = (cycle.required[resource] ?? 0) + required;
+  cycle.shortage[resource] = (cycle.shortage[resource] ?? 0) + shortage;
 }
 function updatePopulation(account: Account): void {
   const cycle = account.populationCycle!, population = account.game.population;
-  const shortage = Math.max(...(['water', 'wood', 'metal'] as const).map(resource =>
-    cycle.required[resource] > 0 ? cycle.shortage[resource] / cycle.required[resource] : 0));
+  const shortage = Math.max(...resources.map(resource => {
+    const required = cycle.required[resource] ?? 0;
+    return required > 0 ? (cycle.shortage[resource] ?? 0) / required : 0;
+  }));
   let change = 0;
   if (population > 0 && shortage > 0) {
     const loss = population * .05 * Math.min(1, shortage) + cycle.lossRemainder;
     change = -Math.min(population, Math.floor(loss));
     cycle.lossRemainder = loss - Math.floor(loss);
-  } else if (population > 0 && Object.values(cycle.required).every(amount => amount > 0)) {
+  } else if (population > 0 && (['water', 'wood', 'metal'] as const).every(resource => cycle.required[resource] > 0)) {
     change = Math.max(1, Math.floor(population * .01));
     cycle.lossRemainder = 0;
   }
@@ -267,9 +274,9 @@ function updatePopulation(account: Account): void {
 function settlementSupplyReason(account: Account): string | null {
   if (hydration(account).shortage) return 'Restore Water supplies before starting advanced activity.';
   if (!account.settlementUpkeep || account.updatedAt < account.settlementUpkeep.readyAt - worldDayMs) return null;
-  for (const resource of ['wood', 'metal'] as const) {
-    if (settlementUpkeep(resource, account.game.population, Math.max(0, account.game.stock[resource] - account.settlementUpkeep.remainder[resource] / 10000), account.settlementUpkeep.readyAt).shortage)
-      return resource === 'wood' ? 'Restore Wood heating supplies before starting advanced activity.' : 'Restore Metal repair supplies before starting advanced activity.';
+  for (const resource of settlementUpkeepResources) {
+    if (settlementUpkeep(resource, account.game.population, Math.max(0, account.game.stock[resource] - (account.settlementUpkeep.remainder[resource] ?? 0) / 10000), account.settlementUpkeep.readyAt, account.game.stage).shortage)
+      return resource === 'wood' ? 'Restore Wood heating supplies before starting advanced activity.' : resource === 'metal' ? 'Restore Metal repair supplies before starting advanced activity.' : 'Restore Oil fuel supplies before starting advanced activity.';
   }
   return null;
 }
@@ -277,11 +284,14 @@ function consumeSettlementDays(account: Account, until: number): void {
   const upkeep = account.settlementUpkeep!;
   const days = 1 + Math.floor((until - upkeep.readyAt) / worldDayMs);
   if (days <= 0) return;
-  for (const resource of ['wood', 'metal'] as const) {
-    const required = settlementConsumptionForDays(resource, account.game.population, upkeep.readyAt, days);
-    const available = Math.max(0, account.game.stock[resource] - upkeep.remainder[resource] / 10000);
-    recordPopulationSupply(account, resource, required, Math.max(0, required - available), upkeep.readyAt, days);
-    const units = Math.round(required * 10000) + upkeep.remainder[resource];
+  for (const resource of settlementUpkeepResources) {
+    const skipped = resource === 'oil' ? Math.min(days, Math.max(0, Math.ceil((upkeep.oilStartedAt! - upkeep.readyAt) / worldDayMs))) : 0;
+    const firstDay = upkeep.readyAt + skipped * worldDayMs;
+    const required = settlementConsumptionForDays(resource, account.game.population, firstDay, days - skipped, account.game.stage);
+    const remainder = upkeep.remainder[resource] ?? 0;
+    const available = Math.max(0, account.game.stock[resource] - remainder / 10000);
+    recordPopulationSupply(account, resource, required, Math.max(0, required - available), firstDay, days - skipped);
+    const units = Math.round(required * 10000) + remainder;
     if (!Number.isSafeInteger(units)) throw new ApiError(409, 'Account limit reached.');
     const consumed = Math.floor(units / 10000);
     upkeep.remainder[resource] = units % 10000;
@@ -488,11 +498,11 @@ export function accrue(account: Account, time: number): void {
           account.game.population > 0 ? (account.populationCycle?.readyAt ?? Infinity) - 1 : Infinity,
           ...Object.values(account.activityAutomation ?? {}).filter(automation => automation.enabled && automation.nextAt < automation.until).map(automation => automation.nextAt - 1));
         const upkeep = account.waterUpkeep;
-        for (const resource of ['water', 'wood', 'metal'] as const) {
+        for (const resource of resources) {
           const supplyUpkeep = resource === 'water' ? upkeep : account.settlementUpkeep;
           if (!supplyUpkeep) continue;
           const consumption = (days: number) => resource === 'water' ? waterForDays(account, days)
-            : settlementConsumptionForDays(resource, account.game.population, supplyUpkeep!.readyAt, days);
+            : settlementConsumptionForDays(resource, account.game.population, supplyUpkeep!.readyAt, days, account.game.stage);
           const refillBelow = resourceCapacity(cap, resource, account.game) - account.pending[resource] / minute
             + (resource === 'water' ? Math.ceil(waterRequirement(account.game.population) * 1.5) : -1);
           const mayRefill = supplyUpkeep && account.game.population > 0
@@ -540,9 +550,10 @@ export function snapshot(account: Account): Snapshot {
   const waterTime = account.waterUpkeep?.readyAt ?? account.updatedAt;
   const water = hydration(account, waterTime);
   const supplyTime = account.settlementUpkeep?.readyAt ?? account.updatedAt;
-  const supplyResources = Object.fromEntries((['wood', 'metal'] as const).map(resource => {
-    const use = settlementUpkeep(resource, account.game.population, Math.max(0, account.game.stock[resource] - (account.settlementUpkeep?.remainder[resource] ?? 0) / 10000), supplyTime);
-    return [resource, { dailyConsumption: use.required, weeklyConsumption: settlementConsumptionForDays(resource, account.game.population, supplyTime, 7), shortage: use.shortage }];
+  const supplyResources = Object.fromEntries(settlementUpkeepResources.map(resource => {
+    const readyAt = resource === 'oil' ? supplyTime + Math.max(0, Math.ceil(((account.settlementUpkeep?.oilStartedAt ?? supplyTime) - supplyTime) / worldDayMs)) * worldDayMs : supplyTime;
+    const use = settlementUpkeep(resource, account.game.population, Math.max(0, account.game.stock[resource] - (account.settlementUpkeep?.remainder[resource] ?? 0) / 10000), readyAt, account.game.stage);
+    return [resource, { readyAt, dailyConsumption: use.required, weeklyConsumption: settlementConsumptionForDays(resource, account.game.population, readyAt, 7, account.game.stage), shortage: use.shortage }];
   })) as NonNullable<Snapshot['settlementUpkeep']>['resources'];
   return { ...(account.customization ? { customization: structuredClone(account.customization) } : {}), physicalVersion: account.physicalVersion, fthg: account.fthg / fthgScale, dollars: account.game.dollars / dollarsScale, income: { weekly: weeklyIncome(account.game) / dollarsScale, readyAt: 0 }, inventory: structuredClone(bag), game: structuredClone(account.game), pending, rates: rates(account), capacity: cap, claimThreshold: Math.ceil(cap / 2),
     ...(account.activityAutomation ? { activityAutomation: {

@@ -78,6 +78,7 @@ test('downgrades use strict below-half thresholds, repeat tiers and retain struc
   }
   const exact = settled(5000);
   exact.game.stage = 6;
+  exact.game.stock.oil = 1000;
   exact.game.stock.water = waterConsumptionForDays(5000, worldEpoch + worldDayMs, 7) - 1;
   accrue(exact, worldEpoch + worldWeekMs);
   assert.equal(exact.game.population, 5000);

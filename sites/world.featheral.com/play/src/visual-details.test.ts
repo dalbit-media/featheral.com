@@ -12,6 +12,22 @@ import { settlementBuildings } from './settlement-layout.ts';
 import { settlementSectionNavigation, settlementTasks } from './settlement-ui.ts';
 import { icon } from './icons.ts';
 import { translate } from './i18n.ts';
+import { stages } from './engine.ts';
+
+test('settlement tier badge shows the exact civilization stage even with a custom settlement name', () => {
+  const account = createAccount(0);
+  for (let stage = -1; stage < stages.length; stage++) {
+    account.game.stage = stage;
+    const state: ApiState = { ...snapshot(account), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
+    state.customization = { ...state.customization, settlementName: 'My settlement' };
+    for (const language of ['en', 'ko'] as const) {
+      const html = settlementScene(state, language);
+      const name = translate(stage < 0 ? 'Unsettled' : stages[stage].name, language);
+      assert.ok(html.includes(`<span class="settlement-stage-tag">${name}</span>`));
+      assert.ok(html.includes('<h2 data-no-localize>My settlement</h2>'));
+    }
+  }
+});
 
 test('every item renders one self-contained illustrated SVG and translated category/effect/use details without changing state', () => {
   const account = createAccount(0), before = structuredClone(account);

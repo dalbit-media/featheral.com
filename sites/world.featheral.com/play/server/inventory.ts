@@ -48,7 +48,8 @@ export function craft(account: Account, item: CraftableItem, quantity = 1): stri
     if (sellableItemCount(bag, permit) < 1) throw new GameError('A matching bulk crafting permit is required for this batch.');
   }
   if (Object.entries(ingredients).some(([id, count]) => sellableItemCount(bag, id as ItemId) < count))
-    throw new GameError(isActivityEquipment(item) || isBulkCraftingItem(item) || isTransportItem(item) ? 'Not enough unused decoration or collector ingredients. Return placed decorations to inventory first.' : 'Not enough collector items to craft this bundle.');
+    throw new GameError(item === 'merchant-charter' ? 'Crafting the Master Merchant Charter requires one unused keepsake from every terrain. Market-reserved and pending collectibles do not count.'
+      : isActivityEquipment(item) || isBulkCraftingItem(item) || isTransportItem(item) ? 'Not enough unused decoration or collector ingredients. Return placed decorations to inventory first.' : 'Not enough collector items to craft this bundle.');
   if (!craftingFits(bag, item, quantity)) throw new GameError('Item inventory is full. Upgrade item storage first.');
   if (!recipeDiscovered(game, item)) throw new GameError('Explore the ingredient resources before crafting this item.');
   const recipe = craftableItems[item];

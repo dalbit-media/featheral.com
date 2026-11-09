@@ -57,7 +57,7 @@ export function settlementScene(state: ApiState, language: Language, editing = f
   return `<section class="settlement-district ${editing ? 'decoration-mode' : ''}" id="settlement-scene" aria-labelledby="district-title">
     <h1 class="visually-hidden" id="district-title" data-no-localize>${displayName}</h1>
     <aside class="settlement-command-card" aria-label="${translate('Your settlement', language)}">
-      <header class="settlement-command-heading"><div><span class="eyebrow">${translate('Your settlement', language)}</span><h2 data-no-localize>${displayName}</h2>${region ? `<small data-no-localize>${region}</small>` : ''}</div><span class="settlement-stage-tag">${translate(profile.style, language)}</span></header>
+      <header class="settlement-command-heading"><div><span class="eyebrow">${translate('Your settlement', language)}</span><h2 data-no-localize>${displayName}</h2>${region ? `<small data-no-localize>${region}</small>` : ''}</div><span class="settlement-stage-tag">${translate(profile.name, language)}</span></header>
       <p class="settlement-command-description">${translate(profile.description, language)}</p>
       <div class="settlement-command-stats">
         <div><small>${translate('Residents', language)}</small><strong>${game.population.toLocaleString(locale(language))}</strong><span>${state.availableWorkers.toLocaleString(locale(language))} ${translate('Available now', language)}</span></div>

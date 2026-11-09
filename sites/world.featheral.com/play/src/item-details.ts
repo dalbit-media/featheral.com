@@ -40,5 +40,7 @@ export function itemDetailRows(id: ItemId, language: Language, owned?: number, r
   const description = itemDescription(id), t = (text: string) => escapeAtlas(translate(text, language));
   return `<dl class="item-facts"><div><dt>${t('Category')}</dt><dd>${t(description.category)}</dd></div>
     <div><dt>${t('Effect')}</dt><dd>${t(description.effect)}</dd></div><div><dt>${t('How to use')}</dt><dd>${t(description.use)}</dd></div>
+    ${isAutoCraftingItem(id) ? `<div><dt>${t('Crafting requirements')}</dt><dd>${t('One of every terrain keepsake, consumed when crafting.')}</dd></div>
+    <div><dt>${t('Market pricing')}</dt><dd>${t('Live player offers and pool liquidity; crafting fee is not the market price.')}</dd></div>` : ''}
     ${owned === undefined ? '' : `<div><dt>${t('Available copies')}</dt><dd>${owned.toLocaleString(locale(language))}${reserved ? ` · ${reserved.toLocaleString(locale(language))} ${t('Reserved in market')}` : ''}</dd></div>`}</dl>`;
 }

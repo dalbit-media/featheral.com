@@ -20,26 +20,35 @@ export function waterUpkeep(population: number, ownedWater: number, time?: numbe
 
 const demand = Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, waterDemandClimate));
 const prefixes = new Map<number, number[]>();
-export type SettlementUpkeepResource = 'wood' | 'metal';
-export const dailyUpkeepPerResident = { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption } as const;
+export const settlementUpkeepResources = ['wood', 'metal', 'oil'] as const;
+export type SettlementUpkeepResource = typeof settlementUpkeepResources[number];
+export const dailyUpkeepPerResident = { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption, oil: 0 } as const;
+export function oilConsumptionPerResident(stage: number): number {
+  return stage < 4 ? 0 : .001 * 2 ** (stage - 4);
+}
+function upkeepRate(resource: SettlementUpkeepResource, stage: number): number {
+  return resource === 'oil' ? oilConsumptionPerResident(stage) : dailyUpkeepPerResident[resource];
+}
 const upkeepDemand = {
   wood: Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, heatingDemandClimate)),
   metal: Array.from({ length: climateCycleDays }, (_, day) => dailyClimate(worldEpoch + day * worldDayMs, maintenanceDemandClimate)),
+  oil: Array.from({ length: climateCycleDays }, () => 1),
 };
 const upkeepPrefixes = new Map<string, number[]>();
-const maximumUpkeepDemand = { wood: Math.max(...upkeepDemand.wood), metal: Math.max(...upkeepDemand.metal) };
-export function maximumSettlementWeeklyConsumption(resource: SettlementUpkeepResource, population: number): number {
-  return Math.ceil(population * dailyUpkeepPerResident[resource] * maximumUpkeepDemand[resource] * 7) + 1;
+const maximumUpkeepDemand = { wood: Math.max(...upkeepDemand.wood), metal: Math.max(...upkeepDemand.metal), oil: 1 };
+export function maximumSettlementWeeklyConsumption(resource: SettlementUpkeepResource, population: number, stage = 0): number {
+  const rate = upkeepRate(resource, stage);
+  return rate ? Math.ceil(population * rate * maximumUpkeepDemand[resource] * 7) + 1 : 0;
 }
 const upkeepScale = 10000;
-export function settlementConsumptionForDays(resource: SettlementUpkeepResource, population: number, firstDay: number, days: number): number {
+export function settlementConsumptionForDays(resource: SettlementUpkeepResource, population: number, firstDay: number, days: number, stage = 0): number {
   if (!Number.isSafeInteger(population) || population < 0 || !Number.isSafeInteger(firstDay) || firstDay < 0
     || !Number.isSafeInteger(days) || days < 0) throw new RangeError('Invalid settlement consumption interval.');
-  const key = `${resource}:${population}`;
+  const rate = upkeepRate(resource, stage), key = `${resource}:${population}:${rate}`;
   let prefix = upkeepPrefixes.get(key);
   if (!prefix) {
     prefix = [0];
-    for (const factor of upkeepDemand[resource]) prefix.push(prefix.at(-1)! + Math.round(population * dailyUpkeepPerResident[resource] * factor * upkeepScale));
+    for (const factor of upkeepDemand[resource]) prefix.push(prefix.at(-1)! + Math.round(population * rate * factor * upkeepScale));
     if (upkeepPrefixes.size >= 64) upkeepPrefixes.delete(upkeepPrefixes.keys().next().value!);
     upkeepPrefixes.set(key, prefix);
   }
@@ -49,8 +58,8 @@ export function settlementConsumptionForDays(resource: SettlementUpkeepResource,
   if (!Number.isSafeInteger(total)) throw new RangeError('Settlement consumption exceeds account limits.');
   return total / upkeepScale;
 }
-export function settlementUpkeep(resource: SettlementUpkeepResource, population: number, owned: number, time: number) {
-  const required = settlementConsumptionForDays(resource, population, time, 1), consumed = Math.min(owned, required);
+export function settlementUpkeep(resource: SettlementUpkeepResource, population: number, owned: number, time: number, stage = 0) {
+  const required = settlementConsumptionForDays(resource, population, time, 1, stage), consumed = Math.min(owned, required);
   return { required, consumed, shortage: Math.max(0, Math.round((required - consumed) * upkeepScale) / upkeepScale) };
 }
 function floorSum(n: bigint, m: bigint, a: bigint, b: bigint): bigint {
@@ -64,15 +73,15 @@ function floorSum(n: bigint, m: bigint, a: bigint, b: bigint): bigint {
     [m, a] = [a, m];
   }
 }
-export function suppliedWorkWeeks(resource: SettlementUpkeepResource, population: number, firstDay: number, weeks: number, remainder: number): number {
+export function suppliedWorkWeeks(resource: SettlementUpkeepResource, population: number, firstDay: number, weeks: number, remainder: number, stage = 0): number {
   if (!Number.isSafeInteger(weeks) || weeks < 0 || !Number.isSafeInteger(remainder) || remainder < 0 || remainder >= upkeepScale)
     throw new RangeError('Invalid supplied work interval.');
   const cycleWeeks = climateCycleDays / 7;
-  const cycle = Math.round(settlementConsumptionForDays(resource, population, firstDay, climateCycleDays) * upkeepScale);
+  const cycle = Math.round(settlementConsumptionForDays(resource, population, firstDay, climateCycleDays, stage) * upkeepScale);
   let before = remainder, charged = 0;
   for (let week = 0; week < Math.min(weeks, cycleWeeks); week++) {
     const count = 1 + Math.floor((weeks - week - 1) / cycleWeeks);
-    const width = Math.round(settlementConsumptionForDays(resource, population, firstDay + week * 7 * worldDayMs, 7) * upkeepScale);
+    const width = Math.round(settlementConsumptionForDays(resource, population, firstDay + week * 7 * worldDayMs, 7, stage) * upkeepScale);
     // A short bill crosses a lot boundary only on some climate cycles.
     charged += width >= upkeepScale ? count : Number(
       floorSum(BigInt(count), 10000n, BigInt(cycle % upkeepScale), BigInt(before % upkeepScale + width))

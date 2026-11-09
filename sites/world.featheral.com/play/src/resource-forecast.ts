@@ -18,9 +18,9 @@ export function resourceForecastPanel(state: Snapshot, language: Language): stri
   if (!state.waterUpkeep) return '';
   const t = (text: string) => translate(text, language);
   const locale = language === 'ko' ? 'ko-KR' : 'en-US';
-  const rows = (['water', 'wood', 'metal'] as const).map(resource => {
+  const rows = (['water', 'wood', 'metal', 'oil'] as const).map(resource => {
     const upkeep = resource === 'water' ? state.waterUpkeep! : state.settlementUpkeep?.resources[resource];
-    if (!upkeep) return '';
+    if (!upkeep || resource === 'oil' && !upkeep.weeklyConsumption) return '';
     const shortage = resource === 'water' ? state.waterUpkeep!.paused : state.settlementUpkeep!.resources[resource].shortage > 0;
     const forecast = depletionForecast(state.game.stock[resource], upkeep.weeklyConsumption, shortage);
     const amount = formatResourceAmount(resource, upkeep.weeklyConsumption, locale, true);

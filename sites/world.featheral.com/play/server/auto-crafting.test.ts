@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { SqliteStore } from './store.ts';
 import { craft, inventory } from './inventory.ts';
 import { seedFixturePools } from './test-support.ts';
-import { craftableKeys, craftingCost, itemName } from '../src/items.ts';
+import { craftableKeys, craftingCost, craftingMaximum, isCollectible, itemName } from '../src/items.ts';
 import { merchantCharter, merchantCharterFee } from '../src/auto-crafting.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { isReserveMarketAsset, isLiquidAsset, marketAssets } from '../src/market.ts';
@@ -17,7 +17,10 @@ import { once } from 'node:events';
 import { createApi } from './http.ts';
 import type { AutoCraftResponse } from '../src/auto-crafting.ts';
 import { craftingIngredients } from '../src/items.ts';
-import { inventoryPanel } from '../src/inventory-view.ts';
+import { craftingPanel, inventoryPanel } from '../src/inventory-view.ts';
+import { terrainDetails } from '../src/engine.ts';
+import { snapshot } from './economy.ts';
+import { itemDetailRows } from '../src/item-details.ts';
 
 function setup(path = ':memory:') {
   let time = 1000000;
@@ -55,9 +58,85 @@ test('charter is the most expensive recipe, has localized art, and never expands
   try {
     h.store.transaction(h.user.token, session => {
       const before = session.account.game.dollars;
+      inventory(session.account).items.push(...marketAssets.filter(isCollectible));
       craft(session.account, merchantCharter);
       assert.equal(before - session.account.game.dollars, dollarsUnits(merchantCharterFee));
     });
+  } finally { h.store.close(); }
+});
+test('charter crafting consumes one of every terrain collectible and rejects missing, reserved or pending keepsakes without spending', () => {
+  const h = setup(), keepsakes = marketAssets.filter(isCollectible);
+  try {
+    assert.equal(keepsakes.length, Object.keys(terrainDetails).length);
+    assert.deepEqual(craftingIngredients(merchantCharter), Object.fromEntries(keepsakes.map(id => [id, 1])));
+    assert.deepEqual(craftingIngredients(merchantCharter, 10), Object.fromEntries(keepsakes.map(id => [id, 10])));
+    for (const missing of keepsakes) {
+      h.store.transaction(h.user.token, session => {
+        const bag = inventory(session.account);
+        bag.items = keepsakes.filter(id => id !== missing);
+        bag.pending = [missing];
+        bag.marketReserved = [missing];
+        const before = structuredClone(session.account);
+        assert.equal(craftingMaximum(session.account.game, bag, merchantCharter), 0);
+        assert.throws(() => craft(session.account, merchantCharter), /one unused keepsake from every terrain/);
+        assert.deepEqual(session.account, before);
+      });
+    }
+    h.store.transaction(h.user.token, session => {
+      const bag = inventory(session.account);
+      bag.items = [...keepsakes]; bag.pending = []; bag.marketReserved = [];
+      const state = { ...snapshot(session.account), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
+      const markup = craftingPanel(state, () => '', 'all');
+      for (const id of keepsakes) assert.ok(markup.includes(itemName(id)), id);
+      for (const language of ['en', 'ko'] as const) {
+        const details = itemDetailRows(merchantCharter, language);
+        assert.ok(details.includes(translate('One of every terrain keepsake, consumed when crafting.', language)));
+        assert.ok(details.includes(translate('Live player offers and pool liquidity; crafting fee is not the market price.', language)));
+      }
+      assert.equal(craftingMaximum(session.account.game, bag, merchantCharter), 1);
+      const dollars = session.account.game.dollars;
+      craft(session.account, merchantCharter);
+      assert.deepEqual(bag.items, [merchantCharter]);
+      assert.equal(dollars - session.account.game.dollars, dollarsUnits(merchantCharterFee));
+    });
+  } finally { h.store.close(); }
+});
+test('charter uses live dynamic pool pricing, player matching and real history without automatic reserve funding', () => {
+  const h = setup(), buyer = h.store.create();
+  try {
+    h.store.transaction(h.user.token, (session, now, realTime, exchange) => {
+      const bag = inventory(session.account);
+      bag.items = Array.from({ length: 20 }, () => merchantCharter);
+      exchange.fundPool(session.account, merchantCharter, 10, dollarsUnits(20000));
+    });
+    h.store.transaction(buyer.token, session => {
+      session.account.game.stage = 0; session.account.game.population = 0;
+      session.account.game.dollars = dollarsUnits(100000);
+    });
+    const read = () => h.store.transaction(buyer.token, (session, now, realTime, exchange, owner) =>
+      exchange.read(owner, session.account, now, realTime, merchantCharter, 1));
+    const before = read(), total = h.store.publicTotals().dollars;
+    assert.ok(before.market.quotes.buy.available);
+    const buy = h.store.transaction(buyer.token, (session, now, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: before.revision, command: { type: 'spot', side: 'buy', asset: merchantCharter, quantity: 1, limitDollars: before.market.quotes.buy.dollars },
+    }, now, realTime));
+    assert.ok(buy.market.quotes.buy.dollars > before.market.quotes.buy.dollars);
+    assert.equal(buy.market.history.length, 1);
+    assert.equal(buy.market.history[0].asset, merchantCharter);
+    assert.equal(h.store.publicTotals().dollars, total);
+    const ask = buy.market.quotes.buy.dollars - .1;
+    h.store.transaction(h.user.token, (session, now, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: session.account.revision, command: { type: 'limit', side: 'sell', asset: merchantCharter, quantity: 1, price: ask },
+    }, now, realTime));
+    const offered = read();
+    assert.equal(offered.market.quotes.buy.dollars, ask);
+    h.store.transaction(buyer.token, (session, now, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: session.account.revision, command: { type: 'spot', side: 'buy', asset: merchantCharter, quantity: 1, limitDollars: ask },
+    }, now, realTime + 1000));
+    const final = read();
+    assert.equal(final.market.history.at(-1)!.venue, 'players');
+    assert.equal(final.inventory.items.filter(id => id === merchantCharter).length, 2);
+    assert.equal(h.store.publicTotals().dollars, total);
   } finally { h.store.close(); }
 });
 test('quote is side-effect free; one atomic action crafts, sells, consumes original permits and has an idempotent receipt', () => {

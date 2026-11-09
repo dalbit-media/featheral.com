@@ -46,7 +46,7 @@ import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { autoCraftConsumption, claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
-import { chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption } from './confirmation.ts';
+import { chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption, showOperationProgress } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
 import { activityKinds, activityName, isActivityItem, isActivityKind } from './automation.ts';
@@ -363,6 +363,7 @@ function upkeepPauseReason(): string | null {
   if (state.waterUpkeep?.paused) return 'Restore Water supplies before starting advanced activity.';
   if (state.settlementUpkeep?.resources.wood.shortage) return 'Restore Wood heating supplies before starting advanced activity.';
   if (state.settlementUpkeep?.resources.metal.shortage) return 'Restore Metal repair supplies before starting advanced activity.';
+  if (state.settlementUpkeep?.resources.oil.shortage) return 'Restore Oil fuel supplies before starting advanced activity.';
   return null;
 }
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -563,6 +564,7 @@ function renderPopulation(): void {
   const status = !game.population ? 'Recruit residents' : state.waterUpkeep?.paused ? 'Water shortage'
     : state.settlementUpkeep?.resources.wood.shortage ? 'Wood heating shortage'
     : state.settlementUpkeep?.resources.metal.shortage ? 'Metal repair shortage'
+    : state.settlementUpkeep?.resources.oil.shortage ? 'Oil fuel shortage'
     : game.stock.water < (state.waterUpkeep?.weeklyConsumption ?? 0) ? 'Low Water reserve' : idle < 2 ? 'No explorer crew' : 'Healthy';
   button.dataset.health = !game.population || upkeepPauseReason() ? 'critical' : status === 'Healthy' ? 'healthy' : 'warning';
   button.title = `${translate('Gathering now', language)}: ${fmt(counts.gathering)} · ${translate('Exploring now', language)}: ${fmt(counts.exploring)} · ${translate('Available now', language)}: ${fmt(idle)} · ${translate(status, language)}`;
@@ -746,15 +748,15 @@ function renderResources(): void {
     card.classList.toggle('storage-full', full);
     card.querySelector<HTMLElement>('.resource-progress > div')!.style.width = `${capacity ? Math.min(100, game.stock[key] / capacity * 100) : 0}%`;
     const dailyUse = key === 'water' ? state.waterUpkeep?.dailyConsumption ?? 0
-      : key === 'wood' || key === 'metal' ? state.settlementUpkeep?.resources[key].dailyConsumption ?? 0 : 0;
+      : state.settlementUpkeep?.resources[key].dailyConsumption ?? 0;
     const consumption = key === 'water' ? dailyUse : state.workforce.crews[key]?.weeklyDollarsCost ?? 0;
     const waterRisk = key === 'water' && !!state.waterUpkeep?.paused;
     card.classList.toggle('water-shortage', waterRisk);
-    const supplyRisk = (key === 'wood' || key === 'metal') && !!state.settlementUpkeep?.resources[key].shortage;
+    const supplyRisk = key !== 'water' && !!state.settlementUpkeep?.resources[key].shortage;
     card.classList.toggle('supply-shortage', supplyRisk);
-    const status = game.stage < 0 ? 'Settlement required.' : supplyRisk ? key === 'wood' ? 'Wood heating shortage' : 'Metal repair shortage' : full ? 'Storage full' : rate === 0 ? 'No crew' : '';
+    const status = game.stage < 0 ? 'Settlement required.' : supplyRisk ? key === 'wood' ? 'Wood heating shortage' : key === 'metal' ? 'Metal repair shortage' : 'Oil fuel shortage' : full ? 'Storage full' : rate === 0 ? 'No crew' : '';
     card.querySelector('.resource-tooltip')!.innerHTML = `<h3>${names[key]}</h3>
-      <dl><div><dt>Owned</dt><dd>${resourceFmt(key, game.stock[key])}</dd></div><div><dt>Storage capacity</dt><dd>${resourceFmt(key, capacity)}</dd></div><div><dt>Delivery</dt><dd>${automation ? 'Auto-collection active' : 'Manual collection'}</dd></div>${key !== 'oil' ? `<div><dt>Daily consumption</dt><dd>${resourceFmt(key, dailyUse)}</dd></div>` : ''}</dl>
+      <dl><div><dt>Owned</dt><dd>${resourceFmt(key, game.stock[key])}</dd></div><div><dt>Storage capacity</dt><dd>${resourceFmt(key, capacity)}</dd></div><div><dt>Delivery</dt><dd>${automation ? 'Auto-collection active' : 'Manual collection'}</dd></div><div><dt>Daily consumption</dt><dd>${resourceFmt(key, dailyUse)}</dd></div></dl>
       <section class="resource-weekly"><h4>${key === 'water' ? 'Resource flow' : '1 game week'}</h4><dl>
         <div><dt>${key === 'water' ? 'Collection / week' : 'Collection'}</dt><dd class="${rate ? 'resource-inflow' : 'resource-flow-zero'}">${rate ? '+' : ''}${resourceFmt(key, rate)}</dd></div>
         <div><dt>${key === 'water' ? 'Consumption / day' : 'FTH$ transport / week'}</dt><dd class="${consumption ? 'resource-outflow' : 'resource-flow-zero'}">${consumption ? '&minus;' : ''}${key === 'water' ? resourceFmt(key, consumption) : `${fmt(consumption)} FTH$`}</dd></div>
@@ -786,7 +788,7 @@ function renderManagement(): void {
     const ready = canClaim(resource), automated = expiry > state.serverTime;
     replaceContent(root, `<div class="resource-workspace"><section class="resource-pickup"><div class="management-metrics resource-${resource}"><div>${icon(resource)}<small>Owned</small><strong>${resourceFmt(resource, game.stock[resource])}</strong></div><div><small>Ready to collect</small><strong>${resourceFmt(resource, state.pending[resource])}</strong></div><div>${icon('dollars')}<small>Transport</small><strong>${formatDollars(fee, languageLocale)}</strong></div></div>
       ${crew ? completionMeter(crew.readyAt - worldWeekMs, crew.readyAt, 'Next collection') : '<p class="fineprint">No active work. New assignments take a full game week.</p>'}
-      ${resource === 'wood' || resource === 'metal' ? settlementUpkeepPanel(false, resource) : ''}
+      ${resource !== 'water' ? settlementUpkeepPanel(false, resource) : ''}
       <div class="collection-actions">${resourceClaimButton(resource)}<button class="button" data-action="collect-sell" data-resource="${resource}" ${!ready ? 'disabled' : ''}>${icon('dollars')}Collect and sell</button></div>
       ${ready && state.dollars < fee ? '<p class="notice">Not enough FTH$ for pickup. Collect and sell pays transport from the proceeds.</p>' : ''}
       <div class="automation-heading"><h3>Auto-collection</h3>${automated ? `<span data-ready-at="${expiry}" data-compact-time></span>` : '<span>Inactive</span>'}</div>
@@ -1047,10 +1049,15 @@ async function purchaseCraftingAnalysis(): Promise<void> {
 async function automaticCraftAndSell(): Promise<void> {
   if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return; }
   busy = true;
+  let finishProgress: (() => void) | undefined;
   try {
+    finishProgress = showOperationProgress('Reviewing merchant profit', 'Checking your permits, materials, balance and live sale liquidity. Nothing is spent until you confirm.', language);
     const preview = await readAutoCraft();
+    finishProgress();
+    finishProgress = undefined;
     synchronize(preview);
     if (!await confirmConsumption(autoCraftConsumption(preview.autoCraft, language), language)) return;
+    finishProgress = showOperationProgress('Crafting and selling', 'Your confirmed merchant run is processing. Please wait; do not submit another run.', language);
     const response = await sendMarket(state, { type: 'auto-craft', fingerprint: preview.autoCraft.fingerprint });
     synchronize(response);
     if (!response.autoCraft) throw new Error('Automatic crafting result is unavailable. Refresh before trying again.');
@@ -1059,6 +1066,7 @@ async function automaticCraftAndSell(): Promise<void> {
   } catch (error) {
     toast(error instanceof Error ? error.message : 'Automatic crafting failed.', true);
   } finally {
+    finishProgress?.();
     busy = false;
     renderSettlement();
   }
@@ -1117,11 +1125,11 @@ function renderSettlement(): void {
 function waterUpkeepPanel(compact = false): string {
   const upkeep = state.waterUpkeep;
   if (!upkeep) return '';
-  if (compact) return `<div class="upkeep-meters" aria-label="${escape(translate('Next consumption', language))}">${(['water', 'wood', 'metal'] as const).map(resource => {
+  if (compact) return `<div class="upkeep-meters" aria-label="${escape(translate('Next consumption', language))}">${(['water', 'wood', 'metal', 'oil'] as const).map(resource => {
     const use = resource === 'water' ? { dailyConsumption: upkeep.dailyConsumption, shortage: upkeep.paused } : state.settlementUpkeep?.resources[resource];
-    if (!use) return '';
-    const readyAt = resource === 'water' ? upkeep.readyAt : state.settlementUpkeep!.readyAt;
-    const label = `${translate(resource === 'water' ? 'Daily Water' : resource === 'wood' ? 'Wood heating' : 'Metal repairs', language)}: ${resourceFmt(resource, use.dailyConsumption)}/${translate('game day', language)}`;
+    if (!use || resource === 'oil' && !use.dailyConsumption) return '';
+    const readyAt = resource === 'water' ? upkeep.readyAt : state.settlementUpkeep!.resources[resource].readyAt ?? state.settlementUpkeep!.readyAt;
+    const label = `${translate(resource === 'water' ? 'Daily Water' : resource === 'wood' ? 'Wood heating' : resource === 'metal' ? 'Metal repairs' : 'Oil fuel', language)}: ${resourceFmt(resource, use.dailyConsumption)}/${translate('game day', language)}`;
     const detail = use.shortage ? `${label}. ${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}` : label;
     return `<a class="upkeep-meter${use.shortage ? ' shortage' : ''}" href="/market/?asset=${resource}&amp;side=buy" title="${escape(detail)}" aria-label="${escape(detail)}">${icon(resource)}<span class="vertical-consumption">${completionMeter(readyAt - worldDayMs, readyAt, label, true)}</span><strong>${resourceFmt(resource, use.dailyConsumption)}</strong><small>/${translate('game day', language)}${use.shortage ? ' !' : ''}</small></a>`;
   }).join('')}<a class="upkeep-manage" href="/settlement/#production" aria-label="${escape(translate('Manage production', language))}">${icon('settings')}</a></div>`;
@@ -1131,20 +1139,23 @@ function waterUpkeepPanel(compact = false): string {
     ${state.populationCycle ? `<div class="water-upkeep-countdown"><span>${translate('Next population update', language)}</span><strong data-ready-at="${state.populationCycle.readyAt}" data-compact-time></strong></div><p class="fineprint">${translate('Fully supplied settlements grow 1% per game week, minimum one resident. Shortages reduce population by up to 5% per week; fractional losses carry forward. Below half the current tier requirement, settlements downgrade while keeping buildings and items.', language)}</p><p class="fineprint">${translate('Last weekly population change', language)}: ${state.populationCycle.lastChange > 0 ? '+' : ''}${fmt(state.populationCycle.lastChange)}</p>` : ''}
     <div class="water-upkeep-links"><a href="/market/?asset=water&amp;side=buy">Buy Water</a><a href="/settlement/#buildings">Water facilities</a></div></div>${settlementUpkeepPanel()}`;
 }
-function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal'): string {
+function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal' | 'oil'): string {
   const upkeep = state.settlementUpkeep;
   if (!upkeep) return '';
-  return (only ? [only] : ['wood', 'metal'] as const).map(resource => {
+  return (only ? [only] : ['wood', 'metal', 'oil'] as const).map(resource => {
     const use = upkeep.resources[resource];
-    const label = resource === 'wood' ? 'Wood heating' : 'Metal repairs';
+    const readyAt = use.readyAt ?? upkeep.readyAt;
+    if (resource === 'oil' && !use.dailyConsumption) return only ? `<p class="fineprint">${translate('Oil consumption starts at Town and doubles each tier through Capital.', language)}</p>` : '';
+    const label = resource === 'wood' ? 'Wood heating' : resource === 'metal' ? 'Metal repairs' : 'Oil fuel';
     const explanation = resource === 'wood'
       ? 'Heating baseline: 2 kg of Wood per resident per day at the reference heating demand. Cold, wet and stormy conditions increase use.'
-      : 'Repair baseline: 0.2 kg of Metal per resident per day. Rain, snow, storms and extreme temperatures increase maintenance.';
+      : resource === 'metal' ? 'Repair baseline: 0.2 kg of Metal per resident per day. Rain, snow, storms and extreme temperatures increase maintenance.'
+      : 'Oil fuel per resident per game day: Town 0.001 bbl, District 0.002, City 0.004, Metropolis 0.008, Capital 0.016. Demand is not climate-adjusted.';
     return `<div class="${compact ? 'water-upkeep-row' : 'notice water-upkeep'}${use.shortage ? ' supply-shortage' : ''}">
-      <span class="water-upkeep-use" title="${escape(translate(explanation, language))}">${icon(resource)}<strong>${translate(label, language)} · ${resourceFmt(resource, use.dailyConsumption)}<small>/${translate('day', language)}</small></strong></span>
-      ${compact ? completionMeter(upkeep.readyAt - worldDayMs, upkeep.readyAt, 'Next consumption', true)
-        : `<p class="fineprint">${translate(explanation, language)}</p><div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${upkeep.readyAt}" data-compact-time></strong></div>`}
-      <a href="/market/?asset=${resource}&amp;side=buy">${icon('plus')}${translate(resource === 'wood' ? 'Buy Wood' : 'Buy Metal', language)}</a>
+      <span class="water-upkeep-use" title="${escape(translate(explanation, language))}">${icon(resource)}<strong>${translate(label, language)} · ${resourceFmt(resource, use.dailyConsumption)}<small>/${translate(resource === 'oil' ? 'game day' : 'day', language)}</small></strong></span>
+      ${compact ? completionMeter(readyAt - worldDayMs, readyAt, 'Next consumption', true)
+        : `<p class="fineprint">${translate(explanation, language)}</p><div class="water-upkeep-countdown"><span>Next consumption</span><strong data-ready-at="${readyAt}" data-compact-time></strong></div>`}
+      <a href="/market/?asset=${resource}&amp;side=buy">${icon('plus')}${translate(resource === 'wood' ? 'Buy Wood' : resource === 'metal' ? 'Buy Metal' : 'Buy Oil', language)}</a>
       ${use.shortage ? `<small role="status">${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}</small>` : ''}</div>`;
   }).join('');
 }
@@ -1191,7 +1202,7 @@ function workforcePanel(): string {
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
     <p class="fineprint">Every crew needs active residents and a full game week. Collect each resource to pay FTH$ transport for all workers. Auto-collection requires an active resource-specific item. Full storage pauses new work.</p>
-    <p class="fineprint">Residents consume Water, Wood for heating and Metal for repairs each game day. Climate changes demand. Shortages pause new exploration and recruitment and gradually reduce population; paid jobs remain.</p>
+    <p class="fineprint">Residents consume Water, heating Wood and repair Metal daily, plus Oil fuel from Town onward. Oil demand doubles each tier through Capital. Shortages pause new exploration and recruitment and gradually reduce population; paid jobs remain.</p>
     </details></details>
     <p class="fineprint"><span>Transport on next pickup</span>: ${costChips({ dollars: transport })} · <span>Next allocation</span>: <span data-ready-at="${work.cycleAt}"></span></p>
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}

@@ -3,7 +3,7 @@ import { dollarsScale } from './dollars.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
 import type { Expedition, ResourceAccess, Workforce } from './api-types.ts';
-import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, waterRequirement } from './upkeep.ts';
+import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, settlementUpkeepResources, waterRequirement } from './upkeep.ts';
 import { waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { constructionLevel, productionMultiplier } from './constructions.ts';
 import { monetaryPolicy } from './monetary-policy.ts';
@@ -18,8 +18,8 @@ export function warehouseCapacity(game: Game, warehouse: number): number {
   if (game.stage < 0) return 0;
   const tier = stages[game.stage + 1] ?? stages[game.stage];
   const requirement = Math.max(...resourceKeys.map(resource => tier.cost[resource] ?? 0));
-  const reserve = Math.max(...(['wood', 'metal'] as const).map(resource =>
-    maximumSettlementWeeklyConsumption(resource, game.population))) * 2;
+  const reserve = Math.max(...settlementUpkeepResources.map(resource =>
+    maximumSettlementWeeklyConsumption(resource, game.population, game.stage))) * 2;
   return Math.max(100 + game.stage * 100 + warehouse * 500, requirement * (warehouse + 1), reserve);
 }
 export function expeditionSurveyRadius(game: Game): number { return Math.min(2, radius(game)); }
@@ -172,8 +172,8 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
   const goals = emptyAllocation(), desired = emptyAllocation(), allocation = emptyAllocation();
   const next = stages[game.stage + 1];
   for (const resource of resourceKeys) goals[resource] = next?.cost[resource] ?? 0;
-  for (const resource of ['wood', 'metal'] as const)
-    goals[resource] = Math.max(goals[resource], maximumSettlementWeeklyConsumption(resource, game.population) * 2);
+  for (const resource of settlementUpkeepResources)
+    goals[resource] = Math.max(goals[resource], maximumSettlementWeeklyConsumption(resource, game.population, game.stage) * 2);
   goals.water = Math.max(goals.water, resourceCapacity(capacity, 'water', game));
   const nextFacility = waterFacilityKeys.find(key => !game.waterFacilities?.[key]);
   if (nextFacility) {

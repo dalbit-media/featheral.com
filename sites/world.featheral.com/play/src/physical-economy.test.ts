@@ -223,7 +223,7 @@ test('planning values retain physical production and upkeep without creating pri
     assert.equal(Math.round(reference.dailyConsumption * 7 * dollarsUnits(price)), dollarsUnits(upkeep[resource]));
   }
   assert.equal(dailyWaterPerResident, resourceEconomy.water.dailyConsumption);
-  assert.deepEqual(dailyUpkeepPerResident, { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption });
+  assert.deepEqual(dailyUpkeepPerResident, { wood: resourceEconomy.wood.dailyConsumption, metal: resourceEconomy.metal.dailyConsumption, oil: 0 });
   assert.equal(formatResourcePrice('water', .01, 'en-US'), '0.001');
   assert.equal(formatResourcePrice('wood', 2.5, 'ko-KR'), '0.05');
   assert.equal(formatResourcePrice('wood', .0001, 'en-US'), '0.000002');

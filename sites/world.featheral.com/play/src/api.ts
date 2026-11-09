@@ -11,9 +11,10 @@ class HttpError extends Error {
   readonly status: number;
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
-async function request<T = ApiState>(path: string, init?: RequestInit): Promise<T> {
+const autoCraftTimeoutMs = 60000;
+async function request<T = ApiState>(path: string, init?: RequestInit, timeoutMs = 10000): Promise<T> {
   const world = path === 'session' || path.startsWith('chat');
-  const response = await fetch(`${world ? '/api/' : '/api/dollar/game/'}${path}`, { ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
+  const response = await fetch(`${world ? '/api/' : '/api/dollar/game/'}${path}`, { ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) });
   if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('API returned a non-JSON response. Start the backend and restart Vite to load its API proxy.');
   const body = await response.json();
   if (!response.ok) throw new HttpError(response.status, body?.error ?? `API failed (${response.status}).`);
@@ -35,11 +36,17 @@ async function submit<T>(state: ApiState, command: Command | MarketCommand, path
   if (needsWalletSigner(state) && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
   const body = JSON.stringify({ id: crypto.randomUUID(), revision: state.revision, command });
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf }, body };
-  try { return await request<T>(path, init); }
+  const timeoutMs = command.type === 'auto-craft' ? autoCraftTimeoutMs : 10000;
+  try { return await request<T>(path, init, timeoutMs); }
   catch (error) {
     if (error instanceof HttpError) throw error;
     // A lost response must retry the same operation, never create another claim.
-    return request<T>(path, init);
+    try { return await request<T>(path, init, timeoutMs); }
+    catch (retryError) {
+      if (command.type === 'auto-craft' && retryError instanceof Error && retryError.name === 'TimeoutError')
+        throw new Error('Automatic crafting response timed out. It may have completed. Refresh inventory before trying again.');
+      throw retryError;
+    }
   }
 }
 export const send = (state: ApiState, command: Command): Promise<ApiState> => submit(state, command, 'actions');
@@ -47,7 +54,13 @@ export const readMarket = (asset: MarketAsset, quantity: number, buying?: BuyQua
   request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}${buying ? `&budgetPercent=${buying.percent}${buying.price === undefined ? '' : `&price=${buying.price}`}` : ''}`);
 export const readHalfSale = (): Promise<HalfSaleResponse> => request('market/half');
 export const sendMarket = (state: ApiState, command: MarketCommand): Promise<MarketResponse> => submit(state, command, 'market/actions');
-export const readAutoCraft = (): Promise<import('./auto-crafting.ts').AutoCraftResponse> => request('market/auto-craft');
+export async function readAutoCraft(): Promise<import('./auto-crafting.ts').AutoCraftResponse> {
+  try { return await request('market/auto-craft', undefined, autoCraftTimeoutMs); }
+  catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Profit review took too long. Nothing was consumed. Please try again.');
+    throw error;
+  }
+}
 export const linkFundWallet = (csrf: string, address: string, issuedAt: string, signature: string, moveGuestFunds = false, separateWorldFunds = false): Promise<ApiState> => request('wallet/link', {
   method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body: JSON.stringify({ address, issuedAt, signature, moveGuestFunds, separateWorldFunds }),
 });

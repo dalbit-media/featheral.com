@@ -16,6 +16,49 @@ import { squadItems } from './exploration-squads.ts';
 let activeDialog: HTMLDialogElement | null = null;
 export const confirmationOpen = (): boolean => activeDialog !== null;
 
+export function showOperationProgress(title: string, note: string, language: Language): () => void {
+  if (activeDialog) throw new Error('Please wait for the current server request.');
+  const trigger = document.activeElement, dialog = document.createElement('dialog');
+  dialog.className = 'consumption-dialog operation-progress-dialog';
+  dialog.setAttribute('aria-labelledby', 'operation-progress-title');
+  dialog.setAttribute('aria-describedby', 'operation-progress-note');
+  const spinner = document.createElement('span');
+  spinner.className = 'operation-spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  const heading = document.createElement('h2');
+  heading.id = 'operation-progress-title';
+  heading.textContent = translate(title, language);
+  const description = document.createElement('p');
+  description.id = 'operation-progress-note';
+  description.className = 'consumption-note';
+  description.textContent = translate(note, language);
+  const status = document.createElement('p');
+  status.className = 'consumption-note';
+  status.setAttribute('role', 'status');
+  status.textContent = translate('Please wait for the current server request.', language);
+  dialog.append(spinner, heading, description, status);
+  dialog.addEventListener('cancel', event => event.preventDefault());
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); }
+  });
+  const slow = window.setTimeout(() => {
+    status.textContent = translate('Still working. Large merchant runs can take up to a minute; recovering a lost response may take longer.', language);
+  }, 10000);
+  const finish = () => {
+    window.clearTimeout(slow);
+    window.removeEventListener('pagehide', finish);
+    if (activeDialog === dialog) activeDialog = null;
+    dialog.remove();
+    if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true });
+  };
+  activeDialog = dialog;
+  window.addEventListener('pagehide', finish, { once: true });
+  document.body.append(dialog);
+  try { dialog.showModal(); }
+  catch (error) { finish(); throw error; }
+  return finish;
+}
+
 export function chooseCraftBatch(subject: string, options: CraftBatchOption[], language: Language): Promise<number | null> {
   const maximum = Math.max(1, ...options.filter(option => !option.reason).map(option => option.quantity));
   const t = (text: string) => translate(text, language);
