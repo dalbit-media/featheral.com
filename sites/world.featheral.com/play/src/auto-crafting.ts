@@ -5,6 +5,7 @@ import type { MarketAsset } from './market.ts';
 
 export const merchantCharter = 'merchant-charter';
 export const merchantCharterFee = 10000;
+export const merchantSpendingLimit = 1000000;
 export const autoCraftingItems = {
   'merchant-charter': { name: 'Master Merchant Charter', stage: 8, cost: { dollars: merchantCharterFee * 10 } },
 } as const;
@@ -22,6 +23,7 @@ export interface AutoCraftQuote {
   batches: AutoCraftBatch[];
   costs: { asset: MarketAsset | 'dollars'; amount: number }[];
   startingBalance: number;
+  spendingCeiling: number;
   craftingFees: number;
   proceeds: number;
   cashChange: number;

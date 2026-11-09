@@ -4,8 +4,8 @@ import { test } from 'node:test';
 import { SqliteStore } from './store.ts';
 import { craft, inventory } from './inventory.ts';
 import { seedFixturePools } from './test-support.ts';
-import { craftableKeys, craftingCost, craftingMaximum, isCollectible, itemName } from '../src/items.ts';
-import { merchantCharter, merchantCharterFee } from '../src/auto-crafting.ts';
+import { craftableItems, craftableKeys, craftingCost, craftingMaximum, isCollectible, itemName } from '../src/items.ts';
+import { merchantCharter, merchantCharterFee, merchantSpendingLimit } from '../src/auto-crafting.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { isReserveMarketAsset, isLiquidAsset, marketAssets } from '../src/market.ts';
 import { itemArt } from '../src/item-art.ts';
@@ -235,6 +235,7 @@ test('starting balance is a hard fee ceiling even when sales create more funds; 
     });
     const quote = h.quote();
     assert.ok(quote.craftingFees <= 15);
+    assert.equal(quote.spendingCeiling, 15);
     assert.equal(quote.batches.length, 1);
     assert.equal(quote.remainingPermits, 2);
     assert.ok(quote.proceeds > 15);
@@ -243,6 +244,65 @@ test('starting balance is a hard fee ceiling even when sales create more funds; 
     assert.equal(after.inventory!.marketReserved!.length, 1);
     assert.equal(after.inventory!.items.filter(item => item === 'craft-batch-10').length, 2);
   } finally { h.store.close(); }
+});
+test('million-dollar ceiling stops a funded profitable run exactly at the cap and preserves unused permits', t => {
+  let db!: DatabaseSync;
+  const prepare = DatabaseSync.prototype.prepare;
+  t.mock.method(DatabaseSync.prototype, 'prepare', function (this: DatabaseSync, sql: string) {
+    db = this;
+    return prepare.call(this, sql);
+  });
+  const h = setup(), buyer = h.store.create();
+  const originalFee = craftableItems.torch.cost.dollars;
+  try {
+    // A high-fee fixture reaches the production cap in one batch, without thousands of test crafts.
+    craftableItems.torch.cost.dollars = 100000;
+    for (const item of craftableKeys) if (item !== merchantCharter && !item.startsWith('craft-batch-'))
+      db.prepare('UPDATE market_pools SET dollars=0,units=0 WHERE asset=?').run(item);
+    h.store.transaction(h.user.token, session => {
+      session.account.game.dollars = dollarsUnits(2000000);
+      inventory(session.account).items = [merchantCharter, 'craft-batch-100', 'craft-batch-100'];
+    });
+    h.store.transaction(buyer.token, session => {
+      session.account.game.stage = 0;
+      session.account.game.dollars = dollarsUnits(10000000);
+    });
+    h.store.transaction(buyer.token, (session, now, realTime, exchange, owner) => exchange.action(owner, session, {
+      id: randomUUID(), revision: session.account.revision,
+      command: { type: 'limit', side: 'buy', asset: 'torch', quantity: 200, price: 20000 },
+    }, now, realTime));
+    h.store.transaction(h.user.token, session => { session.account.game.dollars = dollarsUnits(merchantSpendingLimit - .0001); });
+    const insufficient = h.saved();
+    assert.throws(() => h.quote(), /No profitable batch/);
+    assert.deepEqual(h.saved(), insufficient);
+    h.store.transaction(h.user.token, session => { session.account.game.dollars = dollarsUnits(2000000); });
+    const before = h.saved(), quote = h.quote();
+    assert.deepEqual(h.saved(), before);
+    assert.equal(quote.startingBalance, 2000000);
+    assert.equal(quote.spendingCeiling, merchantSpendingLimit);
+    assert.equal(quote.craftingFees, merchantSpendingLimit);
+    assert.equal(quote.batches.length, 1);
+    assert.equal(quote.consumedPermits, 1);
+    assert.equal(quote.remainingPermits, 1);
+    for (const language of ['en', 'ko'] as const) {
+      const popup = autoCraftConsumption(quote, language);
+      assert.equal(popup.details!.find(row => row.label === 'Starting spending ceiling')!.value, 'FTH$ 1,000,000');
+      assert.ok(popup.notes.includes('Crafting fees are capped at FTH$1,000,000 per merchant run, or your starting balance if lower. Unused funds and permits remain available.'));
+    }
+    const capNote = 'Crafting fees are capped at FTH$1,000,000 per merchant run, or your starting balance if lower. Unused funds and permits remain available.';
+    assert.notEqual(translate(capNote, 'ko'), capNote);
+    const body = h.request(quote.fingerprint), result = h.post(body);
+    assert.equal(result.autoCraft!.craftingFees, merchantSpendingLimit);
+    assert.equal(result.autoCraft!.spendingCeiling, merchantSpendingLimit);
+    const after = h.saved();
+    assert.equal(after.game.dollars, before.game.dollars + dollarsUnits(quote.cashChange));
+    assert.deepEqual(after.inventory!.items, ['craft-batch-100']);
+    h.post(body);
+    assert.deepEqual(h.saved(), after);
+  } finally {
+    craftableItems.torch.cost.dollars = originalFee;
+    h.store.close();
+  }
 });
 test('missing charter, supplies, permits, changed revision and forged totals never consume on failure', () => {
   const h = setup();

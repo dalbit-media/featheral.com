@@ -18,7 +18,7 @@ import type { MarketAnalysis } from '../src/market-analysis.ts';
 import { affordableBuyingQuantity, buyingBudgetUnits } from '../src/market-buy-quantity.ts';
 import type { BuyQuantityBudget, BuyQuantityRequest } from '../src/market-buy-quantity.ts';
 import { createHash } from 'node:crypto';
-import { autoCraftableOutput, merchantCharter } from '../src/auto-crafting.ts';
+import { autoCraftableOutput, merchantCharter, merchantSpendingLimit } from '../src/auto-crafting.ts';
 import type { AutoCraftQuote } from '../src/auto-crafting.ts';
 import { bulkCraftingItems, bulkCraftingKeys } from '../src/bulk-crafting.ts';
 
@@ -360,6 +360,7 @@ export class Exchange {
     if (sellableItemCount(bag, merchantCharter) < 1) throw new ApiError(409, 'An unused Master Merchant Charter is required.');
     const permits = new Map(bulkCraftingKeys.map(permit => [permit, sellableItemCount(bag, permit)]));
     const startingBalance = account.game.dollars;
+    const spendingCeiling = Math.min(startingBalance, dollarsUnits(merchantSpendingLimit));
     const totalPermits = [...permits.values()].reduce((sum, count) => sum + count, 0);
     if (!totalPermits) throw new ApiError(409, 'Own unused bulk crafting permits before using the charter.');
     const ranked = this.generateAnalysis(owner, now, realTime).items
@@ -377,7 +378,7 @@ export class Exchange {
     // Only permits owned at confirmation are eligible; crafted permits cannot extend the run.
     const order = [...bulkCraftingKeys].sort((a, b) => bulkCraftingItems[b].quantity - bulkCraftingItems[a].quantity);
     let progress = true;
-    while (progress) {
+    while (progress && fees < spendingCeiling) {
       progress = false;
       for (const row of ranked) {
         const item = row.item;
@@ -385,7 +386,7 @@ export class Exchange {
         for (const permit of order) {
           if (!permits.get(permit) || sellableItemCount(bag, permit) < 1) continue;
           const quantity = bulkCraftingItems[permit].quantity, cost = craftingCost(item, quantity), inputs = craftingInputs(item, quantity);
-          if (dollarsUnits(cost.dollars ?? 0) > startingBalance - fees || !canAfford(account.game, cost) || !craftingFits(bag, item, quantity)
+          if (dollarsUnits(cost.dollars ?? 0) > spendingCeiling - fees || !canAfford(account.game, cost) || !craftingFits(bag, item, quantity)
             || !Object.entries(inputs).every(([asset, count]) => isMarketAsset(asset) && !isMarketResource(asset) && sellableItemCount(bag, asset) >= count)) continue;
           const fee = dollarsUnits(cost.dollars ?? 0), revenue = fullQuote(item, 'sell', quantity);
           if (revenue === null) continue;
@@ -410,7 +411,7 @@ export class Exchange {
       }
     }
     if (!batches.length) throw new ApiError(409, 'No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed.');
-    const result = { batches, costs: [...costs].map(([asset, amount]) => ({ asset, amount })), startingBalance: startingBalance / dollarsScale,
+    const result = { batches, costs: [...costs].map(([asset, amount]) => ({ asset, amount })), startingBalance: startingBalance / dollarsScale, spendingCeiling: spendingCeiling / dollarsScale,
       craftingFees: fees / dollarsScale, proceeds: proceeds / dollarsScale, cashChange: (proceeds - fees) / dollarsScale,
       estimatedProfit: (proceeds - valuedCost) / dollarsScale, remainingPermits: [...permits.values()].reduce((sum, count) => sum + count, 0),
       consumedPermits: batches.length };

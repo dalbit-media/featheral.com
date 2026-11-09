@@ -128,7 +128,9 @@ available materials, bag space, positive estimated profit and fully funded
 immediate sales. It keeps trying smaller permits and lower-ranked recipes
 when a batch does not fit. Permit recipes and charters are not output targets.
 
-The spending ceiling is the balance at confirmation; sale proceeds do not
+The crafting-fee spending ceiling is **FTH$1,000,000 per run**, or the balance
+at confirmation if lower. Preview and execution use the same ceiling and
+stop once it is reached; unused funds and permits remain. Sale proceeds do not
 fund additional crafting. Materials and permits must already be owned and
 unused (no escrow, equipped/placed items or pending finds). All originally
 owned usable permits are eligible; unused permits remain. Exactly one charter

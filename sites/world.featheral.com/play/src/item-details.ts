@@ -42,5 +42,6 @@ export function itemDetailRows(id: ItemId, language: Language, owned?: number, r
     <div><dt>${t('Effect')}</dt><dd>${t(description.effect)}</dd></div><div><dt>${t('How to use')}</dt><dd>${t(description.use)}</dd></div>
     ${isAutoCraftingItem(id) ? `<div><dt>${t('Crafting requirements')}</dt><dd>${t('One of every terrain keepsake, consumed when crafting.')}</dd></div>
     <div><dt>${t('Market pricing')}</dt><dd>${t('Live player offers and pool liquidity; crafting fee is not the market price.')}</dd></div>` : ''}
+    ${isAutoCraftingItem(id) ? `<div><dt>${t('Starting spending ceiling')}</dt><dd>${t('Crafting fees are capped at FTH$1,000,000 per merchant run, or your starting balance if lower. Unused funds and permits remain available.')}</dd></div>` : ''}
     ${owned === undefined ? '' : `<div><dt>${t('Available copies')}</dt><dd>${owned.toLocaleString(locale(language))}${reserved ? ` · ${reserved.toLocaleString(locale(language))} ${t('Reserved in market')}` : ''}</dd></div>`}</dl>`;
 }

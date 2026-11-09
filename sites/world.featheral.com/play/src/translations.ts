@@ -688,6 +688,7 @@ export const korean: Record<string, string> = {
   'Crafting requirements': '제작 요구 사항',
   'One of every terrain keepsake, consumed when crafting.': '모든 지형의 기념품이 하나씩 필요하며 제작 시 소모됩니다.',
   'Market pricing': '시장 가격',
+  'Crafting fees are capped at FTH$1,000,000 per merchant run, or your starting balance if lower. Unused funds and permits remain available.': '상인 작업 1회당 제작 수수료는 최대 FTH$1,000,000이며 시작 잔액이 더 적으면 해당 잔액까지만 사용합니다. 사용하지 않은 자금과 허가증은 그대로 남습니다.',
   'Reviewing merchant profit': '상인 수익 검토 중',
   'Checking your permits, materials, balance and live sale liquidity. Nothing is spent until you confirm.': '허가증, 재료, 잔액과 실시간 판매 유동성을 확인하고 있습니다. 확인 전에는 아무것도 소모되지 않습니다.',
   'Crafting and selling': '제작 및 판매 중',
