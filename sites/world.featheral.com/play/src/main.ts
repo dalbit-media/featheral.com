@@ -5,6 +5,9 @@ import './communicate.css';
 import './pages.css';
 import './atlas.css';
 import { AtlasPage } from './atlas-view.ts';
+import { Communicate } from './communicate.ts';
+import { isSquadItem, isSquadActivity, planSquad, squadItems } from './exploration-squads.ts';
+import { squadPanel } from './squad-view.ts';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
@@ -156,7 +159,8 @@ app.classList.toggle('marketplace-page', marketPage || bankPage);
 app.classList.toggle('explore-page', explorePage);
 app.classList.toggle('community-page', communityPage);
 app.classList.toggle('guide-page', navigationPage === 'help');
-app.classList.toggle('has-world-chat', explorePage || settlementPage);
+app.classList.toggle('has-world-chat', explorePage || settlementPage || navigationPage === 'atlas');
+app.classList.toggle('atlas-page', navigationPage === 'atlas');
 app.classList.toggle('inbox-full-page', navigationPage === 'communicate');
 app.innerHTML = `
   <nav class="rail" aria-label="Main navigation">
@@ -209,7 +213,7 @@ app.innerHTML = `
   ${marketPage ? '<main class="marketplace-view" id="marketplace-content" aria-label="Marketplace"></main>' : ''}
   ${bankPage ? '<main class="marketplace-view featheral-bank-view" id="bank-content" aria-label="Wallet and staking"></main>' : ''}
   ${communityPage ? '<main class="community-view" id="community-content" tabindex="-1"></main>' : ''}
-  ${explorePage || settlementPage ? `<aside class="world-chat" aria-labelledby="world-chat-title" tabindex="-1"><header><h2 id="world-chat-title">${settlementPage ? 'Settlement visitor chat' : 'Public nearby chats'}</h2><button type="button" class="button" data-chat-toggle aria-expanded="false" aria-controls="world-chat-content" aria-describedby="world-chat-users" aria-label="Expand chat">${icon('communicate')}</button><span class="chat-user-badge" id="world-chat-users" data-chat-users data-no-localize aria-live="polite">—</span><span class="chat-unread-badge" data-chat-unread data-no-localize hidden aria-live="polite"></span></header><div id="world-chat-content" hidden><div data-social-content></div></div></aside>` : ''}
+  ${explorePage || settlementPage || navigationPage === 'atlas' ? `<aside class="world-chat" aria-labelledby="world-chat-title" tabindex="-1"><header><h2 id="world-chat-title">${navigationPage === 'atlas' ? 'Global chat' : settlementPage ? 'Settlement visitor chat' : 'Public nearby chats'}</h2><button type="button" class="button" data-chat-toggle aria-expanded="false" aria-controls="world-chat-content" aria-describedby="world-chat-users" aria-label="Expand chat">${icon('communicate')}</button><span class="chat-user-badge" id="world-chat-users" data-chat-users data-no-localize aria-live="polite">—</span><span class="chat-unread-badge" data-chat-unread data-no-localize hidden aria-live="polite"></span></header><div id="world-chat-content" hidden><div data-social-content></div></div></aside>` : ''}
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="management-dialog" class="management-dialog" aria-labelledby="management-title">
     <header><h2 id="management-title"></h2><button class="button" data-action="close-management" aria-label="Close">${icon('close')}</button></header>
@@ -282,7 +286,12 @@ function mountWorldChat(): void {
   if (!root) return;
   if (settlementPage && !settlementChat) settlementChat = new SettlementChat(root, () => state.csrf, language, visitingSettlement ?? undefined);
   else if (explorePage && !inbox) inbox = new Inbox(root, () => state.csrf, language, false, true);
+  else if (navigationPage === 'atlas' && !atlasChat) {
+    root.innerHTML = '<section class="chat-page"><div data-communicate></div></section>';
+    atlasChat = new Communicate(root.querySelector<HTMLElement>('[data-communicate]')!, () => state.csrf, language, 'global', 'Global chat');
+  }
 }
+let atlasChat: Communicate | null = null;
 const chatOverlay = document.querySelector<HTMLElement>('.world-chat');
 const chatToggle = chatOverlay?.querySelector<HTMLButtonElement>('[data-chat-toggle]');
 function setChatExpanded(expanded: boolean): void {
@@ -815,6 +824,7 @@ function renderSidebar(): void {
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
       ${investigationButton(true)}
+      <button class="button wide" data-action="population-management">${icon('people')}<span>Bulk field missions</span></button>
       <button class="button primary wide sidebar-expedition" data-action="explore" title="${escape(translate(exploreReason || 'Discover new land', language))}" aria-description="${escape(translate(exploreReason || 'Discover new land', language))}" ${exploreReason ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span>${fieldDuration(quote.weeks)}` : ''}</button>
       ${recruitmentButton(true)}
       </div>
@@ -1155,6 +1165,7 @@ function workforcePanel(): string {
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
     <div class="panel-actions">${investigationButton()}<button class="button" data-action="explore" ${exploreReason ? 'disabled' : ''}>${icon('compass')} Send expedition · 2 ${translate('residents', language)}</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${2 ** explorationCount(work.expeditions)}x</span></small>` : ''}</div>
     ${exploreReason ? `<p class="fineprint" role="status">${escape(translate(exploreReason, language))}</p>` : ''}
+    ${squadPanel(state, language)}
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
     <p class="fineprint">Each field team needs two idle residents. Investigate and Explore share exponential route fees: 1x, 2x, 4x, 8x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.</p>
     <p class="fineprint">Investigations use two idle residents for one game week on known land. The base fee is 10% of the undiscounted concurrent Explore route fee. Equipped investigation gear lowers the fee; the low-tier permit chance remains 10%.</p>
@@ -1375,6 +1386,14 @@ app.addEventListener('click', event => {
     case 'activate-collection':
       if (isCollectionItem(target.dataset.item)) void act({ type: 'activate-collection', item: target.dataset.item });
       break;
+    case 'dispatch-squad': {
+      const item = target.dataset.item, activity = target.dataset.activity;
+      if (!isSquadItem(item) || !isSquadActivity(activity)) { toast('Invalid squad dispatch.', true); break; }
+      const plan = planSquad(game, state.workforce, activity, squadItems[item].quantity);
+      if (!plan.missions.length) { toast('No missions can launch. Check available residents, funds and reachable destinations.', true); break; }
+      void act({ type: 'dispatch-squad', item, activity, quantity: plan.missions.length, maximumDollars: plan.dollarsUnits });
+      break;
+    }
     case 'use-customization': {
       const item = target.dataset.item;
       if (!isCustomizationItem(item)) { toast('This customization item is not available in your inventory.', true); break; }
@@ -1568,7 +1587,7 @@ document.addEventListener('keydown', event => {
 window.addEventListener('hashchange', () => {
   if (settlementPage) showSettlementTask(settlementTaskFromHash(location.hash));
 });
-window.addEventListener('pagehide', () => { inbox?.close(); settlementChat?.close(); });
+window.addEventListener('pagehide', () => { inbox?.close(); settlementChat?.close(); atlasChat?.close(); });
 window.addEventListener('focus', async () => {
   if (busy || confirmationOpen() || document.hidden) return;
   busy = true;
@@ -1581,6 +1600,8 @@ window.addEventListener('pageshow', event => {
     inbox?.resume();
   } else if (event.persisted && settlementPage) {
     settlementChat = null; mountWorldChat();
+  } else if (event.persisted && navigationPage === 'atlas') {
+    atlasChat = null; mountWorldChat();
   }
 });
 async function syncProduction(): Promise<void> {

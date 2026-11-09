@@ -15,6 +15,7 @@ import { activityEquipmentItems, isActivityEquipment } from './activity-equipmen
 import type { EquippedActivities } from './activity-equipment.ts';
 import { bulkCraftingItems, bulkCraftingPermit, isBulkCraftingItem } from './bulk-crafting.ts';
 import { transportItems, isTransportItem } from './transport-items.ts';
+import { squadItems } from './exploration-squads.ts';
 
 export const visibilityItems = {
   fire: { name: 'Campfire kit', radius: 5, cost: withDollarFee({ wood: 15 }), symbol: 'sun' },
@@ -56,7 +57,7 @@ export const decorationItems = {
   skybeacon: { name: 'Capital sky beacon', stage: 8, cost: { metal: 500, oil: 90 } },
 } satisfies Record<string, { name: string; stage: number; cost: Cost }>;
 export type DecorationItem = keyof typeof decorationItems;
-export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems };
+export const craftableItems = { ...visibilityItems, ...decorationItems, ...customizationItems, ...collectorRecipes, ...activityEquipmentItems, ...bulkCraftingItems, ...transportItems, ...squadItems };
 export type CraftableItem = keyof typeof craftableItems;
 export const craftableKeys = Object.keys(craftableItems) as CraftableItem[];
 export const decorationSpaces = {

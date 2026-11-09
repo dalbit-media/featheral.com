@@ -6,10 +6,28 @@ import { atlasMap } from './atlas-view.ts';
 import { translate } from './i18n.ts';
 import { diplomacy, newGame } from './engine.ts';
 import { parseCommand } from '../server/economy.ts';
+import { zoomAtlas } from './atlas-camera.ts';
 
 const entry = (id: string, population: number, netWorth: number, federation: string | null = null): AtlasEntry => ({
   id, player: id, settlement: id, yours: false, location: { x: population, y: 0 }, distance: null,
   federation, population, netWorth, dollars: netWorth, stage: 3, explored: population, contribution: population,
+});
+test('atlas zoom preserves the pointer anchor, clamps to 1x–16x and does not mutate the camera', () => {
+  const camera = { x: 20, y: 30, scale: .5 }, anchor = { x: 200, y: 150 };
+  const world = { x: (anchor.x - camera.x) / camera.scale, y: (anchor.y - camera.y) / camera.scale };
+  for (const factor of [.0001, .8, 1.25, 1000]) {
+    const next = zoomAtlas(camera, factor, anchor, .25);
+    assert.ok(next.scale >= .25 && next.scale <= 4);
+    assert.equal((anchor.x - next.x) / next.scale, world.x);
+    assert.equal((anchor.y - next.y) / next.scale, world.y);
+  }
+  assert.deepEqual(camera, { x: 20, y: 30, scale: .5 });
+});
+test('territory rendering batches cells into one path per federation', () => {
+  const html = atlasMap({ entries: [entry('a', 0, 0, 'Evergreen Union'), entry('b', 900, 0, 'Aurora Concord')],
+    federations: [], updatedAt: 0 }, 'en');
+  assert.equal((html.match(/<rect /g) ?? []).length, 1);
+  assert.equal((html.match(/<path /g) ?? []).length, 3);
 });
 test('rankings cover every metric, sort descending and break ties deterministically without mutating input', () => {
   const entries = [entry('z', 10, 50), entry('a', 10, 100), entry('b', 20, 75)];

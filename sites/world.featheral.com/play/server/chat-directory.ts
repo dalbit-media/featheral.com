@@ -61,6 +61,7 @@ export class ChatDirectoryStore {
     }
     const viewer = this.db.prepare('SELECT data FROM sessions WHERE id=? AND expires>?').get(owner, now);
     if (!viewer) throw new ApiError(401, 'Session expired.');
+    if (roomId === 'global') return { id: 'global', kind: 'global', name: 'Global chat' };
     const game = (JSON.parse(String(viewer.data)) as { account: { game: Game } }).account.game;
     const room = this.db.prepare('SELECT kind,target FROM chat_rooms WHERE id=?').get(roomId);
     if (!room) throw new ApiError(403, 'This chat is not available here.');

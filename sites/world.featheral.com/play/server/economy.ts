@@ -4,7 +4,7 @@ import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
 import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
-import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem } from '../src/items.ts';
+import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem, sellableItemCount } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
 import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
 import { isSettlementEntity } from '../src/settlement-layout.ts';
@@ -28,6 +28,8 @@ import type { TimedAction } from '../src/action-timing.ts';
 import { activityEquipmentItems, isActivityEquipment, isEquipmentActivity } from '../src/activity-equipment.ts';
 import { validCraftingQuantity } from '../src/bulk-crafting.ts';
 import { consumeTransportVoucher, transportQuote } from '../src/transport-items.ts';
+import { isSquadActivity, isSquadItem, planSquad, squadItems } from '../src/exploration-squads.ts';
+import type { SquadActivity, SquadMission } from '../src/exploration-squads.ts';
 
 interface LegacyWorkforce {
   crews: Partial<Record<Resource, { workers: number; readyAt: number; weeklyYield: number;
@@ -582,6 +584,7 @@ export function parseCommand(value: unknown): Command {
     'use-customization': ['item', 'value'],
     'activate-activity': ['item'], 'activity-automation': ['activity', 'enabled'],
     'activity-gear': ['activity', 'item'],
+    'dispatch-squad': ['item', 'activity', 'quantity', 'maximumDollars'],
     'federation-contribute': ['asset', 'amount'],
   };
   if (typeof c.type !== 'string' || !Object.hasOwn(fields, c.type)
@@ -601,6 +604,9 @@ export function parseCommand(value: unknown): Command {
     || (c.type === 'craft' && (!isCraftableItem(c.item) || (Object.hasOwn(c, 'quantity') && (typeof c.quantity !== 'number' || !validCraftingQuantity(c.quantity)))))
     || (c.type === 'equip' && c.item !== null && !isVisibilityItem(c.item))
     || (c.type === 'activity-gear' && (!isEquipmentActivity(c.activity) || (c.item !== null && (!isActivityEquipment(c.item) || activityEquipmentItems[c.item].activity !== c.activity))))
+    || (c.type === 'dispatch-squad' && (!isSquadItem(c.item) || !isSquadActivity(c.activity)
+      || typeof c.quantity !== 'number' || !Number.isSafeInteger(c.quantity) || c.quantity < 1 || c.quantity > squadItems[c.item].quantity
+      || typeof c.maximumDollars !== 'number' || !Number.isSafeInteger(c.maximumDollars) || c.maximumDollars < 1))
     || (c.type === 'decorate' && (!isDecorationSlot(c.slot) || (c.item !== null && !isDecorationItem(c.item))))
     || (c.type === 'arrange' && !isSettlementEntity(c.entity))
     || (c.type === 'diplomacy' && (!oneOf(c.action, ['gift', 'join', 'form', 'vote'])
@@ -632,11 +638,39 @@ export function execute(account: Account, command: Command, realTime = account.u
   if (key) (account.actionReadyAt ??= {})[key] = realTime + actionThrottleMs;
   return message;
 }
+function fieldExpedition(account: Account, activity: SquadActivity, mission: SquadMission): Expedition {
+  const { x, y, weeks } = mission;
+  if (activity === 'investigation') {
+    const itemFind = investigationItem(terrainAt(x, y, account.game.seed), randomInt(100), randomInt(100), randomInt(100));
+    return { kind: 'investigate', x, y, workers: 2, startedAt: account.updatedAt,
+      readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
+  }
+  return { x, y, workers: 2, readyAt: account.updatedAt + weeks * worldWeekMs,
+    surveyRadius: expeditionSurveyRadius(account.game), dollarReward: 0,
+    ...(physicalAt(account, account.updatedAt) ? { finds: expeditionFindPlan(account.game.seed, x, y, account.updatedAt, weeks) } : {}) };
+}
 function executeCommand(account: Account, command: Command, realTime: number,
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
   contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): string {
   const game = account.game;
   switch (command.type) {
+    case 'dispatch-squad': {
+      if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before sending a squad.');
+      const supplyReason = settlementSupplyReason(account);
+      if (supplyReason) throw new ApiError(409, supplyReason);
+      const bag = inventory(account);
+      if (sellableItemCount(bag, command.item) < 1) throw new ApiError(409, 'A squad dispatch voucher is required.');
+      enforceActionThrottle(account, 'investigate', realTime);
+      const work = workforce(account), plan = planSquad(game, work, command.activity, command.quantity);
+      if (plan.missions.length !== command.quantity || plan.dollarsUnits > command.maximumDollars)
+        throw new ApiError(409, 'Squad requirements changed. Review the squad and try again.');
+      const missions = plan.missions.map(mission => fieldExpedition(account, command.activity, mission));
+      pay(game, { dollars: plan.dollarsUnits / dollarsScale });
+      bag.items.splice(bag.items.indexOf(command.item), 1);
+      work.expeditions.push(...missions);
+      work.expeditions.sort((a, b) => a.readyAt - b.readyAt);
+      return note(game, `Squad dispatched: ${missions.length} ${command.activity} missions, ${plan.workers} residents. One voucher consumed.`);
+    }
     case 'federation-contribute':
       if (!contribute) throw new ApiError(503, 'Federation vault is unavailable.');
       return note(game, contribute(command));
@@ -668,9 +702,7 @@ function executeCommand(account: Account, command: Command, realTime: number,
       const terrain = terrainDetails[terrainAt(command.x, command.y, game.seed)];
       const quote = explorationQuote(game, command.x, command.y, explorationCount(work.expeditions));
       pay(game, { dollars: quote.dollars });
-      const expedition: Expedition = { x: command.x, y: command.y, workers: 2,
-        readyAt: account.updatedAt + terrain.weeks * worldWeekMs, surveyRadius: expeditionSurveyRadius(game), dollarReward: quote.reward,
-        ...(physicalAt(account, account.updatedAt) ? { finds: expeditionFindPlan(game.seed, command.x, command.y, account.updatedAt, terrain.weeks) } : {}) };
+      const expedition = fieldExpedition(account, 'exploration', { x: command.x, y: command.y, ...quote });
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
       return note(game, `Two residents departed on a ${terrain.weeks}-week expedition. Territory is revealed only on return.`);
@@ -690,9 +722,7 @@ function executeCommand(account: Account, command: Command, realTime: number,
       enforceActionThrottle(account, 'investigate', realTime);
       const quote = investigationQuote(game, command.x, command.y, explorationCount(work.expeditions));
       pay(game, { dollars: quote.dollars });
-      const itemFind = investigationItem(terrainAt(command.x, command.y, game.seed), randomInt(100), randomInt(100), randomInt(100));
-      const expedition: Expedition = { kind: 'investigate', x: command.x, y: command.y, workers: 2, startedAt: account.updatedAt,
-        readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
+      const expedition = fieldExpedition(account, 'investigation', { x: command.x, y: command.y, ...quote });
       const index = work.expeditions.findIndex(active => active.readyAt > expedition.readyAt);
       work.expeditions.splice(index < 0 ? work.expeditions.length : index, 0, expedition);
       return note(game, 'Two residents departed to investigate known terrain for one game week.');

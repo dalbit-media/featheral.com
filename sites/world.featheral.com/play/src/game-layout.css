@@ -45,7 +45,7 @@ html:has(#app),body:has(#app){height:100%;overflow:hidden}
 .game-brand img{display:block;width:34px;height:34px}
 #app .rail-links{margin:28px 0 0;padding:0;gap:8px}
 #app .nav-button{min-height:64px;gap:8px;padding:10px 4px;border-radius:12px;color:#a3b4a8}
-#app .nav-button span{font-size:11px;letter-spacing:0}
+#app .nav-button span{width:100%;font-size:11px;line-height:1.35;letter-spacing:0;text-align:center;text-wrap:balance}
 #app .nav-button.active{background:#c5e7b414;color:#e2f3d8;box-shadow:inset 0 0 0 1px #c5e7b426}
 #app .nav-button.active:before{display:none}
 #app .nav-button:hover{background:#c5e7b40c;color:#e2f3d8}

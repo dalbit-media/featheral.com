@@ -4,36 +4,27 @@ import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
 import { inventoryFits, inventoryUsed, isCollectible, itemStorage, sellableItemCount } from './items.ts';
 import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssetName, marketAssets, marketPriceAvailable, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit } from './market.ts';
-import type { MarketAsset, MarketCommand, MarketFill, MarketResponse, MarketSide } from './market.ts';
+import type { MarketAsset, MarketCommand, MarketResponse, MarketSide } from './market.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { localize } from './i18n-dom.ts';
 import { formatDollars, dollarsScale, dollarsSlippage, dollarsUnits } from './dollars.ts';
 import { marketConsumption } from './consumption.ts';
 import { confirmationOpen, confirmConsumption } from './confirmation.ts';
-import { catalogSorts, filterMarketCatalog, marketOwned, renderMarketCatalog, renderPriceChange } from './marketplace-catalog.ts';
-import type { CatalogSort, CatalogView } from './marketplace-catalog.ts';
+import { catalogCategories, catalogSorts, filterMarketCatalog, marketOwned, renderMarketCatalog, renderPriceChange } from './marketplace-catalog.ts';
+import type { CatalogFilters, CatalogSort, CatalogView } from './marketplace-catalog.ts';
 import { accountingPrice, accountingQuantity, displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, resourceEconomy, tradingUnit } from './resource-units.ts';
 import { SettlementSale } from './settlement-sale.ts';
 import { ResourceSaleQuantity, salePercentages, saleQuantity } from './resource-sale-quantity.ts';
 import { buyingBudgetUnits, isMarketPercentage } from './market-buy-quantity.ts';
 import type { BuyQuantityRequest, MarketPercentage } from './market-buy-quantity.ts';
 
+import { chartIntervals, priceHistoryChart } from './market-chart.ts';
+import type { ChartInterval, ChartStyle } from './market-chart.ts';
+export { priceHistoryChart } from './market-chart.ts';
+
 const compactMarketQuery = '(max-width:650px), (max-width:900px) and (max-height:500px)';
 
-export function priceHistoryChart(history: MarketFill[], language: Language): string {
-  if (!history.length) return '<div class="market-chart-empty">No sales yet. Prices will appear here after someone buys or sells.</div>';
-  const prices = history.map(fill => fill.price), min = Math.min(...prices), max = Math.max(...prices), span = max - min || Math.max(1, max * .1);
-  const first = history[0].time, last = history.at(-1)!.time;
-  const points = history.map((fill, index) => {
-    const fraction = history.length === 1 ? .5 : last > first ? (fill.time - first) / (last - first) : index / (history.length - 1);
-    return `${(40 + fraction * 720).toFixed(2)},${(175 - (fill.price - min + span * .1) / (span * 1.2) * 145).toFixed(2)}`;
-  });
-  const fmt = (value: number) => `${formatResourcePrice(history[0].asset, value, locale(language))} FTH$/${tradingUnit(history[0].asset, locale(language))}`;
-  const date = (time: number) => new Date(time).toLocaleString(locale(language), { timeZone: 'UTC', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  return `<svg class="market-chart" viewBox="0 0 800 215" role="img" aria-label="Past sale prices"><title>Past sale prices</title><path d="M40 20V185H760" class="chart-axis"/><polyline points="${points.join(' ')}" class="chart-line"/><circle cx="${points.at(-1)!.split(',')[0]}" cy="${points.at(-1)!.split(',')[1]}" r="4" class="chart-last"/><text x="40" y="15">${fmt(max)}</text><text x="40" y="180">${fmt(min)}</text><text x="40" y="207">${date(first)}</text><text x="760" y="207" text-anchor="end">${date(last)}</text></svg>
-    <details class="market-chart-data"><summary>See past sales</summary><div class="market-table-scroll"><table><thead><tr><th>Server time</th><th>Price each</th><th>Amount</th></tr></thead><tbody>${history.map(fill => `<tr><td>${date(fill.time)}</td><td>${fmt(fill.price)}</td><td>${formatResourceAmount(fill.asset, fill.quantity, locale(language))}</td></tr>`).join('')}</tbody></table></div></details>`;
-}
 export class Marketplace {
   private root: HTMLElement;
   private state: () => ApiState;
@@ -50,10 +41,13 @@ export class Marketplace {
   private catalogView: CatalogView = 'grid';
   private sort: CatalogSort = 'name';
   private ownedOnly = false;
+  private filters: CatalogFilters = { availability: 'all', rarity: 'all', craftable: false };
   private catalogMarkup = '';
   private priceEdited = false;
   private quantityPercent: MarketPercentage | null = null;
-  private historyCount = 120;
+  private chartInterval: ChartInterval = 'auto';
+  private chartStyle: ChartStyle = 'candles';
+  private chartMarkup = '';
   private pending = false;
   private fresh = false;
   private sequence = 0;
@@ -69,7 +63,7 @@ export class Marketplace {
       <a class="market-bank-link" id="gold" href="/bank/">Wallet and staking ${icon('chevron')}</a>
       <div class="exchange-layout"><aside class="exchange-catalog"><details class="exchange-catalog-choice" data-market-catalog><summary><span class="catalog-current"><span>Trading item</span><strong data-market-selected>${this.name(this.asset)}</strong></span><span class="catalog-current-price" data-market-selected-price></span>${icon('chevron')}</summary><div class="exchange-catalog-body"><div class="catalog-filters"><label class="exchange-search">Search items<input type="search" data-market-search placeholder="Search items"></label><label>Category<select data-market-category><option value="all">All items</option><option value="resources">Resources</option><option value="equipment">Lighting</option><option value="decorations">Decorations</option><option value="collectibles">Collectibles</option></select></label><label>Sort by<select data-market-sort><option value="name">Name</option><option value="buy-low">Lowest buy price</option><option value="sell-high">Highest sell price</option><option value="owned">Most owned</option><option value="change24h-high">Top 24h gainers</option><option value="change24h-low">Top 24h losers</option><option value="change7d-high">Top 7d gainers</option><option value="change7d-low">Top 7d losers</option></select></label></div><div class="catalog-toolbar"><label class="catalog-owned-filter"><input type="checkbox" data-market-owned>Owned only</label><span class="catalog-count"><strong data-market-count>0</strong> <span>Markets</span> · <span>Prices in FTH$</span></span><div class="catalog-view-switch" role="group" aria-label="Market view"><button type="button" data-market-view="grid" aria-pressed="${this.catalogView === 'grid'}">Grid</button><button type="button" data-market-view="table" aria-pressed="${this.catalogView === 'table'}">Table</button></div></div><div class="exchange-assets" data-market-assets tabindex="0" role="region" aria-label="Tradable markets"></div></div></details><div class="catalog-status-row"><p class="exchange-catalog-status" data-market-status role="status">Loading prices...</p><button class="button" type="button" data-market-refresh hidden>Retry</button></div></aside>
       <div class="exchange-main"><section class="exchange-card exchange-instrument"><div data-market-instrument></div></section>
-      <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span><div class="catalog-view-switch" role="group" aria-label="Sale history range"><button type="button" data-market-history="20" aria-pressed="false">20</button><button type="button" data-market-history="60" aria-pressed="false">60</button><button type="button" data-market-history="120" aria-pressed="true">120</button></div></div><div data-market-chart></div></section>
+      <section class="exchange-card exchange-chart-card"><div class="exchange-section-title"><h2>Price history</h2><span>FTH$ each · UTC</span></div><div class="chart-toolbar"><div class="catalog-view-switch" role="group" aria-label="Candle interval">${chartIntervals.map(interval => `<button type="button" data-chart-interval="${interval}" aria-pressed="${interval === this.chartInterval}">${translate(interval === 'auto' ? 'Auto' : interval, this.language)}</button>`).join('')}</div><div class="catalog-view-switch" role="group" aria-label="Chart style"><button type="button" data-chart-style="candles" aria-pressed="true">Candles</button><button type="button" data-chart-style="line" aria-pressed="false">Line</button></div></div><div data-market-chart></div></section>
       <div class="exchange-trading"><section class="exchange-card exchange-order-book"><h2>Player offers</h2><div data-market-book></div></section>
       <section class="exchange-card exchange-order-entry"><h2 data-market-order-title tabindex="-1"><span data-market-order-side>Sell</span> <span data-market-order-asset></span></h2><form data-market-form><div class="exchange-tabs"><button type="button" data-market-mode="spot" aria-pressed="true">Now</button><button type="button" data-market-mode="limit" aria-pressed="false">Choose price</button></div><div class="exchange-tabs exchange-sides"><button type="button" data-market-side="buy" aria-pressed="false">Buy</button><button type="button" data-market-side="sell" aria-pressed="true">Sell</button></div><label class="ticket-quantity">Amount<span class="ticket-stepper"><button type="button" data-market-step="-1" aria-label="Decrease amount">-</button><input data-market-quantity type="number" inputmode="decimal" min="1" max="10000" step="1" required value="1" aria-describedby="market-quantity-help"><button type="button" data-market-step="1" aria-label="Increase amount">+</button></span></label><label data-market-limit hidden>Price each · FTH$<input data-market-price type="number" min="0.0001" max="1000000" step="0.0001" required value="1"></label><div class="ticket-amounts" data-market-amounts role="group" aria-label="Quick amount">${salePercentages.map(percent => `<button type="button" data-market-percent="${percent}" aria-pressed="false">${percent}%</button>`).join('')}</div><p id="market-quantity-help" data-market-quantity-help class="fineprint"></p><div class="exchange-preview" data-market-preview></div><p data-market-requirement class="fineprint" role="status"></p><button class="button primary wide" data-market-submit disabled>Review sell</button><details class="exchange-help"><summary>How buying and selling works</summary><p>Now uses the current price, allowing up to 2% price change. Choose price buys at your price or less, or sells at your price or more. Unused FTH$ and unsold items stay held until the offer completes or you cancel.</p><p>All items use demand-driven spot prices and player offers. One equipped or placed copy is protected; spare copies can be sold. Identical owned and waiting items share one bag slot. Collectibles trade one at a time.</p><p>The best price is used first. If prices match, the oldest offer goes first. You can buy from players or the game shop.</p><p>Trading uses your Dollar ledger wallet. FTH$ is not USD. Ethereum conversion and staking are available through the configured bridge; redemption requires an authorized service.</p></details></form></section></div>
       <section class="exchange-card exchange-history-card"><h2>My offers</h2><div data-market-orders></div></section><section class="exchange-card exchange-history-card"><h2>Recent purchases and sales</h2><div data-market-trades></div></section></div></div>`;
@@ -83,7 +77,7 @@ export class Marketplace {
     const navigation = document.createElement('nav');
     navigation.className = 'resource-market-navigation';
     navigation.setAttribute('aria-label', 'Marketplace section');
-    navigation.innerHTML = '<button type="button" class="button" data-market-section="all">All items</button><button type="button" class="button" data-market-section="resources">Resources</button><button type="button" class="button" data-market-section="items">Item marketplace</button>';
+    navigation.innerHTML = catalogCategories.map(([value, label]) => `<button type="button" class="button" data-market-section="${value}">${translate(label, this.language)}</button>`).join('');
     root.querySelector('.exchange-heading')!.after(navigation);
     root.querySelector('.exchange-heading')!.append(root.querySelector('.market-bank-link')!);
     const seller = document.createElement('div');
@@ -111,9 +105,12 @@ export class Marketplace {
       void this.execute({ type: 'fund-pool', asset: this.asset, quantity, dollars });
     });
     localize(root);
-    root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Automation', this.language), 'automation'));
-    root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Names & titles', this.language), 'customization'));
-    root.querySelector<HTMLSelectElement>('[data-market-category]')!.add(new Option(translate('Item marketplace', this.language), 'items'));
+    const categorySelect = root.querySelector<HTMLSelectElement>('[data-market-category]')!;
+    categorySelect.replaceChildren(...catalogCategories.map(([value, label]) => new Option(translate(label, this.language), value)));
+    const advanced = document.createElement('div');
+    advanced.className = 'catalog-advanced';
+    advanced.innerHTML = `<label>${translate('Availability', this.language)}<select data-market-availability><option value="all">${translate('All markets', this.language)}</option><option value="buy">${translate('Buy quotes available', this.language)}</option><option value="sell">${translate('Sell quotes available', this.language)}</option></select></label><label>${translate('Rarity', this.language)}<select data-market-rarity><option value="all">${translate('Any rarity', this.language)}</option>${['common', 'uncommon', 'rare', 'epic', 'legendary', 'unavailable', 'unknown'].map(value => `<option value="${value}">${translate(value[0].toUpperCase() + value.slice(1), this.language)}</option>`).join('')}</select></label><label class="catalog-owned-filter"><input type="checkbox" data-market-craftable>${translate('Recipes unlocked', this.language)}</label>`;
+    root.querySelector('.catalog-filters')!.after(advanced);
     const sortSelect = root.querySelector<HTMLSelectElement>('[data-market-sort]')!;
     for (const [value, label] of [['name-desc', 'Name Z-A'], ['buy-high', 'Highest buy price'], ['sell-low', 'Lowest sell price'],
       ['rarity-high', 'Rarest market items'], ['rarity-low', 'Most common market items'], ['quantity-low', 'Least available'], ['quantity-high', 'Most available'],
@@ -123,6 +120,13 @@ export class Marketplace {
     clear.dataset.marketClear = ''; clear.textContent = translate('Reset filters', this.language);
     root.querySelector('.catalog-toolbar')!.append(clear);
     root.querySelector<HTMLDetailsElement>('[data-market-catalog]')!.open = true;
+    const inspection = (event: Event): void => {
+      const candle = event.target instanceof Element ? event.target.closest('[data-chart-candle]') : null;
+      if (candle) this.root.querySelector<HTMLElement>('[data-chart-inspection]')!.textContent = candle.getAttribute('aria-label');
+    };
+    root.addEventListener('pointerover', inspection);
+    root.addEventListener('pointerdown', inspection);
+    root.addEventListener('focusin', inspection);
     this.configureQuantity();
     root.querySelectorAll<HTMLButtonElement>('[data-market-side]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSide === this.side)));
     root.addEventListener('input', event => {
@@ -153,6 +157,10 @@ export class Marketplace {
         if (sort) this.sort = sort;
       }
       if (target instanceof HTMLInputElement && target.hasAttribute('data-market-owned')) this.ownedOnly = target.checked;
+      if (target instanceof HTMLInputElement && target.hasAttribute('data-market-craftable')) this.filters.craftable = target.checked;
+      if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-rarity')) this.filters.rarity = target.value;
+      if (target instanceof HTMLSelectElement && target.hasAttribute('data-market-availability')
+        && (target.value === 'all' || target.value === 'buy' || target.value === 'sell')) this.filters.availability = target.value;
       this.catalog();
     });
     root.addEventListener('click', event => {
@@ -166,6 +174,10 @@ export class Marketplace {
       }
       if (button.hasAttribute('data-market-clear')) {
         this.category = 'all'; this.query = ''; this.ownedOnly = false; this.sort = 'name';
+        this.filters = { availability: 'all', rarity: 'all', craftable: false };
+        this.root.querySelector<HTMLSelectElement>('[data-market-rarity]')!.value = 'all';
+        this.root.querySelector<HTMLSelectElement>('[data-market-availability]')!.value = 'all';
+        this.root.querySelector<HTMLInputElement>('[data-market-craftable]')!.checked = false;
         this.root.querySelector<HTMLInputElement>('[data-market-search]')!.value = '';
         this.root.querySelector<HTMLInputElement>('[data-market-owned]')!.checked = false;
         this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.value = 'all';
@@ -177,10 +189,9 @@ export class Marketplace {
         if (sort) { this.sort = sort; this.root.querySelector<HTMLSelectElement>('[data-market-sort]')!.value = sort; this.catalog(); }
       }
       if (button.dataset.marketView === 'grid' || button.dataset.marketView === 'table') { this.catalogView = button.dataset.marketView; this.catalog(); }
-      if (button.dataset.marketHistory) {
-        const count = Number(button.dataset.marketHistory);
-        if ([20, 60, 120].includes(count)) { this.historyCount = count; this.paint(); }
-      }
+      const interval = chartIntervals.find(value => value === button.dataset.chartInterval);
+      if (interval) { this.chartInterval = interval; this.paint(); }
+      if (button.dataset.chartStyle === 'candles' || button.dataset.chartStyle === 'line') { this.chartStyle = button.dataset.chartStyle; this.paint(); }
       if (button.hasAttribute('data-market-refresh')) void this.refresh();
       if (this.pending || confirmationOpen()) return;
       if (isMarketAsset(button.dataset.marketAsset)) {
@@ -332,13 +343,14 @@ export class Marketplace {
     const scrollTop = list.scrollTop, scrollLeft = list.scrollLeft;
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
     const focusedColumn = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.catalogColumn : undefined;
-    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly);
+    const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly, this.filters);
     const markup = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending, this.sort);
     if (markup !== this.catalogMarkup) {
       list.innerHTML = markup; localize(list); this.catalogMarkup = markup;
     }
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-section]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSection === this.category)));
-    this.root.querySelector<HTMLElement>('[data-market-clear]')!.hidden = this.category === 'all' && !this.query && !this.ownedOnly && this.sort === 'name';
+    this.root.querySelector<HTMLElement>('[data-market-clear]')!.hidden = this.category === 'all' && !this.query && !this.ownedOnly && this.sort === 'name'
+      && this.filters.availability === 'all' && this.filters.rarity === 'all' && !this.filters.craftable;
     this.root.querySelector('[data-market-count]')!.textContent = String(tickers.length);
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketView === this.catalogView)));
     list.scrollTo(scrollLeft, scrollTop);
@@ -350,7 +362,7 @@ export class Marketplace {
     const resourceLimitSale = resources && this.side === 'sell' && this.mode === 'limit';
     this.root.querySelector<HTMLSelectElement>('[data-market-category]')!.closest('label')!.hidden = false;
     const search = this.root.querySelector<HTMLInputElement>('[data-market-search]')!;
-    search.placeholder = translate('Search items', this.language);
+    search.placeholder = translate('Search names, resources or item IDs', this.language);
     search.closest('label')!.firstChild!.textContent = search.placeholder;
     const seller = this.root.querySelector<HTMLElement>('[data-market-resource-sale]')!;
     seller.hidden = !resourceSpotSale;
@@ -437,8 +449,15 @@ export class Marketplace {
     });
     const market = this.data.market;
     this.balances();
-    this.root.querySelectorAll<HTMLButtonElement>('[data-market-history]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.marketHistory) === this.historyCount)));
-    this.root.querySelector('[data-market-chart]')!.innerHTML = priceHistoryChart(market.history.slice(-this.historyCount), this.language);
+    this.root.querySelectorAll<HTMLButtonElement>('[data-chart-interval]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.chartInterval === this.chartInterval)));
+    this.root.querySelectorAll<HTMLButtonElement>('[data-chart-style]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.chartStyle === this.chartStyle)));
+    const focusedCandle = document.activeElement?.getAttribute('data-chart-candle');
+    const chart = this.root.querySelector<HTMLElement>('[data-market-chart]')!;
+    const chartMarkup = priceHistoryChart(market.history, this.language, this.chartInterval, this.chartStyle);
+    if (chartMarkup !== this.chartMarkup || !chart.querySelector('.market-chart, .market-chart-empty')) {
+      chart.innerHTML = chartMarkup; this.chartMarkup = chartMarkup;
+      if (focusedCandle) chart.querySelector<SVGElement>(`[data-chart-candle="${focusedCandle}"]`)?.focus({ preventScroll: true });
+    }
     const historyDetails = this.root.querySelector<HTMLDetailsElement>('.market-chart-data');
     if (historyDetails) historyDetails.open = historyOpen;
     const levels = (side: 'bids' | 'asks') => `<div class="${side}"><h3>${side === 'bids' ? 'Buying' : 'Selling'}</h3><table><thead><tr><th>Price each</th><th>Amount</th></tr></thead><tbody>${market[side].map(level => `<tr><td><button type="button" class="book-price" data-market-level="${side === 'bids' ? 'sell' : 'buy'}" data-market-level-price="${level.price}" ${this.pending ? 'disabled' : ''}>${this.price(level.price)}</button></td><td>${this.fmt(level.quantity)}</td></tr>`).join('') || '<tr><td colspan="2">No offers yet.</td></tr>'}</tbody></table></div>`;

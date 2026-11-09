@@ -131,12 +131,24 @@ test('pending batches and receipt retention stay bounded under sustained traffic
     assert.ok(Number(db.prepare('SELECT count(*) AS total FROM chat_receipts').get()!.total) <= 101);
   } finally { hub.close(); db.close(); }
 });
-test('HTTP chat uses session, Origin and CSRF protections; real SSE delivers and replaces connections without game writes', async () => {
+test('global chat is available before settlement but never bypasses session expiry or private-room permissions', () => {
+  const store = new SqliteStore(':memory:'), identity = store.create();
+  try {
+    const session = store.chatSession(identity.token), now = Date.now();
+    assert.deepEqual(store.chatDirectory.authorize(session.owner, 'global', now),
+      { id: 'global', kind: 'global', name: 'Global chat' });
+    assert.throws(() => store.chatDirectory.authorize('missing', 'global', now), status(401));
+    assert.throws(() => store.chatDirectory.authorize(session.owner, 'global', session.expires + 1), status(401));
+    assert.throws(() => store.chatDirectory.authorize(session.owner, 'forged-private-room', now), status(403));
+  } finally { store.close(); }
+});
+for (const channel of ['nearby', 'global']) test(`HTTP ${channel} chat uses session, Origin and CSRF protections; real SSE delivers and replaces connections without game writes`, async () => {
   const store = new SqliteStore(':memory:'), a = store.create(), b = store.create();
   for (const identity of [a, b]) store.transaction(identity.token, session => {
     session.account.game.stage = 0; session.account.game.population = 12; session.account.game.home = { x: 0, y: 0 };
+    if (channel === 'global' && identity === b) session.account.game.home = { x: 9000, y: 9000 };
   });
-  const room = store.chatDirectory.directory(store.chatSession(a.token).owner, Date.now()).rooms.find(room => room.settlement ===
+  const room = channel === 'global' ? 'global' : store.chatDirectory.directory(store.chatSession(a.token).owner, Date.now()).rooms.find(room => room.settlement ===
     store.chatDirectory.directory(store.chatSession(a.token).owner, Date.now()).ownSettlement)!.id;
   const server = createApi(store, 'http://127.0.0.1:5173');
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -163,6 +175,8 @@ test('HTTP chat uses session, Origin and CSRF protections; real SSE delivers and
   };
   try {
     assert.equal((await fetch(base)).status, 401);
+    assert.equal((await fetch(`${base}?room=${room}`)).status, 401);
+    assert.equal((await fetch(`${base}/events?room=${room}`, { headers: headers() })).status, 409);
     assert.equal((await fetch(base + '/events', { headers: headers() })).status, 409);
     assert.equal((await fetch(base + '/profile', { method: 'POST', headers: { ...headers(), Origin: 'https://other.example' }, body: '{}' })).status, 403);
     assert.equal((await fetch(base + '/profile', { method: 'POST', headers: { ...headers(), 'X-CSRF-Token': 'bad' }, body: '{}' })).status, 403);
@@ -188,6 +202,9 @@ test('HTTP chat uses session, Origin and CSRF protections; real SSE delivers and
     const info = await (await fetch(base, { headers: headers() })).json();
     assert.deepEqual(Object.keys(info).sort(), ['capacity', 'connected', 'online', 'ownSettlement', 'profile', 'room', 'rooms', 'serverTime', 'settlements']);
     assert.equal(info.capacity, 1000); assert.equal(info.connected, true);
+    const selected = await (await fetch(`${base}?room=${room}`, { headers: headers() })).json();
+    assert.equal(selected.room.id, room);
+    assert.equal(selected.room.kind, channel === 'global' ? 'global' : 'explore');
     assert.ok(!JSON.stringify(info).includes(a.token));
     assert.deepEqual(store.read(a.token, session => session.account), before);
   } finally {

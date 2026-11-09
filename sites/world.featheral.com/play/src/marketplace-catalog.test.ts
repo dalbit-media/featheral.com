@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createAccount, snapshot } from '../server/economy.ts';
 import { catalogSorts, filterMarketCatalog, formatPriceChange, renderMarketCatalog } from './marketplace-catalog.ts';
 import type { CatalogSort } from './marketplace-catalog.ts';
-import { marketAssets } from './market.ts';
+import { marketAssets, marketResources } from './market.ts';
 import { marketRarity } from './market-analysis.ts';
 
 const state = snapshot(createAccount(1000000));
@@ -20,17 +20,30 @@ test('price sorting supports both directions and always places missing offers la
     assert.deepEqual(filterMarketCatalog(tickers, state, 'en', 'all', '', sort, false).map(ticker => ticker.asset), ['lamp', 'torch', 'collection-wood-1']);
   assert.deepEqual(tickers, before);
 });
-test('all-item browsing retains all 121 markets and item category never hides resources from the all filter', () => {
+test('all-item browsing retains every market and item category never hides resources from the all filter', () => {
   const all = marketAssets.map(asset => ({ asset, bid: 1, ask: 2, last: null }));
-  assert.equal(filterMarketCatalog(all, state, 'en', 'all', '', 'name', false).length, 121);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'all', '', 'name', false).length, marketAssets.length);
   assert.equal(filterMarketCatalog(all, state, 'en', 'resources', '', 'name', false).length, 4);
-  assert.equal(filterMarketCatalog(all, state, 'en', 'items', '', 'name', false).length, 117);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'items', '', 'name', false).length, marketAssets.length - marketResources.length);
   assert.ok(filterMarketCatalog(all, state, 'en', 'automation', '', 'name', false).some(({ asset }) => asset === 'transport-convoy'));
   const equipment = filterMarketCatalog(all, state, 'en', 'equipment', '', 'name', false);
   assert.equal(equipment.length, 13);
   assert.ok(equipment.some(({ asset }) => asset === 'survey-array'));
   const forward = filterMarketCatalog(all, state, 'en', 'all', '', 'name', false).map(ticker => ticker.asset);
   assert.deepEqual(filterMarketCatalog(all, state, 'en', 'all', '', 'name-desc', false).map(ticker => ticker.asset), forward.toReversed());
+});
+test('specialized categories, token search, quote availability, rarity and unlocked recipes combine correctly', () => {
+  const all = marketAssets.map(asset => ({ asset, bid: 1, ask: 2, last: null, availableQuantity: 8 }));
+  assert.equal(filterMarketCatalog(all, state, 'en', 'squads', '100 squad', 'name', false).length, 1);
+  assert.equal(filterMarketCatalog(all, state, 'ko', 'all', '  SQUAD-10  ', 'name', false).length, 2);
+  assert.deepEqual(filterMarketCatalog(all, state, 'ko', 'collectors', 'wood 1', 'name', false).map(row => row.asset).sort(),
+    ['collection-wood-1', 'collection-wood-12', 'collector-wood-12']);
+  assert.ok(filterMarketCatalog(all, state, 'en', 'transport', '', 'name', false).every(row => row.asset.startsWith('transport-')));
+  const unavailable = all.map(row => ({ ...row, ask: Infinity }));
+  assert.equal(filterMarketCatalog(unavailable, state, 'en', 'all', '', 'name', false, { availability: 'buy' }).length, 0);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'resources', '', 'name', false, { rarity: 'legendary' }).length, 0);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'squads', '', 'name', false, { rarity: 'legendary' }).length, 4);
+  assert.equal(filterMarketCatalog(all, state, 'en', 'all', '', 'name', false, { craftable: true }).length, 0);
 });
 test('table sorting exposes direction and keeps every trade button draft-only', () => {
   const html = renderMarketCatalog(tickers, state, 'lamp', 'table', 'en', false, 'buy-high');

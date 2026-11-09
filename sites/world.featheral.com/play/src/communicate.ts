@@ -44,7 +44,9 @@ export class Communicate {
       <form class="chat-composer" data-chat-composer><label class="sr-only" for="${messageId}">Message</label><textarea id="${messageId}" data-chat-text rows="1" maxlength="600" placeholder="Send a message to everyone" disabled></textarea><div><span data-chat-count aria-live="off"></span><button class="button primary" data-chat-send disabled>Send</button></div></form>`;
     localize(root);
     root.querySelector('[data-chat-title]')!.textContent = translate(title, language);
-    root.querySelector('.chat-rules')!.textContent = translate(privateRoom
+    root.querySelector('.chat-rules')!.textContent = translate(room === 'global'
+      ? 'Global chat. Latest 100 messages saved. One message every 3 seconds. Enter to send; Shift+Enter for a new line.'
+      : privateRoom
       ? 'Visitor group chat. Anyone visiting this settlement can join. Not listed in the public inbox. Never share secrets.'
       : 'Public nearby chat. Latest 100 messages saved. One message every 3 seconds. Enter to send; Shift+Enter for a new line.', language);
     this.input.placeholder = translate(privateRoom ? 'Message settlement visitors' : 'Message this public channel', language);

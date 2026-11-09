@@ -1,18 +1,36 @@
 import type { ApiState } from './api-types.ts';
 import { icon } from './icons.ts';
 import { itemArt } from './item-art.ts';
-import { craftingStage, isCraftableItem, isDecorationItem, isVisibilityItem } from './items.ts';
+import { craftingStage, isCraftableItem, isDecorationItem, isVisibilityItem, recipeDiscovered } from './items.ts';
 import { isMarketResource, marketAssetName, marketPriceAvailable } from './market.ts';
 import type { MarketAsset, MarketSnapshot } from './market.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
-import { isAutomationItem } from './automation.ts';
+import { isActivityItem, isAutomationItem } from './automation.ts';
 import { displayPrice, displayQuantity, formatResourceAmount, formatResourcePrice, tradingUnit } from './resource-units.ts';
 import { isCustomizationItem } from './customization.ts';
 import { isActivityEquipment } from './activity-equipment.ts';
 import { isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem } from './transport-items.ts';
+import { isSquadItem } from './exploration-squads.ts';
 import { marketRarity, rarityLabel } from './market-analysis.ts';
+import { isCollectionItem } from './collection.ts';
+
+export const catalogCategories = [
+  ['all', 'All markets'], ['resources', 'Resources'], ['equipment', 'Equipment'],
+  ['lighting', 'Lighting'], ['efficiency', 'Cost-saving equipment'], ['collectors', 'Collectors'],
+  ['automation', 'Automation & vouchers'], ['squads', 'Squad vouchers'], ['bulk', 'Bulk crafting'],
+  ['transport', 'Transport vouchers'], ['decorations', 'Decorations'], ['customization', 'Names & titles'],
+  ['collectibles', 'Collectibles'],
+] as const;
+export interface CatalogFilters { availability?: 'all' | 'buy' | 'sell'; rarity?: string; craftable?: boolean }
+export function marketCategory(asset: MarketAsset): string {
+  return isMarketResource(asset) ? 'Resources' : isSquadItem(asset) ? 'Squad vouchers'
+    : isCollectionItem(asset) ? 'Collectors' : isTransportItem(asset) ? 'Transport vouchers'
+    : isBulkCraftingItem(asset) ? 'Bulk crafting' : isCustomizationItem(asset) ? 'Names & titles'
+    : isActivityItem(asset) ? 'Automation' : isVisibilityItem(asset) ? 'Lighting'
+    : isActivityEquipment(asset) ? 'Cost-saving equipment' : isDecorationItem(asset) ? 'Decorations' : 'Collectibles';
+}
 
 export type CatalogView = 'grid' | 'table';
 export const catalogSorts = ['name', 'name-desc', 'buy-low', 'buy-high', 'sell-high', 'sell-low', 'owned', 'change24h-high', 'change24h-low', 'change7d-high', 'change7d-low',
@@ -46,12 +64,22 @@ export function marketOwned(state: ApiState, asset: MarketAsset): number {
   return isMarketResource(asset) ? state.game.stock[asset] : state.inventory.items.filter(item => item === asset).length;
 }
 export function filterMarketCatalog(tickers: Ticker[], state: ApiState, language: Language,
-  category: string, query: string, sort: CatalogSort, ownedOnly: boolean): Ticker[] {
+  category: string, query: string, sort: CatalogSort, ownedOnly: boolean, filters: CatalogFilters = {}): Ticker[] {
   const name = (asset: MarketAsset) => translate(marketAssetName(asset), language);
-  return tickers.filter(({ asset }) => {
-    const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isAutomationItem(asset) || isBulkCraftingItem(asset) || isTransportItem(asset) ? 'automation' : isVisibilityItem(asset) || isActivityEquipment(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
-    return (category === 'all' || category === group || category === 'items' && group !== 'resources') && name(asset).toLocaleLowerCase(locale(language)).includes(query.toLocaleLowerCase(locale(language)).trim())
-      && (!ownedOnly || marketOwned(state, asset) > 0);
+  const terms = query.toLocaleLowerCase(locale(language)).trim().split(/\s+/).filter(Boolean);
+  return tickers.filter(ticker => {
+    const { asset } = ticker;
+    const group = isMarketResource(asset) ? 'resources' : isCustomizationItem(asset) ? 'customization' : isCollectionItem(asset) ? 'collectors' : isAutomationItem(asset) || isBulkCraftingItem(asset) || isTransportItem(asset) || isSquadItem(asset) ? 'automation' : isVisibilityItem(asset) || isActivityEquipment(asset) ? 'equipment' : isDecorationItem(asset) ? 'decorations' : 'collectibles';
+    const specialized = category === 'lighting' ? isVisibilityItem(asset) : category === 'efficiency' ? isActivityEquipment(asset)
+      : category === 'collectors' ? isCollectionItem(asset) : category === 'squads' ? isSquadItem(asset)
+      : category === 'bulk' ? isBulkCraftingItem(asset) : category === 'transport' ? isTransportItem(asset) : false;
+    const search = `${name(asset)} ${marketAssetName(asset)} ${asset} ${asset.replaceAll('-', ' ')} ${marketCategory(asset)} ${translate(marketCategory(asset), language)}`.toLocaleLowerCase(locale(language));
+    return (category === 'all' || category === group || specialized || category === 'items' && group !== 'resources')
+      && terms.every(term => search.includes(term))
+      && (!ownedOnly || marketOwned(state, asset) > 0)
+      && (!filters.availability || filters.availability === 'all' || marketPriceAvailable(filters.availability === 'buy' ? ticker.ask : ticker.bid))
+      && (!filters.rarity || filters.rarity === 'all' || !isMarketResource(asset) && marketRarity(ticker.availableQuantity) === filters.rarity)
+      && (!filters.craftable || isCraftableItem(asset) && state.game.stage >= craftingStage(asset) && recipeDiscovered(state.game, asset));
   }).sort((a, b) => {
     const value = (ticker: Ticker): number | null => sort.startsWith('rarity-') ? isMarketResource(ticker.asset) || !ticker.availableQuantity || marketRarity(ticker.availableQuantity) === 'unknown' ? null : ticker.availableQuantity
       : sort.startsWith('quantity-') ? ticker.availableQuantity ?? null
@@ -98,8 +126,7 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
       return `<button type="button" class="catalog-price catalog-${side}" data-market-asset="${ticker.asset}" data-market-quick-side="${side}" data-quoted="${available}" aria-label="${text(side === 'buy' ? 'Buy' : 'Sell')} ${name}, ${price}${available ? ` FTH$/${unit}` : ''}" ${pending || (side === 'sell' && marketOwned(state, ticker.asset) === 0) ? 'disabled' : ''}><small>${text(side === 'buy' ? 'Buy' : 'Sell')}</small><strong>${available || view === 'table' ? price : text('No quote')}</strong>${available ? `<span class="catalog-currency">FTH$/${unit}</span>` : ''}</button>`;
     };
     const last = ticker.last === null ? '—' : formatResourcePrice(ticker.asset, ticker.last, locale(language));
-    const category = isMarketResource(ticker.asset) ? 'Resources' : isCustomizationItem(ticker.asset) ? 'Names & titles' : isTransportItem(ticker.asset) ? 'Transport vouchers' : isBulkCraftingItem(ticker.asset) ? 'Bulk crafting' : isAutomationItem(ticker.asset) ? 'Automation'
-      : isVisibilityItem(ticker.asset) || isActivityEquipment(ticker.asset) ? 'Equipment' : isDecorationItem(ticker.asset) ? 'Decorations' : 'Collectibles';
+    const category = marketCategory(ticker.asset);
     const changes = `<div class="catalog-changes">${renderPriceChange(ticker, '24h', language, true)}${renderPriceChange(ticker, '7d', language, true)}</div>`;
     const rarity = isMarketResource(ticker.asset) ? 'unknown' : marketRarity(ticker.availableQuantity);
     const supply = ticker.availableQuantity === undefined ? text('Unknown supply') : formatResourceAmount(ticker.asset, ticker.availableQuantity, locale(language));

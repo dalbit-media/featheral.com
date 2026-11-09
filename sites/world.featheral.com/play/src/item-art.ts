@@ -10,6 +10,7 @@ import { activityEquipmentItems, isActivityEquipment } from './activity-equipmen
 import type { ActivityEquipment } from './activity-equipment.ts';
 import { bulkCraftingItems, isBulkCraftingItem } from './bulk-crafting.ts';
 import { isTransportItem, transportItems } from './transport-items.ts';
+import { isSquadItem, squadItems } from './exploration-squads.ts';
 
 const activityEquipmentDrawings: Record<ActivityEquipment, string> = {
   'survey-satchel': '<path d="M19 24V17a13 13 0 0 1 26 0v7" fill="none" stroke="#dec18b" stroke-width="4"/><path d="M12 22h40v35H12Z" fill="#ad8059"/><path d="M12 22h40l-7 17H19Z" fill="#d2af76"/><circle cx="32" cy="39" r="5" fill="#82c4ad"/><path d="m21 48 6 4 7-5 9 5" fill="none" stroke="#eadcaa" stroke-width="2"/>',
@@ -65,6 +66,7 @@ export function decorationDrawing(id: DecorationItem): string {
   return `<ellipse cx="32" cy="57" rx="29" ry="6" fill="#102c2020"/>${decorationDrawings[id]}`;
 }
 export function itemArt(id: ItemId): string {
+  if (isSquadItem(id)) return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 6h40v52H12Z" fill="#a2c4b2"/><path d="m18 40 13-17 15 17" fill="none" stroke="#36594b" stroke-width="3"/><circle cx="22" cy="18" r="5" fill="#d6b47f"/><circle cx="42" cy="18" r="5" fill="#d6b47f"/><path d="M16 28v8m12-8v8m8-8v8m12-8v8M22 46h20" stroke="#36594b" stroke-width="4"/></svg><b>×${squadItems[id].quantity}</b></div>`;
   if (isBulkCraftingItem(id)) {
     const recipe = bulkCraftingItems[id], color = ['#c3a479', '#96bd97', '#90bdce', '#c4ace1'][Math.floor(recipe.stage / 2)];
     return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M13 7h32l8 8v43H13Z" fill="${color}"/><path d="M45 7v10h8M21 23h24m-24 8h16m-16 8h24" fill="none" stroke="#314b41" stroke-width="3"/><path d="m31 44 8-4 8 4v8l-8 5-8-5Z" fill="#426e5d"/><path d="m34 47 5 5 6-8" fill="none" stroke="#e4edca" stroke-width="2"/></svg><b>×${recipe.quantity}</b></div>`;

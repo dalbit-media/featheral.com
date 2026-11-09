@@ -5,6 +5,7 @@ export type TimedAction = 'investigate' | 'warehouse' | 'upgrade' | 'item-storag
   | `craft:${string}` | `building:${string}`;
 export type ActionReadyAt = Partial<Record<TimedAction, number>>;
 export function timedActionKey(command: Command): TimedAction | null {
+  if (command.type === 'dispatch-squad') return 'investigate';
   if (command.type === 'craft') return `craft:${command.item}`;
   if (command.type === 'construction') return `building:${command.kind}`;
   if (command.type === 'build') return `building:${command.kind === 'trade-hub' ? 'logistics' : command.kind}`;
@@ -20,7 +21,8 @@ export function renderActionControls(root: ParentNode, readyAt: ActionReadyAt | 
       : type === 'construction' && construction ? `building:${construction}`
         : (type === 'water-facility' || type === 'income-facility') && facility ? `building:${facility === 'trade-hub' ? 'logistics' : facility}`
           : type === 'bank' || type === 'townhall' ? `building:${type}`
-            : type === 'investigate' || type === 'warehouse' || type === 'upgrade' || type === 'item-storage' ? type : null;
+            : type === 'dispatch-squad' ? 'investigate'
+              : type === 'investigate' || type === 'warehouse' || type === 'upgrade' || type === 'item-storage' ? type : null;
     if (!action) return;
     button.dataset.actionEligible ??= String(!button.disabled);
     const remaining = actionRemaining(readyAt, action, now);

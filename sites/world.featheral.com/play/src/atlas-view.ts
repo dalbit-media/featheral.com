@@ -1,10 +1,11 @@
 import { readAtlas } from './api.ts';
-import { atlasSize, escapeAtlas as escape, federationArt, generatedAvatar, isRankingMetric, nearbyDistance, rankEntries, rankingMetrics, territoryAt } from './atlas.ts';
+import { atlasSize, escapeAtlas as escape, federationArt, generatedAvatar, generatedFederation, isRankingMetric, nearbyDistance, rankEntries, rankingMetrics, territoryAt } from './atlas.ts';
 import type { AtlasEntry, AtlasSnapshot, RankingMetric } from './atlas.ts';
 import { icon } from './icons.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { stages } from './engine.ts';
+import { AtlasCamera } from './atlas-camera.ts';
 
 const metricLabels: Record<RankingMetric, string> = {
   population: 'Population', netWorth: 'Net worth', dollars: 'FTH$ balance',
@@ -19,15 +20,16 @@ export function atlasMap(snapshot: AtlasSnapshot, language: Language): string {
     cells[y] = [];
     for (let x = 0; x < resolution; x++) cells[y][x] = territoryAt({ x: (x + .5) * step, y: (y + .5) * step }, settlements);
   }
-  let territories = '', borders = '';
+  const territoryPaths = new Map<string, string>();
+  let borders = '';
   for (let y = 0; y < resolution; y++) for (let x = 0; x < resolution; x++) {
     const federation = cells[y][x];
-    if (federation) territories += `<rect x="${x * step}" y="${y * step}" width="${step}" height="${step}" fill="${colors.get(federation)}" opacity=".6"/>`;
+    if (federation) territoryPaths.set(federation, (territoryPaths.get(federation) ?? '') + `M${x * step} ${y * step}h${step}v${step}h-${step}Z`);
     if (x && federation !== cells[y][x - 1]) borders += `M${x * step} ${y * step}v${step}`;
     if (y && federation !== cells[y - 1][x]) borders += `M${x * step} ${y * step}h${step}`;
   }
-  return `<svg class="atlas-map" viewBox="-20 -20 ${atlasSize + 40} ${atlasSize + 40}" role="img" aria-label="${escape(translate('Settlement atlas and federation territories', language))}">
-    <rect width="${atlasSize}" height="${atlasSize}" fill="#14251f"/>${territories}
+  return `<svg class="atlas-map" viewBox="0 0 ${atlasSize} ${atlasSize}" role="img" aria-label="${escape(translate('Settlement atlas and federation territories', language))}">
+    <rect width="${atlasSize}" height="${atlasSize}" fill="#14251f"/>${[...territoryPaths].map(([federation, path]) => `<path d="${path}" fill="${escape(colors.get(federation) ?? generatedFederation(federation).color)}" opacity=".6"/>`).join('')}
     <path d="${borders}" stroke="#e0ebd5" stroke-width="2" fill="none" opacity=".7"/>
     ${settlements.map(entry => `<g><title>${escape(entry.settlement!)} (${entry.location!.x}, ${entry.location!.y}) - ${escape(entry.federation ?? translate('Independent', language))}</title>
       <circle cx="${entry.location!.x}" cy="${entry.location!.y}" r="${entry.yours ? 9 : 4}" fill="${entry.yours ? '#ffdf81' : '#fff'}" stroke="#101d17" stroke-width="2"/>
@@ -47,6 +49,9 @@ export class AtlasPage {
   private loading = false;
   private error = '';
   private map = '';
+  private camera: AtlasCamera | null = null;
+  private directoryOpen = false;
+  private active = true;
   constructor(root: HTMLElement, language: Language, geography: boolean) {
     this.root = root; this.language = language; this.geography = geography;
     root.addEventListener('change', event => {
@@ -55,7 +60,7 @@ export class AtlasPage {
       if (target.dataset.atlasControl === 'metric' && isRankingMetric(target.value)) this.metric = target.value;
       if (target.dataset.atlasControl === 'scope' && (target.value === 'players' || target.value === 'settlements')) this.scope = target.value;
       if (target.dataset.atlasControl === 'nearby' && target instanceof HTMLInputElement) this.nearby = target.checked;
-      this.page = 0; this.render();
+      this.page = 0; this.geography ? this.renderTable() : this.render();
     });
     root.addEventListener('input', event => {
       if (!(event.target instanceof HTMLInputElement) || event.target.dataset.atlasControl !== 'search') return;
@@ -66,21 +71,41 @@ export class AtlasPage {
       const button = event.target.closest<HTMLButtonElement>('[data-atlas-action]');
       if (!button || button.disabled) return;
       if (button.dataset.atlasAction === 'refresh') void this.load();
+      else if (button.dataset.atlasAction === 'zoom-in') this.camera?.zoom(1.25);
+      else if (button.dataset.atlasAction === 'zoom-out') this.camera?.zoom(.8);
+      else if (button.dataset.atlasAction === 'fit') this.camera?.fit();
+      else if (button.dataset.atlasAction === 'home') {
+        const location = this.snapshot?.entries.find(entry => entry.yours)?.location;
+        if (location) this.camera?.center(location);
+      }
       else { this.page += button.dataset.atlasAction === 'next' ? 1 : -1; this.renderTable(); }
+    });
+    window.addEventListener('pagehide', () => { this.active = false; this.camera?.close(); this.camera = null; });
+    window.addEventListener('pageshow', event => {
+      this.active = true;
+      if (event.persisted && this.geography) this.render();
     });
     void this.load();
   }
   private t(text: string): string { return translate(text, this.language); }
   private async load(): Promise<void> {
     if (this.loading) return;
-    this.loading = true; this.error = ''; this.render();
+    this.loading = true; this.error = '';
+    if (!this.snapshot) this.render();
+    else this.updateStatus();
     try {
       this.snapshot = await readAtlas();
       this.map = this.geography ? atlasMap(this.snapshot, this.language) : '';
     } catch (error) {
       console.error('World atlas:', error);
       this.error = error instanceof Error ? error.message : 'World atlas is unavailable.';
-    } finally { this.loading = false; this.render(); }
+    } finally {
+      this.loading = false;
+      if (this.active && this.geography && this.camera && this.snapshot) {
+        this.root.querySelector<HTMLElement>('[data-atlas-scene]')!.innerHTML = this.map;
+        this.renderTable(); this.updateStatus();
+      } else if (this.active) this.render();
+    }
   }
   private rows(): AtlasEntry[] {
     const query = this.query.toLocaleLowerCase();
@@ -91,6 +116,7 @@ export class AtlasPage {
     return this.geography ? entries.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity) || a.id.localeCompare(b.id)) : rankEntries(entries, this.metric);
   }
   private render(): void {
+    if (this.geography) { this.renderGeography(); return; }
     const focused = document.activeElement instanceof HTMLElement && this.root.contains(document.activeElement)
       ? document.activeElement.dataset.atlasControl : undefined;
     const t = (text: string) => this.t(text), snapshot = this.snapshot;
@@ -112,9 +138,42 @@ export class AtlasPage {
     this.renderTable();
     if (focused) this.root.querySelector<HTMLElement>(`[data-atlas-control="${focused}"]`)?.focus({ preventScroll: true });
   }
+  private updateStatus(): void {
+    const status = this.root.querySelector<HTMLElement>('[data-atlas-status]');
+    if (status) status.textContent = this.error ? this.error : this.loading ? this.t('Loading atlas...')
+      : this.snapshot ? `${this.t('Last updated')}: ${new Date(this.snapshot.updatedAt).toLocaleString(locale(this.language))}` : '';
+    this.root.querySelector<HTMLButtonElement>('[data-atlas-action="refresh"]')?.toggleAttribute('disabled', this.loading);
+    const ownLocation = this.snapshot?.entries.find(entry => entry.yours)?.location;
+    this.root.querySelector<HTMLButtonElement>('[data-atlas-action="home"]')?.toggleAttribute('disabled', !ownLocation);
+    this.root.querySelector<HTMLInputElement>('[data-atlas-control="nearby"]')?.toggleAttribute('disabled', !ownLocation);
+  }
+  private renderGeography(): void {
+    this.camera?.close();
+    const t = (text: string) => escape(this.t(text)), own = this.snapshot?.entries.find(entry => entry.yours);
+    this.root.classList.add('atlas-fullscreen');
+    this.root.innerHTML = `<div class="atlas-viewport" data-atlas-viewport tabindex="0" role="region" aria-label="${t('Settlement atlas and federation territories')}" aria-describedby="atlas-navigation-help"><div class="atlas-scene" data-atlas-scene>${this.map}</div></div>
+      <header class="atlas-overlay atlas-heading"><h1>${icon('atlas')}${t('Settlement atlas')}</h1><p id="atlas-navigation-help">${t('Drag to pan. Scroll or pinch to zoom. Arrow keys to pan, + / - to zoom, Home to fit.')}</p><p data-atlas-status role="status"></p></header>
+      <div class="atlas-overlay atlas-camera-controls" role="group" aria-label="${t('Map controls')}">
+        <button class="button" data-atlas-action="zoom-in" aria-label="${t('Zoom in')}">+</button><span data-atlas-zoom aria-label="${t('Zoom level')}">100%</span><button class="button" data-atlas-action="zoom-out" aria-label="${t('Zoom out')}">-</button>
+        <button class="button" data-atlas-action="fit">${t('Fit map')}</button><button class="button" data-atlas-action="home" ${own?.location ? '' : 'disabled'}>${t('Your settlement')}</button></div>
+      <details class="atlas-overlay atlas-directory" ${this.directoryOpen ? 'open' : ''}><summary>${t('Settlements and federations')}</summary><div class="atlas-directory-content">
+        <section class="atlas-controls"><label>${t('Search')}<input type="search" data-atlas-control="search" value="${escape(this.query)}" placeholder="${t('Player, settlement or federation')}"></label>
+        <label class="atlas-nearby"><input type="checkbox" data-atlas-control="nearby" ${this.nearby ? 'checked' : ''} ${own?.location ? '' : 'disabled'}>${t('Nearby (100 km)')}</label><button class="button" data-atlas-action="refresh">${t('Refresh')}</button></section>
+        <section class="atlas-results" data-atlas-table></section><div class="atlas-legend" data-atlas-legend></div></div></details>`;
+    this.root.querySelector<HTMLDetailsElement>('.atlas-directory')!.addEventListener('toggle', event => {
+      this.directoryOpen = (event.currentTarget as HTMLDetailsElement).open;
+    });
+    this.camera = new AtlasCamera(this.root.querySelector<HTMLElement>('[data-atlas-viewport]')!,
+      this.root.querySelector<HTMLElement>('[data-atlas-scene]')!, this.root.querySelector<HTMLElement>('[data-atlas-zoom]')!);
+    this.renderTable(); this.updateStatus();
+  }
   private renderTable(): void {
     const root = this.root.querySelector<HTMLElement>('[data-atlas-table]');
     if (!root) return;
+    const legend = this.root.querySelector<HTMLElement>('[data-atlas-legend]');
+    if (legend) legend.innerHTML = `<h2>${this.t('Federation territories')}</h2><p>${this.t('Automatic nearest-settlement territories, shown on a 25 km grid. Independent settlements leave neutral territory. Borders are informational, not land claims.')}</p>
+      ${(this.snapshot?.federations ?? []).map(federation => `<div class="atlas-legend-row">${federationArt(federation.name, 'shield')}<span data-no-localize><strong>${escape(federation.name)}</strong><small>${escape(federation.motto)}</small></span><span>${federation.members} ${this.t('Settlements')}</span></div>`).join('')}
+      <p>${this.t('Coordinates and straight-line distances use game kilometers, not real-world locations. Local exploration maps are unchanged.')}</p>`;
     const entries = this.rows(), t = (text: string) => this.t(text);
     const pages = Math.max(1, Math.ceil(entries.length / 25));
     const showLocation = !this.geography && (this.metric === 'population' || this.metric === 'netWorth');

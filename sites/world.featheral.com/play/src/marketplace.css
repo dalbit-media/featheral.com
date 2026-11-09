@@ -144,3 +144,23 @@
 .catalog-tile[data-rarity]:not([data-rarity=unknown]){border-left:3px solid var(--rarity-color)}
 #app .catalog-tile[data-rarity] .catalog-identity strong,#app .catalog-row[data-rarity] .catalog-identity strong{color:var(--rarity-color)}
 .catalog-rarity{display:block;color:var(--rarity-color);font-size:10px;line-height:1.6;margin:4px 0;overflow-wrap:anywhere}
+.chart-toolbar{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.chart-summary{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:11px;color:#9dad91;margin:12px 0}
+.chart-summary strong{color:#e3e7dd;font-variant-numeric:tabular-nums}
+.market-chart.trading-chart{max-height:none;min-height:180px;background:#0d1914;border:1px solid #c6e8a41c;border-radius:10px}
+.chart-grid{stroke:#c6e8a415;fill:none;stroke-dasharray:3 4}
+.chart-current{stroke:#e1c88e88;stroke-dasharray:5 4;fill:none}
+.chart-current-label{fill:#efd49a!important}
+.chart-candle.up{color:#69cba2}.chart-candle.down{color:#e2988d}
+.chart-wick{stroke:currentColor;stroke-width:1.5}
+.chart-body{fill:currentColor}.chart-volume{fill:currentColor;opacity:.35}
+.chart-hit{fill:transparent}
+.chart-candle:hover .chart-hit,.chart-candle:focus .chart-hit{fill:#ffffff0b}
+.chart-candle:focus{outline:none}.chart-candle:focus .chart-body{stroke:#fff;stroke-width:1}
+.chart-inspection{min-height:40px;font-size:11px;color:#d0dcc5;font-variant-numeric:tabular-nums;margin-top:8px}
+.chart-disclosure{color:#96aa8c;font-size:10px;line-height:1.6}
+.catalog-advanced{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:center}
+.catalog-advanced .catalog-owned-filter{white-space:normal}
+.marketplace-view .resource-market-navigation{flex-wrap:nowrap;overflow:auto;scrollbar-width:thin;max-width:100%}
+.marketplace-view .resource-market-navigation .button{flex:none;white-space:nowrap}
+@media(max-width:650px){.catalog-advanced{grid-template-columns:repeat(2,minmax(0,1fr))}.catalog-advanced>.catalog-owned-filter{grid-column:1/-1}.chart-toolbar .catalog-view-switch{flex-wrap:wrap}.trading-chart text{font-size:13px}.chart-inspection{font-size:12px}}

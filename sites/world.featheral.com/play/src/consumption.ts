@@ -19,6 +19,7 @@ import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { formatDollars } from './dollars.ts';
 import { marketAnalysisFee } from './market-analysis.ts';
+import { planSquad, squadItems } from './exploration-squads.ts';
 
 export interface ConsumptionAmount { asset: MarketAsset | 'fthg' | 'dollars'; amount: number }
 export interface ConsumptionQuote {
@@ -122,6 +123,22 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           ...(activityEquipmentDiscount(game, 'investigation') ? [`Equipped gear reduces investigation fees by ${activityEquipmentDiscount(game, 'investigation')}%. Paid jobs stay unchanged.`] : []),
           'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']),
         weeks: cost.weeks, residents: 2 };
+    }
+    case 'dispatch-squad': {
+      const plan = planSquad(game, state.workforce, command.activity, command.quantity);
+      return { ...quote('Dispatch squad', squadItems[command.item].name, {},
+        ['Consumes one voucher for the displayed missions only. Cancellation or failure consumes nothing.',
+          'Targets are chosen automatically within your current reach. Two available residents are assigned per mission.',
+          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.',
+          'Exploration avoids destinations already covered by active or selected surveys. Terrain is revealed only on return.',
+          ...(command.activity === 'investigation' ? ['Two idle residents return after one game week. Known terrain is not expanded.',
+            '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.'] : []),
+          'Squad size is a maximum. Available residents, funds and destinations can reduce the dispatched count.']),
+        costs: [{ asset: command.item, amount: 1 }, { asset: 'dollars', amount: plan.dollarsUnits / dollarsScale }],
+        subject: `${plan.missions.length} / ${squadItems[command.item].quantity} ${command.activity === 'exploration' ? 'exploration' : 'investigation'} missions`,
+        weeks: Math.max(1, ...plan.missions.map(mission => mission.weeks)), residents: plan.workers,
+        preciseDollars: true,
+        ...(plan.missions.length !== command.quantity ? { warning: 'Squad requirements changed. Review the squad and try again.' } : {}) };
     }
     case 'invite':
       return { ...quote('Recruit residents', 'Residents', { dollars: state.recruitmentDollars },

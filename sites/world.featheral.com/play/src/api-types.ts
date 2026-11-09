@@ -11,10 +11,12 @@ import type { Customization, CustomizationItem } from './customization.ts';
 import type { ActionReadyAt } from './action-timing.ts';
 import type { ActivityEquipment, EquipmentActivity } from './activity-equipment.ts';
 import type { TransportItem } from './transport-items.ts';
+import type { SquadActivity, SquadItem } from './exploration-squads.ts';
 
 export type Command =
   | { type: 'move'; x: number; y: number }
   | { type: 'investigate'; x: number; y: number }
+  | { type: 'dispatch-squad'; item: SquadItem; activity: SquadActivity; quantity: number; maximumDollars: number }
   | { type: 'assign'; resource: Resource; workers: number }
   | { type: 'automatic'; enabled: boolean }
   | { type: 'trade'; resource: Resource; direction: 'buy' | 'sell'; amount: number }

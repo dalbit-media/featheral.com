@@ -308,3 +308,12 @@ html[data-screen-preview] #app{width:var(--screen-preview-width);max-width:var(-
   .header-wallet strong{max-width:48px;font-size:10px}
   .topbar-account{gap:5px}
 }
+.squad-panel{margin-top:16px;padding:12px;border:1px solid var(--surface-border);border-radius:12px}
+.squad-panel h3{font-size:14px;margin-bottom:8px}
+.squad-panel p{font-size:11px;line-height:1.6;color:var(--muted);margin:8px 0}
+.squad-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:8px}
+.squad-option{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;padding:10px;border:1px solid var(--surface-border);border-radius:10px;min-width:0}
+.squad-option>.item-art{width:44px;height:44px}
+.squad-option strong{font-size:12px}
+.squad-option small{display:block;font-size:10px;color:var(--muted);margin-top:4px}
+.squad-option .button{grid-column:1/-1;flex-direction:column;gap:2px;min-height:44px}

@@ -65,6 +65,38 @@ physical-unit increment and selected spending limit; editing quantity or using
 the stepper switches back to manual sizing. Item sale presets use sellable copies,
 excluding equipped/placed copies. Resource sale controls are unchanged.
 
+## Marketplace browsing and charts
+
+Marketplace browsing includes specialized categories, multi-word search across
+localized/English names and item IDs, owned-only, available buy/sell quotes,
+rarity and unlocked-recipe filters. Filters combine and Reset filters clears
+them all. Sorting supports both price directions, ownership, changes, supply,
+rarity and crafting tier; grid and sortable-table views share the same results.
+
+Price history defaults to OHLC candles with volume bars and a closing-price
+line alternative. Auto groups the available history into roughly 40 candles;
+1h, 4h and 1d intervals use the game clock in UTC. Hover or keyboard-focus a
+candle for its open, high, low, close and volume. Only the latest 120 executed
+trades are available; missing intervals stay empty, not fabricated or carried
+forward. This is a trade-history chart, not a guaranteed complete time series.
+
+## Squad dispatch vouchers
+
+Craft or trade `squad-10`, `squad-20`, `squad-50`, and `squad-100` to launch
+up to that many field missions with one confirmation and one server action.
+Open **Bulk field missions** from Explore or population management, or select
+a voucher in inventory. Choose Explore or Investigate; targets are selected
+automatically within the normal reach, without revisiting active destinations.
+Exploration also skips destinations covered by another active or selected survey.
+
+Each mission needs two idle residents and retains the normal duration, equipment
+discounts, findings, and **exponential shared concurrency fees**. Squad sizes are
+maximums, not guaranteed counts: residents, reachable targets, and funds may
+reduce the batch, especially for 50/100 vouchers. Confirmation shows the exact
+mission count, total fee, and residents. One voucher is consumed only when the
+whole displayed batch successfully launches. Changed requirements fail without
+spending; action receipts prevent retries from consuming another voucher.
+
 ## Hall of Fame and settlement atlas
 
 The trophy rail link opens `/hall-of-fame/`: all persisted players or established
@@ -87,6 +119,15 @@ their local terrain, seed, home, exploration radius or chat/visit permissions.
 The map derives informational federation territories from the nearest member
 settlement on a 25 km display grid; independent settlements keep neutral areas.
 Empty federations have no territory. Borders are not player claims or ownership.
+
+The atlas fills the game viewport behind the navigation and resource bar.
+Drag or use arrow keys to pan; scroll, pinch or use + / - to zoom (up to 16x).
+Home and Fit map restore the whole map; Your settlement recenters it.
+The searchable settlement directory and federation legend are collapsible overlays.
+Territory geometry is generated only on atlas refresh; camera gestures update a
+single composited transform at most once per animation frame, with no idle loop.
+The chat overlay joins the authenticated global channel, retaining existing
+profile requirements, moderation, message limits and single-chat-tab policy.
 
 Five starting federations have distinct procedural flags, shields and mottos.
 Choose one on Federation when the existing Village/50-relationship requirements
