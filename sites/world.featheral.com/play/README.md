@@ -67,6 +67,14 @@ excluding equipped/placed copies. Resource sale controls are unchanged.
 
 ## Marketplace browsing and charts
 
+Game visuals use a shared duotone UI icon family and illustrated item/building
+badges. Item effects and usage details are shared by inventory, recipes and
+market cards; decoration and civic descriptions do not imply income or
+production bonuses. Settlement panels include a persistent section switcher,
+context descriptions and object inspectors. Controls keep stable hover
+geometry, visible action labels, keyboard focus and 44px minimum touch targets.
+Reduced-motion preferences suppress control transitions.
+
 Marketplace browsing includes specialized categories, multi-word search across
 localized/English names and item IDs, owned-only, available buy/sell quotes,
 rarity and unlocked-recipe filters. Filters combine and Reset filters clears
@@ -89,9 +97,12 @@ target. Deployment preflight and ledger authority checks remain enforced.
 
 Craft or trade `squad-10`, `squad-20`, `squad-50`, and `squad-100` to launch
 up to that many field missions with one confirmation and one server action.
-Open **Bulk field missions** from Explore or population management, or select
-a voucher in inventory. Choose Explore or Investigate; targets are selected
-automatically within the normal reach, without revisiting active destinations.
+Click the normal **Explore** or **Investigate** action. If an unused voucher is
+owned, choose one mission (no voucher) or an available voucher batch before
+reviewing the final confirmation. Without a voucher the normal action flow is
+unchanged. Reserved and pending vouchers do not unlock bulk options. There is
+no separate bulk button in Explore, population management or inventory.
+Bulk targets are selected automatically within the normal reach, without revisiting active destinations.
 Exploration also skips destinations covered by another active or selected survey.
 
 Each mission needs two idle residents and retains the normal duration, equipment

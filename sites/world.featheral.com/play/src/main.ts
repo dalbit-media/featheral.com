@@ -6,8 +6,7 @@ import './pages.css';
 import './atlas.css';
 import { AtlasPage } from './atlas-view.ts';
 import { Communicate } from './communicate.ts';
-import { isSquadItem, isSquadActivity, planSquad, squadItems } from './exploration-squads.ts';
-import { squadPanel } from './squad-view.ts';
+import { fieldMissionActivity, squadOptions } from './squad-options.ts';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
 import type { ApiState, Command, Expedition } from './api-types.ts';
@@ -31,7 +30,7 @@ import { settlementLayoutPanel, settlementScene } from './settlement-scene.ts';
 import { arrangementError, isSettlementEntity, settlementBuildings, settlementEntityName, settlementPositions } from './settlement-layout.ts';
 import type { GridPosition, SettlementEntity } from './settlement-layout.ts';
 import { SettlementMap } from './settlement-map.ts';
-import { isSettlementTask, settlementDockTasks, settlementTaskFromHash, settlementTasks } from './settlement-ui.ts';
+import { isSettlementTask, settlementDockTasks, settlementSectionNavigation, settlementTaskFromHash, settlementTasks } from './settlement-ui.ts';
 import type { SettlementTask } from './settlement-ui.ts';
 import { Marketplace } from './marketplace.ts';
 import { federationPanel } from './federation-view.ts';
@@ -47,7 +46,7 @@ import { isConstruction } from './constructions.ts';
 import { civicUpgradeCards, commercialUpgradeCards, constructionUpgradeCards, warehouseUpgradeCard, waterUpgradeCards } from './upgrade-view.ts';
 import { guideContent, wireGuide } from './guide.ts';
 import { claimConsumption, gameConsumption, marketConsumption } from './consumption.ts';
-import { chooseCraftBatch, confirmationOpen, confirmConsumption } from './confirmation.ts';
+import { chooseCraftBatch, chooseFieldMission, confirmationOpen, confirmConsumption } from './confirmation.ts';
 import { craftBatchOptions } from './bulk-crafting.ts';
 import { AccountPane } from './account.ts';
 import { activityKinds, activityName, isActivityItem, isActivityKind } from './automation.ts';
@@ -58,6 +57,7 @@ import './collection.css';
 import './game-layout.css';
 import './world-chat.css';
 import './explore-layout.css';
+import './game-polish.css';
 import { collectionClaimReason, collectionDurations, collectionItemDetails, collectionReceiptQuantity, isCollectionItem } from './collection.ts';
 import { formatResourceAmount, isResource } from './resource-units.ts';
 import { chatUnreadChangedEvent, chatPresenceChangedEvent, chatVisibilityChangedEvent } from './chat.ts';
@@ -383,7 +383,7 @@ function toast(message: string, error = false): void {
 }
 async function act(command: Command, recenter = false): Promise<boolean> {
   if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return false; }
-  const timedKey = timedActionKey(command);
+  let timedKey = timedActionKey(command);
   if (timedKey && actionRemaining(state.actionReadyAt, timedKey, Date.now())) {
     toast('Action cooling down. Please wait.', true); return false;
   }
@@ -391,6 +391,19 @@ async function act(command: Command, recenter = false): Promise<boolean> {
   const submittedDraft = command.type === 'assign' && assignmentDraft !== undefined && Number(assignmentDraft) === command.workers ? assignmentDraft : undefined;
   busy = true;
   try {
+    const activity = fieldMissionActivity(command, state.game);
+    if (activity) {
+      const options = squadOptions(state, activity);
+      if (options.length) {
+        const selected = await chooseFieldMission(command, options, language);
+        if (!selected) return false;
+        command = selected;
+        timedKey = timedActionKey(command);
+        if (timedKey && actionRemaining(state.actionReadyAt, timedKey, Date.now())) {
+          toast('Action cooling down. Please wait.', true); return false;
+        }
+      }
+    }
     if (command.type === 'craft') {
       const options = craftBatchOptions(state.game, state.inventory, command.item);
       if (options.length > 1) {
@@ -824,7 +837,6 @@ function renderSidebar(): void {
       ${game.stage < 0 ? foundingPanel() : `
       <div class="sidebar-action-row">
       ${investigationButton(true)}
-      <button class="button wide" data-action="population-management">${icon('people')}<span>Bulk field missions</span></button>
       <button class="button primary wide sidebar-expedition" data-action="explore" title="${escape(translate(exploreReason || 'Discover new land', language))}" aria-description="${escape(translate(exploreReason || 'Discover new land', language))}" ${exploreReason ? 'disabled' : ''}><span class="quick-action-heading">${icon('compass')}<span>Explore</span></span>${quote ? `<span class="quick-action-cost">${costChips({ dollars: quote.dollars }, true)}</span>${fieldDuration(quote.weeks)}` : ''}</button>
       ${recruitmentButton(true)}
       </div>
@@ -1070,7 +1082,8 @@ function renderSettlement(): void {
     ${pendingPlacement ? `<div class="placement-prompt" role="status"><span>${translate(`Choose an empty land cell for ${settlementEntityName(pendingPlacement.entity)}.`, language)}</span><button class="button" data-action="cancel-placement">Cancel placement</button></div>` : ''}
     <section class="settlement-task-panel" id="settlement-task-panel" role="region" aria-labelledby="settlement-task-title" ${settlementTask ? '' : 'hidden'}>
       <header class="settlement-task-heading"><h2 id="settlement-task-title" tabindex="-1">${icon(settlementTasks[settlementTask ?? 'overview'].icon)}${settlementTasks[settlementTask ?? 'overview'].label}</h2><button class="task-close" data-action="close-settlement-task" aria-label="Close settlement panel">${icon('close')}</button></header>
-      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}">${content}</div>
+      ${settlementSectionNavigation(settlementTask, language)}
+      <div class="settlement-task-body" data-task="${settlementTask ?? 'overview'}"><p class="settlement-task-description">${translate(settlementTasks[settlementTask ?? 'overview'].description, language)}</p>${content}</div>
     </section>
     <nav class="settlement-dock" aria-label="Settlement actions">${settlementDockTasks.map(task => {
       const badge = task === 'inventory' ? state.inventory.pending.length : 0;
@@ -1165,7 +1178,6 @@ function workforcePanel(): string {
     ${work.unfundedWorkers ? `<p class="notice">${state.waterUpkeep?.paused ? 'Water shortage. Additional workers are waiting.' : 'Not enough FTH$ for transport. Some workers are waiting.'}</p>` : ''}
     <div class="panel-actions">${investigationButton()}<button class="button" data-action="explore" ${exploreReason ? 'disabled' : ''}>${icon('compass')} Send expedition · 2 ${translate('residents', language)}</button>${next ? `<small>${translate(`Next expedition: ${next.dollars} FTH$ · ${next.weeks} game weeks`, language)} · <span title="Concurrency multiplier">${2 ** explorationCount(work.expeditions)}x</span></small>` : ''}</div>
     ${exploreReason ? `<p class="fineprint" role="status">${escape(translate(exploreReason, language))}</p>` : ''}
-    ${squadPanel(state, language)}
     <details class="disclosure" data-detail="workforce-expeditions"><summary>Active expeditions <span>${work.expeditions.length}</span>${icon('chevron')}</summary>
     <p class="fineprint">Each field team needs two idle residents. Investigate and Explore share exponential route fees: 1x, 2x, 4x, 8x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.</p>
     <p class="fineprint">Investigations use two idle residents for one game week on known land. The base fee is 10% of the undiscounted concurrent Explore route fee. Equipped investigation gear lowers the fee; the low-tier permit chance remains 10%.</p>
@@ -1386,14 +1398,6 @@ app.addEventListener('click', event => {
     case 'activate-collection':
       if (isCollectionItem(target.dataset.item)) void act({ type: 'activate-collection', item: target.dataset.item });
       break;
-    case 'dispatch-squad': {
-      const item = target.dataset.item, activity = target.dataset.activity;
-      if (!isSquadItem(item) || !isSquadActivity(activity)) { toast('Invalid squad dispatch.', true); break; }
-      const plan = planSquad(game, state.workforce, activity, squadItems[item].quantity);
-      if (!plan.missions.length) { toast('No missions can launch. Check available residents, funds and reachable destinations.', true); break; }
-      void act({ type: 'dispatch-squad', item, activity, quantity: plan.missions.length, maximumDollars: plan.dollarsUnits });
-      break;
-    }
     case 'use-customization': {
       const item = target.dataset.item;
       if (!isCustomizationItem(item)) { toast('This customization item is not available in your inventory.', true); break; }

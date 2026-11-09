@@ -73,12 +73,18 @@ export function drawHouse(c: CanvasRenderingContext2D, x: number, y: number, siz
   c.fillStyle = appearance?.kind === 'centre' ? '#9e6648' : appearance?.kind === 'bank' ? '#526c75' : '#655747';
   c.beginPath(); c.moveTo(-18, -6); c.lineTo(-1, -24); c.lineTo(23, -10); c.lineTo(0, 5); c.fill();
   c.fillStyle = appearance?.kind === 'centre' ? '#bb895b' : '#87765a'; c.beginPath(); c.moveTo(-1, -24); c.lineTo(23, -10); c.lineTo(7, -27); c.fill();
+  c.strokeStyle = '#eed1a344'; c.lineWidth = .8;
+  c.beginPath();
+  for (const offset of [0, 5, 10]) { c.moveTo(-14 + offset, -8 - offset); c.lineTo(3 + offset, 2 - offset); }
+  c.stroke();
   if (appearance?.night) {
     const glow = c.createRadialGradient(10, 4, 0, 10, 4, 17);
     glow.addColorStop(0, '#f3cf7a70'); glow.addColorStop(1, '#f3cf7a00');
     c.fillStyle = glow; c.fillRect(-7, -13, 34, 34);
   }
   c.fillStyle = !appearance || appearance.night ? '#f2cf7d' : '#789b9a'; c.fillRect(8, 1, 5, 6);
+  c.strokeStyle = '#f2d9ab'; c.lineWidth = .7; c.strokeRect(8, 1, 5, 6);
+  c.beginPath(); c.moveTo(10.5, 1); c.lineTo(10.5, 7); c.stroke();
   if (appearance?.kind === 'workshop') { c.fillStyle = '#8a8067'; c.fillRect(-9, -35, 5, 17); c.fillStyle = '#b4ad91'; c.fillRect(-10, -36, 7, 3); }
   if (appearance?.kind === 'centre' || appearance?.kind === 'townhall') {
     c.strokeStyle = '#d9cfa4'; c.lineWidth = 1.3; c.beginPath(); c.moveTo(0, -24); c.lineTo(0, -46); c.stroke();
@@ -86,6 +92,8 @@ export function drawHouse(c: CanvasRenderingContext2D, x: number, y: number, siz
   }
   c.restore();
   c.fillStyle = '#5c5845'; c.beginPath(); c.moveTo(-10, 4); c.lineTo(-5, 7); c.lineTo(-5, 16); c.lineTo(-10, 13); c.fill();
+  c.fillStyle = '#ad9674'; c.beginPath(); c.moveTo(-12, 13); c.lineTo(-5, 17); c.lineTo(-8, 19); c.lineTo(-15, 15); c.closePath(); c.fill();
+  c.strokeStyle = '#897d60'; c.lineWidth = .7; c.beginPath(); c.moveTo(-14, 0); c.lineTo(0, 8); c.moveTo(0, 13); c.lineTo(19, 3); c.stroke();
   if (appearance?.urban) { c.fillStyle = appearance.night ? '#f2cf7d' : '#789b9a'; c.fillRect(8, 4, 5, 6); }
   if (appearance?.kind === 'bank') { c.fillStyle = '#d5b869'; c.beginPath(); c.arc(9, -2 - lift, 4, 0, Math.PI * 2); c.fill(); }
   if (appearance?.kind === 'supplies') {

@@ -35,4 +35,4 @@
   .consumption-note:last-of-type{grid-column:1/-1}
   .consumption-actions{margin-top:14px}
 }
-.consumption-dialog.craft-batch-dialog[open]{display:block}.craft-batch-choices{display:grid;gap:8px;margin:16px 0}.craft-batch-choices>.button{display:grid;gap:6px;text-align:left;justify-content:stretch;min-height:56px;white-space:normal}.craft-batch-choices small{font-weight:400;line-height:1.5;overflow-wrap:anywhere}.craft-batch-dialog>.button{min-height:44px;width:100%}
+.consumption-dialog.craft-batch-dialog[open],.consumption-dialog.field-mission-dialog[open]{display:block}.craft-batch-choices{display:grid;gap:8px;margin:16px 0}.craft-batch-choices>.button{display:grid;gap:6px;text-align:left;justify-content:stretch;min-height:56px;white-space:normal}.craft-batch-choices small{font-weight:400;line-height:1.5;overflow-wrap:anywhere}.craft-batch-dialog>.button,.field-mission-dialog>.button{min-height:44px;width:100%}

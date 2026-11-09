@@ -343,10 +343,14 @@ export class Marketplace {
     const scrollTop = list.scrollTop, scrollLeft = list.scrollLeft;
     this.root.querySelector('[data-market-selected]')!.textContent = this.name(this.asset);
     const focusedColumn = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.catalogColumn : undefined;
+    const focusedDetail = document.activeElement instanceof HTMLElement && document.activeElement.matches('.catalog-item-details>summary')
+      ? document.activeElement.closest<HTMLDetailsElement>('details[data-detail]')?.dataset.detail : undefined;
     const tickers = filterMarketCatalog(this.data.market.tickers, this.state(), this.language, this.category, this.query, this.sort, this.ownedOnly, this.filters);
     const markup = renderMarketCatalog(tickers, this.state(), this.asset, this.catalogView, this.language, this.pending, this.sort);
     if (markup !== this.catalogMarkup) {
+      const openDetails = [...list.querySelectorAll<HTMLDetailsElement>('details[open][data-detail]')].map(detail => detail.dataset.detail);
       list.innerHTML = markup; localize(list); this.catalogMarkup = markup;
+      list.querySelectorAll<HTMLDetailsElement>('details[data-detail]').forEach(detail => { detail.open = openDetails.includes(detail.dataset.detail); });
     }
     this.root.querySelectorAll<HTMLButtonElement>('[data-market-section]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.marketSection === this.category)));
     this.root.querySelector<HTMLElement>('[data-market-clear]')!.hidden = this.category === 'all' && !this.query && !this.ownedOnly && this.sort === 'name'
@@ -356,6 +360,7 @@ export class Marketplace {
     list.scrollTo(scrollLeft, scrollTop);
     if (focusedAsset) this.root.querySelector<HTMLButtonElement>(`[data-market-asset="${focusedAsset}"]${focusedSide ? `[data-market-quick-side="${focusedSide}"]` : ':not([data-market-quick-side])'}`)?.focus({ preventScroll: true });
     if (focusedColumn) list.querySelector<HTMLButtonElement>(`[data-catalog-column="${focusedColumn}"]`)?.focus({ preventScroll: true });
+    if (focusedDetail) list.querySelector<HTMLElement>(`details[data-detail="${focusedDetail}"]>summary`)?.focus({ preventScroll: true });
   }
   private preview(): void {
     const resources = isMarketResource(this.asset), resourceSpotSale = resources && this.side === 'sell' && this.mode === 'spot';

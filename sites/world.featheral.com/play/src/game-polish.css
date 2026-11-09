@@ -1,0 +1,72 @@
+:root{--muted:#a2b19f;--surface-border:#b5d0b326;--ui-radius:12px;--ui-focus:#d4eab8}
+.button{min-height:44px;border-radius:10px;gap:8px;font-size:12px;transition:background-color .15s,border-color .15s,color .15s}
+.button:hover:not(:disabled){transform:none;border-color:#c6e8a452}
+.button:active:not(:disabled){background-color:#c6e8a41a}
+.button.primary:active:not(:disabled){background-color:#b9d897}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--ui-focus);outline-offset:3px}
+button:disabled{opacity:.58}
+.fineprint{color:#a2b19f;line-height:1.65}
+.nav-button{color:#9aab93;border-radius:12px}
+.nav-button.active{background:#c6e8a419}
+.nav-button .icon{stroke-width:1.6}
+.item-art[data-item-art]{position:relative;isolation:isolate;flex-shrink:0;border:1px solid color-mix(in srgb,var(--art-accent) 28%,transparent);background:linear-gradient(145deg,#31483d,#152a23);border-radius:12px;box-shadow:inset 0 1px #ffffff0c;margin-bottom:0}
+.item-art[data-item-art]>svg{width:100%;height:100%;overflow:visible}
+.item-art[data-item-art]>b{position:absolute;bottom:-3px;right:-3px;border:1px solid #76967b55;border-radius:5px;background:#162b22;color:#ebdfb9;padding:1px 4px;font-size:9px;line-height:1.4;font-variant-numeric:tabular-nums;box-shadow:0 2px 5px #0003}
+.item-facts{display:grid;gap:0;margin:12px 0 0;padding:8px 12px;border:1px solid var(--surface-border);border-radius:12px;background:#101f1833}
+.item-facts>div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px;padding:8px 0;border-bottom:1px solid #ffffff0a;font-size:12px;line-height:1.55}
+.item-facts>div:last-child{border-bottom:0}
+.item-facts dt{color:#a8bba4}.item-facts dd{margin:0;color:#e0ead8;overflow-wrap:anywhere}
+.inventory-pages{overflow-x:auto;overscroll-behavior:contain;scrollbar-width:thin;padding-bottom:4px}
+.inventory-pages>.button,.inventory-pages>span{flex-shrink:0}
+.catalog-item-details{border-top:1px solid var(--surface-border);font-size:11px}
+.catalog-item-details summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:#c8deb9}
+.catalog-item-details summary::after{content:'+';margin-left:auto}.catalog-item-details[open] summary::after{content:'-'}
+.catalog-item-details .item-facts{padding:0;border:0;background:none;margin:0}.catalog-item-details .item-facts>div{grid-template-columns:1fr;gap:2px;font-size:11px}
+.building-art{display:inline-flex;width:56px;height:56px;flex:none;align-items:center;justify-content:center;background:linear-gradient(145deg,#344b3f,#152b22);border:1px solid var(--surface-border);border-radius:12px}
+.building-art svg{width:100%;height:100%}
+.upgrade-option-icon:has(.building-art){width:52px!important;height:52px!important;background:none}
+.upgrade-option-icon>.building-art{width:52px;height:52px}
+.upgrade-option-status{border-radius:6px;padding:3px 7px;background:#ffffff08;line-height:1.5}
+.upgrade-option-status[data-status="ready"],.upgrade-option-status[data-status="complete"]{color:#c0dfa9;background:#9dce7d12}
+.upgrade-option-status[data-status="missing"]{color:#edc69e;background:#c8a15e12}
+.settlement-panel-navigation{display:flex;gap:4px;flex:none;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;padding:8px 12px;border-bottom:1px solid var(--surface-border);background:#172b20}
+.settlement-panel-navigation button{display:flex;align-items:center;gap:6px;min-height:44px;flex:none;padding:8px 10px;background:transparent;border-radius:8px;color:#b6c7ad;font-size:11px}
+.settlement-panel-navigation button[aria-pressed="true"]{background:#c6e8a419;color:#e5f3da}
+.settlement-panel-navigation .icon{width:16px;height:16px}
+.settlement-task-description{color:#b2c3a8;line-height:1.6;font-size:12px;margin-bottom:16px;max-width:62ch}
+.settlement-task-body,.management-content,.exchange-assets{scrollbar-gutter:stable;overflow-anchor:none}
+.settlement-command-card{border-color:#c6e8a438;box-shadow:0 12px 28px #08150d33}
+.settlement-command-heading h2{letter-spacing:-.4px}
+.settlement-command-description{margin:12px 0;color:#b8c8ac;font-size:12px;line-height:1.6}
+.settlement-command-health{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:9px;background:#9dce7d12;color:#c5dfad;font-size:11px;margin:10px 0}
+.settlement-command-health[data-shortage="true"]{color:#f2c393;background:#bd82401a}
+.settlement-task-body .upgrade-option,.settlement-task-body .item-card,.stock-card{border-radius:12px;border-color:var(--surface-border)}
+.settlement-task-body .inventory-item-detail{align-items:flex-start;gap:12px;padding:14px;background:#ffffff04;border:1px solid var(--surface-border);border-radius:12px}
+.settlement-task-body .inventory-item-detail>.item-art{width:64px;height:64px}
+.settlement-task-body .inventory-item-detail .item-art svg{width:100%;height:100%}
+#crafting .recipe-heading .item-art{width:44px;height:44px}
+#crafting .recipe-heading .item-art svg{width:100%;height:100%}
+#crafting .recipe-details summary,.settlement-task-body .upgrade-details summary{min-height:44px;text-decoration:none;font-size:12px}
+#crafting .recipe-details summary:hover,.settlement-task-body .upgrade-details summary:hover{color:#e9f5dc}
+#crafting .recipe-card>.compact-item-action,.settlement-task-body .upgrade-option>.compact-item-action{width:auto;min-width:44px;min-height:44px;height:auto;padding:8px;gap:5px}
+.settlement-task-body .upgrade-option>.compact-item-action .control-label{position:static;width:auto;height:auto;clip-path:none;overflow:visible;font-size:11px}
+#crafting .recipe-card>.compact-item-action .item-action-label{font-size:11px}
+.compact-item-action:has(.action-feedback:not(:empty))>.item-action-label,.compact-item-action:has(.action-feedback:not(:empty))>.control-label{visibility:hidden}
+.layout-inspector-art{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.layout-inspector-art>.item-art{width:56px;height:56px}
+.layout-inspector-description{color:#b6c7ad;line-height:1.6;font-size:12px;margin-bottom:14px}
+.layout-entities .layout-entity{min-height:68px;padding:10px;border-radius:10px}
+.layout-entity .building-art{width:40px;height:40px}
+@media(max-width:650px){.item-facts>div{grid-template-columns:76px minmax(0,1fr);font-size:12px}.settlement-task-body .inventory-item-detail{flex-wrap:wrap}.settlement-panel-navigation{padding:6px 10px}.settlement-panel-navigation button{font-size:12px}.settlement-task-body .inventory-item-detail>.item-art{width:52px;height:52px}.settlement-command-description{font-size:11px}.settlement-command-health{font-size:11px;padding:7px}.settlement-task-body .upgrade-options{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.button,.nav-button{transition:none}}
+@media(max-width:650px){.settlement-command-description{display:none}.settlement-command-health{margin:6px 0}#crafting .crafting-filters .button{min-height:44px}.sidebar-secondary-actions .button{min-height:44px}#crafting .crafting-analysis-rules summary{width:44px;height:44px}}
+@media(max-width:900px) and (max-height:500px){
+  .has-world-chat .settlement-command-card{padding:8px}
+  .settlement-command-heading{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .settlement-command-description{display:none}
+  .settlement-command-health{margin:0 0 6px;padding:0;background:none;line-height:16px}
+  .settlement-command-health .icon{width:16px;height:16px}
+  .has-world-chat .settlement-command-actions{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+  .has-world-chat .settlement-command-actions .button{flex-direction:column;min-height:44px;padding:6px 2px;gap:4px;font-size:11px;line-height:14px}
+  .has-world-chat .settlement-command-actions .icon{width:16px;height:16px}
+}

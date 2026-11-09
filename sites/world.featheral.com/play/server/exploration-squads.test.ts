@@ -13,7 +13,7 @@ import { translate } from '../src/i18n.ts';
 import { investigationQuote, explorationQuote, workforceCounts } from '../src/workforce.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { dollarsScale } from '../src/dollars.ts';
-import { squadPanel } from '../src/squad-view.ts';
+import { fieldMissionActivity, squadOptions } from '../src/squad-options.ts';
 import { craftingPanel, inventoryPanel } from '../src/inventory-view.ts';
 import type { ApiState } from '../src/api-types.ts';
 import { marketBasePrice, marketAssets } from '../src/market.ts';
@@ -139,26 +139,50 @@ test('one server action has an idempotent receipt and cooldown instead of one re
     });
   } finally { store.close(); }
 });
-test('squad UI exposes all sizes, exact partial previews, inventory actions and marketplace classification', () => {
+test('normal field action options expose only owned vouchers with exact partial previews and no separate inventory action', () => {
   const account = fixture();
   account.game.dollars = 1000 * dollarsScale;
   const state: ApiState = { ...snapshot(account), csrf: 'test', population: { global: 200, federation: null }, clockSpeed: 1 };
-  const html = squadPanel(state, 'en');
-  assert.equal((html.match(/data-action="dispatch-squad"/g) ?? []).length, 8);
-  assert.match(html, /Fees still double/);
+  const options = squadOptions(state, 'investigation');
+  assert.equal(options.length, 4);
+  for (const option of options) {
+    const plan = planSquad(state.game, state.workforce, 'investigation', squadItems[option.item].quantity);
+    assert.equal(option.command.quantity, plan.missions.length);
+    assert.equal(option.command.maximumDollars, plan.dollarsUnits);
+  }
   for (const item of squadKeys) {
     assert.ok(marketAssets.includes(item));
     assert.ok(marketBasePrice(item) > 0);
-    assert.match(html, new RegExp(`data-item="${item}"`));
     assert.notEqual(translate(itemName(item), 'ko'), itemName(item));
   }
   const inventoryHtml = inventoryPanel(state, () => '', 'bulk', 'en', 'explore', 0, 'squad-20');
-  assert.match(inventoryHtml, /data-action="dispatch-squad" data-item="squad-20"/);
+  assert.doesNotMatch(inventoryHtml, /data-action="dispatch-squad"/);
+  assert.match(inventoryHtml, /Click Explore or Investigate/);
   const recipes = craftingPanel(state, () => '', 'bulk', 'explore', 1, 'en');
   for (const item of squadKeys) assert.ok(recipes.includes(`data-item="${item}"`));
   const ticks = squadKeys.map(asset => ({ asset, bid: 1, ask: 2, last: null }));
   assert.equal(filterMarketCatalog(ticks, state, 'en', 'automation', '', 'name', false).length, 4);
   const request = command(account, 'squad-100', 'investigation'), consumption = gameConsumption(state, request)!;
   assert.ok(translate(consumption.subject, 'ko').includes('조사'));
-  assert.ok(squadPanel(state, 'ko').includes('일괄 탐사 임무'));
+  state.inventory.items = ['squad-10'];
+  state.inventory.marketReserved = ['squad-20'];
+  state.inventory.pending = ['squad-50'];
+  assert.deepEqual(squadOptions(state, 'exploration').map(option => option.item), ['squad-10']);
+  state.inventory.items = [];
+  assert.deepEqual(squadOptions(state, 'investigation'), []);
+  state.inventory.items = ['squad-10'];
+  state.game.population = 0;
+  assert.ok(squadOptions(state, 'investigation')[0].reason);
+  state.game.population = 200;
+  state.waterUpkeep = { ...state.waterUpkeep!, paused: true };
+  assert.match(squadOptions(state, 'investigation')[0].reason!, /adequate supplies/);
+});
+test('field choices apply only to investigations and new exploration, preserving known travel and founding', () => {
+  const account = fixture(), game = account.game;
+  assert.equal(fieldMissionActivity({ type: 'investigate', x: 0, y: 0 }, game), 'investigation');
+  assert.equal(fieldMissionActivity({ type: 'move', x: 100, y: 100 }, game), 'exploration');
+  assert.equal(fieldMissionActivity({ type: 'move', x: 0, y: 0 }, game), null);
+  assert.equal(fieldMissionActivity({ type: 'gather' }, game), null);
+  game.stage = -1;
+  assert.equal(fieldMissionActivity({ type: 'move', x: 100, y: 100 }, game), null);
 });

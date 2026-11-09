@@ -1,6 +1,6 @@
 import './confirmation.css';
 import type { ConsumptionAmount, ConsumptionQuote } from './consumption.ts';
-import { formatDollars } from './dollars.ts';
+import { dollarsScale, formatDollars } from './dollars.ts';
 import { formatFthg } from './fthg.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
@@ -9,42 +9,65 @@ import { isMarketResource, marketAssetName } from './market.ts';
 import { formatResourceAmount } from './resource-units.ts';
 import type { CraftBatchOption } from './bulk-crafting.ts';
 import { itemName } from './items.ts';
+import type { Command } from './api-types.ts';
+import type { SquadOption } from './squad-options.ts';
+import { squadItems } from './exploration-squads.ts';
 
 let activeDialog: HTMLDialogElement | null = null;
 export const confirmationOpen = (): boolean => activeDialog !== null;
 
 export function chooseCraftBatch(subject: string, options: CraftBatchOption[], language: Language): Promise<number | null> {
+  const maximum = Math.max(1, ...options.filter(option => !option.reason).map(option => option.quantity));
+  const t = (text: string) => translate(text, language);
+  return chooseOperation('Choose crafting batch', subject,
+    'Bulk crafting consumes one matching permit plus all batch ingredients. Only exact batches are allowed. Nothing is spent until you confirm.',
+    options.map(option => ({ value: String(option.quantity), disabled: option.reason !== null,
+      label: option.quantity === 1 ? t('Craft one') : t(`Craft ${option.quantity} copies`),
+      detail: option.reason ? t(option.reason) : option.permit
+        ? `${t(itemName(option.permit))} · ${t('Owned')}: ${option.owned} · ${t('Consumes one permit')}${option.quantity === maximum ? ` · ${t('Maximum available batch')}` : ''}`
+        : t('No permit required') })), language, 'craftBatch')
+    .then(value => value === null ? null : Number(value));
+}
+export function chooseFieldMission(command: Command, options: SquadOption[], language: Language): Promise<Command | null> {
+  const t = (text: string) => translate(text, language);
+  return chooseOperation('Choose mission size', command.type === 'investigate' ? 'Investigate' : 'Explore',
+    'Choose one mission or use an owned voucher for automatic bulk targets. Fees still double for every active team. Nothing is spent until confirmation.',
+    [{ value: 'single', disabled: false, label: t('One mission'), detail: t('No voucher required') },
+      ...options.map(option => ({ value: option.item, disabled: option.reason !== null,
+        label: `${option.command.quantity} / ${squadItems[option.item].quantity} ${t('missions')}`,
+        detail: option.reason ? t(option.reason) : `${t(itemName(option.item))} · ${t('Owned')}: ${option.owned} · ${(option.command.maximumDollars / dollarsScale).toLocaleString(locale(language), { maximumFractionDigits: 4 })} FTH$ · ${option.command.quantity * 2} ${t('residents')} · ${t('Consumes one permit')}` }))],
+    language, 'fieldMission').then(value => value === 'single' ? command : options.find(option => option.item === value)?.command ?? null);
+}
+function chooseOperation(title: string, subject: string, noteText: string,
+  options: { value: string; label: string; detail: string; disabled: boolean }[], language: Language, dataset: string): Promise<string | null> {
   if (activeDialog) throw new Error('Please wait for the current server request.');
   const trigger = document.activeElement, dialog = document.createElement('dialog');
   activeDialog = dialog;
-  dialog.className = 'consumption-dialog craft-batch-dialog';
-  dialog.setAttribute('aria-labelledby', 'craft-batch-title');
+  dialog.className = `consumption-dialog ${dataset === 'craftBatch' ? 'craft-batch-dialog' : 'field-mission-dialog'}`;
+  dialog.setAttribute('aria-labelledby', 'operation-choice-title');
   const t = (text: string) => translate(text, language);
   const heading = document.createElement('h2');
-  heading.id = 'craft-batch-title';
-  heading.textContent = t('Choose crafting batch');
+  heading.id = 'operation-choice-title';
+  heading.textContent = t(title);
   const description = document.createElement('p');
   description.className = 'consumption-subject';
   description.textContent = t(subject);
   const note = document.createElement('p');
   note.className = 'consumption-note';
-  note.textContent = t('Bulk crafting consumes one matching permit plus all batch ingredients. Only exact batches are allowed. Nothing is spent until you confirm.');
+  note.textContent = t(noteText);
   const choices = document.createElement('div');
   choices.className = 'craft-batch-choices';
-  const maximum = Math.max(1, ...options.filter(option => !option.reason).map(option => option.quantity));
   for (const option of options) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'button';
-    button.dataset.craftBatch = String(option.quantity);
-    button.disabled = option.reason !== null;
+    button.dataset[dataset] = option.value;
+    button.disabled = option.disabled;
     const label = document.createElement('strong'), detail = document.createElement('small');
-    label.textContent = option.quantity === 1 ? t('Craft one') : t(`Craft ${option.quantity} copies`);
-    detail.textContent = option.reason ? t(option.reason) : option.permit
-      ? `${t(itemName(option.permit))} · ${t('Owned')}: ${option.owned} · ${t('Consumes one permit')}${option.quantity === maximum ? ` · ${t('Maximum available batch')}` : ''}`
-      : t('No permit required');
+    label.textContent = option.label;
+    detail.textContent = option.detail;
     button.append(label, detail);
-    button.addEventListener('click', () => dialog.close(String(option.quantity)));
+    button.addEventListener('click', () => dialog.close(option.value));
     choices.append(button);
   }
   const cancel = document.createElement('button');
@@ -62,9 +85,9 @@ export function chooseCraftBatch(subject: string, options: CraftBatchOption[], l
       if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true });
     };
     dialog.addEventListener('close', () => {
-      const choice = options.find(option => !option.reason && String(option.quantity) === dialog.returnValue);
+      const choice = options.find(option => !option.disabled && option.value === dialog.returnValue);
       cleanup();
-      resolve(choice?.quantity ?? null);
+      resolve(choice?.value ?? null);
     }, { once: true });
     dialog.addEventListener('cancel', event => { event.preventDefault(); cancelDialog(); });
     dialog.addEventListener('keydown', event => {

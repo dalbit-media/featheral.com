@@ -1,4 +1,4 @@
-import { terrainResources } from './engine.ts';
+import { terrainDetails, terrainResources } from './engine.ts';
 import type { Terrain } from './engine.ts';
 import { icon } from './icons.ts';
 import { isDecorationItem, isVisibilityItem } from './items.ts';
@@ -63,23 +63,47 @@ const decorationDrawings: Record<DecorationItem, string> = {
   canopy: '<ellipse cx="32" cy="57" rx="29" ry="6" fill="#102c2030"/><path d="M12 26v28m39-28v28" stroke="#9c754e" stroke-width="4"/><path d="m8 47 25 10 24-11v8l-24 10L8 54Z" fill="#b28b5b"/><path d="m6 22 25-13 28 12v14L31 47 6 35Z" fill="#daaa74"/><path d="m15 17 9-5 28 12-9 5Zm-8 7 27 12 8-4v11l-9 4L6 35V24Zm44 1 8-4v14l-8 4Z" fill="#e7d8ac"/><path d="m6 22 27 12 26-13" fill="none" stroke="#a98158" stroke-width="2"/>',
 };
 export function decorationDrawing(id: DecorationItem): string {
-  return `<ellipse cx="32" cy="57" rx="29" ry="6" fill="#102c2020"/>${decorationDrawings[id]}`;
+  return `<ellipse cx="32" cy="57" rx="27" ry="5" fill="#102c2040"/><g stroke-linecap="round" stroke-linejoin="round">${decorationDrawings[id]}</g>`;
 }
 export function itemArt(id: ItemId): string {
-  if (isSquadItem(id)) return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 6h40v52H12Z" fill="#a2c4b2"/><path d="m18 40 13-17 15 17" fill="none" stroke="#36594b" stroke-width="3"/><circle cx="22" cy="18" r="5" fill="#d6b47f"/><circle cx="42" cy="18" r="5" fill="#d6b47f"/><path d="M16 28v8m12-8v8m8-8v8m12-8v8M22 46h20" stroke="#36594b" stroke-width="4"/></svg><b>×${squadItems[id].quantity}</b></div>`;
-  if (isBulkCraftingItem(id)) {
+  let drawing = '', badge = '', kind = '', accent = '#e0bc84';
+  const emblem = (symbol: string) => `<g transform="translate(19 18) scale(1.1)">${icon(symbol).replace(/^<svg[^>]*>/, '').replace('</svg>', '')}</g>`;
+  const permit = (symbol: string) => `<path d="M15 7h29l7 7v42H15Z" fill="#e6d7b2" stroke="#ac9365" stroke-width="2"/><path d="M44 7v9h7M21 45h23M21 50h15" fill="none" stroke="#ac9365" stroke-width="2"/><g color="${accent}">${emblem(symbol)}</g>`;
+  if (isSquadItem(id)) {
+    kind = 'bulk-crafting-art'; accent = ['#769e88', '#80b6bd', '#9c93c4', '#d5a76d'][squadItems[id].quantity === 10 ? 0 : squadItems[id].quantity === 20 ? 1 : squadItems[id].quantity === 50 ? 2 : 3];
+    drawing = permit('compass'); badge = `×${squadItems[id].quantity}`;
+  }
+  else if (isBulkCraftingItem(id)) {
     const recipe = bulkCraftingItems[id], color = ['#c3a479', '#96bd97', '#90bdce', '#c4ace1'][Math.floor(recipe.stage / 2)];
-    return `<div class="item-art bulk-crafting-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M13 7h32l8 8v43H13Z" fill="${color}"/><path d="M45 7v10h8M21 23h24m-24 8h16m-16 8h24" fill="none" stroke="#314b41" stroke-width="3"/><path d="m31 44 8-4 8 4v8l-8 5-8-5Z" fill="#426e5d"/><path d="m34 47 5 5 6-8" fill="none" stroke="#e4edca" stroke-width="2"/></svg><b>×${recipe.quantity}</b></div>`;
+    kind = 'bulk-crafting-art'; accent = color; drawing = permit('tool'); badge = `×${recipe.quantity}`;
   }
-  if (isActivityEquipment(id)) return `<div class="item-art activity-equipment-art"><svg viewBox="0 0 64 64" aria-hidden="true">${activityEquipmentDrawings[id]}</svg><b>−${activityEquipmentItems[id].discount}%</b></div>`;
-  if (isTransportItem(id)) return `<div class="item-art transport-item-art"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 24h39v24H10Z" fill="${id === 'transport-cart' ? '#ad8059' : id === 'transport-wagon' ? '#739f8b' : '#91b9c6'}"/><path d="M10 24 5 15m44 27h10" fill="none" stroke="#dec18b" stroke-width="4"/><circle cx="18" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><circle cx="44" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><path d="M17 30h25m-25 8h25" stroke="#e5dbad" stroke-width="2"/></svg><b>-${transportItems[id].discount}%</b></div>`;
-  if (isCollectionItem(id)) return `<div class="item-art collection-item-art">${icon(collectionItemDetails(id).resource === 'all' ? 'warehouse' : collectionItemDetails(id).resource)}<b>${collectionItemDetails(id).weeks}w</b></div>`;
-  if (isCustomizationItem(id)) return `<div class="item-art collection-item-art">${icon(isTitleItem(id) ? 'spark' : id === 'permit-region-name' ? 'world' : 'home')}</div>`;
-  if (isActivityItem(id)) {
+  else if (isActivityEquipment(id)) {
+    kind = 'activity-equipment-art'; accent = '#8fbfae'; drawing = activityEquipmentDrawings[id]; badge = `−${activityEquipmentItems[id].discount}%`;
+  }
+  else if (isTransportItem(id)) {
+    kind = 'transport-item-art'; accent = id === 'transport-cart' ? '#ad8059' : id === 'transport-wagon' ? '#739f8b' : '#91b9c6';
+    drawing = `<path d="M10 24h39v24H10Z" fill="${accent}" stroke="#dec18b" stroke-width="2"/><path d="M10 24 5 15m44 27h10" fill="none" stroke="#dec18b" stroke-width="4"/><circle cx="18" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><circle cx="44" cy="51" r="7" fill="#29483d" stroke="#dec18b" stroke-width="3"/><path d="M17 30h25m-25 8h25" stroke="#e5dbad" stroke-width="2"/>`;
+    badge = `-${transportItems[id].discount}%`;
+  }
+  else if (isCollectionItem(id)) {
+    const { resource, weeks } = collectionItemDetails(id);
+    kind = 'collection-item-art'; accent = resource === 'water' ? '#82bac7' : resource === 'metal' ? '#d4b67b' : resource === 'oil' ? '#a39cc0' : '#8fb591';
+    drawing = permit(resource === 'all' ? 'warehouse' : resource); badge = `${weeks}w`;
+  }
+  else if (isCustomizationItem(id)) {
+    const titleSymbols = { 'title-pioneer': 'flag', 'title-explorer': 'compass', 'title-steward': 'people',
+      'title-artisan': 'tool', 'title-trader': 'market', 'title-naturalist': 'leaf' };
+    kind = 'collection-item-art'; accent = '#c6a2c4'; drawing = permit(isTitleItem(id) ? titleSymbols[id] : id === 'permit-region-name' ? 'atlas' : 'home');
+    if (isTitleItem(id)) drawing += `<path d="m24 51-4 10 12-5 12 5-4-10" fill="#9d789f"/>`;
+  }
+  else if (isActivityItem(id)) {
     const { activity, weeks } = activityItemDetails(id);
-    return `<div class="item-art collection-item-art">${icon(activity === 'exploration' ? 'compass' : 'people')}<b>${weeks}w</b></div>`;
+    kind = 'collection-item-art'; accent = '#8bbab1'; drawing = permit(activity === 'exploration' ? 'compass' : 'people'); badge = `${weeks}w`;
   }
-  if (!isVisibilityItem(id) && !isDecorationItem(id)) return `<div class="item-art collectible-art">${icon(terrainResources[id.slice(6) as Terrain])}</div>`;
-  const drawing = isDecorationItem(id) ? decorationDrawing(id) : equipmentDrawings[id];
-  return `<div class="item-art"><svg viewBox="0 0 64 64" aria-hidden="true">${drawing}</svg></div>`;
+  else if (!isVisibilityItem(id) && !isDecorationItem(id)) {
+    const terrain = id.slice(6) as Terrain, index = Object.keys(terrainDetails).indexOf(terrain);
+    kind = 'collectible-art'; accent = ['#82b994', '#8ebbc6', '#b5a2ce', '#d8b27e'][index % 4];
+    drawing = `<path d="m32 5 23 14-5 29-18 13-18-13-5-29Z" fill="${accent}" stroke="#edd6a4" stroke-width="2"/><path d="m32 10 17 11-4 24-13 10-13-10-4-24Z" fill="#243d37"/><g color="${accent}">${emblem(terrainResources[terrain])}</g><path d="M22 47h${8 + index % 5 * 3}" stroke="#edd6a4" stroke-width="2"/><circle cx="${22 + index % 5 * 5}" cy="14" r="2" fill="#edd6a4"/>`;
+  } else drawing = isDecorationItem(id) ? decorationDrawing(id) : equipmentDrawings[id];
+  return `<div class="item-art ${kind}" data-item-art="${id}" style="--art-accent:${accent}"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="m32 2 28 15v31L32 63 4 48V17Z" fill="#142d26" fill-opacity=".75"/><path d="m6 46 26 14 26-14" fill="none" stroke="${accent}" stroke-opacity=".25"/><g transform="translate(5 3) scale(.84)" stroke-linecap="round" stroke-linejoin="round">${drawing}</g></svg>${badge ? `<b aria-hidden="true">${badge}</b>` : ''}</div>`;
 }

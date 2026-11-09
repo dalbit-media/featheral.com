@@ -15,6 +15,7 @@ import { isTransportItem } from './transport-items.ts';
 import { isSquadItem } from './exploration-squads.ts';
 import { marketRarity, rarityLabel } from './market-analysis.ts';
 import { isCollectionItem } from './collection.ts';
+import { itemDetailRows } from './item-details.ts';
 
 export const catalogCategories = [
   ['all', 'All markets'], ['resources', 'Resources'], ['equipment', 'Equipment'],
@@ -132,7 +133,7 @@ export function renderMarketCatalog(tickers: Ticker[], state: ApiState, selected
     const supply = ticker.availableQuantity === undefined ? text('Unknown supply') : formatResourceAmount(ticker.asset, ticker.availableQuantity, locale(language));
     const scarcity = `<span class="catalog-rarity" data-rarity="${rarity}">${isMarketResource(ticker.asset) ? text('Resources') : text(rarityLabel(rarity))} · ${text('Available')} ${supply}</span>`;
     return view === 'grid'
-      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}${scarcity}${changes}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small></div>`
+      ? `<div class="catalog-tile" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><div class="catalog-card-meta"><span>${text(category)}</span><span class="catalog-holdings" data-owned="${marketOwned(state, ticker.asset) > 0}">${text('Owned')} ${owned}</span></div>${identity}${scarcity}${changes}<div class="catalog-tile-prices">${trade('buy')}${trade('sell')}</div><small class="catalog-last">${text('Last sale')} <strong>${last}${ticker.last === null ? '' : ` FTH$/${unit}`}</strong></small>${isMarketResource(ticker.asset) ? '' : `<details class="catalog-item-details" data-detail="market-item-${ticker.asset}"><summary>${text('Item details')}</summary>${itemDetailRows(ticker.asset, language)}</details>`}</div>`
       : `<tr class="catalog-row" data-selected="${ticker.asset === selected}" data-rarity="${rarity}"><td class="catalog-name-cell">${identity}${scarcity}</td><td>${trade('buy')}</td><td>${trade('sell')}</td><td class="catalog-change-column">${renderPriceChange(ticker, '24h', language)}</td><td class="catalog-change-column">${renderPriceChange(ticker, '7d', language)}</td><td class="catalog-owned-column">${owned}</td><td class="catalog-last-column">${last}</td></tr>`;
   }).join('');
   if (!rows) return `<p class="fineprint">${text('No matching items.')}</p>`;

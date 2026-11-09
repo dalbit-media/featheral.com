@@ -4,6 +4,7 @@ import type { Cost, Resource } from './engine.ts';
 import { constructionCost, constructionKeys, constructionLevel, constructions } from './constructions.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import { icon } from './icons.ts';
+import { buildingArt } from './building-art.ts';
 import { locale, translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
 import { incomeFacilities } from './income.ts';
@@ -36,7 +37,7 @@ function upgradeCard(state: ApiState, card: UpgradeCard, language: Language): st
   const eligible = !locked && !missing && Boolean(card.cost);
   const ready = entries.filter(([asset, required]) => owned(asset) >= required).length;
   return `<article class="upgrade-option${complete ? ' is-complete' : ''}" aria-labelledby="${card.id}-name">
-    <header class="upgrade-option-heading"><span class="upgrade-option-icon">${icon(card.symbol)}</span><div><h3 id="${card.id}-name">${t(card.name)}</h3><small>${t('Level')} ${card.level} / ${card.maximum}</small></div><span class="upgrade-option-status">${t(label)}</span></header>
+    <header class="upgrade-option-heading"><span class="upgrade-option-icon">${buildingArt(card.symbol)}</span><div><h3 id="${card.id}-name">${t(card.name)}</h3><small>${t('Level')} ${card.level} / ${card.maximum}</small></div><span class="upgrade-option-status" data-status="${complete ? 'complete' : locked ? 'locked' : missing ? 'missing' : 'ready'}">${t(label)}</span></header>
     <p class="upgrade-option-benefit">${t(card.benefit)}</p>
     ${complete ? '' : `<div class="consumption-costs" aria-label="${t('Upgrade cost')}">${entries.map(([asset, required]) => `<span class="cost${owned(asset) < required ? ' insufficient' : ''}" title="${t('Owned')}: ${amount(asset, owned(asset))}">${icon(asset)}<strong>${amount(asset, required)}</strong></span>`).join('')}</div>
       <details class="upgrade-details recipe-details" data-detail="${card.id}-recipe"><summary><span>${t('Recipe')}</span> <strong>${ready}/${entries.length}</strong>${icon('chevron')}</summary>

@@ -16,12 +16,12 @@ const paths: Record<string, string> = {
   hall: '<path d="M7 3h10v6a5 5 0 0 1-10 0V3ZM7 5H3v3a5 5 0 0 0 5 5M17 5h4v3a5 5 0 0 1-5 5M12 14v5M8 21h8M9 19h6"/>',
   atlas: '<path d="m3 5 6-2 6 2 6-2v16l-6 2-6-2-6 2V5ZM9 3v16M15 5v16"/>',
   journal: '<path d="M5 4h13v17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM7 4v17M10 8h5M10 12h5"/>',
-  wood: '<path d="m12 2-6 8h3l-5 7h6v5h4v-5h6l-5-7h3l-6-8Z"/>',
+  wood: '<path d="m5 9 11-6 5 8-11 7Z"/><ellipse cx="7.5" cy="15" rx="4.5" ry="5.5" transform="rotate(-28 7.5 15)"/><path d="m9 9 9-5m-6 9 7-4m-12 4 2 4"/>',
   water: '<path d="M12 2S5 10 5 15a7 7 0 0 0 14 0c0-5-7-13-7-13Z"/><path d="M8 15a4 4 0 0 0 4 4"/>',
-  metal: '<path d="m8 5-5 14h18L16 5H8ZM5 14h14M9 5l-2 9M15 5l2 9"/>',
+  metal: '<path d="m3 12 12-5 6 4-12 6-6-5ZM3 12v5l6 4 12-6v-4M9 17v4M6 10l1-5 8-3 2 4"/>',
   fthg: '<circle cx="12" cy="12" r="9"/><path d="M9 17V7h7M9 11h5M5 5l2 2M17 17l2 2"/>',
   dollars: '<circle cx="12" cy="12" r="9"/><path d="M15 7H9v5h6v5H9M12 4v16"/>',
-  oil: '<path d="m9 3 6 0 1 5 4 3v9H4v-9l4-3 1-5ZM8 12h8v5H8z"/>',
+  oil: '<ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v14c0 4 14 4 14 0V5M5 10c4 3 10 3 14 0M5 17c4 3 10 3 14 0"/><path d="M12 9s-3 4-3 6a3 3 0 0 0 6 0c0-2-3-6-3-6Z"/>',
   lithium: '<path d="m12 2 8 6v8l-8 6-8-6V8l8-6ZM4 8l8 5 8-5M12 13v9"/>',
   people: '<circle cx="9" cy="7" r="3"/><path d="M3 20v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v2"/>',
   arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
@@ -61,5 +61,6 @@ const paths: Record<string, string> = {
   fullscreen: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
 };
 export function icon(name: string, cls = ''): string {
-  return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ?? paths.spark}</svg>`;
+  const drawing = paths[name === 'tools' ? 'tool' : name] ?? paths.spark;
+  return `<svg class="icon ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g class="icon-tone" fill="currentColor" fill-opacity=".13" stroke="none">${drawing}</g><g>${drawing}</g></svg>`;
 }
