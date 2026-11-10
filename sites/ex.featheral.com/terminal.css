@@ -9,6 +9,10 @@
   --gold: #e4c478;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+[data-exchange-panel] { min-width: 0; }
+.tabs a[aria-selected="true"] { color: var(--accent); box-shadow: 0 2px var(--accent); }
+.workspace-hint { color: var(--muted); font-size: 12px; padding: 8px 0; }
 html { scroll-behavior: smooth; scroll-padding-top: 85px; }
 body { background: radial-gradient(ellipse at 75% 0, #122b35 0, transparent 38%), #080e18; color: #e9f1fb; font-family: Inter, ui-sans-serif, system-ui, sans-serif; margin: 0; }
 body > header { display: flex; align-items: center; gap: 28px; padding: 16px 28px; border-bottom: 1px solid var(--line); background: #0b1320ee; flex-wrap: wrap; }

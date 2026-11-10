@@ -93,7 +93,7 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     if (sessionExpired && url.endsWith('/wallet')) return { ...reply({ error: 'Session expired' }), ok: false, status: 401 };
     if (url.endsWith('/wallet') || url.startsWith('/api/wallet/accounts/')) return reply({ address: url.startsWith('/api/wallet/accounts/') ? url.split('/').pop().split('?')[0] : publicAddress || address, holdings: [{ symbol: 'FTHX', balance: 123 }],
       dollar: { balance: { available: '10000000000000000000' }, transactions: [] }, markets: { trades: [] }, exchange: { trades: [], requests: [] }, noteTransfers: [], ...walletData });
-    if (url.endsWith('/wallet/notes/send')) {
+    if (url.endsWith('/wallet/notes/send') || url.endsWith('/wallet/fthx/send')) {
       tips.set(body.requestId, body);
       if (tipReceiptLost) { tipReceiptLost = false; throw new Error('lost tip receipt'); }
       return reply(body);
@@ -317,14 +317,14 @@ test('site wallet authorizes an existing extension inline and never sends withou
   assert.ok(ui.calls.some(call => call.url.endsWith('/login')));
   assert.equal(ui.nodes['wallet-review'].open, true);
   assert.match(ui.nodes['wallet-review-message'].textContent, /Send 2 FTHX to 0x22/);
-  assert.ok(!ui.calls.some(call => call.url.endsWith('/wallet/notes/send')));
+  assert.ok(!ui.calls.some(call => call.url.endsWith('/wallet/fthx/send')));
   await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
-  assert.ok(!ui.calls.some(call => call.url.endsWith('/wallet/notes/send')));
+  assert.ok(!ui.calls.some(call => call.url.endsWith('/wallet/fthx/send')));
   const approved = ui.nodes['send-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
   await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
   assert.equal(ui.calls.filter(call => call.url.endsWith('/login')).length, 1, 'reuse the current wallet session');
-  assert.equal(ui.calls.find(call => call.url.endsWith('/wallet/notes/send')).body.amount, 2);
+  assert.equal(ui.calls.find(call => call.url.endsWith('/wallet/fthx/send')).body.amount, '2000000000000000000');
   ui.nodes['send-symbol'].value = 'FTH$'; ui.nodes['send-amount'].value = '1';
   const native = ui.nodes['send-form'].fire('submit');
   await new Promise(resolve => setImmediate(resolve));
@@ -1107,6 +1107,25 @@ test('one wallet defaults to FTH$ on Dollar and FTHX on Exchange/Notes, using th
     assert.equal(nodes.swap.hidden, false);
     assert.equal(nodes['exchange-link'].href, 'http://ex.localhost:8080/');
   }
+});
+test('fractional-only FTHX wallets display and send one base unit with exact approval and proportional estimates', async () => {
+  const asset = { symbol: 'FTHX', balance: '0', baseBalance: '1', decimals: 18 };
+  const ui = await fixture('wallet', { walletData: { fthxExact: { balance: '1' }, holdings: [asset],
+    portfolio: { assets: [{ ...asset, baseBalance: '3', estimates: { FTHX: '3' }, usdValue: '3' }],
+      totals: { FTHX: { value: '3', unpriced: [] } }, usd: null, unpriced: [] } } });
+  assert.equal(ui.nodes.balance.textContent, '0.000000000000000001 FTHX');
+  const row = ui.nodes.holdings.children.find(node => node.textContent.includes('0.000000000000000001 FTHX'));
+  assert.ok(row);
+  assert.doesNotMatch(row.textContent, /FTHX estimate unavailable/);
+  ui.nodes['send-symbol'].value = 'FTHX';
+  ui.nodes['send-amount'].value = '0.000000000000000001';
+  ui.nodes.recipient.value = '0x' + '22'.repeat(20);
+  await ui.nodes['send-form'].fire('submit');
+  assert.equal(ui.calls.find(call => call.url.endsWith('/wallet/fthx/send')).body.amount, '1');
+  ui.nodes['send-amount'].value = '0.0000000000000000001';
+  await ui.nodes['send-form'].fire('submit');
+  assert.match(ui.nodes.status.textContent, /18 decimal places/);
+  assert.equal(ui.calls.filter(call => call.url.endsWith('/wallet/fthx/send')).length, 1);
 });
 test('all sites lead with actual primary holdings even when combined estimates differ or prices are missing', async () => {
   const portfolio = { assets: [], totals: Object.fromEntries(['FTHG', 'FTH$', 'FTHX'].map(symbol =>

@@ -15,7 +15,7 @@ function activityRow(ledger, tx, hash) {
   const source = tx.k === "GOLD" ? "gold" : tx.k === "GAME" ? tx.i.startsWith("exchange:") ? "exchange" : "world"
     : tx.k === "CREDIT" || ["RESERVE", "SETTLE", "RELEASE"].includes(tx.k) ? "gold"
     : tx.d.m?.startsWith("exchange:") ? "exchange" : tx.d.m?.startsWith("world:") ? "world" : "wallet";
-  return { id: `d:${hash}`, at: tx.t, symbol: "FTH$", source, kind: tx.k,
+  return { id: `d:${hash}`, at: tx.t, symbol: "FTH$", source, kind: tx.k === "GOLD" ? tx.d.op : tx.k === "CREDIT" ? tx.d.src : tx.k,
     amount: (entries.length ? credits > debits ? credits : debits : BigInt(tx.v)).toString(),
     credits: credits.toString(), debits: debits.toString(), recordType: "transaction" };
 }

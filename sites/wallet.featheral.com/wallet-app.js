@@ -161,17 +161,22 @@ async function mountFeatheralWallet(context) {
   const publicAddress = () => config.followActive ? returnedAddress !== undefined ? returnedAddress : selectedAddress() || config.address
     : config.address || returnedAddress || (!token ? selectedAddress() : null);
   if (!interactive) token = "";
-  const units = (value, symbol) => {
-    const decimals = symbol === "FTH$" ? 18 : 0, text = value.trim();
+  const units = (value, symbol, exactFthx = false) => {
+    const decimals = symbol === "FTH$" || symbol === "FTHX" && exactFthx ? 18 : 0, text = value.trim();
     if (!/^\d+(?:\.\d+)?$/.test(text)) throw new Error("Enter a positive amount.");
     const [whole, fraction = ""] = text.split(".");
-    if (fraction.length > decimals) throw new Error(symbol === "FTH$" ? "FTH$ supports 18 decimal places." : "Notes use whole units.");
+    if (fraction.length > decimals) throw new Error(decimals ? `${symbol} supports 18 decimal places.` : "This market accepts whole notes.");
     const raw = BigInt(whole) * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
     if (raw < 1n) throw new Error("Amount must be positive.");
-    if (symbol !== "FTH$" && raw > 1000000000n) throw new Error("Note amounts must not exceed 1,000,000,000 whole units.");
+    if (symbol !== "FTH$" && raw > 1000000000n * (exactFthx && symbol === "FTHX" ? 10n ** 18n : 1n)) throw new Error("Note amounts must not exceed 1,000,000,000 tokens.");
     return raw.toString();
   };
-  const format = (raw, symbol) => {
+  const format = (raw, symbol, exactFthx = false) => {
+    if (symbol === "FTHX" && exactFthx) {
+      const value = BigInt(raw), absolute = value < 0n ? -value : value;
+      const fraction = (absolute % (10n ** 18n)).toString().padStart(18, "0").replace(/0+$/, "");
+      return `${value < 0n ? "-" : ""}${(absolute / (10n ** 18n)).toLocaleString()}${fraction ? "." + fraction : ""} FTHX`;
+    }
     const signed = BigInt(raw), absolute = signed < 0n ? -signed : signed, scale = symbol === "FTH$" ? 100n : 1n;
     const value = symbol === "FTH$" ? (absolute + 5n * 10n ** 15n) / 10n ** 16n : absolute;
     if (symbol === "FTH$" && absolute > 0n && value === 0n) return `${signed < 0n ? "-" : ""}<0.01 FTH$`;
@@ -774,7 +779,8 @@ async function mountFeatheralWallet(context) {
       : interactive ? "Connected wallet · approve or unlock before spending" : "Read-only wallet · available balance";
     const spendable = primarySymbol === "FTHG" ? data.ethereum?.balance == null ? "— FTHG"
       : goldAmount(data.ethereum.balance)
-      : format(primarySymbol === "FTH$" ? data.dollar.balance.available : String(data.holdings.find(asset => asset.symbol === primarySymbol)?.balance || 0), primarySymbol);
+      : primarySymbol === "FTHX" && data.fthxExact ? format(data.fthxExact.balance, "FTHX", true)
+        : format(primarySymbol === "FTH$" ? data.dollar.balance.available : String(data.holdings.find(asset => asset.symbol === primarySymbol)?.balance || 0), primarySymbol);
     renderBalance(spendable);
     $("available-balance").textContent = primarySymbol === "FTHG" && data.ethereum?.balance == null
       ? "FTHG balance unavailable" : `Available to spend: ${spendable}`;
@@ -814,11 +820,11 @@ async function mountFeatheralWallet(context) {
     }
     assets.sort((a, b) => Number(b.symbol === primarySymbol) - Number(a.symbol === primarySymbol));
     for (const asset of assets) {
-      if (BigInt(asset.balance) === 0n) continue;
+      if (BigInt(asset.baseBalance ?? asset.balance) === 0n) continue;
       const row = el("div", "", "asset-row"), name = el("div", "", "asset-mark");
       const icon = document.createElement("img"); icon.src = tokenIcon(asset.symbol); icon.alt = ""; name.append(icon);
       const label = el("div", asset.symbol); label.append(el("small", asset.symbol === "FTH$" ? "Featheral Dollar" : "Network note"));
-      const amounts = el("div", ""), amount = el("b", format(String(asset.balance), asset.symbol));
+      const amounts = el("div", ""), amount = el("b", format(String(asset.baseBalance ?? asset.balance), asset.symbol, asset.symbol === "FTHX" && asset.baseBalance !== undefined));
       const estimate = walletEstimate(data.portfolio, asset);
       amounts.append(amount);
       appendEstimates(amounts, estimate, walletEstimate(data.portfolio, asset, "USD"), data.portfolio);
@@ -829,7 +835,7 @@ async function mountFeatheralWallet(context) {
     for (const linked of linkedData) {
       $("holdings").append(el("p", `Linked · ${linked.address.slice(0, 6)}…${linked.address.slice(-4)} · separate funds`, "account-divider"));
       for (const asset of [{ symbol: "FTH$", balance: linked.dollar.balance.available }, ...linked.holdings.filter(asset => asset.symbol !== "FTH$")]) {
-        if (BigInt(asset.balance) > 0n) appendToken(asset.symbol, format(String(asset.balance), asset.symbol), "Featheral L3",
+        if (BigInt(asset.baseBalance ?? asset.balance) > 0n) appendToken(asset.symbol, format(String(asset.baseBalance ?? asset.balance), asset.symbol, asset.symbol === "FTHX" && asset.baseBalance !== undefined), "Featheral L3",
           walletEstimate(linked.portfolio, asset), walletEstimate(linked.portfolio, asset, "USD"), linked.portfolio);
       }
       if (linked.ethereum?.balance != null && BigInt(linked.ethereum.balance) > 0n)
@@ -870,8 +876,10 @@ async function mountFeatheralWallet(context) {
     function walletEstimate(portfolio, asset, currency = primarySymbol) {
       const total = portfolio?.assets?.find(value => value.symbol === asset.symbol);
       const value = currency === "USD" ? total?.usdValue : total?.estimates?.[currency];
-      if (value == null || total.balance == null || BigInt(total.balance) === 0n) return null;
-      return (BigInt(value) * BigInt(asset.balance) / BigInt(total.balance)).toString();
+      const exact = holding => asset.symbol === "FTHX"
+        ? BigInt(holding.baseBalance ?? (BigInt(holding.balance) * 10n ** 18n).toString()) : BigInt(holding.balance);
+      if (value == null || total?.balance == null || exact(total) === 0n) return null;
+      return (BigInt(value) * exact(asset) / exact(total)).toString();
     }
     function appendEstimates(container, estimate, usd, portfolio, reference = portfolio?.usdMarket?.fallback) {
       const usdText = usd == null ? "USD unavailable" : usdEstimate(usd);
@@ -900,6 +908,7 @@ async function mountFeatheralWallet(context) {
       transactions.push({ label: "Swap", amount: tx.from ? `${format(tx.amount, tx.from)} → ${format(tx.output, tx.to)}` : `${tx.side} ${tx.symbol}: ${tx.amount} → ${tx.output}`, at: Number(tx.at) || 0 });
     }
     for (const tx of data.noteTransfers) transactions.push({ label: `${tx.purpose === "tip" ? "Thanks · " : ""}${tx.owner === owner ? "Sent" : "Received"}`, amount: format(String(tx.amount), tx.symbol), at: Number(tx.at) || 0 });
+    for (const tx of data.fthxTransfers || []) transactions.push({ label: `${tx.purpose === "tip" ? "Thanks · " : ""}${tx.owner === owner ? "Sent" : "Received"}`, amount: format(tx.amount, "FTHX", true), at: Number(tx.at) || 0 });
     for (const tx of data.silverActivity || []) transactions.push({ label: tx.kind === "silver-refund" ? "Silver refund" : "Silver purchase", amount: format(String(tx.amount), tx.symbol), at: Number(tx.at) || 0 });
     transactions.sort((a, b) => b.at - a.at);
     for (const [id, limit] of [["history", 50], ["recent-history", 3]]) {
@@ -1083,9 +1092,9 @@ async function mountFeatheralWallet(context) {
     event.preventDefault(); if (busy) return; lock(true);
     try {
       if (!await ensureSession()) return;
-      const symbol = $("send-symbol").value, raw = units($("send-amount").value, symbol);
+      const symbol = $("send-symbol").value, raw = units($("send-amount").value, symbol, symbol === "FTHX");
       const account = owner, startingEpoch = epoch, recipient = $("recipient").value;
-      const reviewAmount = format(raw, symbol);
+      const reviewAmount = format(raw, symbol, symbol === "FTHX");
       if (!await review(`Send ${reviewAmount} to ${recipient}?\nNetwork: native Featheral ledger. This moves existing funds.`, "Approve transfer")) return;
       if (owner !== account || epoch !== startingEpoch) throw new Error("Wallet changed. Review the transfer again.");
       if (symbol === "FTH$") {
@@ -1097,6 +1106,9 @@ async function mountFeatheralWallet(context) {
         $("wallet-review-status").textContent = "Submitting the approved transfer. Closing the wallet cannot undo it.";
         const response = await fetch("/api/v1/notes/fth/transfers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...request.payment, signature }) });
         const result = await response.json(); if (!response.ok) throw new Error(result.error || "Dollar transfer failed.");
+      } else if (symbol === "FTHX") {
+        sendRequest ||= { to: recipient, amount: raw, requestId: crypto.randomUUID() };
+        await api("/wallet/fthx/send", sendRequest);
       } else {
         sendRequest ||= { to: recipient, symbol, amount: Number(raw), requestId: crypto.randomUUID() };
         await api("/wallet/notes/send", sendRequest);

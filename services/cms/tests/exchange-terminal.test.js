@@ -255,7 +255,7 @@ class VisualElement {
     this.className = ""; this.listeners = {}; this.isConnected = true;
     this.classList = { add: name => { this.className += " " + name; } };
   }
-  append(...children) { this.children.push(...children); }
+  append(...children) { children.forEach(child => { child.parentElement = this; }); this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, handler) { this.listeners[name] = handler; }
@@ -319,6 +319,52 @@ test("Funding deep link opens the review form without submitting a funding reque
   const ui = await browserFixture(t, undefined, undefined, "#initial-dollar-funding");
   assert.equal(ui.node("initial-dollar-funding").open, true);
   assert.equal(ui.requests.filter(request => request.route === "/dollar-pool/fund").length, 0);
+});
+test("Pools workspace reads only reserves, keeps every pool and never requests unrelated history", async () => {
+  const root = new VisualElement("section"), requests = [], errors = [];
+  root.dataset.marketView = "pools";
+  const markets = Array.from({ length: 9 }, (_, i) => ({
+    symbol: `FTH${i}`, status: "unfunded", baseReserve: "0", tokenReserve: "0", initialTarget: null, feeBps: 30,
+  }));
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8"), {
+    document: { querySelectorAll: () => [root], createElement: tag => new VisualElement(tag) },
+    location: { protocol: "https:", hostname: "ex.featheral.com", port: "" },
+    URLSearchParams, AbortController, setInterval() {}, console: { error: (...args) => errors.push(args) },
+    fetch: async url => { requests.push(url); return { ok: true, json: async () => ({ markets, policy: "Existing funds only." }) }; },
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(requests, ["/api/creation/liquidity"]);
+  assert.equal(descendants(root).filter(node => node.className === "liquidity-card").length, 9);
+  assert.ok(descendants(root).filter(node => ["Window", "Activity"].includes(node.textContent)).every(node => node.hidden));
+});
+test("Activity workspace keeps source-separated native charts visible while Notes collapses only detailed records", async () => {
+  const root = new VisualElement("section"), requests = [], errors = [];
+  root.dataset.marketView = "activity"; root.dataset.marketRecords = "collapsed";
+  const summary = ["world", "gold"].map(source => ({
+    symbol: "FTH$", source, recordType: "transaction", events: 1, credits: "100", debits: "0",
+  }));
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8"), {
+    document: { querySelectorAll: () => [root], createElement: tag => new VisualElement(tag), createElementNS: (_, tag) => new VisualElement(tag) },
+    location: { protocol: "https:", hostname: "notes.featheral.com", port: "" },
+    URLSearchParams, AbortController, setInterval() {}, console: { error: (...args) => errors.push(args) },
+    fetch: async url => {
+      requests.push(url);
+      return { ok: true, json: async () => url.includes("market-tape") ? { rows: [], description: "Executed legs only." }
+        : { rows: [], summary, buckets: summary.map(row => ({ ...row, at: 0 })), bucketMs: 86400000,
+          from: 0, to: 86400000, coverage: {}, nextCursor: null } };
+    },
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(errors, []);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every(url => !url.includes("liquidity")));
+  assert.ok(requests.every(url => url.includes("interval=all")));
+  const charts = root.children.find(node => node.className === "market-activity-charts");
+  assert.ok(charts, "Charts remain visible, outside the detailed-record disclosure.");
+  assert.equal(charts.children.length, 2);
+  assert.ok(charts.children.every(card => descendants(card).filter(node => node.tag === "rect").length === 1));
+  assert.ok(root.children.some(node => node.tag === "details" && descendants(node).some(child => child.tag === "table")));
 });
 test("Disconnect restores connection placeholders with correctly sized table cells", async t => {
   const ui = await browserFixture(t);

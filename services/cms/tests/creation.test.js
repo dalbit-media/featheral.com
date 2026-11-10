@@ -113,8 +113,8 @@ test('native circulation uses all authoritative ledger units and never reward ac
   assert.equal(dollar.circulating, api.ledger.summary().circulating);
   assert.equal(dollar.supply, raw);
   assert.equal(dollar.decimals, 18);
-  assert.equal(fthx.circulating, '697');
-  assert.equal(fthx.decimals, 0);
+  assert.equal(fthx.circulating, (697n * 10n ** 18n).toString());
+  assert.equal(fthx.decimals, 18);
   assert.equal(fthx.name, 'Featheral Exchange Token');
   assert.ok(native.every(note => note.rewards === 0 && note.awarded === 0));
   const reservation = `0x${'df'.repeat(32)}`;

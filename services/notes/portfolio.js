@@ -1,15 +1,17 @@
 "use strict";
 function portfolio(holdings, dollarPool, markets, gold = null, extra = {}) {
+  const exactFthx = asset => BigInt(asset.baseBalance ?? (BigInt(asset.balance) * 10n ** 18n).toString());
+  const empty = asset => (asset.symbol === "FTHX" ? exactFthx(asset) : BigInt(asset.balance)) === 0n;
   const prices = new Map(markets.map(market => [market.symbol, market]));
   const rate = require("./exchange-price").dollarReference(dollarPool), routeReady = !!rate;
   let total = 0n;
   const assets = holdings.map(asset => {
     let value = null;
-    if (BigInt(asset.balance) === 0n) value = 0n;
+    if (empty(asset)) value = 0n;
     else if (asset.symbol === "FTH$") value = BigInt(asset.balance);
     else if (routeReady) {
       const market = prices.get(asset.symbol);
-      if (asset.symbol === "FTHX") value = BigInt(asset.balance) * rate.dollars / rate.fthx;
+      if (asset.symbol === "FTHX") value = exactFthx(asset) * rate.dollars / (10n ** 18n * rate.fthx);
       else if (market?.funded && !market.reserved && market.price) value = BigInt(asset.balance) * BigInt(market.price.numerator)
         * rate.dollars / (BigInt(market.price.denominator) * rate.fthx);
     }
@@ -78,9 +80,9 @@ function portfolio(holdings, dollarPool, markets, gold = null, extra = {}) {
     }
   }
   const estimates = (asset, symbol) => {
-    if (BigInt(asset.balance) === 0n) return 0n;
+    if (empty(asset)) return 0n;
     if (asset.symbol === "FTHG" || prices.get(asset.symbol)?.reserved) return null;
-    if (asset.symbol === symbol) return BigInt(asset.balance) * (symbol === "FTHX" ? unit : 1n);
+    if (asset.symbol === symbol) return symbol === "FTHX" ? exactFthx(asset) : BigInt(asset.balance);
     if (symbol === "FTHX") {
       const market = prices.get(asset.symbol);
       if (market?.funded && !market.reserved && market.price)

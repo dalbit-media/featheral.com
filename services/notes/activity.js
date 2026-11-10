@@ -3,12 +3,13 @@ const { period } = require("./candles");
 const fail = message => Object.assign(new Error(message), { status: 400 });
 const sources = ["world", "exchange", "wallet", "gold", "app", "silver", "notes", "other"];
 const noteSource = `CASE WHEN site='notes-market' THEN 'exchange' WHEN site='notes-wallet' THEN 'wallet'
+  WHEN site='world' THEN 'world' WHEN site='gold' THEN 'gold'
   WHEN site='featheral-app' THEN 'app' WHEN site='silver.featheral.com' THEN 'silver'
-  WHEN site IN ('notes-creation','notes') THEN 'notes' ELSE 'other' END`;
+  WHEN site IN ('notes-creation','notes','notes-migration') THEN 'notes' ELSE 'other' END`;
 function options(input = {}, now = Date.now()) {
   const interval = input.interval === undefined ? "24h" : input.interval;
   if (typeof interval !== "string") throw fail("Choose a supported chart interval.");
-  const [duration, bucket] = period(interval);
+  const [duration, bucket] = interval === "all" ? [now, 86400000] : period(interval);
   const symbol = input.symbol || "", source = input.source || "";
   if (typeof symbol !== "string" || symbol.length > 16 || /[\x00-\x20]/.test(symbol)) throw fail("Choose a valid currency.");
   if (typeof source !== "string" || source && !sources.includes(source)) throw fail("Choose a valid activity source.");
@@ -21,17 +22,21 @@ function options(input = {}, now = Date.now()) {
     catch { throw fail("Invalid activity cursor."); }
     if (!cursor || !Number.isSafeInteger(cursor.end) || cursor.end > now || cursor.end < now - 86400000
       || !Number.isSafeInteger(cursor.at) || cursor.at > cursor.end || cursor.at < cursor.end - duration
-      || typeof cursor.id !== "string" || !/^(?:[nt]:\d{20}|d:0x[0-9a-f]{64}(?::FTHG)?)$/.test(cursor.id)
+      || typeof cursor.id !== "string" || !/^(?:[ntx]:\d{20}|d:0x[0-9a-f]{64}(?::FTHG)?)$/.test(cursor.id)
       || cursor.interval !== interval || cursor.symbol !== symbol || cursor.source !== source) throw fail("Activity cursor expired or filters changed. Refresh activity.");
     end = cursor.end;
   }
-  return { interval, bucket, from: end - duration, to: end, symbol, source, limit, cursor };
+  return { interval, bucket, from: interval === "all" ? 0 : end - duration, to: end, symbol, source, limit, cursor };
 }
 function readRows(db, table, query, type = "dollar") {
   const notes = type === "notes";
   const columns = notes ? `printf('n:%020d',id) AS id,at,symbol,${noteSource} AS source,kind,
     CAST(ABS(amount) AS TEXT) AS amount,CAST(MAX(amount,0) AS TEXT) AS credits,
     CAST(-MIN(amount,0) AS TEXT) AS debits,'posting' AS recordType`
+    : type === "exact" ? `printf('x:%020d',id) AS id,at,'FTHX' AS symbol,${noteSource} AS source,kind,
+      CASE WHEN substr(amount,1,1)='-' THEN substr(amount,2) ELSE amount END AS amount,
+      CASE WHEN substr(amount,1,1)='-' THEN '0' ELSE amount END AS credits,
+      CASE WHEN substr(amount,1,1)='-' THEN substr(amount,2) ELSE '0' END AS debits,'base-unit-posting' AS recordType`
     : type === "custody" ? `printf('t:%020d',id) AS id,at,'FTH$' AS symbol,'exchange' AS source,side AS kind,
       CASE WHEN side='buy' THEN output ELSE amount END AS amount,
       CASE WHEN side='buy' THEN output ELSE '0' END AS credits,
@@ -40,7 +45,7 @@ function readRows(db, table, query, type = "dollar") {
   const filters = ["at>=?", "at<=?"], args = [query.from, query.to];
   if (query.symbol) { filters.push("symbol=?"); args.push(query.symbol); }
   if (query.source) { filters.push("source=?"); args.push(query.source); }
-  const sql = `WITH activity AS (SELECT ${columns} FROM ${table}${notes ? " WHERE symbol NOT IN ('FTH$','FTHG')" : ""})
+  const sql = `WITH activity AS (SELECT ${columns} FROM ${table}${notes ? " WHERE symbol NOT IN ('FTH$','FTHG') AND site!='fthx-base-units'" : ""})
     SELECT * FROM activity WHERE ${filters.join(" AND ")}`;
   const summary = new Map(), buckets = new Map();
   for (const row of db.prepare(sql).iterate(...args)) {
@@ -49,11 +54,11 @@ function readRows(db, table, query, type = "dollar") {
       target.credits = (BigInt(target.credits) + BigInt(row.credits)).toString();
       target.debits = (BigInt(target.debits) + BigInt(row.debits)).toString();
     };
-    const group = `${row.symbol}:${row.recordType}`;
-    if (!summary.has(group)) summary.set(group, { symbol: row.symbol, recordType: row.recordType, events: 0, credits: "0", debits: "0" });
+    const group = `${row.symbol}:${row.source}:${row.recordType}`;
+    if (!summary.has(group)) summary.set(group, { symbol: row.symbol, source: row.source, recordType: row.recordType, events: 0, credits: "0", debits: "0" });
     add(summary.get(group));
     const at = Math.floor(row.at / query.bucket) * query.bucket, key = `${group}:${at}`;
-    if (!buckets.has(key)) buckets.set(key, { symbol: row.symbol, recordType: row.recordType, at, events: 0, credits: "0", debits: "0" });
+    if (!buckets.has(key)) buckets.set(key, { symbol: row.symbol, source: row.source, recordType: row.recordType, at, events: 0, credits: "0", debits: "0" });
     add(buckets.get(key));
   }
   const cursor = query.cursor;
@@ -76,16 +81,24 @@ function merge(groups, key) {
 }
 function activity(creation, dollarReader, input, now = Date.now()) {
   const query = options(input, now), notes = readRows(creation.db, "notes_entries", query, "notes");
+  const exact = creation.notes.fthx.installed ? readRows(creation.db, "fthx_base_entries", query, "exact") : { rows: [], summary: [], buckets: [] };
   const custody = readRows(creation.db, "trading_dollar_trades", query, "custody");
   const dollar = dollarReader ? dollarReader(query) : { rows: [], summary: [], buckets: [] };
-  const all = [...notes.rows, ...dollar.rows, ...custody.rows].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
+  const all = [...notes.rows, ...dollar.rows, ...custody.rows, ...exact.rows].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id));
   const rows = all.slice(0, query.limit), last = rows.at(-1);
-  return { interval: query.interval, from: query.from, to: query.to, bucketMs: query.bucket, rows,
+  const rawBuckets = [...notes.buckets, ...dollar.buckets, ...custody.buckets, ...exact.buckets];
+  const earliest = rawBuckets.reduce((at, row) => Math.min(at, row.at), query.to);
+  const from = query.interval === "all" ? Math.min(earliest, query.to - 86400000) : query.from;
+  const bucketMs = query.interval === "all" ? Math.max(86400000, Math.ceil((query.to - from) / (90 * 86400000)) * 86400000) : query.bucket;
+  return { interval: query.interval, from, to: query.to, bucketMs, rows,
     nextCursor: all.length > query.limit ? Buffer.from(JSON.stringify({ end: query.to, at: last.at, id: last.id,
       interval: query.interval, symbol: query.symbol, source: query.source })).toString("base64url") : null,
-    summary: merge([notes.summary, dollar.summary, custody.summary], row => `${row.symbol}:${row.recordType}`).sort((a, b) => a.symbol.localeCompare(b.symbol)),
-    buckets: merge([notes.buckets, dollar.buckets, custody.buckets], row => `${row.symbol}:${row.recordType}:${row.at}`).sort((a, b) => a.at - b.at || a.symbol.localeCompare(b.symbol)),
+    summary: merge([notes.summary, dollar.summary, custody.summary, exact.summary], row => `${row.symbol}:${row.source}:${row.recordType}`)
+      .sort((a, b) => a.symbol.localeCompare(b.symbol) || String(a.source).localeCompare(String(b.source)) || a.recordType.localeCompare(b.recordType)),
+    buckets: merge([rawBuckets.map(row => ({ ...row, at: Math.floor(row.at / bucketMs) * bucketMs }))],
+      row => `${row.symbol}:${row.source}:${row.recordType}:${row.at}`).sort((a, b) => a.at - b.at || a.symbol.localeCompare(b.symbol)),
     coverage: { notes: "All committed native/community note ledger postings; debit and credit legs are separate records.",
+      fthx: "Legacy FTHX postings use whole units. Version 2 base-unit-posting series use 18 decimals; whole-token carry records are excluded to avoid counting the same movement twice.",
       dollar: dollarReader ? "All sealed FTH$ financial transactions, including World, wallet, Exchange and Gold settlement. Pending transactions are excluded."
         : "Unavailable: Dollar activity reader is not connected.",
       gold: "FTHG reserve activity separates off-chain obligations from Ethereum-confirmed reserve transfers. Unrelated Ethereum transfers are not indexed. These series are never combined or treated as FTHX trades.",

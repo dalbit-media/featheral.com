@@ -34,9 +34,10 @@
   function short(value) {
     return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
   }
-  function amount(value) {
-    const text = String(value);
-    return Number(value) > 0 ? `+${text}` : text;
+  function amount(value, decimals = 0) {
+    const raw = BigInt(value), absolute = raw < 0n ? -raw : raw, scale = 10n ** BigInt(decimals);
+    const fraction = decimals ? (absolute % scale).toString().padStart(decimals, "0").replace(/0+$/, "") : "";
+    return `${raw > 0n ? "+" : raw < 0n ? "-" : ""}${absolute / scale}${fraction ? "." + fraction : ""}`;
   }
   function timestamp(value) {
     const date = new Date(Number(value));
@@ -45,7 +46,7 @@
   function renderEntries(data) {
     const rows = data.entries.map(entry => el("tr", {},
       el("td", { textContent: String(entry.id) }),
-      el("td", { className: "num", textContent: amount(entry.amount) }),
+      el("td", { className: "num", textContent: amount(entry.amount, data.decimals) }),
       el("td", { textContent: entry.kind }),
       el("td", {}, el("code", { textContent: short(entry.address), title: entry.address })),
       el("td", {}, entry.other ? el("code", { textContent: short(entry.other), title: entry.other }) : el("span", { className: "muted", textContent: "—" })),
@@ -82,6 +83,7 @@
     }
     updateUrl();
     const query = new URLSearchParams({ limit: "50" });
+    if (symbol === "FTHX") query.set("exact", "1");
     if (cursor) query.set("before", String(cursor));
     const address = addressInput.value.trim();
     if (address) query.set("address", address);

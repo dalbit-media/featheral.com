@@ -59,8 +59,12 @@ class Trading {
   }
   portfolioHoldings(owner, holdings) {
     const totals = new Map(holdings.map(asset => [asset.symbol, BigInt(asset.balance)]));
+    let fthx = holdings.filter(asset => asset.symbol === "FTHX")
+      .reduce((sum, asset) => sum + BigInt(asset.baseBalance ?? (BigInt(asset.balance) * 10n ** 18n).toString()), 0n);
+    fthx += this.creation.notes.fthx.balance(this.custody(owner));
     for (const asset of this.holdings(owner)) totals.set(asset.symbol, (totals.get(asset.symbol) || 0n) + BigInt(asset.balance));
-    return [...totals].map(([symbol, balance]) => ({ symbol, balance: balance.toString() }));
+    return [...totals].map(([symbol, balance]) => ({ symbol, balance: balance.toString(),
+      ...(symbol === "FTHX" ? { baseBalance: fthx.toString(), decimals: 18 } : {}) }));
   }
   ready() {
     this.exchange.assertReady();

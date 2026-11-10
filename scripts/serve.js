@@ -144,6 +144,7 @@ cms.setOperationsHandler(async (req, res) => {
   res.end(JSON.stringify({ error: "Unknown administration API route" }));
 });
 const gameApiOrigin = require("../services/operations/origin").worldOrigin(env, deploymentManifest, port);
+cms.setFthxSettlementSource(api.ledger, keys?.privateKey);
 if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, defaultClockSpeed, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;

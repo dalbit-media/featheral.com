@@ -61,6 +61,7 @@ class Notes {
     this.file = file;
     this.db = open(file);
     initialize(this.db);
+    this.fthx = new (require("./fthx").Fthx)(this.db);
   }
   program(site) {
     return effectiveProgram(this.db.prepare("SELECT site,symbol,chance,amount,enabled FROM notes_programs WHERE site=?").get(site)
@@ -98,6 +99,7 @@ class Notes {
       currencies: [{ symbol: "FTH$", kind: "reserve-backed-ledger", rewards: "system-native" }, { symbol: "FTHX", kind: "global-credit", rewards: "system-native" },
         ...symbols.map(symbol => ({ symbol, kind: "unbacked-credit", placeholder: placeholders.some(row => row.symbol === symbol) }))],
       dollarApi: "/api/v1/",
+      fthx: this.fthx.summary(),
       migrations: this.db.prepare("SELECT * FROM notes_migrations ORDER BY site").all(),
       programs: this.db.prepare("SELECT * FROM notes_programs ORDER BY site").all().map(effectiveProgram),
       reactions: this.db.prepare("SELECT COUNT(*) AS attempts,COALESCE(SUM(paid),0) AS awarded FROM notes_reactions").get(),

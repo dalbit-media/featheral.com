@@ -12,7 +12,7 @@
     "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
     "liquidity-form", "liquidity-symbol", "liquidity-action", "liquidity-amount", "liquidity-positions",
     "funding-form", "funding-dollar", "funding-fthx", "funding-approval",
-    "market-mode", "gold-pool-details",
+    "market-mode", "gold-pool-details", "recovery-notice",
   ];
   const missingElements = requiredElements.filter(id => !$(id));
   if (missingElements.length) {
@@ -128,6 +128,7 @@
   function row(values) { const tr = document.createElement("tr"); values.forEach(value => tr.append(text("td", value))); return tr; }
   function renderPendingMovements() {
     $("pending-movements").replaceChildren();
+    $("recovery-notice").replaceChildren(); $("recovery-notice").hidden = true;
     if (!token) return;
     for (const kind of ["deposit", "withdraw", "liquidity", "funding"]) {
       const saved = sessionStorage.getItem(`featheral-exchange-pending:${owner}:${kind}`);
@@ -139,6 +140,13 @@
       resume.addEventListener("click", () => run(() => kind === "funding" ? funding()
         : kind === "liquidity" ? liquidity() : movement(kind, input.symbol, input.amount)));
       box.append(resume); $("pending-movements").append(box);
+    }
+    if ($("pending-movements").children.length || sessionStorage.getItem(`featheral-exchange-pending:${owner}:trade`)
+      || account?.movements.some(movement => movement.status === "settling") || account?.legacyRequests?.length) {
+      const link = text("a", "Review unresolved transactions in Portfolio");
+      link.href = "#trading-account";
+      const trade = text("a", " / Resume submitted trade"); trade.href = "#terminal";
+      $("recovery-notice").append(link, trade); $("recovery-notice").hidden = false;
     }
   }
   async function refreshAccount() {

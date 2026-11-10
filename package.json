@@ -18,7 +18,7 @@
     "test:cms": "npm test --prefix services/cms",
     "test:db": "node --test services/database/tests/*.test.js",
     "test:pay": "node --test services/pay/tests/*.test.js",
-    "test:exchange": "node --test services/cms/tests/trading.test.js services/cms/tests/market-activity.test.js services/cms/tests/markets.test.js services/cms/tests/dollar-exchange.test.js services/cms/tests/exchange-terminal.test.js services/cms/tests/exchange-auth.test.js services/cms/tests/wallet-swaps-http.test.js services/cms/tests/notes.test.js services/cms/tests/creation.test.js services/cms/tests/trending.test.js services/cms/tests/portfolio.test.js services/cms/tests/wallet-context.test.js services/cms/tests/network-wallet.test.js",
+    "test:exchange": "node --test services/cms/tests/trading.test.js services/cms/tests/market-activity.test.js services/cms/tests/markets.test.js services/cms/tests/dollar-exchange.test.js services/cms/tests/exchange-terminal.test.js services/cms/tests/exchange-workspace.test.js services/cms/tests/exchange-auth.test.js services/cms/tests/wallet-swaps-http.test.js services/cms/tests/notes.test.js services/cms/tests/creation.test.js services/cms/tests/trending.test.js services/cms/tests/portfolio.test.js services/cms/tests/wallet-context.test.js services/cms/tests/network-wallet.test.js services/cms/tests/fthx-precision.test.js services/cms/tests/fthx-settlement.test.js",
     "test": "hardhat test"
   },
   "engines": {

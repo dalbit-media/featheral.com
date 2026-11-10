@@ -349,6 +349,25 @@ Exchange HTML is served without caching or file-date validators so deployment
 timestamps cannot keep an older page paired with newer scripts. The terminal
 checks its required page elements before attaching trading handlers; incompatible
 markup disables forms and displays an explicit hard-reload/update message.
+The Exchange workspace uses keyboard-accessible Trade, Activity, Pools & routes,
+and Portfolio tabs. Hash links select the containing workspace, including initial
+funding links; unresolved transactions remain signposted outside hidden panels.
+Without JavaScript the sections remain visible rather than hiding recovery controls.
+
+Notes places native circulation and executed-price charts first, followed by
+recorded economic history, then community notes ordered by actual 24-hour FTHX
+volume. Native cards link to their own markets. The activity API and execution tape
+accept `interval=all`; both public history views default to all recorded history.
+Old sealed transactions are reconstructed on journal replay, not rewritten into
+new trades. All-history count charts use at most approximately 90 time buckets
+per series, with exact totals across pagination. Series are separated by currency,
+source and record type, so World settlements, Gold activity, Ethereum confirmations
+and custody executions are not combined. Gold events name their recorded operation.
+An empty pool tape explicitly points to the financial history instead of suggesting
+that game settlements never happened. No migration of balances, escrow, Gold
+obligations or token precision is performed by these presentation/history changes.
+An unfunded FTH$/FTHX pool remains unfunded: routing World settlement through it
+requires actual approved capital and recoverable cross-ledger settlement.
 
 Shared site navigation loads a presentation-only compact-number layer for
 prominent metrics and balances across Featheral. Values from 10,000 use K/M/B/T
@@ -375,7 +394,7 @@ Exchange and Notes share an **Across the economy** panel: public executed-pool
 trade tape, financial activity charts, paginated records, currency/source/window
 filters, and actual FTHX/token reserves. Visible first pages refresh every 30
 seconds; browsing older pages pauses automatic refresh. Windows cover 1h, 24h,
-7d or 30d. Activity charts cover the entire selected window, not just the current
+7d, 30d or all recorded history. Activity charts cover the entire selected window, not just the current
 50-record page. Amounts and aggregates use exact base-unit strings.
 
 `GET /api/creation/activity` accepts `interval`, `symbol`, `source`, `limit`
@@ -404,13 +423,52 @@ records, not unique user actions or net issuance. Neither these charts nor
 ordinary transfers alter OHLC prices, market liquidity, or trading volume.
 Only executed FTHX-pair trades do so.
 
-The accounting boundaries are deliberate: Notes owns whole-unit FTHX and community
-notes; Exchange routes pairs through FTHX and segregates trading custody; Dollar
-owns 18-decimal FTH$ and its signed settlement journal; World uses separately
+The accounting boundaries are deliberate: Notes owns 18-decimal FTHX and whole-unit
+community notes; Exchange routes pairs through FTHX and segregates trading custody;
+Dollar owns 18-decimal FTH$ and its signed settlement journal; World uses separately
 reconciled FTH$ accounts; Gold owns actual Ethereum FTHG and reserve conversion.
 Neither portfolio estimates nor sign-in authorizations transfer funds across
 these boundaries. Liquidity must be explicitly funded before trading, and
 deployment must preserve the single authoritative financial writer.
+
+FTHX precision version 2 preserves every existing whole-token posting and owner
+balance. Exact balances combine those whole units with an 18-decimal remainder;
+fractional transfers materialize whole-token carries without rescaling history.
+Authenticated `GET /api/creation/wallet/fthx` and
+`POST /api/creation/wallet/fthx/send` use exact integer base-unit strings and
+idempotent request IDs. Wallet approvals, read-only views, holdings, portfolio
+estimates and transfer history include fractional-only balances.
+`GET /api/notes/ledger/FTHX/entries?exact=1` merges legacy and exact postings with
+stable snapshot pagination, excluding duplicate carry records. The Notes explorer
+uses this view. Existing whole-unit AMM, LP and trading-custody request formats
+remain unchanged: sub-whole FTHX balances can be sent but cannot yet be traded.
+
+The authoritative combined server migrates Dollar settlement backing before
+recovering World fund commits or accepting traffic. A signed, immutable policy
+binds the original game authority, source genesis/snapshot, denomination model
+and finite new-issuance cap. The allowance is
+`100 * (snapshot FTH$ supply + finite Gold cap * 20,000)`, in 18-decimal base units;
+only required backing is issued, never the entire allowance. Existing owner
+FTHX, Dollar balances, reservations, World budgets and escrow amounts are unchanged.
+Public FTHX total supply increases by actual new backing issuance; these locked
+tokens are disclosed separately and excluded from circulating/spendable supply.
+
+Each sealed Dollar balance change moves real FTHX in locked protocol accounts at
+100 FTHX per FTH$. This is an internal denomination, **not an AMM execution,
+redemption promise or guaranteed market price**. Transfers, gameplay, Gold
+funding/conversions, issuance and burns share block-atomic, exact-once backing
+checkpoints. Burns retain reusable backing in the settlement treasury. A Notes
+failure after a durable Dollar append fails the request and blocks Dollar balance
+use until replay recovers the matching backing; restarting never reissues the
+snapshot. A missing original key, incompatible source journal, invalid signature,
+exhausted cap or reconciliation mismatch fails closed.
+
+`GET /api/creation/settlement`, liquidity responses and activity responses publish
+the backing model, cap/issued amounts, source checkpoint and synchronization state.
+Exchange and Notes label backing separately from executable reserves and price
+candles. Replicas only read the replicated checkpoint; they never authorize or mint.
+No historical FTHX execution is fabricated, and migration backing does not fund
+an executable AMM: initial pool funding still needs separate, explicit approval.
 
 Run `npm run test:exchange` for the integrated Notes, AMM, custody, recovery,
 wallet, portfolio, HTTP ownership/origin and executable terminal-handler tests.

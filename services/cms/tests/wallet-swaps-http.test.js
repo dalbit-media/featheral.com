@@ -148,4 +148,27 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   const cookie = appLogin.headers["set-cookie"][0].split(";")[0];
   assert.equal((await call("/me", undefined, { ...appHost, cookie })).body.profile.username, "GatewayProfile");
   assert.equal((await call("/silver", undefined, { host: "silver.localhost", prefix: "/api/intranet" })).body.supply, 0);
+  const exactSend = { to: other.address, amount: "1", requestId: "http-fractional-send-001" };
+  assert.equal((await call("/wallet/fthx/send", exactSend)).status, 401);
+  assert.equal((await call("/wallet/fthx/send", exactSend, { token, origin: "https://untrusted.invalid" })).status, 403);
+  assert.equal((await call("/wallet/fthx/send", exactSend, { token, host: "untrusted.invalid" })).status, 404);
+  for (const to of ["fthx-settlement:treasury", "0x" + "00".repeat(20)])
+    assert.equal((await call("/wallet/fthx/send", { ...exactSend, to }, { token })).status, 400);
+  assert.equal((await call("/wallet/fthx/send", { ...exactSend, amount: "0.1" }, { token })).status, 400);
+  const sent = await call("/wallet/fthx/send", exactSend, { token });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.body.amount, "1");
+  assert.equal(sent.body.decimals, 18);
+  assert.deepEqual((await call("/wallet/fthx/send", exactSend, { token })).body, sent.body);
+  assert.equal((await call("/wallet/fthx/send", { ...exactSend, amount: "2" }, { token })).status, 409);
+  assert.equal((await call("/wallet/fthx", undefined, { token: otherToken })).body.balance, "1");
+  app.setDollarWallet(() => ({ balance: { balance: "0", available: "0", reserved: "0" }, nonce: 0, transactions: [] }));
+  const readOnly = await app.walletSummary(other.address);
+  assert.equal(readOnly.fthxExact.balance, "1");
+  assert.equal(readOnly.holdings.find(asset => asset.symbol === "FTHX").baseBalance, "1");
+  assert.equal(readOnly.fthxTransfers[0].amount, "1");
+  const exactEntries = await call(`/ledger/FTHX/entries?exact=1&address=${other.address}`, undefined, { prefix: "/api/notes" });
+  assert.equal(exactEntries.status, 200);
+  assert.equal(exactEntries.body.decimals, 18);
+  assert.equal(exactEntries.body.entries[0].amount, "1");
 });

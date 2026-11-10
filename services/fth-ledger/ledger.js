@@ -311,6 +311,7 @@ class FthLedger {
       default:
         throw ledgerError("Unsupported transaction kind.");
     }
+    if (height === null) this.fthxSettlement?.validate(tx);
     if (!validateOnly) {
       commit();
       this.ids.set(tx.i, hash);
@@ -324,17 +325,20 @@ class FthLedger {
 
   commitAuthorized(tx, { fresh = false } = {}) {
     this.requireWriter();
+    this.fthxSettlement?.recover();
     if (!["GAME", "GOLD", "GOLD_POLICY", "GOLD_MARKETS"].includes(tx.k)) throw ledgerError("Only signed gameplay or Gold transactions can use synchronous settlement.");
     const previous = this.ids.get(tx.i);
     if (previous) {
       const existing = this.findTx(previous);
       if (!existing || canonical(existing.tx) !== canonical(tx)) throw ledgerError("Game commit conflicts with an existing transaction.", 409);
-      if (!existing.location && !this.seal()) throw ledgerError("Game commit could not be sealed.", 503);
+      while (!this.txIndex.has(previous))
+        if (!this.pending.length || !this.seal()) throw ledgerError("Game commit could not be sealed.", 503);
       return;
     }
     const hash = this.applyTx(tx, { fresh });
     this.pending.push({ tx, hash });
-    if (!this.seal() || !this.ids.has(tx.i)) throw ledgerError("Game commit could not be persisted.", 503);
+    while (!this.txIndex.has(hash))
+      if (!this.pending.length || !this.seal()) throw ledgerError("Game commit could not be persisted.", 503);
   }
 
   /* -------------------------------- writes -------------------------------- */
@@ -348,6 +352,7 @@ class FthLedger {
       this.requireWriter();
       const existingHash = this.ids.get(id);
       if (existingHash) {
+        this.fthxSettlement?.recover();
         const existing = this.findTx(existingHash);
         const same = existing && canonical({ k: existing.tx.k, a: existing.tx.a, v: existing.tx.v, d: existing.tx.d }) === canonical({ k: kind, a: account, v: String(amount), d: data });
         if (!same) throw ledgerError("Idempotency key was already used with different transaction data.", 409);
@@ -456,8 +461,11 @@ class FthLedger {
   }
 
   rebuild() {
-    this.reset();
-    for (const { block, file } of this.store.blocks()) this.importBlock(block, { persist: false, file, rebuildOnError: false });
+    this.rebuilding = true;
+    try {
+      this.reset();
+      for (const { block, file } of this.store.blocks()) this.importBlock(block, { persist: false, file, rebuildOnError: false });
+    } finally { this.rebuilding = false; }
   }
 
   indexBlock(block, file) {
@@ -483,6 +491,7 @@ class FthLedger {
       }
     });
     this.indexSql(block, file);
+    if (!this.rebuilding) this.fthxSettlement?.commitBlock(block);
   }
 
   /* -------------------------------- queries ------------------------------- */
@@ -616,6 +625,7 @@ class FthLedger {
   }
 
   balance(accountId) {
+    if (!this.rebuilding) this.fthxSettlement?.assertSynchronized();
     const entry = this.balances.get(String(accountId).toLowerCase()) || { balance: 0n, reserved: 0n };
     return { balance: entry.balance.toString(), reserved: entry.reserved.toString(), available: (entry.balance - entry.reserved).toString() };
   }

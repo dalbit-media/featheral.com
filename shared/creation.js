@@ -475,7 +475,10 @@
       const fraction = (units % scale).toString().padStart(decimals, "0").slice(0, 2).replace(/0+$/, "");
       return (units / scale).toLocaleString() + (decimals && fraction ? "." + fraction : "");
     };
-    for (const note of data.notes) {
+    const nativeOrder = ["FTH$", "FTHX", "FTHS"];
+    const ordered = [...data.notes].sort((a, b) => Number(!!b.native) - Number(!!a.native)
+      || (a.native && b.native ? nativeOrder.indexOf(a.symbol) - nativeOrder.indexOf(b.symbol) : b.volume - a.volume || a.symbol.localeCompare(b.symbol)));
+    for (const note of ordered) {
       const card = el("article", "", "note-trending");
       card.append(noteHeading(note));
       if (note.native) {
@@ -485,17 +488,14 @@
           : `${formatSupply(note.circulating, note.decimals)} ${note.symbol}`, "note-supply"));
         card.append(el("p", "Total circulating"));
         if (note.supply != null) card.append(el("p", `Total issued: ${formatSupply(note.supply, note.decimals)} ${note.symbol}`));
-        if (note.reserved != null && BigInt(note.reserved) > 0n) card.append(el("p", `Reserved for redemption: ${formatSupply(note.reserved, note.decimals)} ${note.symbol}`));
+        if (note.reserved != null && BigInt(note.reserved) > 0n)
+          card.append(el("p", `${note.symbol === "FTHX" ? "Locked settlement backing" : "Reserved for redemption"}: ${formatSupply(note.reserved, note.decimals)} ${note.symbol}`));
         const currencyExplorerLink = el("a", "Explore ledger activity"); currencyExplorerLink.href = ledgerUrl(note.symbol); card.append(currencyExplorerLink);
-        nativeGrid?.append(card);
-        const ranked = el("article", "", "note-trending");
-        ranked.append(noteHeading(note),
-          priceTrend(note),
+        card.append(priceTrend(note),
           el("p", `24h volume · ${note.volume.toLocaleString()} FTHX`, "note-volume"));
-        const swap = el("a", "FTH$ ↔ FTHX · Open Exchange");
-        swap.href = hostUrl("ex") + "?market=" + encodeURIComponent("FTH$"); ranked.append(swap);
-        const ledgerLink = el("a", "Explore ledger activity"); ledgerLink.href = ledgerUrl(note.symbol); ranked.append(ledgerLink);
-        grid.append(ranked);
+        const swap = el("a", "Open Exchange");
+        swap.href = hostUrl("ex") + "?market=" + encodeURIComponent(note.symbol === "FTHX" ? "FTH$" : note.symbol); card.append(swap);
+        (nativeGrid || grid).append(card);
       } else {
         card.append(priceTrend(note));
         card.append(el("p", `24h volume · ${note.volume.toLocaleString()} FTHX`, "note-volume"));
@@ -506,6 +506,13 @@
         const ledger = el("a", "Explore ledger activity"); ledger.href = ledgerUrl(note.symbol); card.append(ledger);
         grid.append(card);
       }
+    }
+    if (nativeGrid) {
+      const gold = el("article", "", "note-trending");
+      gold.append(noteHeading({ symbol: "FTHG" }), el("p", "Featheral Gold / Ethereum"),
+        el("p", "Recorded reserve allocations and confirmed conversions are charted separately in the economic history below. These are not internal FTHX executions."));
+      const link = el("a", "View Gold conversion market");
+      link.href = hostUrl("ex") + "?market=FTHG"; gold.append(link); nativeGrid.append(gold);
     }
     if (!grid.childElementCount) grid.append(el("p", "No community notes yet. Create one below to start a reward program."));
   }

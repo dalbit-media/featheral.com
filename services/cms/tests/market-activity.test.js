@@ -19,6 +19,13 @@ function fixture(t) {
       .run(amount, kind, at, site, symbol);
   return { notes, creation, exchange, trading, add };
 }
+test("a registered native definition is not duplicated as a placeholder community market", t => {
+  const { creation } = fixture(t);
+  creation.db.exec("INSERT INTO note_currencies VALUES ('FTHS','Featheral Silver','fixture',0)");
+  const silver = creation.trending().filter(note => note.symbol === "FTHS");
+  assert.equal(silver.length, 1);
+  assert.equal(silver[0].native, true);
+});
 test("activity counts exact native postings without conflating transfers, prices, private metadata or legacy fake currencies", t => {
   const { creation, add } = fixture(t), now = Date.now();
   add(9007199254740991, "FTHX", "notes-wallet", now);
@@ -58,7 +65,8 @@ test("sealed Dollar and World settlements are captured with exact amounts, witho
   assert.equal(worldRows[0].amount, amount);
   assert.equal(worldRows[0].credits, amount);
   assert.equal(worldRows[0].debits, amount);
-  assert.equal(result.summary.find(row => row.symbol === "FTH$").credits, (BigInt(amount) * 2n).toString());
+  assert.equal(result.summary.filter(row => row.symbol === "FTH$").reduce((sum, row) => sum + BigInt(row.credits), 0n), BigInt(amount) * 2n);
+  assert.deepEqual(result.summary.filter(row => row.symbol === "FTH$").map(row => row.source), ["gold", "world"]);
   assert.doesNotMatch(JSON.stringify(result), /signature|fixture-credit|"entries"|private-wallet/);
   const count = result.rows.length;
   ledger.blockIntervalMs = 600000;
@@ -91,6 +99,44 @@ test("keyset pages are stable across equal timestamps and retain complete window
   assert.throws(() => activity(creation, null, { cursor: first.nextCursor, symbol: "FTHS" }, now), /filters changed/);
   for (const input of [{ limit: 101 }, { interval: "constructor" }, { source: "private" }, { cursor: "bad" }, { symbol: ["FTHX"] }])
     assert.throws(() => options(input, now), error => error.status === 400);
+});
+test("all-history backfill includes old settlements, separates sources, and retains exact totals across stable pages", t => {
+  const { creation, add } = fixture(t), now = Date.now(), old = now - 400 * 86400000;
+  add(12, "FTHX", "notes-wallet", old);
+  add(-3, "FTHX", "notes-market", now);
+  add(3, "FTHX", "notes-market", now);
+  assert.equal(activity(creation, null, {}, now).rows.length, 2);
+  const first = activity(creation, null, { interval: "all", limit: 1 }, now);
+  assert.equal(first.rows.length, 1);
+  assert.ok(first.from <= old);
+  assert.ok(first.bucketMs >= 5 * 86400000);
+  assert.ok(first.buckets.length <= 90);
+  assert.equal(first.summary.find(row => row.source === "wallet").credits, "12");
+  assert.equal(first.summary.find(row => row.source === "exchange").debits, "3");
+  const ids = [...first.rows.map(row => row.id)];
+  let cursor = first.nextCursor;
+  while (cursor) {
+    const next = activity(creation, null, { interval: "all", limit: 1, cursor }, now + 1000);
+    assert.deepEqual(next.summary, first.summary);
+    assert.deepEqual(next.buckets, first.buckets);
+    assert.equal(next.to, first.to);
+    ids.push(...next.rows.map(row => row.id)); cursor = next.nextCursor;
+  }
+  assert.equal(ids.length, 3);
+  assert.equal(new Set(ids).size, 3);
+  assert.equal(trades(creation, { interval: "all" }, now).rows.length, 0, "Historical postings never become pool trades.");
+  assert.throws(() => options({ interval: "all", cursor: first.nextCursor }, now + 86400001), /expired/);
+});
+test("Gold activity backfill names actual conversion and funding operations without inferring an FTHX execution", () => {
+  const hash = "0x" + "ab".repeat(32);
+  const funding = activityRows({}, { i: "funding", k: "GOLD", a: "", v: "0", t: 1,
+    d: { op: "market-liquidity", account: "reserve", dollars: "1000", fthg: "1" } }, hash);
+  assert.equal(funding[0].kind, "market-liquidity");
+  const converted = activityRows({}, { i: "credit", k: "CREDIT", a: "", v: "123", t: 2,
+    d: { src: "FthgConverted" } }, hash);
+  assert.equal(converted[0].kind, "FthgConverted");
+  assert.equal(converted[0].source, "gold");
+  assert.equal(converted.length, 1, "Do not infer missing Ethereum Gold amounts from a Dollar credit.");
 });
 test("FTHG reserve obligations and confirmed Ethereum records stay separate and never fabricate FTHX trades", t => {
   const { creation } = fixture(t), hash = "0x" + "ab".repeat(32), now = Date.now();

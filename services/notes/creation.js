@@ -57,14 +57,14 @@ class Creation {
   trending(now = Date.now()) {
     const markets = this.markets.catalog(now, true);
     const dollar = this.dollarSupply ? this.dollarSupply() : null;
-    const fthx = this.db.prepare("SELECT COALESCE(SUM(amount),0) AS supply FROM notes_entries WHERE symbol='FTHX'").get().supply;
-    if (!Number.isSafeInteger(fthx) || fthx < 0) throw fail(409, "Global FTHX supply is invalid.");
+    const fthx = this.notes.fthx.summary();
+    const definitions = this.db.prepare("SELECT symbol,name FROM note_currencies").all();
     const currencies = [
       { symbol: "FTH$", name: "Featheral Dollar", kind: "reserve-backed-ledger", native: true, ...dollar,
         circulating: dollar?.circulating ?? null, decimals: 18 },
       { symbol: "FTHX", name: "Featheral Exchange Token", kind: "global-credit", native: true,
-        supply: String(fthx), circulating: String(fthx), reserved: "0", decimals: 0 },
-      ...this.db.prepare("SELECT symbol,name FROM note_currencies").all().map(row => {
+        supply: fthx.supply, circulating: fthx.circulating, reserved: fthx.reserved, decimals: 18, precisionVersion: 2 },
+      ...definitions.map(row => {
         const currency = { ...markets.find(market => market.symbol === row.symbol), ...row, kind: "unbacked-credit" };
         if (row.symbol !== "FTHS") return currency;
         const supply = this.db.prepare("SELECT COALESCE(SUM(amount),0) AS n FROM notes_entries WHERE symbol='FTHS'").get().n;
@@ -72,7 +72,8 @@ class Creation {
         return { ...currency, native: true, kind: "approved-work-credit", alias: "Featheral Salary",
           supply: String(supply), circulating: String(supply), reserved: "0", decimals: 0 };
       }),
-      ...markets.filter(market => market.placeholder).map(market => ({ ...market, kind: "unbacked-credit" })),
+      ...markets.filter(market => market.placeholder && !definitions.some(note => note.symbol === market.symbol))
+        .map(market => ({ ...market, kind: "unbacked-credit" })),
     ];
     const legacy = this.db.prepare("SELECT symbol FROM notes_programs UNION SELECT symbol FROM notes_entries").all();
     for (const { symbol } of legacy) if (!currencies.some(currency => currency.symbol === symbol))
@@ -261,8 +262,13 @@ class Creation {
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
   account(owner) {
+    const fthx = this.notes.fthx.view(owner);
+    const holdings = this.db.prepare("SELECT symbol,SUM(amount) AS balance FROM notes_entries WHERE address=? GROUP BY symbol HAVING SUM(amount)>0").all(owner);
+    const token = holdings.find(asset => asset.symbol === "FTHX");
+    if (token) Object.assign(token, { baseBalance: fthx.balance, decimals: 18 });
+    else if (BigInt(fthx.balance) > 0n) holdings.push({ symbol: "FTHX", balance: 0, baseBalance: fthx.balance, decimals: 18 });
     return { address: owner, fthx: this.notes.balance(owner),
-      holdings: this.db.prepare("SELECT symbol,SUM(amount) AS balance FROM notes_entries WHERE address=? GROUP BY symbol HAVING SUM(amount)>0").all(owner),
+      fthxExact: fthx, holdings,
       dollar: this.payment ? this.payment.balance(walletAccountId(owner)) : null,
       notes: this.db.prepare("SELECT symbol,name FROM note_currencies WHERE owner=?").all(owner),
       integrations: this.db.prepare("SELECT site,symbol FROM note_sites WHERE owner=?").all(owner),

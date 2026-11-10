@@ -252,7 +252,7 @@ test('public creation APIs enforce wallet ownership, fee signatures, origin and 
   assert.equal((await request(`/owned/${key}/rewards`, { symbol: 'FTHX', chance: 10, amount: 1, enabled: true }, login.token, siteHost, 'PUT')).status, 409);
   const natives = (await request('/trending')).data.notes.filter(note => note.native);
   assert.equal(natives.find(note => note.symbol === 'FTH$').circulating, dollar.ledger.summary().circulating);
-  assert.equal(natives.find(note => note.symbol === 'FTHX').circulating, '1000');
+  assert.equal(natives.find(note => note.symbol === 'FTHX').circulating, (1000n * 10n ** 18n).toString());
   assert.equal((await request('/me', undefined, login.token)).data.fthx, 0);
   assert.equal((await request('/wallet', undefined, '', 'dollar.featheral.com')).status, 401);
   assert.equal((await request('/wallet', undefined, '', 'dollar.localhost')).status, 401);

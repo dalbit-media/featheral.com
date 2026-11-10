@@ -239,6 +239,11 @@ let portfolioGoldReader;
 let walletSourceReader;
 app.setPortfolioGold = reader => { portfolioGoldReader = reader; };
 app.setWalletSources = reader => { walletSourceReader = reader; };
+function exactFthxTransfers(owner) {
+  return creation.notes.fthx.installed
+    ? creation.db.prepare("SELECT owner,result,at FROM fthx_operations WHERE owner=? OR json_extract(result,'$.to')=? ORDER BY at DESC LIMIT 50")
+      .all(owner, owner).map(row => ({ owner: row.owner, ...JSON.parse(row.result) })) : [];
+}
 app.walletSummary = async (owner, publicWorldAccount) => {
   if (!creation || !dollarWalletReader) throw Object.assign(new Error('Wallet services are unavailable.'), { status: 503 });
   if (!require('ethers').isAddress(owner)) throw Object.assign(new Error('Invalid Ethereum wallet address.'), { status: 400 });
@@ -250,7 +255,8 @@ app.walletSummary = async (owner, publicWorldAccount) => {
     : { ethereum: null, world: null, ethereumError: 'Ethereum balance reader unavailable.', worldError: 'World balance reader unavailable.' };
   const portfolio = await walletPortfolio(trading.portfolioHoldings(owner, [{ symbol: 'FTH$', balance: dollar.balance.available },
     ...account.holdings.filter(asset => asset.symbol !== 'FTH$')]), sources);
-  return { address: account.address, holdings: account.holdings, trading: trading.account(owner), dollar, ...sources, portfolio,
+  return { address: account.address, fthxExact: account.fthxExact, fthxTransfers: exactFthxTransfers(owner),
+    holdings: account.holdings, trading: trading.account(owner), dollar, ...sources, portfolio,
     markets: { trades: creation.markets.account(owner).trades }, exchange: { trades: dollarExchange.account(owner).trades, requests: [] },
     silverActivity: creation.db.prepare("SELECT amount,kind,at,symbol FROM notes_entries WHERE address=? AND kind IN ('silver-purchase','silver-refund') ORDER BY id DESC LIMIT 50").all(owner),
     noteTransfers: creation.db.prepare("SELECT owner,payload,at FROM note_wallet_transfers WHERE owner=? OR json_extract(payload,'$.to')=? ORDER BY at DESC LIMIT 50")
@@ -309,6 +315,12 @@ app.setDollarWallet = (reader, settlement) => {
   }
 };
 app.setNoteSupply = supply => { if (creation) creation.dollarSupply = supply; };
+let fthxSettlementReader;
+app.setFthxSettlementSource = (ledger, key) => {
+  const { FthxSettlement, settlementSummary } = require('../notes/fthx-settlement');
+  if (key) new FthxSettlement(ledger, notes.fthx, key);
+  fthxSettlementReader = () => settlementSummary(notes.fthx, ledger);
+};
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api/v1/')) return next();
   if (![String(CONFIG.cmsHost).toLowerCase(), 'notes.featheral.com'].includes(hostName(req)) && !localRequest(req)) return res.sendStatus(404);
@@ -449,11 +461,17 @@ creationRouter.get('/trending', wrap((req, res) => {
 creationRouter.get('/markets', wrap((req, res) => res.json({ markets: creation.markets.catalog() })));
 creationRouter.get('/activity', wrap((req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json(require('../notes/activity').activity(creation, dollarActivityReader, req.query));
+  res.json({ ...require('../notes/activity').activity(creation, dollarActivityReader, req.query),
+    settlement: fthxSettlementReader?.() || null });
 }));
 creationRouter.get('/liquidity', wrap((req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json(require('../notes/activity').liquidity(creation, dollarExchange));
+  res.json({ ...require('../notes/activity').liquidity(creation, dollarExchange),
+    settlement: fthxSettlementReader?.() || null });
+}));
+creationRouter.get('/settlement', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store').json(fthxSettlementReader ? fthxSettlementReader()
+    : { enabled: false, error: 'FTHX-backed settlement writer is not connected on this node.' });
 }));
 creationRouter.get('/market-tape', wrap((req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -534,6 +552,7 @@ creationRouter.get('/wallet', wrap(async (req, res) => {
   const portfolio = await walletPortfolio(trading.portfolioHoldings(owner, [{ symbol: 'FTH$', balance: dollar.balance.available }, ...account.holdings.filter(asset => asset.symbol !== 'FTH$')]), sources);
   res.json({ ...account, ...sources, dollar, portfolio, trading: trading.account(owner), markets: creation.markets.account(owner),
     exchange: dollarExchange.account(owner), dollarPool: dollarExchange.pool(),
+    fthxTransfers: exactFthxTransfers(owner),
     noteTransfers: creation.db.prepare("SELECT owner,payload,at FROM note_wallet_transfers WHERE owner=? OR json_extract(payload,'$.to')=? ORDER BY at DESC LIMIT 50")
       .all(owner, owner).map(row => ({ owner: row.owner, ...JSON.parse(row.payload), at: row.at })) });
 }));
@@ -557,6 +576,16 @@ creationRouter.post('/wallet/send/prepare', wrap((req, res) => {
   res.json({ payment, message: transferMessage(payment) });
 }));
 creationRouter.post('/wallet/notes/send', wrap((req, res) => res.json(creation.sendNote(creationOwner(req), req.body))));
+creationRouter.get('/wallet/fthx', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store').json(creation.notes.fthx.view(creationOwner(req)));
+}));
+creationRouter.post('/wallet/fthx/send', wrap((req, res) => {
+  const owner = creationOwner(req), to = creation.address(req.body?.to).toLowerCase();
+  if (to === require('ethers').ethers.ZeroAddress.toLowerCase())
+    throw Object.assign(new Error('Choose a non-zero recipient wallet.'), { status: 400 });
+  creation.markets.requireUnlocked();
+  res.json(creation.notes.fthx.transfer(owner, { ...req.body, to }));
+}));
 creationRouter.get('/dollar-pool', wrap((req, res) => res.json(dollarExchange.pool())));
 creationRouter.get('/dollar-pool/market', wrap((req, res) => res.json(dollarExchange.market(req.query.interval))));
 creationRouter.use('/dollar-pool', (req, res, next) => {
@@ -920,10 +949,17 @@ app.get('/api/notes/ledger/:symbol/entries', wrap((req, res) => {
     return Number(value);
   };
   const limit = parseBoundedInteger(req.query.limit, 'limit', 50, 100);
-  const before = parseBoundedInteger(req.query.before, 'before', undefined, Number.MAX_SAFE_INTEGER);
   const address = req.query.address;
   if (address !== undefined && (typeof address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(address)))
     throw Object.assign(new Error('address must be a valid Ethereum wallet address'), { status: 400 });
+  if (req.query.exact !== undefined) {
+    if (currency.symbol !== 'FTHX' || req.query.exact !== '1')
+      throw Object.assign(new Error('Exact base-unit entries require FTHX and exact=1.'), { status: 400 });
+    return res.set('Cache-Control', 'no-store').json({
+      currency: { ...currency, decimals: 18 }, ...notes.fthx.entries({ address, before: req.query.before, limit }),
+    });
+  }
+  const before = parseBoundedInteger(req.query.before, 'before', undefined, Number.MAX_SAFE_INTEGER);
   const clauses = ['symbol=?'], params = [currency.symbol];
   if (address !== undefined) { clauses.push('address=?'); params.push(address.toLowerCase()); }
   if (before !== undefined) { clauses.push('id<?'); params.push(before); }
@@ -949,7 +985,7 @@ app.post('/api/notes/sites', wrap((req, res) => {
 }));
 app.get('/api/notes/wallets/:address', wrap((req, res) => {
   if (!/^0x[0-9a-fA-F]{40}$/.test(req.params.address)) throw Object.assign(new Error('Invalid wallet address'), { status: 400 });
-  res.json({ address: req.params.address, balances: notes.db.prepare('SELECT symbol,SUM(amount) AS amount FROM notes_entries WHERE address=? GROUP BY symbol')
+  res.json({ address: req.params.address, fthxExact: notes.fthx.view(req.params.address), balances: notes.db.prepare('SELECT symbol,SUM(amount) AS amount FROM notes_entries WHERE address=? GROUP BY symbol')
     .all(req.params.address.toLowerCase()) });
 }));
 app.get('/api/notes/markets', wrap((req, res) => {
