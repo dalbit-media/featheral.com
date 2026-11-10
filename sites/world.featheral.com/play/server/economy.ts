@@ -640,7 +640,7 @@ export function parseCommand(value: unknown): Command {
     || (c.type === 'decorate' && (!isDecorationSlot(c.slot) || (c.item !== null && !isDecorationItem(c.item))))
     || (c.type === 'arrange' && !isSettlementEntity(c.entity))
     || (c.type === 'diplomacy' && (!oneOf(c.action, ['gift', 'join', 'form', 'vote'])
-      || Object.hasOwn(c, 'federation') && (c.action !== 'join' || !startingFederations.some(identity => identity.name === c.federation))))
+      || Object.hasOwn(c, 'federation') && (!oneOf(c.action, ['gift', 'join']) || !startingFederations.some(identity => identity.name === c.federation))))
     || (c.type === 'assign' && (!oneOf(c.resource, resources)
       || typeof c.workers !== 'number' || !Number.isSafeInteger(c.workers) || c.workers < 0 || c.workers > 1000000))
     || (c.type === 'automatic' && typeof c.enabled !== 'boolean')

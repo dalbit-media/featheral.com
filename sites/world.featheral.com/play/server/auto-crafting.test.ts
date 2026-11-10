@@ -1,11 +1,12 @@
 import { strict as assert } from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { SqliteStore } from './store.ts';
 import { craft, inventory } from './inventory.ts';
 import { seedFixturePools } from './test-support.ts';
 import { craftableItems, craftableKeys, craftingCost, craftingMaximum, isCollectible, itemName } from '../src/items.ts';
-import { merchantCharter, merchantCharterFee, merchantSpendingLimit } from '../src/auto-crafting.ts';
+import { autoCraftableOutput, merchantCharter, merchantCharterFee, merchantSpendingLimit } from '../src/auto-crafting.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
 import { isReserveMarketAsset, isLiquidAsset, marketAssets } from '../src/market.ts';
 import { itemArt } from '../src/item-art.ts';
@@ -168,6 +169,73 @@ test('quote is side-effect free; one atomic action crafts, sells, consumes origi
     assert.equal(result.market.trades.reduce((sum, fill) => sum + fill.quantity, 0), quote.batches.reduce((sum, batch) => sum + batch.quantity, 0));
   } finally { h.store.close(); }
 });
+test('zero FTH$ still permits profitable zero-fee starter batches without reinvesting sales', () => {
+  const h = setup();
+  try {
+    h.store.transaction(h.user.token, session => {
+      session.account.game.dollars = 0;
+      inventory(session.account).items = [merchantCharter, 'craft-batch-10', 'craft-batch-10'];
+    });
+    const before = h.saved(), quote = h.quote();
+    assert.deepEqual(h.saved(), before);
+    assert.equal(quote.spendingCeiling, 0);
+    assert.equal(quote.craftingFees, 0);
+    assert.ok(quote.batches.length > 0);
+    assert.ok(quote.batches.every(batch => craftingCost(batch.item, batch.quantity).dollars === 0));
+    const result = h.post(h.request(quote.fingerprint));
+    assert.equal(result.autoCraft!.fingerprint, quote.fingerprint);
+    assert.equal(h.saved().game.dollars, dollarsUnits(quote.proceeds));
+  } finally { h.store.close(); }
+});
+
+test('merchant failures distinguish missing buyers, ingredient quotes and actual losses without consuming inventory', t => {
+  let db!: DatabaseSync;
+  const prepare = DatabaseSync.prototype.prepare;
+  t.mock.method(DatabaseSync.prototype, 'prepare', function(this: DatabaseSync, sql: string) {
+    db = this;
+    return prepare.call(this, sql);
+  });
+  const h = setup();
+  try {
+    const permitPool = db.prepare('SELECT units,dollars FROM market_pools WHERE asset=?').get('craft-batch-10')!;
+    db.prepare('UPDATE market_pools SET units=0,dollars=0 WHERE asset=?').run('craft-batch-10');
+    h.store.transaction(h.user.token, session => {
+      inventory(session.account).items = [merchantCharter, 'craft-batch-10'];
+    });
+    const before = h.saved();
+    assert.throws(() => h.quote(), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Live buy quotes are missing/);
+      const localized = translate(error.message, 'ko');
+      assert.notEqual(localized, error.message);
+      assert.doesNotMatch(localized, /Live buy quotes|No profitable batch/);
+      return true;
+    });
+    assert.deepEqual(h.saved(), before);
+    db.prepare('UPDATE market_pools SET units=?,dollars=? WHERE asset=?').run(permitPool.units, permitPool.dollars, 'craft-batch-10');
+    for (const asset of ['wood', 'water', 'metal', 'oil']) {
+      db.prepare('UPDATE market_pools SET dollars=dollars*100 WHERE asset=?').run(asset);
+    }
+    assert.throws(() => h.quote(), /Sale proceeds do not cover crafting fees/);
+    assert.deepEqual(h.saved(), before);
+    for (const item of craftableKeys.filter(autoCraftableOutput)) {
+      db.prepare('UPDATE market_pools SET dollars=0 WHERE asset=?').run(item);
+    }
+    assert.throws(() => h.quote(), /No funded buyer or pool can buy the complete batch/);
+    assert.deepEqual(h.saved(), before);
+  } finally { h.store.close(); }
+});
+
+test('merchant failures remain visible in inventory after the temporary toast disappears', () => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  const operation = main.slice(main.indexOf('async function automaticCraftAndSell'), main.indexOf('function renderInventoryPage'));
+  assert.match(operation, /merchantReviewError = ''/);
+  assert.match(operation, /merchantReviewError = error instanceof Error/);
+  const rendering = main.slice(main.indexOf('function renderInventoryPage'), main.indexOf('const inventorySearchInput'));
+  assert.match(rendering, /role="alert"/);
+  assert.match(rendering, /escape\(translate\(merchantReviewError, language\)\)/);
+});
+
 test('ranks highest-profit eligible recipes first and reuses every feasible original permit', () => {
   const h = setup();
   try {

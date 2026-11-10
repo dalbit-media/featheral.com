@@ -13,19 +13,28 @@
 #app .inventory-view .settlement-section-title h3{margin:0;font-size:15px}
 #app .inventory-view .inventory-filters{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
 #app .inventory-view .inventory-filters .button{font-size:11px;min-height:36px;padding:6px 10px}
-#app .inventory-view .inventory-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:8px;align-content:start}
+#app .inventory-view .inventory-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
+.inventory-browser,.inventory-inspector{min-width:0}
+.inventory-browser{display:flex;flex-direction:column;gap:12px}
+#app .inventory-view .inventory-browser .inventory-search{max-width:none;margin:0}
+#app .inventory-view .inventory-browser .inventory-expansion{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0}
+#app .inventory-view .inventory-browser .inventory-expansion>span{font-size:12px;color:var(--muted)}
+#app .inventory-view .inventory-browser .inventory-filters{margin:0}
+#app .inventory-view .inventory-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;align-content:start;margin:0}
 #app .inventory-view .inventory-slot{min-height:56px;max-height:100px;border-radius:10px}
 #app .inventory-view .inventory-slot:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
 #app .inventory-view .inventory-slot[aria-pressed=true]{border-color:var(--mint);background:#c5e7b418}
 #app .inventory-view .inventory-pages{flex-wrap:wrap;overflow:visible;gap:6px}
 #app .inventory-view .inventory-pages .button{min-width:44px;min-height:44px}
 #app .inventory-view .inventory-pages>span{margin-left:auto;font-size:12px;color:var(--muted)}
-#app .inventory-view .inventory-item-detail{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px;border:1px solid var(--surface-border);border-radius:12px;background:var(--surface)}
+#app .inventory-view .inventory-item-detail{display:grid;grid-template-columns:64px minmax(0,1fr);align-items:start;gap:12px;padding:16px;border:1px solid var(--surface-border);border-radius:12px;background:var(--surface)}
 #app .inventory-view .inventory-item-detail>.item-art{width:64px;height:64px;margin:0}
-#app .inventory-view .inventory-item-detail h3{font-size:15px}
-#app .inventory-view .inventory-item-detail p{font-size:12px}
-#app .inventory-view .inventory-item-detail>.button{min-height:44px;font-size:12px}
-#app .inventory-view .inventory-item-detail+.item-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;padding:14px;margin:10px 0;border:1px solid var(--surface-border);border-radius:12px}
+#app .inventory-view .inventory-item-detail h3{font-size:17px;line-height:1.35;overflow-wrap:normal;word-break:normal}
+#app .inventory-view .inventory-item-detail p{font-size:12px;line-height:1.6}
+#app .inventory-view .inventory-item-detail>.button{grid-column:1/-1;width:100%;min-height:44px;font-size:13px;white-space:normal;text-align:center;justify-content:center}
+#app .inventory-view .inventory-inspector>.item-facts{display:grid;grid-template-columns:minmax(0,1fr);gap:0;padding:0 16px;margin:12px 0 0;border:1px solid var(--surface-border);border-radius:12px;background:var(--surface)}
+#app .inventory-view .inventory-inspector>.item-facts>div{display:block;min-width:0;padding:12px 0;border-bottom:1px solid var(--surface-border)}
+#app .inventory-view .inventory-inspector>.item-facts>div:last-child{border-bottom:0}
 #app .inventory-view .item-facts dt{font-size:11px;color:var(--muted)}
 #app .inventory-view .item-facts dd{margin:4px 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 #app .inventory-view .craft-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr));align-items:start;gap:12px}
@@ -121,14 +130,8 @@
   .enhancement-detail{position:static}
 }
 @media(min-width:1000px){
-  #app .inventory-view .inventory-panel{display:grid;grid-template-columns:minmax(0,1fr) 300px;column-gap:16px;align-content:start;align-items:start}
-  #app .inventory-view .inventory-panel>:is(.settlement-section-title,.inventory-search,.inventory-expansion,.inventory-filters,.inventory-slots,.inventory-pages){grid-column:1}
-  #app .inventory-view .inventory-panel>.inventory-item-detail{grid-column:2;grid-row:1/5;align-self:start}
-  #app .inventory-view .inventory-panel>.item-facts{grid-column:2;grid-row:5/9;grid-template-columns:1fr;margin-top:0;align-self:start}
-  #app .inventory-view .inventory-panel>:is(.pending-finds,.disclosure,.notice,.inventory-page-empty){grid-column:1/-1}
-}
-@media(min-width:1200px){
-  #app .inventory-view .inventory-slots{grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px}
+  #app .inventory-view .inventory-panel{grid-template-columns:minmax(0,1fr) clamp(320px,26vw,380px);gap:24px}
+  #app .inventory-view .inventory-panel>:not(.inventory-browser):not(.inventory-inspector){grid-column:1/-1}
 }
 @media(max-width:479px){
   #app .inventory-view .inventory-slots{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -146,7 +149,6 @@
   #app .inventory-view .inventory-filters .button,#app .inventory-view .crafting-filters .button{min-height:44px}
   #app .inventory-view .inventory-expansion{flex-wrap:wrap}
   #app .inventory-view .inventory-expansion .button{flex-wrap:wrap;min-height:44px}
-  #app .inventory-view .inventory-item-detail>div:not(.item-art){flex-basis:calc(100% - 80px)}
   #app .inventory-view .pending-finds{flex-wrap:wrap;padding:12px;gap:10px}
   #app .settlement-task-panel{inset:8px 8px 78px}
   #app .settlement-task-body{padding:10px}

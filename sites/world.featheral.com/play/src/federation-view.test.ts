@@ -111,9 +111,28 @@ test('all default federation cards explain joining gates and link members to the
       assert.equal((member.match(/data-action="join"[^>]*disabled/g) ?? []).length, startingFederations.length - 1);
       assert.ok(member.includes('href="#federation-vault-title"'));
       assert.ok(member.includes(translate('Contribute to your federation’s common vault.', language)));
-      assert.equal(member.includes(`data-federation="${federation.name}"`), false);
+      assert.equal((member.match(/data-action="gift"/g) ?? []).length, startingFederations.length);
     }
     state.game.federation = null;
+  }
+});
+
+test('every federation offers targeted goodwill with matching confirmation and translated results', () => {
+  const state = fixture();
+  for (const language of ['en', 'ko'] as const) {
+    const html = federationPanel(state, language);
+    for (const [index, federation] of startingFederations.entries()) {
+      assert.ok(html.includes(`data-action="gift" data-federation="${federation.name}"`));
+      assert.ok(html.includes(`aria-describedby="federation-gift-reason-${index}"`));
+      const quote = gameConsumption(state, { type: 'diplomacy', action: 'gift', federation: federation.name })!;
+      assert.equal(quote.subject, federation.name);
+      assert.deepEqual(quote.costs, Object.entries(diplomacyCosts.gift).map(([asset, amount]) => ({ asset, amount })));
+      const message = `A goodwill shipment reached ${federation.name}. Relations improved.`;
+      assert.notEqual(translate(message, 'ko'), message);
+    }
+    state.game.stock.wood = 39;
+    assert.equal((federationPanel(state, language).match(/data-action="gift"[^>]*disabled/g) ?? []).length, startingFederations.length);
+    state.game.stock.wood = 40;
   }
 });
 

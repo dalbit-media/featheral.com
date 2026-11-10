@@ -252,9 +252,10 @@ export function trade(_game: Game, _resource: Resource, _direction: 'buy' | 'sel
 }
 export function diplomacy(game: Game, action: 'gift' | 'join' | 'form' | 'vote', federation = 'Evergreen Union'): string {
   if (action === 'gift') {
+    if (!startingFederations.some(identity => identity.name === federation)) throw new GameError('Choose a starting federation.');
     pay(game, diplomacyCosts.gift);
     game.relationship = Math.min(100, game.relationship + 25);
-    return note(game, 'A goodwill shipment reached Evergreen Union. Relations improved.');
+    return note(game, `A goodwill shipment reached ${federation}. Relations improved.`);
   }
   if (action === 'join') {
     if (!startingFederations.some(identity => identity.name === federation)) throw new GameError('Choose a starting federation.');

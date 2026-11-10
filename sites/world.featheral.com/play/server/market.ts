@@ -387,11 +387,12 @@ export class Exchange {
     const totalPermits = [...permits.values()].reduce((sum, count) => sum + count, 0);
     if (!totalPermits) throw new ApiError(409, 'Own unused bulk crafting permits before using the charter.');
     const ranked = this.generateAnalysis(owner, now, realTime).items
-      .filter(row => autoCraftableOutput(row.item) && row.profit !== null && row.profit > 0)
-      .sort((a, b) => b.profit! - a.profit! || a.item.localeCompare(b.item));
+      .filter(row => autoCraftableOutput(row.item))
+      .sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity) || a.item.localeCompare(b.item));
     bag.items.splice(bag.items.indexOf(merchantCharter), 1);
     const costs = new Map<MarketAsset | 'dollars', number>([[merchantCharter, 1]]);
     const batches: AutoCraftQuote['batches'] = [];
+    const blockers = new Map<number, string>();
     let fees = 0, proceeds = 0, valuedCost = 0;
     const fullQuote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
       const steps = this.plan(owner, asset, side, quantity, realTime);
@@ -401,23 +402,50 @@ export class Exchange {
     // Only permits owned at confirmation are eligible; crafted permits cannot extend the run.
     const order = [...bulkCraftingKeys].sort((a, b) => bulkCraftingItems[b].quantity - bulkCraftingItems[a].quantity);
     let progress = true;
-    while (progress && fees < spendingCeiling) {
+    while (progress) {
       progress = false;
       for (const row of ranked) {
         const item = row.item;
-        if (account.game.stage < craftingStage(item) || !recipeDiscovered(account.game, item)) continue;
+        if (account.game.stage < craftingStage(item) || !recipeDiscovered(account.game, item)) {
+          blockers.set(0, 'Unlock more recipes by advancing your settlement and discovering their resources.');
+          continue;
+        }
         for (const permit of order) {
           if (!permits.get(permit) || sellableItemCount(bag, permit) < 1) continue;
           const quantity = bulkCraftingItems[permit].quantity, cost = craftingCost(item, quantity), inputs = craftingInputs(item, quantity);
-          if (dollarsUnits(cost.dollars ?? 0) > spendingCeiling - fees || !canAfford(account.game, cost) || !craftingFits(bag, item, quantity)
-            || !Object.entries(inputs).every(([asset, count]) => isMarketAsset(asset) && !isMarketResource(asset) && sellableItemCount(bag, asset) >= count)) continue;
+          if (dollarsUnits(cost.dollars ?? 0) > spendingCeiling - fees) {
+            blockers.set(1, 'The batch crafting fee exceeds your starting FTH$ balance or the FTH$1,000,000 run limit.');
+            continue;
+          }
+          if (!canAfford(account.game, cost)) {
+            blockers.set(2, 'Not enough raw resources for a complete owned permit batch. A smaller permit may fit.');
+            continue;
+          }
+          if (!Object.entries(inputs).every(([asset, count]) => isMarketAsset(asset) && !isMarketResource(asset) && sellableItemCount(bag, asset) >= count)) {
+            blockers.set(3, 'Recipes require additional unused item ingredients; equipped, placed and reserved copies cannot be consumed.');
+            continue;
+          }
+          if (!craftingFits(bag, item, quantity)) {
+            blockers.set(4, 'Free an item slot or expand storage to craft the output before selling it.');
+            continue;
+          }
           const fee = dollarsUnits(cost.dollars ?? 0), revenue = fullQuote(item, 'sell', quantity);
-          if (revenue === null) continue;
+          if (revenue === null) {
+            blockers.set(5, 'No funded buyer or pool can buy the complete batch. A smaller permit may fit available demand.');
+            continue;
+          }
           const materialCosts = [...Object.entries(cost).filter(([asset]) => asset !== 'dollars'), ...Object.entries(inputs)]
             .map(([asset, count]) => isMarketAsset(asset) ? fullQuote(asset, 'buy', count) : null);
-          if (materialCosts.some(cost => cost === null)) continue;
+          if (materialCosts.some(cost => cost === null)) {
+            blockers.set(6, 'Live buy quotes are missing for consumed resources, ingredients or the bulk permit, so their value cannot be verified even when you own them.');
+            continue;
+          }
           const estimatedCost = fee + materialCosts.reduce<number>((sum, cost) => sum + cost!, 0);
-          if (!Number.isSafeInteger(estimatedCost) || revenue <= estimatedCost) continue;
+          if (!Number.isSafeInteger(estimatedCost)) throw new ApiError(409, 'Account limit reached.');
+          if (revenue <= estimatedCost) {
+            blockers.set(7, 'Sale proceeds do not cover crafting fees plus the live market value of consumed resources, ingredients and the bulk permit.');
+            continue;
+          }
           this.craftAndSell(owner, account, item, quantity, revenue, now, realTime);
           permits.set(permit, permits.get(permit)! - 1);
           fees += fee; proceeds += revenue; valuedCost += estimatedCost;
@@ -433,7 +461,7 @@ export class Exchange {
         if (progress) break;
       }
     }
-    if (!batches.length) throw new ApiError(409, 'No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed.');
+    if (!batches.length) throw new ApiError(409, `No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed. ${blockers.get(Math.max(...blockers.keys()))}`);
     const result = { batches, costs: [...costs].map(([asset, amount]) => ({ asset, amount })), startingBalance: startingBalance / dollarsScale, spendingCeiling: spendingCeiling / dollarsScale,
       craftingFees: fees / dollarsScale, proceeds: proceeds / dollarsScale, cashChange: (proceeds - fees) / dollarsScale,
       estimatedProfit: (proceeds - valuedCost) / dollarsScale, remainingPermits: [...permits.values()].reduce((sum, count) => sum + count, 0),

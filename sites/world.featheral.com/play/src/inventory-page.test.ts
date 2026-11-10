@@ -116,6 +116,26 @@ test('inventory breakpoint changes retain the current slot range and rerender on
   assert.equal(renders, 3);
 });
 
+test('long item inspectors stay separate from the compact inventory browser and its grid rows', () => {
+  const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', population: { global: 0, federation: null }, clockSpeed: 1 };
+  state.inventory.storage = 5;
+  state.inventory.items = ['merchant-charter', 'torch'];
+  const html = inventoryPanel(state, () => '', 'all', 'en', 'explore', 0, 'merchant-charter', '', 60);
+  const browser = html.slice(html.indexOf('<div class="inventory-browser">'), html.indexOf('<div class="inventory-inspector">'));
+  const inspector = html.slice(html.indexOf('<div class="inventory-inspector">'));
+  assert.match(browser, /inventory-search/);
+  assert.match(browser, /inventory-filters/);
+  assert.match(browser, /inventory-slots/);
+  assert.match(browser, /inventory-pages/);
+  assert.doesNotMatch(browser, /inventory-item-detail/);
+  assert.match(inspector, /<h3>Master Merchant Charter<\/h3>/);
+  assert.match(inspector, /data-action="auto-craft"/);
+  assert.match(inspector, /<dl class="item-facts">/);
+  const css = readFileSync(new URL('./interface.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /grid-row:1\/5|grid-row:5\/9/);
+  assert.match(css, /\.inventory-item-detail\{display:grid;grid-template-columns:64px minmax\(0,1fr\)/);
+});
+
 test('background refreshes restore inventory controls after clearing pending state', async () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const focus = main.slice(main.indexOf("window.addEventListener('focus', async"), main.indexOf("window.addEventListener('pageshow'"));

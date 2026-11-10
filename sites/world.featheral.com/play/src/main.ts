@@ -113,6 +113,7 @@ let inventoryPage = 0;
 let inventoryVisibleSlots = inventorySlotsPerPage(innerWidth);
 let inventorySelection: ItemId | null = null;
 let inventorySearch = '';
+let merchantReviewError = '';
 let craftingSearch = '';
 let enhancementSelection: string | null = null;
 let enhancementMarket: MarketSnapshot | null = null;
@@ -1092,6 +1093,7 @@ async function purchaseCraftingAnalysis(): Promise<void> {
 async function automaticCraftAndSell(): Promise<void> {
   if (busy || confirmationOpen()) { toast('Please wait for the current server request.', true); return; }
   busy = true;
+  merchantReviewError = '';
   let finishProgress: (() => void) | undefined;
   try {
     finishProgress = showOperationProgress('Reviewing merchant profit', 'Checking your permits, materials, balance and live sale liquidity. Nothing is spent until you confirm.', language);
@@ -1107,7 +1109,8 @@ async function automaticCraftAndSell(): Promise<void> {
     craftingTickers = response.market.tickers;
     toast(`${translate('Automatic crafting and immediate sales completed.', language)} ${translate('Estimated total profit', language)}: FTH$ ${response.autoCraft.estimatedProfit.toLocaleString(languageLocale, { maximumFractionDigits: 4 })}`);
   } catch (error) {
-    toast(error instanceof Error ? error.message : 'Automatic crafting failed.', true);
+    merchantReviewError = error instanceof Error ? error.message : 'Automatic crafting failed.';
+    toast(merchantReviewError, true);
   } finally {
     finishProgress?.();
     busy = false;
@@ -1118,6 +1121,7 @@ function renderInventoryPage(): void {
   const root = document.querySelector('#inventory-content')!;
   let content = '';
   if (inventoryTab === 'inventory') content = enhancedInventoryPanel(state, language)
+    + (merchantReviewError ? `<p class="notice" role="alert">${escape(translate(merchantReviewError, language))}</p>` : '')
     + inventoryPanel(state, costChips, inventoryFilter, language, 'explore', inventoryPage, inventorySelection, inventorySearch, inventoryVisibleSlots);
   else if (inventoryTab === 'craft') {
     void refreshCraftingPrices();
@@ -1742,8 +1746,8 @@ app.addEventListener('click', event => {
         if (success && input) input.value = '';
       }); break;
     }
-    case 'join': void act({ type: 'diplomacy', action: 'join', ...(target.dataset.federation ? { federation: target.dataset.federation } : {}) }); break;
-    case 'gift': case 'form': case 'vote': void act({ type: 'diplomacy', action }); break;
+    case 'gift': case 'join': void act({ type: 'diplomacy', action, ...(target.dataset.federation ? { federation: target.dataset.federation } : {}) }); break;
+    case 'form': case 'vote': void act({ type: 'diplomacy', action }); break;
     case 'claim': void act({ type: 'claim' }); break;
     case 'export': case 'legacy-export': {
       try {

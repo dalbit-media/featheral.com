@@ -1,4 +1,17 @@
 export const korean: Record<string, string> = {
+  'Unlock more recipes by advancing your settlement and discovering their resources.': '정착지를 발전시키고 필요한 자원을 발견하여 더 많은 제작법을 해금하세요.',
+  'The batch crafting fee exceeds your starting FTH$ balance or the FTH$1,000,000 run limit.': '묶음 제작 비용이 시작 FTH$ 잔액 또는 실행당 FTH$1,000,000 한도를 초과합니다.',
+  'Not enough raw resources for a complete owned permit batch. A smaller permit may fit.': '보유 허가증의 전체 수량을 제작할 원자원이 부족합니다. 더 작은 수량의 허가증을 사용해 보세요.',
+  'Recipes require additional unused item ingredients; equipped, placed and reserved copies cannot be consumed.': '제작법에 필요한 미사용 아이템 재료가 부족합니다. 장착, 배치 또는 거래 예약 중인 아이템은 사용할 수 없습니다.',
+  'Free an item slot or expand storage to craft the output before selling it.': '판매할 아이템을 먼저 제작할 수 있도록 아이템 칸을 비우거나 보관함을 확장하세요.',
+  'No funded buyer or pool can buy the complete batch. A smaller permit may fit available demand.': '전체 묶음을 구매할 자금이 있는 구매자나 유동성 풀이 없습니다. 더 작은 수량의 허가증을 사용해 보세요.',
+  'Live buy quotes are missing for consumed resources, ingredients or the bulk permit, so their value cannot be verified even when you own them.': '소모할 자원, 아이템 재료 또는 묶음 허가증의 실시간 구매 견적이 없어 보유 중이어도 가치를 확인할 수 없습니다.',
+  'Sale proceeds do not cover crafting fees plus the live market value of consumed resources, ingredients and the bulk permit.': '판매 수익이 제작비와 소모할 자원, 아이템 재료 및 묶음 허가증의 실시간 시장 가치를 충당하지 못합니다.',
+  'Goodwill improves your shared relationship score for all starting federations.': '우호 물자를 보내면 모든 시작 연방에 공통으로 적용되는 관계 점수가 오릅니다.',
+  'A goodwill shipment reached Aurora Concord. Relations improved.': '친선 물자가 오로라 협약에 도착했습니다. 우호도가 올랐습니다.',
+  'A goodwill shipment reached Azure Maritime League. Relations improved.': '친선 물자가 아주르 해양 연맹에 도착했습니다. 우호도가 올랐습니다.',
+  'A goodwill shipment reached Solaris Commonwealth. Relations improved.': '친선 물자가 솔라리스 공동체에 도착했습니다. 우호도가 올랐습니다.',
+  'A goodwill shipment reached Silverpeak Assembly. Relations improved.': '친선 물자가 실버피크 의회에 도착했습니다. 우호도가 올랐습니다.',
   'Origin story': '기원 이야기',
   'When the Long Frost silenced the forest roads, five villages kept a single greenhouse alive by sharing their last firewood. Its first spring sapling became the Union’s emblem. Their oldest promise is simple: no settlement faces winter alone.': '긴 혹한으로 숲길이 끊겼을 때, 다섯 마을은 마지막 장작을 나누어 온실 하나를 지켜 냈습니다. 그곳에서 봄에 처음 자란 묘목은 연합의 문장이 되었습니다. 가장 오래된 약속은 단순합니다. 어느 정착지도 홀로 겨울을 맞지 않는다는 것입니다.',
   'A storm scattered the northern observatories until a young keeper answered a distant light with a polished mirror. That chain of signals reunited the valleys. The Concord still keeps a lantern burning for discoveries that have not yet found their way home.': '폭풍으로 북쪽 관측소들이 고립되었을 때, 젊은 관리인이 닦아 낸 거울로 먼 불빛에 응답했습니다. 이어지는 신호가 계곡들을 다시 연결했습니다. 협약은 아직 돌아올 길을 찾지 못한 발견들을 위해 지금도 등불을 밝힙니다.',
@@ -2568,6 +2581,7 @@ export const korean: Record<string, string> = {
 };
 
 export const koreanPatterns: readonly (readonly [string, string])[] = [
+  ['No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed. {reason}', '수익을 낼 수 있는 묶음이 없습니다. 아무것도 소모하지 않았습니다. {reason}'],
   ['Refinement succeeded. {name} is now +{level}.', '강화 성공. {name} 장비가 +{level}이 되었습니다.'],
   ['Refinement failed. {name} remains +{level}; your equipment is safe.', '강화 실패. {name} 장비는 +{level}을 유지하며 안전하게 보관됩니다.'],
   ['{count} upgrades · Final level: {level}', '{count}단계 업그레이드 · 최종 단계: {level}'],

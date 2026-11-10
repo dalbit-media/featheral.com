@@ -12,6 +12,7 @@ import { dollarsScale } from '../src/dollars.ts';
 import { worldEpoch, worldYearMs } from '../src/environment.ts';
 import { marketBasePrice } from '../src/market.ts';
 import { startingFederations } from '../src/atlas.ts';
+import { diplomacyCosts } from '../src/engine.ts';
 
 type Contribution = Extract<Command, { type: 'federation-contribute' }>;
 function setup(store: SqliteStore, federation: string | null = 'Evergreen Union') {
@@ -44,6 +45,7 @@ test('every default federation accepts qualified joins and member contributions 
       store.transaction(identity.token, session => {
         session.account.game.relationship = 50;
       });
+
       const join = () => {
         const revision = store.read(identity.token, session => session.account.revision);
         return store.transaction(identity.token, (session, time, realTime) =>
@@ -68,6 +70,41 @@ test('every default federation accepts qualified joins and member contributions 
       now += 2000;
       assert.throws(join, /already belongs/);
     }
+  } finally { store.close(); }
+});
+
+test('targeted goodwill reaches every default federation and unlocks joining with exact-once costs', () => {
+  let now = worldEpoch + 1000;
+  const store = new SqliteStore(':memory:', () => now);
+  try {
+    for (const federation of startingFederations) {
+      const identity = setup(store, null);
+      store.transaction(identity.token, session => { session.account.game.relationship = 0; });
+      const send = (command: unknown) => {
+        now += 1000;
+        const revision = store.read(identity.token, session => session.account.revision);
+        const body = { id: randomUUID(), revision, command: parseCommand(command) };
+        const run = () => store.transaction(identity.token, (session, time, realTime) =>
+          apply(session.account, body, time, realTime));
+        return { run };
+      };
+      assert.throws(send({ type: 'diplomacy', action: 'join', federation: federation.name }).run, /50 relationship/);
+      for (let count = 1; count <= 2; count++) {
+        const gift = send({ type: 'diplomacy', action: 'gift', federation: federation.name });
+        const result = gift.run();
+        assert.deepEqual(gift.run(), result);
+        store.read(identity.token, session => {
+          assert.equal(session.account.game.relationship, count * 25);
+          assert.equal(session.account.game.stock.wood, 100 - count * diplomacyCosts.gift.wood!);
+          assert.equal(session.account.game.stock.water, 100 - count * diplomacyCosts.gift.water!);
+          assert.ok(session.account.game.log.some(entry => entry.includes(federation.name)));
+        });
+      }
+      send({ type: 'diplomacy', action: 'join', federation: federation.name }).run();
+      assert.equal(store.read(identity.token, session => session.account.game.federation), federation.name);
+    }
+    assert.throws(() => parseCommand({ type: 'diplomacy', action: 'gift', federation: 'Unknown' }));
+    assert.throws(() => parseCommand({ type: 'diplomacy', action: 'vote', federation: startingFederations[0].name }));
   } finally { store.close(); }
 });
 

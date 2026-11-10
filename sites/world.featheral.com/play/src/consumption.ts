@@ -236,7 +236,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           'Equipment is permanent and affects new manual and automatic jobs only. Crafting does not equip it automatically.',
         ] : Object.keys(craftingIngredients(command.item)).length ? ['Collector recipes consume owned permits, not active automation time or market escrow. Total collection time is preserved.'] : [])] };
     case 'diplomacy':
-      if (command.action === 'gift') return quote('Send goodwill shipment', 'Evergreen Union', diplomacyCosts.gift);
+      if (command.action === 'gift') return quote('Send goodwill shipment', command.federation ?? 'Evergreen Union', diplomacyCosts.gift);
       if (command.action === 'form') return quote('Found federation', 'Verdant Federation', diplomacyCosts.form);
       return null;
     default: return null;
