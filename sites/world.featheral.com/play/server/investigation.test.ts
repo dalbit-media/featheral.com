@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createAccount, accrue, apply, execute, parseCommand, snapshot } from './economy.ts';
-import { investigationItem, inventory, collectFinds } from './inventory.ts';
+import { investigationItem, inventory, collectFinds, squadRareFind } from './inventory.ts';
 import { worldDayMs, worldWeekMs } from '../src/environment.ts';
 import { explorationCount, explorationQuote, investigationQuote, nextExploration, nextInvestigation, workforceCounts } from '../src/workforce.ts';
 import { craftableKeys, inventoryUsed } from '../src/items.ts';
@@ -89,19 +89,24 @@ test('investigation uses only idle workers and known reachable unoccupied destin
   account.game.explored = [`${destination.x},${destination.y}`];
   assert.equal(nextInvestigation(account.game, account.workforce.expeditions), null);
 });
-test('investigation rolls have exactly 10 percent item chance and 90/10 low-tier weights for every terrain', () => {
+test('investigation rolls use 25 percent solo and 35 percent squad item chances with squad-only rare twelve-week permits', () => {
   for (const terrain of Object.keys(terrainDetails) as (keyof typeof terrainDetails)[]) {
-    let successes = 0, oneWeek = 0, fourWeek = 0;
-    for (let chance = 0; chance < 100; chance++) {
-      const item = investigationItem(terrain, chance, 0, 0);
-      if (item) successes++;
+    for (const [squad, chanceExpected, tiersExpected] of [[false, 25, { 1: 170, 4: 30, 12: 0 }], [true, 35, { 1: 110, 4: 70, 12: 20 }]] as const) {
+      let successes = 0;
+      const tiers: Record<string, number> = { 1: 0, 4: 0, 12: 0 };
+      for (let chance = 0; chance < 100; chance++) if (investigationItem(terrain, chance, 0, 0, squad)) successes++;
+      for (let tier = 0; tier < 100; tier++) for (const category of [0, 99]) {
+        const item = investigationItem(terrain, 0, tier, category, squad)!;
+        assert.match(item, /^(collection|activity)-.+-(1|4|12)$/);
+        tiers[item.split('-').at(-1)!]++;
+      }
+      assert.equal(successes, chanceExpected);
+      assert.deepEqual(tiers, { 1: tiersExpected[1], 4: tiersExpected[4], 12: tiersExpected[12] });
     }
-    for (let tier = 0; tier < 100; tier++) for (const category of [0, 99]) {
-      const item = investigationItem(terrain, 0, tier, category)!;
-      assert.match(item, /^(collection|activity)-.+-(1|4)$/);
-      if (item.endsWith('-1')) oneWeek++; else fourWeek++;
-    }
-    assert.equal(successes, 10); assert.equal(oneWeek, 180); assert.equal(fourWeek, 20);
+    let rare = 0, twelve = 0;
+    for (let chance = 0; chance < 100; chance++) if (squadRareFind(terrain, chance, 99, 0)) rare++;
+    for (let tier = 0; tier < 100; tier++) if (squadRareFind(terrain, 0, tier, 0)!.endsWith('-12')) twelve++;
+    assert.equal(rare, 40); assert.equal(twelve, 25);
   }
   for (const roll of [-1, 100, .5, NaN]) assert.throws(() => investigationItem('forest', roll, 0, 0), /Invalid investigation rolls/);
 });

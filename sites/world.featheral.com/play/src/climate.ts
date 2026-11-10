@@ -55,7 +55,7 @@ export function weeklyClimate(time: number, effect: (environment: Environment) =
   for (let day = 0; day < 7; day++) total += dailyClimate(time + day * worldDayMs, effect);
   return total / 7;
 }
-export function expeditionFindPlan(seed: number, x: number, y: number, startedAt: number, weeks: number) {
+export function expeditionFindPlan(seed: number, x: number, y: number, startedAt: number, weeks: number, squad = false) {
   if (!Number.isSafeInteger(seed) || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)
     || !Number.isInteger(weeks) || weeks < 1 || weeks > 3) throw new RangeError('Invalid expedition find plan.');
   let suitability = 0;
@@ -67,8 +67,8 @@ export function expeditionFindPlan(seed: number, x: number, y: number, startedAt
     return state / 4294967296;
   };
   return {
-    collectible: roll() < clamp(.6 * suitability, .2, .85),
-    collection: 1 + Number(roll() < clamp(.65 * suitability, .15, .9)),
-    activity: Number(roll() < clamp(.85 * suitability, .2, 1)) + Number(roll() < clamp(.25 * suitability, .05, .4)),
+    collectible: roll() < (squad ? clamp(.95 * suitability, .65, 1) : clamp(.8 * suitability, .35, .95)),
+    collection: 1 + Number(roll() < clamp(.85 * suitability, .35, .95)),
+    activity: Number(roll() < clamp(suitability, .45, 1)) + Number(roll() < clamp(.45 * suitability, .15, .65)),
   };
 }

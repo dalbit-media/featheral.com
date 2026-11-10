@@ -151,13 +151,30 @@ export function findActivityItem(account: Account, terrain: Terrain): void {
   const item: ExplorationFind = `activity-${activity}-${weeks}`;
   addPermitFind(account, item);
 }
-export function investigationItem(terrain: Terrain, chance: number, tier: number, category: number): CollectionItem | ActivityItem | undefined {
-  if (![chance, tier, category].every(value => Number.isInteger(value) && value >= 0 && value < 100))
-    throw new RangeError('Invalid investigation rolls.');
-  if (chance >= 10) return undefined;
-  const weeks = tier < 90 ? 1 : 4;
+export const investigationOdds = Object.freeze({
+  solo: Object.freeze({ chance: 25, fourWeek: 15, twelveWeek: 0 }),
+  squad: Object.freeze({ chance: 35, fourWeek: 35, twelveWeek: 10 }),
+});
+export const squadRareFindChance = 40;
+function permitFind(terrain: Terrain, weeks: 1 | 4 | 12, category: number): CollectionItem | ActivityItem {
   return category < 50 ? `collection-${terrainResources[terrain]}-${weeks}`
     : `activity-${activityKinds[Object.keys(terrainDetails).indexOf(terrain) % activityKinds.length]}-${weeks}`;
+}
+function validRolls(...rolls: number[]): void {
+  if (!rolls.every(value => Number.isInteger(value) && value >= 0 && value < 100)) throw new RangeError('Invalid investigation rolls.');
+}
+export function investigationItem(terrain: Terrain, chance: number, tier: number, category: number, squad = false): CollectionItem | ActivityItem | undefined {
+  validRolls(chance, tier, category);
+  const odds = investigationOdds[squad ? 'squad' : 'solo'];
+  if (chance >= odds.chance) return undefined;
+  const weeks = tier < odds.twelveWeek ? 12 : tier < odds.twelveWeek + odds.fourWeek ? 4 : 1;
+  return permitFind(terrain, weeks, category);
+}
+/** Squad expeditions carry an extra rare high-tier permit roll: 75% four-week, 25% twelve-week. */
+export function squadRareFind(terrain: Terrain, chance: number, tier: number, category: number): CollectionItem | ActivityItem | undefined {
+  validRolls(chance, tier, category);
+  if (chance >= squadRareFindChance) return undefined;
+  return permitFind(terrain, tier < 25 ? 12 : 4, category);
 }
 export function addPermitFind(account: Account, item: CollectionItem | ActivityItem): void {
   const bag = inventory(account);

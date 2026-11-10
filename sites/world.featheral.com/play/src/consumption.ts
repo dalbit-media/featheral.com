@@ -146,7 +146,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const cost = investigationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Investigate', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Two idle residents return after one game week. Known terrain is not expanded.',
-          '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.',
+          '25% chance of one permit: 85% one-week tier, 15% four-week tier. No keepsakes or high-tier items.',
           'Costs 10% of the undiscounted concurrent Explore route fee, minimum FTH$0.10 before equipment discounts.',
           ...(activityEquipmentDiscount(game, 'investigation') ? [`Equipped gear reduces investigation fees by ${activityEquipmentDiscount(game, 'investigation')}%. Paid jobs stay unchanged.`] : []),
           'Investigate and Explore share a 1x, 1.5x, 2.25x, 3.375x... route fee multiplier. Each active field team raises the next base fee by 50% at departure.']),
@@ -160,7 +160,8 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           'Investigate and Explore share a 1x, 1.5x, 2.25x, 3.375x... route fee multiplier. Each active field team raises the next base fee by 50% at departure.',
           'Exploration avoids destinations already covered by active or selected surveys. Terrain is revealed only on return.',
           ...(command.activity === 'investigation' ? ['Two idle residents return after one game week. Known terrain is not expanded.',
-            '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.'] : []),
+            'Squad bonus: 35% chance of one permit: 55% one-week, 35% four-week, 10% rare twelve-week tier.'] : [
+            'Squad bonus: more keepsake and customization finds, plus a 40% chance of a rare four-week or twelve-week permit per mission.']),
           'Squad size is a maximum. Available residents, funds and destinations can reduce the dispatched count.']),
         costs: [{ asset: command.item, amount: 1 }, { asset: 'dollars', amount: plan.dollarsUnits / dollarsScale }],
         subject: `${plan.missions.length} / ${squadItems[command.item].quantity} ${command.activity === 'exploration' ? 'exploration' : 'investigation'} missions`,

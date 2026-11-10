@@ -6,7 +6,7 @@ import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/
 import { allocationWeights, balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, isAllocationWeights, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, weightedAllocation, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem, sellableItemCount } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
-import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
+import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory, squadRareFind } from './inventory.ts';
 import { isSettlementEntity } from '../src/settlement-layout.ts';
 import { fthgScale } from '../src/fthg.ts';
 import { dailyWaterPerResident, settlementConsumptionForDays, settlementUpkeep, settlementUpkeepResources, waterConsumptionForDays, waterRequirement, waterUpkeep } from '../src/upkeep.ts';
@@ -463,7 +463,8 @@ export function accrue(account: Account, time: number, captureRelics?: RelicCapt
       }
       account.game.contribution += discovered;
       exploringWorkers -= expedition.workers;
-      note(account.game, `Expedition returned from ${terrainDetails[terrainAt(expedition.x, expedition.y, account.game.seed)].name}. Charted ${discovered} new tiles; ${expedition.workers} residents are available.`);
+      if (expedition.itemFind) addPermitFind(account, expedition.itemFind);
+      note(account.game, `Expedition returned from ${terrainDetails[terrainAt(expedition.x, expedition.y, account.game.seed)].name}. Charted ${discovered} new tiles; ${expedition.workers} residents are available.${expedition.itemFind ? ' The squad also recovered a rare permit.' : ''}`);
     }
     for (const resource of resources) {
       const crew = work.crews[resource];
@@ -679,16 +680,18 @@ export function execute(account: Account, command: Command, realTime = account.u
   if (key) (account.actionReadyAt ??= {})[key] = realTime + actionThrottleMs;
   return message;
 }
-function fieldExpedition(account: Account, activity: SquadActivity, mission: SquadMission): Expedition {
-  const { x, y, weeks } = mission;
+function fieldExpedition(account: Account, activity: SquadActivity, mission: SquadMission, squad = false): Expedition {
+  const { x, y, weeks } = mission, terrain = terrainAt(x, y, account.game.seed);
   if (activity === 'investigation') {
-    const itemFind = investigationItem(terrainAt(x, y, account.game.seed), randomInt(100), randomInt(100), randomInt(100));
+    const itemFind = investigationItem(terrain, randomInt(100), randomInt(100), randomInt(100), squad);
     return { kind: 'investigate', x, y, workers: 2, startedAt: account.updatedAt,
       readyAt: account.updatedAt + worldWeekMs, surveyRadius: 0, ...(itemFind ? { itemFind } : {}) };
   }
+  const itemFind = squad ? squadRareFind(terrain, randomInt(100), randomInt(100), randomInt(100)) : undefined;
   return { x, y, workers: 2, readyAt: account.updatedAt + weeks * worldWeekMs,
     surveyRadius: expeditionSurveyRadius(account.game), dollarReward: 0,
-    ...(physicalAt(account, account.updatedAt) ? { finds: expeditionFindPlan(account.game.seed, x, y, account.updatedAt, weeks) } : {}) };
+    ...(physicalAt(account, account.updatedAt) ? { finds: expeditionFindPlan(account.game.seed, x, y, account.updatedAt, weeks, squad) } : {}),
+    ...(itemFind ? { itemFind } : {}) };
 }
 function executeCommand(account: Account, command: Command, realTime: number,
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
@@ -718,7 +721,7 @@ function executeCommand(account: Account, command: Command, realTime: number,
       const work = workforce(account), plan = planSquad(game, work, command.activity, command.quantity);
       if (plan.missions.length !== command.quantity || plan.dollarsUnits > command.maximumDollars)
         throw new ApiError(409, 'Squad requirements changed. Review the squad and try again.');
-      const missions = plan.missions.map(mission => fieldExpedition(account, command.activity, mission));
+      const missions = plan.missions.map(mission => fieldExpedition(account, command.activity, mission, true));
       pay(game, { dollars: plan.dollarsUnits / dollarsScale });
       bag.items.splice(bag.items.indexOf(command.item), 1);
       work.expeditions.push(...missions);

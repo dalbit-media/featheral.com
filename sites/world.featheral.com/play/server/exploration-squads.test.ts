@@ -99,7 +99,7 @@ test('all four sizes launch the feasible batch, preserving exponential fees, wor
     const account = fixture(), work = account.workforce!, request = command(account, item, 'investigation');
     const plan = planSquad(account.game, work, 'investigation', squadItems[item].quantity);
     assert.ok(request.quantity > 0 && request.quantity <= squadItems[item].quantity);
-    if (squadItems[item].quantity <= 20) assert.equal(request.quantity, squadItems[item].quantity);
+    if (squadItems[item].quantity <= 50) assert.equal(request.quantity, squadItems[item].quantity);
     else assert.ok(request.quantity < squadItems[item].quantity);
     assert.equal(new Set(plan.missions.map(mission => `${mission.x},${mission.y}`)).size, request.quantity);
     assert.equal(plan.dollarsUnits, plan.missions.reduce((sum, mission, index) =>
@@ -138,6 +138,17 @@ test('bulk exploration avoids redundant destinations, respects active routes and
   accrue(account, Math.max(...work.expeditions.map(mission => mission.readyAt)));
   assert.equal(work.expeditions.length, 0);
   assert.ok(account.game.explored.length > before.length);
+});
+test('squad expeditions roll rare high-tier permits that are delivered on return', () => {
+  const account = fixture(), work = account.workforce!, bag = inventory(account);
+  account.game.explored = ['0,0'];
+  bag.items = ['squad-20'];
+  execute(account, command(account, 'squad-20', 'exploration'));
+  const rare = work.expeditions.flatMap(mission => mission.itemFind ? [mission.itemFind] : []);
+  assert.ok(rare.every(item => /-(4|12)$/.test(item)));
+  accrue(account, Math.max(...work.expeditions.map(mission => mission.readyAt)));
+  const after = inventory(account), owned = [...after.items, ...after.pending];
+  for (const item of new Set(rare)) assert.ok(owned.filter(id => id === item).length >= rare.filter(id => id === item).length);
 });
 test('funds, idle residents, targets, missing vouchers, supply shortages and changed confirmations never consume on failure', () => {
   const account = fixture(), work = account.workforce!;

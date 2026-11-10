@@ -332,6 +332,20 @@ test('exploration finds vary by climate and seed, remain bounded and are determi
   assert.throws(() => dailyClimate(-1, effect => effect.temperature), RangeError);
   assert.ok(worldWeekMs > worldDayMs);
 });
+test('exploration drops items frequently and squads find keepsakes more often', () => {
+  let soloKeepsakes = 0, squadKeepsakes = 0, items = 0;
+  for (let seed = 1; seed <= 500; seed++) for (const startedAt of [worldEpoch, worldEpoch + 3 * seasonMs]) {
+    const solo = expeditionFindPlan(seed, 5, 0, startedAt, 1), squad = expeditionFindPlan(seed, 5, 0, startedAt, 1, true);
+    soloKeepsakes += Number(solo.collectible);
+    squadKeepsakes += Number(squad.collectible);
+    items += Number(solo.collectible) + solo.collection + solo.activity;
+    assert.ok(Number(squad.collectible) >= Number(solo.collectible));
+    assert.deepEqual({ ...squad, collectible: solo.collectible }, solo);
+  }
+  assert.ok(items / 1000 >= 3, `average solo finds ${items / 1000}`);
+  assert.ok(soloKeepsakes / 1000 >= .35);
+  assert.ok(squadKeepsakes > soloKeepsakes && squadKeepsakes / 1000 >= .95);
+});
 
 test('weighted allocation splits residents by resource and idle weights and passes full or unexplored shares on', () => {
   const game = newGame(1000000);
