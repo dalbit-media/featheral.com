@@ -146,6 +146,9 @@ cms.setOperationsHandler(async (req, res) => {
 const gameApiOrigin = require("../services/operations/origin").worldOrigin(env, deploymentManifest, port);
 cms.setFthxSettlementSource(api.ledger, keys?.privateKey);
 if (!reader) store = new SqliteStore(path.join(gameDirectory, "game.sqlite"), Date.now, defaultClockSpeed, ledgerFunds(api.ledger, keys.privateKey, reserveEngine));
+if (store) cms.setWorldMarketsSource(store.db, api.ledger);
+else if (fs.existsSync(path.join(gameDirectory, "game.sqlite")))
+  cms.setWorldMarketsSource(require("../services/database/sqlite").open(path.join(gameDirectory, "game.sqlite"), { readOnly: true }), api.ledger);
 const gameApi = store ? createApi(store, gameApiOrigin, worldProfileReader(`http://127.0.0.1:${port}`), "world") : null;
 const dollarGameApi = store ? createApi(store, gameApiOrigin, undefined, "dollar") : null;
 const worldAccounts = reader ? null : require("../services/identity/world-accounts").createWorldAccounts({

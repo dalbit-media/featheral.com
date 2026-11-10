@@ -10,7 +10,7 @@
     root.replaceChildren(info, svg);
     const value = ratio => Number(ratio.numerator) / Number(ratio.denominator);
     const number = n => {
-      const digits = ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[history.currency];
+      const digits = history.source === "world-executed-inventory" ? undefined : ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[history.currency];
       return n.toLocaleString(undefined, digits === undefined ? { maximumSignificantDigits: 7 } : { maximumFractionDigits: digits });
     };
     const add = (tag, attrs, text) => {

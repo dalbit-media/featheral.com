@@ -4,6 +4,28 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
 const site = path.join(__dirname, "../../../sites/ex.featheral.com");
 const script = fs.readFileSync(path.join(site, "workspace.js"), "utf8");
+test("Notes renders World execution charts with fractional prices and honest historical-clock labels", () => {
+  class Element {
+    constructor(tag, value) { this.tag = tag; this.textContent = value || ""; this.children = []; this.attributes = {}; }
+    append(...children) { this.children.push(...children); }
+    setAttribute(name, value) { this.attributes[name] = value; }
+    get text() { return this.textContent + this.children.map(node => node.text).join(" "); }
+  }
+  const source = fs.readFileSync(path.join(__dirname, "../../../shared/creation.js"), "utf8");
+  const trend = vm.runInNewContext(source.slice(source.indexOf("function priceTrend("), source.indexOf("let token =")) + ";priceTrend;", {
+    el: (tag, value) => new Element(tag, value), noteColors: {},
+    document: { querySelector: () => ({ value: "24h" }), createElementNS: (_ns, tag) => new Element(tag) },
+  });
+  const price = { numerator: "1", denominator: "1000000000", currency: "FTHX" };
+  const card = trend({ symbol: "WORLD:wood", inventoryOnly: true, price,
+    history: { interval: "all", clocks: ["historical-game-clock"], currency: "FTHX", from: 1000, to: 2000, points: [{ at: 1000, ...price }] } });
+  assert.match(card.text, /0\.000000001 FTHX/);
+  assert.match(card.text, /Latest recorded/);
+  const svg = card.children.find(node => node.tag === "svg");
+  assert.match(svg.attributes["aria-label"], /All recorded history \(legacy game clock\)/);
+  assert.doesNotMatch(svg.attributes["aria-label"], /pool spot/);
+  assert.ok(svg.children.every(node => !Object.values(node.attributes).some(value => String(value).includes("NaN"))));
+});
 function fixture(hash = "") {
   const location = { hash }, events = {};
   const panels = ["trade", "pools", "portfolio", "activity", "pools"].map((name, i) => ({
@@ -22,7 +44,8 @@ function fixture(hash = "") {
     document: {
       querySelector: () => list,
       querySelectorAll: selector => selector === "[data-exchange-tab]" ? tabs : panels,
-      getElementById: id => targets.has(id) ? { closest: () => targets.get(id) } : null,
+      getElementById: id => id === "world-market-activity" ? { closest: selector => selector === "#world-market-activity" ? {} : null }
+        : targets.has(id) ? { closest: selector => selector === "[data-exchange-panel]" ? targets.get(id) : null } : null,
     },
     location, history: { replaceState(_state, _title, url) { location.hash = url; } }, Event: class {},
     window: { addEventListener(name, callback) { events[name] = callback; }, dispatchEvent() {} },
@@ -64,4 +87,16 @@ test("Notes keeps native charts and recorded history above volume-ranked communi
   assert.ok(html.indexOf("data-market-activity") < html.indexOf('id="trending-notes"'));
   assert.match(html, /data-market-interval="all"/);
   assert.doesNotMatch(html, /<details[^>]*>.*Native circulation/);
+});
+test("World activity remains above every workspace and its deep link preserves the active tab", () => {
+  const html = fs.readFileSync(path.join(site, "index.html"), "utf8");
+  assert.ok(html.indexOf('id="world-market-activity"') < html.indexOf('id="workspace-trade"'));
+  assert.match(html, /data-market-view="overview" data-market-source="world"/);
+  assert.match(html, /href="#world-market-activity"/);
+  const initial = fixture("#world-market-activity");
+  assert.equal(initial.tabs[0]["aria-selected"], "true");
+  const ui = fixture("#liquidity-network");
+  ui.location.hash = "#world-market-activity"; ui.events.hashchange();
+  assert.equal(ui.tabs[2]["aria-selected"], "true");
+  assert.ok(ui.panels.filter(panel => !panel.hidden).every(panel => panel.dataset.exchangePanel === "pools"));
 });

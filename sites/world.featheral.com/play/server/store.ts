@@ -171,6 +171,7 @@ export class SqliteStore implements Store {
   transaction<T>(token: string, operation: (session: Session, now: number, realTime: number, exchange: Exchange, owner: string) => T): T {
     this.funds?.sync();
     const before = this.funds?.balances();
+    const tradesBefore = this.funds?.tradeSnapshot();
     let committed = false;
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -197,7 +198,7 @@ export class SqliteStore implements Store {
         if (game.federation) this.addPopulation(`federation:${game.federation}`, game.population);
       }
       this.db.prepare('UPDATE sessions SET expires=?,data = ? WHERE id = ?').run(session.expires, JSON.stringify(session), id);
-      const commitId = before ? this.funds!.stage(before) : null;
+      const commitId = before ? this.funds!.stage(before, tradesBefore, realTime) : null;
       this.db.exec('COMMIT');
       committed = true;
       this.funds?.settle(commitId);

@@ -22,15 +22,18 @@
     </section>
     <p id="terminal-status" role="status" aria-live="polite"></p>
     <p id="recovery-notice" role="status" aria-live="polite" hidden></p>
+    <section id="world-market-activity" data-market-activity data-market-view="overview" data-market-source="world" aria-label="World market activity"></section>
     <div id="workspace-trade" data-exchange-panel="trade" aria-labelledby="tab-trade">
     <section id="terminal" class="terminal-grid">
       <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol"></label><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
       <section class="chart-panel panel">
-        <div class="chart-toolbar"><div><h2 id="market-title">FTH$ / FTHX</h2><strong id="spot-price">Loading price...</strong><small id="usd-price"></small></div><label>Timeframe<select id="chart-interval"><option value="1h">1h / 5m candles</option><option value="24h" selected>24h / 1h candles</option><option value="7d">7d / 6h candles</option><option value="30d">30d / 1d candles</option></select></label><button id="refresh-market" type="button">Refresh</button></div>
+        <div class="chart-toolbar"><div><h2 id="market-title">FTH$ / FTHX</h2><strong id="spot-price">Loading price...</strong><small id="usd-price"></small></div><label>Timeframe<select id="chart-interval"><option value="1h">1h / 5m candles</option><option value="24h" selected>24h / 1h candles</option><option value="7d">7d / 6h candles</option><option value="30d">30d / 1d candles</option><option value="all">All history / daily candles</option></select></label><button id="refresh-market" type="button">Refresh</button></div>
         <div class="chart-tools"><label><input id="chart-sma" type="checkbox" checked> SMA 20</label><button id="chart-reset" type="button">Reset zoom</button><button id="chart-fullscreen" type="button">Fullscreen</button><span>Scroll to zoom / drag to pan</span></div>
         <div id="candle-chart"></div>
+        <p class="workspace-hint">This chart shows executed pool prices only. Game purchases and sales are shown in <a href="#world-market-activity">World market activity above</a> and the <a href="#network-activity">full financial records</a>, even when this pool is unfunded.</p>
         <div class="chart-legend"><span class="legend-up">Upward / flat close</span><span class="legend-down">Downward close</span><span class="legend-average">SMA 20</span><span>Executed data only</span></div>
         <p id="market-detail" class="muted"></p><p id="reference-detail" class="muted"></p>
+        <div id="world-executions" hidden><a id="world-trade-link" href="https://world.featheral.com/market/">Trade inventory in World</a><div class="table-wrap"><table><caption>Executed World inventory trades · latest 100 in selected interval</caption><thead><tr><th>Time / clock</th><th>Quantity</th><th>Price (FTHX/item)</th><th>FTHX notional</th><th>Original FTH$ paid</th><th>Venue</th><th>Record / settlement</th></tr></thead><tbody id="world-trade-records"></tbody></table></div></div>
       </section>
       <section class="order-panel panel"><div class="order-heading"><h2>Spot order</h2><span class="status-tag">AMM</span></div><p>No leverage. 0.3% fee per pool. Pool prices move with supply and demand.</p>
         <p id="market-mode" role="status"></p>

@@ -10,6 +10,77 @@ const { activity, readRows, options, liquidity, trades } = require("../../notes/
 const { activityRows } = require("../../fth-ledger/activity");
 const { FthLedger } = require("../../fth-ledger/ledger");
 const { ledgerFunds, SYSTEM_TREASURY_ACCOUNT } = require("../../notes/game-funds");
+test("shared trade tape honors inventory quantity and FTHX base-unit decimals without multiplying displayed notional", async () => {
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.listeners = {}; this.classList = { add() {} }; this.isConnected = true; }
+    append(...children) { for (const child of children) { this.children.push(child); child.parentElement = this; } }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    setAttribute() {}
+    addEventListener(name, callback) { this.listeners[name] = callback; }
+    get options() { return this.children; }
+    get text() { return (this.textContent || "") + this.children.map(child => child.text).join(" "); }
+  }
+  const root = new Element("section"), errors = [], now = Date.now();
+  root.dataset.marketView = "activity";
+  require("node:vm").runInNewContext(fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8"), {
+    document: { querySelectorAll: () => [root], createElement: tag => new Element(tag), createElementNS: (_ns, tag) => new Element(tag) },
+    fetch: async url => ({ ok: true, json: async () => url.includes("market-tape") ? { description: "Executed inventory trades.", rows: [{
+      symbol: "WORLD:wood", ticker: "WOOD", from: "WORLD:wood", to: "FTHX", fromDecimals: 0, toDecimals: 18, at: now,
+      amount: "3", output: "10000000000000000", venue: "world-system", id: "world:market:1", settlement: "historical-recorded",
+    }] } : { from: now - 86400000, to: now, rows: [], summary: [], buckets: [], coverage: {} } }),
+    URLSearchParams, AbortController, Date, console: { error: (...args) => errors.push(args) }, setInterval() {}, clearInterval() {},
+  });
+  await new Promise(setImmediate);
+  assert.equal(errors.length, 0);
+  assert.match(root.text, /WOOD\/FTHX/);
+  assert.match(root.text, /3 WOOD/);
+  assert.match(root.text, /0\.01 FTHX/);
+  assert.match(root.text, /world-system \/ world:market:1 \/ historical-recorded/);
+  assert.doesNotMatch(root.text, /10,000,000,000,000,000 FTHX/);
+});
+test("World overview renders complete historical counts and charts without depending on executable pools or trade tape", async () => {
+  class Element {
+    constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.dataset = {}; this.listeners = {}; this.classList = { add() {} }; this.isConnected = true; }
+    append(...children) { for (const child of children) { this.children.push(child); child.parentElement = this; } }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    setAttribute(name, value) { this.attributes[name] = value; }
+    addEventListener(name, callback) { this.listeners[name] = callback; }
+    get options() { return this.children; }
+    get text() { return (this.textContent || "") + this.children.map(child => child.text).join(" "); }
+  }
+  const root = new Element("section");
+  root.dataset = { marketView: "overview", marketSource: "world" };
+  const requests = [], errors = [], timers = [];
+  let failed = false;
+  const now = Date.now(), data = { from: now - 86400000, to: now, bucketMs: 86400000, rows: [],
+    summary: [{ symbol: "FTH$", source: "world", recordType: "transaction", events: 6064, credits: "1000000000000000000", debits: "1000000000000000000" }],
+    buckets: [{ symbol: "FTH$", source: "world", recordType: "transaction", at: now - 86400000, events: 6064, credits: "1000000000000000000", debits: "1000000000000000000" }],
+    coverage: { world: "Sealed settlements." }, partial: false };
+  require("node:vm").runInNewContext(fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8"), {
+    document: { querySelectorAll: () => [root], createElement: tag => new Element(tag), createElementNS: (_ns, tag) => new Element(tag) },
+    fetch: async url => { requests.push(url); if (failed) throw Error("World reader offline"); return { ok: true, json: async () => data }; },
+    URLSearchParams, AbortController, Date, console: { error: (...args) => errors.push(args) },
+    setInterval: callback => { timers.push(callback); return 1; }, clearInterval() {},
+  });
+  await new Promise(setImmediate);
+  assert.equal(requests.length, 1);
+  const query = new URL(requests[0], "https://ex.featheral.com").searchParams;
+  assert.equal(query.get("source"), "world");
+  assert.equal(query.get("interval"), "all");
+  assert.match(root.text, /6,064 ledger records across 1 separate currency\/source series/);
+  assert.match(root.text, /FTH\$ \/ world \/ transaction/);
+  assert.equal(root.children.find(child => child.tag === "a").href, "#network-activity");
+  const charts = root.children.find(child => child.children.some(card => card.children.some(node => node.tag === "svg")));
+  assert.ok(charts);
+  assert.ok(charts.children[0].children.find(node => node.tag === "svg").attributes["aria-label"].includes("not prices"));
+  assert.equal(root.children.some(child => child.tag === "table"), false);
+  failed = true;
+  root.children.find(child => child.children.some(node => node.tag === "button")).children.find(child => child.tag === "button").listeners.click();
+  await new Promise(setImmediate);
+  assert.match(root.text, /Activity unavailable: World reader offline/);
+  assert.equal(errors.length, 1);
+  assert.ok(charts.children.length, "A failed refresh retains the labeled stale chart.");
+});
 function fixture(t) {
   const notes = new Notes(":memory:"), creation = new Creation(notes, { list: () => [] });
   const exchange = new Exchange(creation), trading = new Trading(creation, exchange);

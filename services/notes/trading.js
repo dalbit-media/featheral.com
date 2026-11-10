@@ -99,6 +99,8 @@ class Trading {
     });
   }
   quote(input) {
+    if (typeof input?.symbol === "string" && input.symbol.startsWith("WORLD:"))
+      throw fail(409, "World inventory trades must be placed in World. Inventory assets are not wallet notes.");
     this.ready();
     if (input?.symbol !== "FTH$") {
       const amount = Number(positive(input?.amount));

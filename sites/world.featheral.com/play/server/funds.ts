@@ -17,6 +17,7 @@ export interface FundRequest {
   at: number; error?: string;
 }
 interface StoredFundRequest extends FundRequest { signature?: string; commitId?: number }
+export interface TradeSnapshot { fills: number; equipment: Set<number> }
 export interface WalletView { accountId: string; wallet: string | null; available: string }
 export interface FundView extends WalletView {
   mode: 'guest' | 'legacy-direct' | 'separate'; walletAvailable: string | null; requests: FundRequest[];
@@ -59,6 +60,8 @@ export class GameFunds {
       CREATE TABLE IF NOT EXISTS session_aliases (token TEXT PRIMARY KEY, owner TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS revoked_fund_sessions (token TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS fund_commits (id INTEGER PRIMARY KEY AUTOINCREMENT, transaction_data TEXT NOT NULL, settled INTEGER NOT NULL DEFAULT 0)`);
+    db.exec(`CREATE TABLE IF NOT EXISTS world_trade_settlements (
+      venue TEXT NOT NULL,fill INTEGER NOT NULL,commit_id INTEGER REFERENCES fund_commits(id),executed_at INTEGER NOT NULL,PRIMARY KEY(venue,fill))`);
     db.exec('CREATE TABLE IF NOT EXISTS fund_pool_seeds (asset TEXT PRIMARY KEY, quantity INTEGER NOT NULL)');
     if (!db.prepare('PRAGMA table_info(fund_wallets)').all().some(column => column.name === 'mode'))
       db.exec("ALTER TABLE fund_wallets ADD COLUMN mode TEXT NOT NULL DEFAULT 'legacy-direct' CHECK(mode IN ('legacy-direct','separate'))");
@@ -240,7 +243,14 @@ export class GameFunds {
       result.set(gameFundAccount('escrow', String(row.owner)), Number(row.dollars));
     return result;
   }
-  stage(before: Map<string, number>): number | null {
+  tradeSnapshot(): TradeSnapshot {
+    const maximum = (table: string, key: string): number => this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      ? Number(this.db.prepare(`SELECT COALESCE(MAX(${key}),0) AS id FROM ${table}`).get()!.id) : 0;
+    const equipment = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='enhancement_sales'").get()
+      ? this.db.prepare('SELECT listingId FROM enhancement_sales').all().map(row => Number(row.listingId)) : [];
+    return { fills: maximum('market_fills', 'id'), equipment: new Set(equipment) };
+  }
+  stage(before: Map<string, number>, trades?: TradeSnapshot, executedAt = Date.now()): number | null {
     const after = this.balances();
     const entries: FundEntry[] = [];
     for (const account of new Set([...before.keys(), ...after.keys()])) {
@@ -249,9 +259,15 @@ export class GameFunds {
       const delta = BigInt(next) - BigInt(previous);
       if (delta) entries.push({ account, delta: (delta * BASE_UNITS_PER_GAME_UNIT).toString() });
     }
-    if (!entries.length) return null;
-    const transaction = this.ledger.prepare(entries);
-    return Number(this.db.prepare('INSERT INTO fund_commits(transaction_data) VALUES(?)').run(JSON.stringify(transaction)).lastInsertRowid);
+    const transaction = entries.length ? this.ledger.prepare(entries) : null;
+    const commit = transaction ? Number(this.db.prepare('INSERT INTO fund_commits(transaction_data) VALUES(?)').run(JSON.stringify(transaction)).lastInsertRowid) : null;
+    if (trades) {
+      this.db.prepare("INSERT INTO world_trade_settlements SELECT 'market',id,?,? FROM market_fills WHERE id>?").run(commit, executedAt, trades.fills);
+      const link = this.db.prepare("INSERT INTO world_trade_settlements VALUES ('equipment',?,?,?)");
+      for (const row of this.db.prepare('SELECT listingId FROM enhancement_sales').all())
+        if (!trades.equipment.has(Number(row.listingId))) link.run(row.listingId!, commit, executedAt);
+    }
+    return commit;
   }
   settle(id: number | null): void {
     if (id !== null) this.recover();

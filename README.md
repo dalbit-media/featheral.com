@@ -397,10 +397,57 @@ seconds; browsing older pages pauses automatic refresh. Windows cover 1h, 24h,
 7d, 30d or all recorded history. Activity charts cover the entire selected window, not just the current
 50-record page. Amounts and aggregates use exact base-unit strings.
 
+Exchange also keeps a World market-activity overview above every workspace,
+including Trade. It defaults to all recorded World financial history and shows
+source-separated activity-count charts even when every AMM is unfunded. Its
+record totals are not exchange volume or unique purchases; debit/credit legs and
+backing postings remain separately labeled. The price chart links directly to
+this overview and the full financial records rather than implying no game activity.
+
+World inventory executions also have genuine, separate **asset/FTHX markets**:
+WOOD/FTHX, WATER/FTHX, METAL/FTHX, OIL/FTHX and other assets with recorded fills.
+They are namespaced `WORLD:asset` and labeled World inventory, not wallet-note
+AMMs. No inventory item is equated with an existing FTH note just because its
+name or initials match; FTHG remains Ethereum Gold and FTHS remains Silver/Salary.
+Enhanced equipment is separated by item and enhancement level.
+
+The source is World's existing `market_fills` and completed enhancement sales.
+Exact FTHX notional is the actual paid game amount times `10^16` base units
+(four-decimal FTH$ gameplay units, at the internal 100 FTHX/FTH$ denomination);
+prices and OHLC use that paid total divided by actual item quantity, never a
+floating-point quote. This does not invent an FTH$/FTHX currency swap, redeemable
+inventory tokens, or funded AMM liquidity. These trades cannot be submitted to
+the note-order API; the execution table links back to the World marketplace.
+When no AMM is executable, Exchange initially selects the highest-volume World
+pair, unless the URL explicitly selects another market.
+
+New execution links and their wall-clock timestamps are saved in the same World
+SQLite transaction as inventory fills and the signed fund-commit journal.
+Unsettled fills stay hidden until recovery seals the original Dollar transaction;
+retries publish the same stable execution ID, not another trade. Zero-net monetary
+transactions remain labeled netted inventory fills. Legacy records without such
+links are explicitly historical/denominated, not falsely assigned a settlement
+hash or retroactive backing proof. Their original accelerated game-clock times
+are preserved in all-history charts and excluded from rolling wall-clock volumes.
+History-only pairs initially show **All history**, clearly labeled; Notes shows
+their full recorded chart rather than an empty recent window. World cards rank
+by exact 24-hour execution notional, with lifetime recorded notional as a tie-break.
+AMM liquidity and volume counters remain separate.
+
+`GET /api/creation/world-markets` returns this separate catalog;
+`GET /api/creation/world-markets/:asset/history?interval=all` supplies executed
+inventory OHLC, and `GET /api/creation/world-trades?asset=wood&interval=all`
+returns the latest 100 matching public records. Record amounts are exact strings
+with explicit decimals, venue, clock and settlement provenance, but no owners,
+signatures or private inventory/session data. These reads use the writer's World
+database, or an available read-only World snapshot on a replica; an unattached
+source is explicitly unavailable rather than an empty synchronized market.
+
 `GET /api/creation/activity` accepts `interval`, `symbol`, `source`, `limit`
 (1-100) and the returned `cursor`; keep filters unchanged when paging.
-`GET /api/creation/market-tape` returns up to 100 actual pool legs for `interval`
-and optional `symbol`. `GET /api/creation/liquidity` reports reconciled reserves,
+`GET /api/creation/market-tape` returns up to 100 actual pool legs and separately
+labeled World inventory executions for `interval` and optional `symbol`
+(including `WORLD:wood`). `GET /api/creation/liquidity` reports reconciled reserves,
 initial note-funding targets and recovery/writer availability; it never moves
 funds. Initial targets are not an instruction to rebalance healthy pools after
 trades. Dollar initial funding still requires explicit approval of both amounts.

@@ -235,6 +235,10 @@ const trading = creation ? new (require('../notes/trading').Trading)(creation, d
 let dollarWalletReader;
 let dollarActivityReader;
 app.setMarketActivity = reader => { dollarActivityReader = reader; };
+let worldMarkets;
+app.setWorldMarketsSource = (db, ledger) => { worldMarkets = new (require('../notes/world-markets').WorldMarkets)(db, ledger); };
+const worldCoverage = () => ({ available: Boolean(worldMarkets),
+  description: worldMarkets ? require('../notes/world-markets').description : 'World execution database is not connected on this node.' });
 let portfolioGoldReader;
 let walletSourceReader;
 app.setPortfolioGold = reader => { portfolioGoldReader = reader; };
@@ -445,7 +449,7 @@ creationRouter.get('/economy/reference', wrap(async (req, res) => {
 }));
 creationRouter.get('/trending', wrap((req, res) => {
   const interval = req.query.interval || '24h';
-  if (!['1h', '24h', '7d', '30d'].includes(interval)) throw Object.assign(new Error('Choose a supported chart interval.'), { status: 400 });
+  if (!['1h', '24h', '7d', '30d', 'all'].includes(interval)) throw Object.assign(new Error('Choose a supported chart interval.'), { status: 400 });
   const symbols = new Set(creation.markets.catalog().map(market => market.symbol));
   const pair = dollarExchange.market(interval), pairVolume = Number(pair.volumeFthx);
   if (!Number.isSafeInteger(pairVolume)) throw Object.assign(new Error('FTHX trading volume exceeds safe unit limits.'), { status: 409 });
@@ -456,7 +460,9 @@ creationRouter.get('/trending', wrap((req, res) => {
     return { ...note, ...native, volume,
       history: native?.history || (symbols.has(note.symbol) ? creation.markets.history(note.symbol, interval) : null) };
   }).sort((a, b) => b.volume - a.volume || a.symbol.localeCompare(b.symbol));
-  res.json({ notes, dollarPair: pair, noteCost: 1000, siteCost: 500 });
+  res.json({ notes, dollarPair: pair, noteCost: 1000, siteCost: 500,
+    worldMarkets: worldMarkets ? worldMarkets.overview(interval) : [],
+    worldCoverage: worldCoverage() });
 }));
 creationRouter.get('/markets', wrap((req, res) => res.json({ markets: creation.markets.catalog() })));
 creationRouter.get('/activity', wrap((req, res) => {
@@ -475,7 +481,30 @@ creationRouter.get('/settlement', wrap((req, res) => {
 }));
 creationRouter.get('/market-tape', wrap((req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json(require('../notes/activity').trades(creation, req.query));
+  const isWorld = typeof req.query.symbol === 'string' && req.query.symbol.startsWith('WORLD:');
+  const pool = require('../notes/activity').trades(creation, isWorld ? { ...req.query, symbol: 'FTHX' } : req.query);
+  const world = worldMarkets && (!req.query.symbol || req.query.symbol === 'FTHX' || isWorld)
+    ? worldMarkets.tape({ interval: req.query.interval, asset: isWorld ? req.query.symbol.slice(6) : '' }).rows
+      .map(row => ({ ...row, from: row.symbol, to: 'FTHX', amount: row.quantity, output: row.quoteAmount,
+        fromDecimals: 0, toDecimals: 18 })) : [];
+  res.json({ rows: [...(isWorld ? [] : pool.rows), ...world].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id)).slice(0, 100),
+    description: pool.description + ' World inventory fills are separate executed trades denominated in FTHX, not internal note-pool swaps.',
+    worldCoverage: worldCoverage() });
+}));
+creationRouter.get('/world-markets', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!worldMarkets) throw Object.assign(new Error(worldCoverage().description), { status: 503 });
+  res.json({ markets: worldMarkets.catalog(), coverage: worldCoverage() });
+}));
+creationRouter.get('/world-markets/:asset/history', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!worldMarkets) throw Object.assign(new Error(worldCoverage().description), { status: 503 });
+  res.json(worldMarkets.history(req.params.asset, req.query.interval));
+}));
+creationRouter.get('/world-trades', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!worldMarkets) throw Object.assign(new Error(worldCoverage().description), { status: 503 });
+  res.json(worldMarkets.tape(req.query));
 }));
 creationRouter.get('/markets/:symbol/history', wrap((req, res) => res.json(creation.markets.history(req.params.symbol, req.query.interval))));
 creationRouter.get('/markets/account', wrap((req, res) => res.json(creation.markets.account(creationOwner(req)))));
@@ -495,7 +524,8 @@ creationRouter.get('/trading/operations/:requestId', wrap((req, res) => res.json
 creationRouter.get('/trading/markets', wrap(async (req, res) => {
   const pair = dollarExchange.market(req.query.interval || '24h');
   const reference = await walletPortfolio([{ symbol: 'FTH$', balance: '1000000000000000000' }], {});
-  res.json({ markets: [pair.notes[0], ...creation.markets.catalog()], pair, reference });
+  res.json({ markets: [pair.notes[0], ...creation.markets.catalog(), ...(worldMarkets?.catalog() || [])],
+    pair, reference, worldCoverage: worldCoverage() });
 }));
 for (const method of ['deposit', 'withdraw', 'trade']) {
   creationRouter.post(`/trading/${method}`, wrap((req, res) => res.json(trading[method](creationOwner(req), req.body))));

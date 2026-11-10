@@ -38,7 +38,8 @@
   }
   function priceTrend(note) {
     const interval = document.querySelector("#note-chart-interval").value;
-    const range = {
+    const range = note.inventoryOnly && note.history?.interval === "all"
+      ? { label: "All recorded history" + (note.history.clocks?.includes("historical-game-clock") ? " (legacy game clock)" : ""), start: "Earliest", samples: 30 } : {
       "1h": { label: "1-hour", start: "1h ago", samples: 13 },
       "24h": { label: "24-hour", start: "24h ago", samples: 24 },
       "7d": { label: "7-day", start: "7d ago", samples: 28 },
@@ -51,13 +52,23 @@
     const caption = el("figcaption");
     const formatPrice = ratio => {
       const numerator = BigInt(ratio.numerator), denominator = BigInt(ratio.denominator);
-      const digits = ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[ratio.currency || "FTHX"] ?? 18;
+      let digits = ({ "FTH$": 2, FTHG: 4, FTHS: 4, FTHX: 2 })[ratio.currency || "FTHX"] ?? 18;
+      if (note.inventoryOnly) {
+        const whole = numerator / denominator;
+        digits = Math.max(0, 6 - whole.toString().length);
+        if (whole === 0n) {
+          digits = 0;
+          while (digits < 18 && numerator * 10n ** BigInt(digits) < denominator) digits++;
+          digits = Math.min(18, digits + 5);
+        }
+      }
       const scale = 10n ** BigInt(digits), rounded = (numerator * scale + denominator / 2n) / denominator;
       const fraction = (rounded % scale).toString().padStart(digits, "0").replace(/0+$/, "");
       return (rounded / scale).toLocaleString() + (fraction ? "." + fraction : "");
     };
     const price = el("span", note.price ? `${formatPrice(note.price)} ${note.price.currency || "FTHX"}` : "No market price", "note-price");
-    price.title = "Current pool spot ratio. Executable swaps include price impact and a 0.3% pool fee.";
+    price.title = note.inventoryOnly ? `Last executed World inventory price, rounded for display. Exact FTHX/item ratio: ${note.price?.numerator}/${note.price?.denominator}. Not a wallet-note AMM spot quote.`
+      : "Current pool spot ratio. Executable swaps include price impact and a 0.3% pool fee.";
     caption.append(price);
     if (change !== null) caption.append(el("span", `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`, change >= 0 ? "note-change positive" : "note-change negative"));
     chart.append(caption);
@@ -68,7 +79,7 @@
     const low = Math.min(...prices) * 0.98, high = Math.max(...prices) * 1.02;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 360 160"); svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", `${note.symbol}: executed ${range.label} prices in ${note.history.currency || "FTHX"}. Current price is the pool spot ratio, not a guaranteed quote.`);
+    svg.setAttribute("aria-label", `${note.symbol}: executed ${range.label} prices in ${note.history.currency || "FTHX"}. ${note.inventoryOnly ? "Last-fill inventory price, not a wallet-note AMM." : "Current price is the pool spot ratio, not a guaranteed quote."}`);
     const shape = (tag, attrs) => {
       const node = document.createElementNS(svg.namespaceURI, tag);
       for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -87,7 +98,7 @@
     });
     if (coordinates.length === 1) shape("circle", { cx: coordinates[0][0], cy: coordinates[0][1], r: 3, fill: noteColors[note.symbol.slice(-1)] || "#a855d7" });
     shape("text", { x: 8, y: 154 }).textContent = range.start;
-    shape("text", { x: 352, y: 154, "text-anchor": "end" }).textContent = "Now";
+    shape("text", { x: 352, y: 154, "text-anchor": "end" }).textContent = note.inventoryOnly && note.history.interval === "all" ? "Latest recorded" : "Now";
     chart.append(svg);
     return chart;
   }
@@ -468,6 +479,25 @@
     const request = ++trendRequest;
     const data = await api(`/trending?interval=${document.querySelector("#note-chart-interval").value}`);
     if (request !== trendRequest) return;
+    const worldGrid = document.querySelector("#world-markets"), worldStatus = document.querySelector("#world-market-coverage");
+    if (worldGrid) {
+      worldGrid.replaceChildren();
+      worldStatus.textContent = data.worldCoverage?.description || "World execution database is not connected on this node.";
+      for (const market of data.worldMarkets || []) {
+        const card = el("article", "", "note-trending");
+        card.append(el("h3", `${market.ticker} / FTHX`), el("p", `${market.name} · World inventory, not a wallet note`),
+          priceTrend(market), el("p", `${market.recordedTrades.toLocaleString()} recorded trades`));
+        for (const [label, raw] of [["24h World notional", market.volumeBaseUnits], ["All recorded notional", market.recordedVolumeBaseUnits]]) {
+          const scale = 10n ** 18n, volume = BigInt(raw), fraction = (volume % scale).toString().padStart(18, "0").replace(/0+$/, "");
+          card.append(el("p", `${label} · ${(volume / scale).toLocaleString()}${fraction ? "." + fraction : ""} FTHX`, "note-volume"));
+        }
+        const link = el("a", "View executed pair and trade records");
+        link.href = hostUrl("ex") + "?market=" + encodeURIComponent(market.marketId);
+        card.append(link); worldGrid.append(card);
+      }
+      if (!worldGrid.childElementCount && data.worldCoverage?.available)
+        worldGrid.append(el("p", "No recorded World inventory fills yet."));
+    }
     const grid = document.querySelector("#trending-notes"), nativeGrid = document.querySelector("#native-notes");
     grid.replaceChildren(); nativeGrid?.replaceChildren();
     const formatSupply = (raw, decimals) => {

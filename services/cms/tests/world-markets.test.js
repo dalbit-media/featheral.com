@@ -1,0 +1,151 @@
+"use strict";
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const sqlite = require("../../database/sqlite");
+const { WorldMarkets } = require("../../notes/world-markets");
+function fixture(t) {
+  const db = sqlite.open(":memory:");
+  t.after(() => db.close());
+  db.exec(`CREATE TABLE market_fills(id INTEGER PRIMARY KEY,asset TEXT,quantity INTEGER,dollars INTEGER,price REAL,time INTEGER,venue TEXT,buyer TEXT,seller TEXT);
+    CREATE TABLE fund_commits(id INTEGER PRIMARY KEY,transaction_data TEXT,settled INTEGER);
+    CREATE TABLE world_trade_settlements(venue TEXT,fill INTEGER,commit_id INTEGER,executed_at INTEGER,PRIMARY KEY(venue,fill));
+    CREATE TABLE enhancement_listings(id INTEGER PRIMARY KEY,equipment TEXT);
+    CREATE TABLE enhancement_sales(listingId INTEGER PRIMARY KEY,buyer TEXT,seller TEXT,dollars INTEGER,time INTEGER);`);
+  const add = (id, asset, quantity, dollars, time) => db.prepare("INSERT INTO market_fills VALUES (?,?,?,?,0,?,'system','private-buyer','private-seller')")
+    .run(id, asset, quantity, dollars, time);
+  const ledger = { ids: new Map(), findTx: () => ({ location: { h: 12, i: 0 } }),
+    fthxSettlement: { summary: () => ({ synchronized: true }) } };
+  return { db, add, ledger, reader: new WorldMarkets(db, ledger) };
+}
+test("real World fills become isolated item/FTHX pairs with exact paid-amount candles, never FTH currency swap executions", t => {
+  const { reader, add } = fixture(t), now = Date.now(), at = Math.floor(now / 3600000) * 3600000 + 1;
+  add(1, "wood", 2, 30000, at);
+  add(2, "wood", 1, 20000, at + 1);
+  add(3, "water", 7, 1, at + 2);
+  const markets = reader.catalog(now), wood = markets.find(m => m.asset === "wood");
+  assert.equal(wood.symbol, "WORLD:wood");
+  assert.equal(wood.ticker, "WOOD");
+  assert.equal(wood.funded, false);
+  assert.equal(wood.inventoryOnly, true);
+  assert.equal(wood.recordedTrades, 2);
+  assert.deepEqual(wood.price, { numerator: "200000000000000000000", denominator: "1000000000000000000", currency: "FTHX" });
+  const history = reader.history("wood", "all", now), candle = history.candles[0];
+  assert.equal(candle.trades, 2);
+  assert.equal(BigInt(candle.open.numerator) / BigInt(candle.open.denominator), 150n);
+  assert.equal(BigInt(candle.high.numerator) / BigInt(candle.high.denominator), 200n);
+  assert.equal(BigInt(candle.low.numerator) / BigInt(candle.low.denominator), 150n);
+  assert.equal(candle.baseVolume, "3");
+  assert.equal(history.baseVolumeDecimals, 0);
+  assert.equal(history.quoteVolumeDecimals, 18);
+  assert.equal(candle.quoteVolume, "500000000000000000000");
+  const tape = reader.tape({ interval: "all" }, now);
+  assert.equal(tape.rows[0].quoteAmount, "10000000000000000");
+  assert.doesNotMatch(JSON.stringify({ markets, history, tape }), /private-buyer|private-seller/);
+  assert.match(tape.description, /not retroactive currency swaps/);
+  assert.ok(markets.every(m => !["FTHG", "FTHS", "FTHW", "FTHM"].includes(m.symbol)));
+});
+test("unsettled fills are hidden until their original signed settlement is durable; retries cannot duplicate a fill", t => {
+  const { db, reader, add, ledger } = fixture(t), now = Date.now();
+  add(1, "wood", 1, 1, now - 1);
+  db.prepare("INSERT INTO fund_commits VALUES (1,?,0)").run(JSON.stringify({ i: "game:fixture" }));
+  db.prepare("INSERT INTO world_trade_settlements VALUES ('market',1,1,?)").run(now - 1);
+  assert.equal(reader.tape({ interval: "all" }).rows.length, 0);
+  db.exec("UPDATE fund_commits SET settled=1");
+  assert.equal(reader.tape({ interval: "all" }).rows.length, 0, "A copied commit flag alone cannot invent a sealed source transaction.");
+  ledger.ids.set("game:fixture", "0x" + "ab".repeat(32));
+  const trade = reader.tape({ interval: "all" }).rows[0];
+  assert.equal(trade.settlement, "sealed-dollar-settlement");
+  assert.equal(trade.backing, "locked-fthx-settlement");
+  assert.equal(trade.settlementHash, "0x" + "ab".repeat(32));
+  assert.equal(reader.tape({ interval: "all" }).rows.length, 1);
+  assert.equal(reader.tape({ interval: "all" }).rows.length, 1);
+  assert.equal(reader.catalog()[0].volumeBaseUnits, "10000000000000000");
+});
+test("historical accelerated game-clock trades remain visible in all history without inventing wall-clock times or 24h volumes", t => {
+  const { reader, add } = fixture(t), now = Date.now(), future = now + 365 * 86400000;
+  add(1, "oil", 1, 10000, future);
+  assert.equal(reader.catalog(now)[0].volumeBaseUnits, "0");
+  const trade = reader.tape({ interval: "all" }, now).rows[0];
+  assert.equal(trade.at, future);
+  assert.equal(trade.sourceTime, future);
+  assert.equal(trade.clock, "historical-game-clock");
+  assert.equal(trade.settlementHash, null);
+  assert.equal(reader.history("oil", "all", now).candles.length, 1);
+  assert.equal(reader.history("oil", "24h", now).candles.length, 0);
+});
+test("enhanced equipment levels remain distinct assets and exact fractional notional survives below one FTHX", t => {
+  const { db, reader } = fixture(t), now = Date.now();
+  for (const [id, level] of [[1, 2], [2, 3]]) {
+    db.prepare("INSERT INTO enhancement_listings VALUES (?,?)").run(id, JSON.stringify({ item: "torch", level }));
+    db.prepare("INSERT INTO enhancement_sales VALUES (?,'private-buyer','private-seller',1,?)").run(id, now);
+  }
+  assert.deepEqual(reader.catalog(now).map(m => m.symbol).sort(), ["WORLD:enhanced-torch-level-2", "WORLD:enhanced-torch-level-3"]);
+  assert.equal(reader.tape({ interval: "all" }, now).rows[0].quoteAmount, "10000000000000000");
+});
+test("World readers enforce asset and interval validation, omit nonfinancial/zero fills, and fail explicitly on invalid stored amounts", t => {
+  const { db, reader, add } = fixture(t), now = Date.now();
+  add(1, "wood", 1, 0, now);
+  assert.equal(reader.catalog(now).length, 0);
+  assert.throws(() => reader.history("../secret"), error => error.status === 400);
+  assert.throws(() => reader.history("wood", "never"), error => error.status === 400);
+  assert.throws(() => reader.tape({ asset: ["wood"] }), error => error.status === 400);
+  assert.throws(() => reader.tape({ interval: ["24h"] }), error => error.status === 400);
+  db.exec("UPDATE market_fills SET dollars=1.5");
+  assert.throws(() => reader.catalog(now), error => error.status === 503);
+});
+test("a read-only historical World replica can expose fills without schema writes", t => {
+  const { db, add } = fixture(t);
+  add(1, "metal", 1, 10000, Date.now() - 1);
+  db.exec("DROP TABLE world_trade_settlements; PRAGMA query_only=ON");
+  const reader = new WorldMarkets(db);
+  assert.equal(reader.catalog()[0].symbol, "WORLD:metal");
+  assert.equal(reader.tape({ interval: "all" }).rows[0].settlement, "historical-recorded");
+});
+test("the actual World marketplace supplies the published inventory execution, preserving gameplay price and idempotency", t => {
+  const { SqliteStore } = require("../../../sites/world.featheral.com/play/server/store.ts");
+  const { seedFixturePools } = require("../../../sites/world.featheral.com/play/server/test-support.ts");
+  const store = new SqliteStore(":memory:", Date.now, 1);
+  t.after(() => store.close());
+  seedFixturePools(store);
+  const { token } = store.create();
+  store.transaction(token, session => {
+    session.account.game.stock.wood = 10; session.account.game.stage = 0;
+    session.account.game.home = { ...session.account.game.position };
+  });
+  const revision = store.read(token, session => session.account.revision);
+  const body = { id: require("node:crypto").randomUUID(), revision, command: { type: "spot", asset: "wood", side: "sell", quantity: 3, limitDollars: 0.0001 } };
+  const execute = () => store.transaction(token, (session, now, realTime, exchange, owner) => exchange.action(owner, session, body, now, realTime));
+  execute(); execute();
+  const source = store.db.prepare("SELECT * FROM market_fills WHERE asset='wood'").all();
+  const tape = new WorldMarkets(store.db).tape({ interval: "all" }).rows;
+  assert.equal(tape.length, source.length);
+  assert.equal(tape.length, 1, "The same gameplay request cannot create another fill.");
+  assert.equal(tape[0].quantity, "3");
+  assert.equal(tape[0].quoteAmount, (BigInt(source[0].dollars) * 10n ** 16n).toString());
+  assert.ok(BigInt(tape[0].quoteAmount) > 0n);
+});
+test("netted fills and equipment purchases with nonmonotonic listing IDs link atomically and carry real execution timestamps", t => {
+  const { db, add, reader } = fixture(t);
+  const { GameFunds } = require("../../../sites/world.featheral.com/play/server/funds.ts");
+  db.exec(`CREATE TABLE sessions(id TEXT PRIMARY KEY,data TEXT);
+    CREATE TABLE market_pools(asset TEXT,dollars INTEGER);
+    CREATE TABLE market_orders(owner TEXT,price INTEGER,remaining INTEGER,side TEXT,status TEXT);`);
+  const funds = new GameFunds(db, { commit() {}, available: () => "0" });
+  db.prepare("INSERT INTO enhancement_listings VALUES(1,?)").run(JSON.stringify({ item: "torch", level: 2 }));
+  db.prepare("INSERT INTO enhancement_listings VALUES(100,?)").run(JSON.stringify({ item: "torch", level: 3 }));
+  db.exec("INSERT INTO enhancement_sales VALUES(100,'buyer','seller',1,1000000000)");
+  const snapshot = funds.tradeSnapshot(), now = Date.now();
+  db.exec("BEGIN");
+  add(1, "wood", 1, 1, now + 86400000 * 100);
+  db.prepare("INSERT INTO enhancement_sales VALUES(1,'buyer','seller',1,?)").run(now + 86400000 * 100);
+  assert.equal(funds.stage(new Map(), snapshot, now), null);
+  db.exec("COMMIT");
+  const links = db.prepare("SELECT * FROM world_trade_settlements ORDER BY venue").all();
+  assert.equal(links.length, 2, "Buying an older listing after a newer listing is still captured.");
+  const trades = reader.tape({ interval: "24h" }, now).rows;
+  assert.equal(trades.length, 2);
+  assert.ok(trades.every(trade => trade.clock === "execution-wall-clock" && trade.at === now && trade.settlement === "netted-inventory-fill"));
+  const before = funds.tradeSnapshot();
+  db.exec("BEGIN"); add(2, "water", 1, 1, now); funds.stage(new Map(), before, now); db.exec("ROLLBACK");
+  assert.equal(reader.tape({ interval: "all" }).rows.length, 3, "Rollback removes both the fill and its execution link; the original legacy sale remains.");
+});

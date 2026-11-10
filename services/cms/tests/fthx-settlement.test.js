@@ -212,17 +212,23 @@ test("existing World funds migrate unchanged and its real fund journal recovers 
   const visible = store.read(token, session => session.account.game.dollars);
   assert.equal(visible, 10000);
   const settlement = attach(), supply = notes.fthx.supply();
+  const { WorldMarkets } = require("../../notes/world-markets"), worldMarkets = new WorldMarkets(store.db, api.ledger);
+  const fill = () => store.db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES ('wood',1,1,1,?,'system','private-buyer','private-seller')").run(Date.now());
   assert.equal(store.read(token, session => session.account.game.dollars), visible);
   assert.equal(notes.fthx.balance(backingAccount(account)), UNIT * RATE);
-  store.transaction(token, session => { session.account.game.dollars--; });
+  store.transaction(token, session => { session.account.game.dollars--; fill(); });
   assert.equal(store.read(token, session => session.account.game.dollars), 9999);
+  assert.equal(worldMarkets.tape({ interval: "all" }).rows.length, 1);
+  assert.equal(worldMarkets.tape({ interval: "all" }).rows[0].backing, "locked-fthx-settlement");
   notes.db.exec(`CREATE TRIGGER reject_world_backing BEFORE INSERT ON fthx_base_entries
     WHEN NEW.kind='backing_settlement' BEGIN SELECT RAISE(ABORT,'World backing unavailable'); END`);
-  assert.throws(() => store.transaction(token, session => { session.account.game.dollars--; }), error => error.status === 503);
+  assert.throws(() => store.transaction(token, session => { session.account.game.dollars--; fill(); }), error => error.status === 503);
+  assert.equal(worldMarkets.tape({ interval: "all" }).rows.length, 1, "Failed backing never exposes an unsettled execution.");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM fund_commits WHERE settled=0").get().n, 1);
   notes.db.exec("DROP TRIGGER reject_world_backing");
   store.recoverFunds();
   store.recoverFunds();
+  assert.equal(worldMarkets.tape({ interval: "all" }).rows.length, 2, "Recovery publishes each real execution once.");
   assert.equal(store.read(token, session => session.account.game.dollars), 9998);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM fund_commits WHERE settled=0").get().n, 0);
   assert.equal(api.ledger.balance(SYSTEM_TREASURY_ACCOUNT).balance, (2n * 10n ** 14n).toString());

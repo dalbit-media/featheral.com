@@ -1,7 +1,8 @@
 "use strict";
 const periods = { "1h": [3600000, 300000], "24h": [86400000, 3600000],
   "7d": [604800000, 21600000], "30d": [2592000000, 86400000] };
-function period(interval) {
+function period(interval, now = Date.now()) {
+  if (interval === "all") return [now, 86400000];
   if (!Object.hasOwn(periods, interval)) throw Object.assign(new Error("Choose a supported chart interval."), { status: 400 });
   return periods[interval];
 }

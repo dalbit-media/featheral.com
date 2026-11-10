@@ -113,7 +113,7 @@ class Exchange {
   }
   market(interval = "24h", now = Date.now()) {
     const { period, candles } = require("./candles");
-    const [duration, bucket] = period(interval), pool = this.pool();
+    const [duration, bucket] = period(interval, now), pool = this.pool();
     const ready = pool.funded && pool.settlementEnabled && !pool.pendingSettlement;
     if (ready) this.validatePool(pool);
     const rows = this.db.prepare(`SELECT t.*,json_extract(r.payload,'$.intermediate') AS fthx,o.sequence

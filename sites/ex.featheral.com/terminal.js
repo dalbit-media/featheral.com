@@ -12,7 +12,7 @@
     "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
     "liquidity-form", "liquidity-symbol", "liquidity-action", "liquidity-amount", "liquidity-positions",
     "funding-form", "funding-dollar", "funding-fthx", "funding-approval",
-    "market-mode", "gold-pool-details", "recovery-notice",
+    "market-mode", "gold-pool-details", "recovery-notice", "world-executions", "world-trade-link", "world-trade-records",
   ];
   const missingElements = requiredElements.filter(id => !$(id));
   if (missingElements.length) {
@@ -30,12 +30,17 @@
   const hostUrl = name => `${location.protocol}//${location.hostname.endsWith(".localhost") ? name + ".localhost" : name + ".featheral.com"}${location.port ? ":" + location.port : ""}`;
   $("notes-link").href = hostUrl("notes") + "/";
   $("gold-channel").href = "/gold-channel/";
+  $("world-trade-link").href = hostUrl("world") + "/market/";
+  let autoSelect = !new URLSearchParams(location.search).has("market"), firstHistory = true, displayedMarket = "";
   let token = "", owner = "", markets = [], selected = new URLSearchParams(location.search).get("market") || "FTH$", account, preview, quoteGeneration = 0, refreshing = false, busy = false;
   const chart = window.FeatheralCandleChart.mount($("candle-chart"));
   function applyMarketMode() {
     const reference = selected === "FTHG";
-    $("market-mode").textContent = reference ? "Reference / conversion only. No internal FTHG pool or direct Exchange order. Use the Gold reserve channel." : "";
-    $("order-form").querySelectorAll("input, select, button").forEach(control => { control.disabled = reference; });
+    const world = Boolean(markets.find(market => market.symbol === selected)?.inventoryOnly);
+    $("market-mode").textContent = world ? "Executed World inventory market. Trade these items in World; they are not wallet notes. FTHX prices use the internal denomination, not an AMM currency swap."
+      : reference ? "Reference / conversion only. No internal FTHG pool or direct Exchange order. Use the Gold reserve channel." : "";
+    $("order-form").querySelectorAll("input, select, button").forEach(control => { control.disabled = reference || world; });
+    $("execute-order").disabled = reference || world || !preview;
   }
   function renderGoldPools(reference) {
     const root = $("gold-pool-details"); root.replaceChildren();
@@ -92,11 +97,15 @@
     const fraction = (rounded % 10n ** BigInt(places)).toString().padStart(places, "0").replace(/0+$/, "");
     return `${value > 0n && rounded === 0n ? "<0.01" : whole.toLocaleString() + (fraction ? "." + fraction : "")} ${symbol}`;
   }
-  function ratio(price) {
-    const n = BigInt(price.numerator), d = BigInt(price.denominator), rounded = (n * 100n + d / 2n) / d;
-    const fraction = (rounded % 100n).toString().padStart(2, "0").replace(/0+$/, "");
-    if (n > 0n && rounded === 0n) return "<0.01";
-    return `${rounded / 100n}${fraction ? "." + fraction : ""}`;
+  function ratio(price, digits = 2) {
+    const n = BigInt(price.numerator), d = BigInt(price.denominator), scale = 10n ** BigInt(digits), rounded = (n * scale + d / 2n) / d;
+    const fraction = (rounded % scale).toString().padStart(digits, "0").replace(/0+$/, "");
+    if (n > 0n && rounded === 0n) return `<${digits === 2 ? "0.01" : "0." + "0".repeat(digits - 1) + "1"}`;
+    return `${rounded / scale}${fraction ? "." + fraction : ""}`;
+  }
+  function exactFthx(raw, symbol = "FTHX") {
+    const value = BigInt(raw), fraction = (value % unit).toString().padStart(18, "0").replace(/0+$/, "");
+    return `${(value / unit).toLocaleString()}${fraction ? "." + fraction : ""} ${symbol}`;
   }
   async function api(path, method = "GET", body) {
     const response = await fetch("/api/creation" + path, { method, cache: "no-store",
@@ -211,36 +220,54 @@
   function renderMarkets() {
     const filter = $("market-search").value.toUpperCase();
     $("market-list").replaceChildren();
-    for (const market of markets.filter(m => m.symbol.includes(filter))) {
-      const button = text("button", market.symbol); button.type = "button"; button.setAttribute("aria-pressed", String(market.symbol === selected));
-      button.append(text("small", market.referenceOnly ? "Reference only" : market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
-      button.addEventListener("click", () => { selected = market.symbol; invalidate(); refresh().catch(error => { console.error(error); $("terminal-status").textContent = error.message; }); });
+    for (const market of markets.filter(m => m.symbol.toUpperCase().includes(filter))) {
+      const button = text("button", market.ticker || market.symbol); button.type = "button"; button.setAttribute("aria-pressed", String(market.symbol === selected));
+      button.append(text("small", market.inventoryOnly ? "World fills" : market.referenceOnly ? "Reference only" : market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
+      button.addEventListener("click", () => {
+        selected = market.symbol;
+        if (market.inventoryOnly && !market.trades) $("chart-interval").value = "all";
+        invalidate(); refresh().catch(error => { console.error(error); $("terminal-status").textContent = error.message; });
+      });
       $("market-list").append(button);
     }
   }
   async function refresh() {
     const generation = ++quoteGeneration;
-    const marketSymbol = selected;
+    $("world-executions").hidden = true; $("world-trade-records").replaceChildren();
+    let marketSymbol = selected;
     const data = await api("/trading/markets?interval=" + $("chart-interval").value);
     if (generation !== quoteGeneration) return;
+    if (autoSelect) {
+      autoSelect = false;
+      const world = data.markets.find(market => market.inventoryOnly);
+      if (world && !data.markets.some(market => market.funded)) {
+        selected = marketSymbol = world.symbol;
+        if (!world.trades) $("chart-interval").value = "all";
+      }
+    }
     const recovering = data.pair.notes.some(item => item.pendingSettlement);
     const gold = data.reference.goldReference, dollar = data.reference.dollarReference;
     const goldPrice = gold && dollar ? { numerator: (BigInt(gold.numerator) * BigInt(dollar.numerator)).toString(),
       denominator: (BigInt(gold.denominator) * BigInt(dollar.denominator) * unit).toString() } : null;
-    markets = [...data.markets.map(item => recovering ? { ...item, pendingSettlement: true } : item),
+    markets = [...data.markets.map(item => recovering && !item.inventoryOnly ? { ...item, pendingSettlement: true } : item),
       { symbol: "FTHG", funded: false, referenceOnly: true, price: goldPrice }];
-    const priority = symbol => { const rank = ["FTH$", "FTHG", "FTHS"].indexOf(symbol); return rank < 0 ? 3 : rank; };
-    markets.sort((a, b) => priority(a.symbol) - priority(b.symbol)); renderMarkets(); renderGoldPools(data.reference); applyMarketMode();
+    const priority = market => market.inventoryOnly ? 3 : ["FTH$", "FTHG", "FTHS"].includes(market.symbol) ? ["FTH$", "FTHG", "FTHS"].indexOf(market.symbol) : 4;
+    markets.sort((a, b) => priority(a) - priority(b)); renderMarkets(); renderGoldPools(data.reference); applyMarketMode();
     $("overview-markets").textContent = String(data.markets.length);
     $("overview-funded").textContent = String(data.markets.filter(item => item.funded && !recovering && !item.pendingSettlement).length);
-    const volumes = data.markets.map(item => item.symbol === "FTH$" ? data.pair.volumeFthx : item.volume);
+    const volumes = data.markets.filter(item => !item.inventoryOnly).map(item => item.symbol === "FTH$" ? data.pair.volumeFthx : item.volume);
     $("overview-volume").textContent = volumes.every(value => /^\d+$/.test(String(value)))
       ? `${volumes.reduce((sum, value) => sum + BigInt(value), 0n).toLocaleString()} FTHX` : "Unavailable";
     const market = markets.find(m => m.symbol === marketSymbol);
     if (!market) throw Error("Requested market is unavailable. Select an available market.");
-    $("market-title").textContent = marketSymbol + " / FTHX";
+    if (firstHistory && market.inventoryOnly && !market.trades) $("chart-interval").value = "all";
+    firstHistory = false;
+    if (displayedMarket !== marketSymbol) {
+      chart.update({ currency: "FTHX", candles: [] }); displayedMarket = marketSymbol;
+    }
+    $("market-title").textContent = (market.ticker || marketSymbol) + " / FTHX" + (market.inventoryOnly ? " · World" : "");
     $("spot-price").textContent = market.referenceOnly ? goldPrice ? `Indicative ${ratio(goldPrice)} FTHX` : "Reference unavailable"
-      : market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price)} FTHX` : "Pool not available";
+      : market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price, market.inventoryOnly ? 18 : 2)} FTHX${market.inventoryOnly ? " · last fill" : ""}` : "Pool not available";
     const usdPerDollar = data.reference.usdValue, rate = data.reference.dollarReference;
     if (market?.price && usdPerDollar !== null && rate) {
       const usdPerFthx = BigInt(usdPerDollar) * BigInt(rate.denominator) / BigInt(rate.numerator);
@@ -248,16 +275,28 @@
       const fractional = (usd % unit).toString().padStart(18, "0").slice(0, 8).replace(/0+$/, "");
       $("usd-price").textContent = `~ $${usd > 0n && usd < 10000000000n ? "<0.00000001" : `${usd / unit}${fractional ? "." + fractional : ""}`} USD / ${marketSymbol}`;
     } else $("usd-price").textContent = "USD unavailable — live FTHG/USD and verified reference rates required";
-    $("market-detail").textContent = market.referenceOnly ? `FTHG → FTH$ → FTHX reference (${gold?.source || "Gold unavailable"} / ${dollar?.source || "Dollar unavailable"}). No direct executions, candles or FTHX volume are implied.`
+    $("market-detail").textContent = market.inventoryOnly ? `${market.recordedTrades} recorded inventory trades · ${exactFthx(market.volumeBaseUnits)} World executed notional / 24h · ${exactFthx(market.recordedVolumeBaseUnits)} all recorded notional. ${market.description}`
+      : market.referenceOnly ? `FTHG → FTH$ → FTHX reference (${gold?.source || "Gold unavailable"} / ${dollar?.source || "Dollar unavailable"}). No direct executions, candles or FTHX volume are implied.`
       : market?.pendingSettlement ? "A Dollar settlement requires recovery. Resume the original request before trading; do not fund a replacement pool."
       : market?.funded ? `0.3% fee • ${marketSymbol === "FTH$" ? data.pair.volumeFthx : market.volume} FTHX executed volume / 24h`
       : "Unfunded. Opening reference prices do not enable trading or guarantee redemption.";
     $("reference-detail").textContent = data.reference.source;
     $("order-amount-label").firstChild.textContent = `Input (${ $("order-side").value === "buy" ? "FTHX" : marketSymbol })`;
     const history = market.referenceOnly ? { currency: "FTHX", candles: [], referenceOnly: true }
-      : marketSymbol === "FTH$" ? data.pair.notes[0].history : await api(`/markets/${encodeURIComponent(marketSymbol)}/history?interval=${$("chart-interval").value}`);
+      : market.inventoryOnly ? await api(`/world-markets/${encodeURIComponent(market.asset)}/history?interval=${$("chart-interval").value}`)
+        : marketSymbol === "FTH$" ? data.pair.notes[0].history : await api(`/markets/${encodeURIComponent(marketSymbol)}/history?interval=${$("chart-interval").value}`);
     if (generation !== quoteGeneration) return;
     chart.update(history);
+    if (market.inventoryOnly) {
+      const executions = await api(`/world-trades?asset=${encodeURIComponent(market.asset)}&interval=${$("chart-interval").value}`);
+      if (generation !== quoteGeneration) return;
+      rows($("world-trade-records"), executions.rows, "No inventory trades in this interval.", trade => row([
+        `${new Date(trade.at).toLocaleString()} · ${trade.clock}`, trade.quantity, ratio(trade.price, 18),
+        exactFthx(trade.quoteAmount), exactFthx(trade.dollars, "FTH$"), trade.venue,
+        `${trade.id} · ${trade.settlement}${trade.settlementHash ? " · " + trade.settlementHash : ""}`,
+      ]), 7);
+      $("world-executions").hidden = false;
+    }
     const lastLiquidity = $("liquidity-symbol").value;
     $("liquidity-symbol").replaceChildren(...markets.filter(m => m.symbol !== "FTH$" && m.funded).map(m => { const option = text("option", m.symbol); option.value = m.symbol; return option; }));
     if (markets.some(m => m.symbol === lastLiquidity)) $("liquidity-symbol").value = lastLiquidity;
@@ -296,6 +335,8 @@
     event.preventDefault();
     run(async () => {
       requireOwner(); invalidate();
+      if (markets.find(market => market.symbol === selected)?.inventoryOnly)
+        throw Error("World inventory trades must be placed in World. These items are not wallet notes.");
       if (selected === "FTHG") throw Error("FTHG is reference-only. Use the Gold conversion channel; no internal FTHG order can be placed.");
       if (preview?.submitted) throw Error("Resolve the submitted trade before requesting another order.");
       const generation = quoteGeneration, side = $("order-side").value, symbol = selected;

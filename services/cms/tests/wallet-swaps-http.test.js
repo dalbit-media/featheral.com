@@ -171,4 +171,35 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   assert.equal(exactEntries.status, 200);
   assert.equal(exactEntries.body.decimals, 18);
   assert.equal(exactEntries.body.entries[0].amount, "1");
+  assert.equal((await call("/world-markets", undefined, { host: "ex.featheral.com" })).status, 503);
+  const world = require("../../database/sqlite").open(":memory:");
+  t.after(() => world.close());
+  world.exec(`CREATE TABLE market_fills(id INTEGER PRIMARY KEY,asset TEXT,quantity INTEGER,dollars INTEGER,price REAL,time INTEGER,venue TEXT,buyer TEXT,seller TEXT)`);
+  world.prepare("INSERT INTO market_fills VALUES(1,'wood',2,1,999999,?,'players','private-buyer','private-seller')").run(Date.now() - 86400000 * 40);
+  app.setWorldMarketsSource(world);
+  for (const host of ["ex.featheral.com", "notes.featheral.com"]) {
+    const catalog = await call("/world-markets", undefined, { host });
+    assert.equal(catalog.status, 200);
+    assert.equal(catalog.headers["cache-control"], "no-store");
+    assert.equal(catalog.body.markets[0].symbol, "WORLD:wood");
+    const history = await call("/world-markets/wood/history?interval=all", undefined, { host });
+    assert.equal(history.body.candles[0].quoteVolume, "10000000000000000");
+    const executions = await call("/world-trades?asset=wood&interval=all", undefined, { host });
+    assert.equal(executions.body.rows[0].id, "world:market:1");
+    assert.equal(executions.body.rows[0].settlement, "historical-recorded");
+    assert.equal(executions.body.rows[0].price.numerator, "10000000000000000");
+    const tape = await call("/market-tape?symbol=WORLD:wood&interval=all", undefined, { host });
+    assert.equal(tape.body.rows[0].output, "10000000000000000");
+    assert.equal(tape.body.rows[0].toDecimals, 18);
+    const trending = await call("/trending", undefined, { host });
+    assert.equal(trending.body.worldMarkets[0].history.candles.length, 1, "Legacy charts explicitly use all recorded history.");
+    assert.equal(trending.body.worldMarkets[0].history.interval, "all");
+    assert.doesNotMatch(JSON.stringify({ catalog, executions, history, tape, trending }), /private-buyer|private-seller|transaction_data/);
+  }
+  const terminal = await call("/trading/markets", undefined, { host: "ex.featheral.com" });
+  assert.equal(terminal.body.markets.find(market => market.symbol === "WORLD:wood").inventoryOnly, true);
+  assert.equal((await call("/world-markets", undefined, { host: "untrusted.invalid" })).status, 404);
+  assert.equal((await call("/world-trades?asset=..", undefined, { host: "ex.featheral.com" })).status, 400);
+  assert.equal((await call("/world-markets/wood/history?interval=never", undefined, { host: "ex.featheral.com" })).status, 400);
+  assert.equal((await call("/trading/quote", { symbol: "WORLD:wood", side: "buy", amount: "1" }, { host: "ex.featheral.com" })).status, 409);
 });

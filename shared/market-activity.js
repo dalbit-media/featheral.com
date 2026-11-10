@@ -6,8 +6,8 @@
     if (className) node.className = className;
     return node;
   };
-  const format = (raw, symbol, recordType) => {
-    const value = BigInt(raw), precision = ["FTH$", "FTHG"].includes(symbol) || symbol === "FTHX" && recordType === "base-unit-posting" ? 18 : 0;
+  const format = (raw, symbol, recordType, decimals) => {
+    const value = BigInt(raw), precision = decimals ?? (["FTH$", "FTHG"].includes(symbol) || symbol === "FTHX" && recordType === "base-unit-posting" ? 18 : 0);
     const unit = 10n ** BigInt(precision), fraction = (value % unit).toString().padStart(precision, "0").replace(/0+$/, "");
     return (value / unit).toLocaleString() + (precision && fraction ? "." + fraction : "") + " " + symbol;
   };
@@ -39,9 +39,12 @@
   }
   function mount(root) {
     root.classList.add("market-activity");
-    const poolsOnly = root.dataset.marketView === "pools", activityOnly = root.dataset.marketView === "activity";
-    const heading = element("h2", poolsOnly ? "Liquidity network" : "Recorded economic history");
-    const intro = element("p", "World settlements, wallet transfers, Exchange movements, note rewards and payments. Activity is not trading volume; only executed trades set price candles.");
+    const poolsOnly = root.dataset.marketView === "pools", overviewOnly = root.dataset.marketView === "overview",
+      activityOnly = root.dataset.marketView === "activity" || overviewOnly;
+    const heading = element("h2", poolsOnly ? "Liquidity network" : overviewOnly ? "World market activity" : "Recorded economic history");
+    const intro = element("p", overviewOnly
+      ? "Recorded game purchases, sales and other financial settlements. These charts show ledger activity, not pool prices or exchange trading volume."
+      : "World settlements, wallet transfers, Exchange movements, note rewards and payments. Activity is not trading volume; only executed trades set price candles.");
     const controls = element("div", undefined, "market-activity-controls");
     const select = (title, items) => {
       const label = element("label", title), input = element("select");
@@ -56,12 +59,13 @@
     const symbol = select("Currency", [["", "All currencies"], ["FTHX", "FTHX"], ["FTH$", "FTH$"], ["FTHS", "FTHS"], ["FTHG", "FTHG (coverage below)"]]);
     const source = select("Activity", [["", "All sources"], ["world", "World settlement"], ["wallet", "Wallet transfers"],
       ["exchange", "Exchange"], ["gold", "Gold channel"], ["app", "App rewards"], ["silver", "Silver payments"], ["notes", "Notes creation"], ["other", "Other notes activity"]]);
+    source.value = root.dataset.marketSource || "";
     const refresh = element("button", "Refresh activity"); refresh.type = "button"; controls.append(refresh);
     const status = element("p"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
     const settlementStatus = element("p", undefined, "settlement-status");
     const charts = element("div", undefined, "market-activity-charts");
     const feed = table("Public financial activity - postings and sealed transactions", ["Time", "Source", "Currency", "Event", "Event amount", "Gross credits", "Gross debits", "Record"]);
-    const tape = table("Latest executed pool trades (up to 100)", ["Time", "Pair", "Input", "Output"]);
+    const tape = table("Latest executed trades (up to 100)", ["Time", "Pair", "Input / quantity", "Output / notional", "Venue / record"]);
     const tapeNote = element("p");
     const more = element("button", "Load older activity"); more.type = "button"; more.hidden = true;
     const poolHeading = element("div", undefined, "liquidity-heading");
@@ -72,14 +76,19 @@
     liquidityDetails.append(element("summary", "Base liquidity and funding needs"), reserves.wrapper);
     const policy = element("p"), coverage = element("details"), coverageBody = element("div");
     coverage.append(element("summary", "Coverage and accounting rules"), coverageBody);
-    if (poolsOnly) {
+    if (overviewOnly) {
+      symbol.parentElement.hidden = true; source.parentElement.hidden = true;
+      const detailsLink = element("a", "Inspect all game settlements and economic activity");
+      detailsLink.href = "#network-activity";
+      root.replaceChildren(heading, intro, controls, status, charts, detailsLink);
+    } else if (poolsOnly) {
       interval.parentElement.hidden = true; source.parentElement.hidden = true;
       root.replaceChildren(heading, controls, status, settlementStatus, poolHeading, poolCards, poolLegend, liquidityDetails, policy);
     } else {
       const records = [feed.wrapper, more, tape.wrapper, tapeNote];
       if (root.dataset.marketRecords === "collapsed") {
         const details = element("details");
-        details.append(element("summary", "Inspect financial records and executed pool trades"), ...records);
+        details.append(element("summary", "Inspect financial records and executed trades"), ...records);
         records.splice(0, records.length, details);
       }
       root.replaceChildren(heading, intro, controls, status, settlementStatus, charts, ...records,
@@ -201,7 +210,7 @@
         }
         const [data, liquidity, executions] = await Promise.all([get("activity?" + params, controller.signal),
           append || activityOnly ? Promise.resolve(null) : get("liquidity", controller.signal),
-          append ? Promise.resolve(null) : get("market-tape?" + new URLSearchParams({ interval: interval.value, symbol: symbol.value }), controller.signal)]);
+          append || overviewOnly ? Promise.resolve(null) : get("market-tape?" + new URLSearchParams({ interval: interval.value, symbol: symbol.value }), controller.signal)]);
         if (current !== generation) return;
         renderSettlement(data.settlement);
         if (!append) { feed.body.replaceChildren(); count = 0; }
@@ -212,7 +221,9 @@
         if (!append && !data.rows.length) row(feed.body, ["No recorded financial activity in this window.", "", "", "", "", "", "", ""]);
         count += data.rows.length; cursor = data.nextCursor;
         more.hidden = !cursor;
-        status.textContent = `${data.partial ? "Partial coverage. " : ""}${count} recent records shown. Window: ${new Date(data.from).toLocaleString()} - ${new Date(data.to).toLocaleString()}.`;
+        status.textContent = `${data.partial ? "Partial coverage. " : ""}${overviewOnly
+          ? `${data.summary.reduce((total, entry) => total + entry.events, 0).toLocaleString()} ledger records across ${data.summary.length} separate currency/source series`
+          : `${count} recent records shown`}. Window: ${new Date(data.from).toLocaleString()} - ${new Date(data.to).toLocaleString()}.`;
         renderCharts(data);
         for (const summary of data.summary) {
           if (![...symbol.options].some(option => option.value === summary.symbol)) {
@@ -221,9 +232,11 @@
         }
         if (executions) {
           tape.body.replaceChildren();
-          for (const trade of executions.rows) row(tape.body, [new Date(trade.at).toLocaleString(), `${trade.symbol}/FTHX`, format(trade.amount, trade.from), format(trade.output, trade.to)]);
+          for (const trade of executions.rows) row(tape.body, [new Date(trade.at).toLocaleString(), `${trade.ticker || trade.symbol}/FTHX`,
+            format(trade.amount, trade.ticker || trade.from, undefined, trade.fromDecimals),
+            format(trade.output, trade.to, undefined, trade.toDecimals), trade.venue ? `${trade.venue} / ${trade.id} / ${trade.settlement}` : "Internal pool / " + trade.id]);
           tapeNote.textContent = executions.description;
-          if (!executions.rows.length) row(tape.body, ["No FTHX pool executions in this window. World settlements and Gold conversions appear in the financial history above.", "", "", ""]);
+          if (!executions.rows.length) row(tape.body, ["No executed trades in this window. Other settlements appear in the financial history above.", "", "", "", ""]);
         }
         coverageBody.replaceChildren(...Object.entries(data.coverage).map(([name, value]) => element("p", `${name}: ${value}`)));
         if (liquidity) renderLiquidity(liquidity);

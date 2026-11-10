@@ -50,7 +50,7 @@ test("Terminal rejects stale or incomplete HTML before requests, timers or tradi
     assert.match(status.textContent, /Ctrl\+Shift\+R/);
   }
 });
-async function browserFixture(t, respond = () => null, storage = new Map(), hash = "") {
+async function browserFixture(t, respond = () => null, storage = new Map(), hash = "", search = "") {
   const owner = "0x" + "ab".repeat(20), requests = [], confirmations = [], errors = [], histories = [];
   class Element {
     constructor() { this.value = ""; this.children = []; this.listeners = new Map(); this.firstChild = { textContent: "" }; }
@@ -79,7 +79,7 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
   };
   vm.runInNewContext(terminal, {
     document: { getElementById: node, createElement: () => new Element(), querySelectorAll: () => [], hidden: false },
-    location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search: "", hash },
+    location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search, hash },
     window: { FeatheralCandleChart: { mount: () => ({ update(value) { histories.push(value); }, reset() {}, sma() {} }) },
       addEventListener() {},
       FeatheralWallet: { authenticate: async challenge => { await challenge(owner); return { address: owner, signature: "login-signature" }; } },
@@ -107,6 +107,40 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
   assert.equal(errors.length, 0, "Terminal initializes and connects");
   return { owner, requests, confirmations, storage, node, dispatch, errors, histories };
 }
+test("World pairs automatically show real recorded history when AMMs are unfunded, retain exact trade amounts, and block wallet-note orders", async t => {
+  let unavailable = false;
+  const market = { symbol: "WORLD:wood", asset: "wood", ticker: "WOOD", inventoryOnly: true, trades: 0,
+    recordedTrades: 1, volumeBaseUnits: "0", recordedVolumeBaseUnits: "10000000000000000",
+    price: { numerator: "1", denominator: "1000000000" }, description: "Recorded World fills." };
+  const respond = route => {
+    const native = { symbol: "FTH$", funded: false, history: { candles: [], currency: "FTHX" } };
+    if (route.startsWith("/trading/markets")) return { body: { markets: [market, { symbol: "FTH$", funded: false }],
+      pair: { notes: [native] }, reference: {} } };
+    if (route.startsWith("/world-markets/")) return { body: { source: "world-executed-inventory", candles: [{ trades: 1 }], currency: "FTHX" } };
+    if (unavailable && route.startsWith("/world-trades")) return { status: 503, body: { error: "World execution reader unavailable" } };
+    if (route.startsWith("/world-trades")) return { body: { rows: [{ id: "world:market:1", at: Date.now(), clock: "historical-game-clock", quantity: "10000000",
+      quoteAmount: "10000000000000000", dollars: "100000000000000", price: market.price, venue: "world-players", settlement: "historical-recorded" }] } };
+    return null;
+  };
+  const ui = await browserFixture(t, respond);
+  assert.equal(ui.node("market-title").textContent, "WOOD / FTHX · World");
+  assert.equal(ui.node("spot-price").textContent, "0.000000001 FTHX · last fill");
+  assert.equal(ui.node("chart-interval").value, "all");
+  assert.equal(ui.node("world-executions").hidden, false);
+  assert.equal(ui.node("world-trade-records").children[0].children[3].textContent, "0.01 FTHX");
+  assert.equal(ui.node("world-trade-records").children[0].children[4].textContent, "0.0001 FTH$");
+  assert.ok(ui.node("order-amount").disabled);
+  await ui.dispatch("order-form");
+  assert.match(ui.node("terminal-status").textContent, /must be placed in World/);
+  assert.equal(ui.requests.filter(request => request.route === "/trading/quote").length, 0);
+  unavailable = true;
+  await ui.dispatch("refresh-market", "click");
+  assert.equal(ui.node("world-executions").hidden, true, "A failed refresh cannot relabel stale executions as a different pair.");
+  assert.equal(ui.node("world-trade-records").children.length, 0);
+  assert.match(ui.node("terminal-status").textContent, /World execution reader unavailable/);
+  const explicit = await browserFixture(t, respond, new Map(), "", "?market=FTH%24");
+  assert.equal(explicit.node("market-title").textContent, "FTH$ / FTHX", "An explicit native-pair URL is never overridden.");
+});
 test("Initial funding is wired at startup exactly once and resumes saved parameters despite edited form inputs", async t => {
   let submissions = 0;
   const ui = await browserFixture(t, (route, body) => {

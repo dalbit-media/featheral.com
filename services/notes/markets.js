@@ -99,7 +99,7 @@ class Markets {
   history(symbol, interval = "24h", now = Date.now()) {
     const { period, candles } = require("./candles");
     this.pool(symbol); requireTradingSymbol(symbol);
-    const [duration, bucket] = period(interval);
+    const [duration, bucket] = period(interval, now);
     const rows = this.db.prepare("SELECT id,side,amount,output,at FROM note_trades WHERE symbol=? AND at>=? AND at<=? ORDER BY at,id").all(symbol, now - duration, now);
     const points = new Map();
     for (const row of rows) points.set(Math.floor(row.at / bucket) * bucket, {
