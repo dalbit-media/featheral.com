@@ -131,6 +131,8 @@ export const korean: Record<string, string> = {
   'Master Merchant Charter': '상인 길드 최고 헌장',
   'Master Builder Charter': '마스터 건설자 헌장',
   'Bulk upgrades': '일괄 업그레이드',
+  'Upgrade the selected target as far as current materials and dollars allow. Crafting the charter consumes one of every decoration building.': '보유 재료와 달러가 허용하는 만큼 선택한 대상을 업그레이드합니다. 헌장을 제작할 때 모든 장식 건물을 하나씩 소비합니다.',
+  'Crafting the Master Builder Charter requires one unused copy of every decoration building. Return placed decorations to inventory first.': '마스터 건설자 헌장을 제작하려면 모든 장식 건물의 미사용 사본이 하나씩 필요합니다. 배치한 장식은 먼저 보관함으로 되돌리세요.',
   'Choose upgrade size': '업그레이드 규모 선택',
   'Upgrade once': '한 단계 업그레이드',
   'Max upgrade': '최대 업그레이드',

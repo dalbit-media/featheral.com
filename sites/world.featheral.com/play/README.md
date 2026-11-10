@@ -207,7 +207,9 @@ are preserved.
 
 ## Master Builder Charter
 
-Craft `builder-charter` at Settlement for 20 Wood, 10 Metal and FTH$100.
+Craft `builder-charter` at Settlement for 20 Wood, 10 Metal, FTH$100 and one
+unused copy of every decoration building. All 30 decoration buildings are
+consumed; placed, reserved and pending copies do not count.
 The consumable is stackable and player-tradeable, with unique blueprint artwork.
 It does not add any automatic reserve market or change existing financial policies.
 

@@ -80,7 +80,15 @@ export function settlementEntityName(id: SettlementEntity): string {
 }
 export function settlementTerrain(x: number, y: number, seed: number): Terrain {
   if (x >= 8 && y >= 2) return 'river';
-  return Math.max(Math.abs(x), Math.abs(y)) >= 7 && hash(x, y, seed) > .35 ? 'forest' : 'meadow';
+  const scale = 3.5, gx = x / scale, gy = y / scale, ix = Math.floor(gx), iy = Math.floor(gy);
+  const smooth = (value: number) => value * value * (3 - 2 * value);
+  const tx = smooth(gx - ix), ty = smooth(gy - iy);
+  const top = hash(ix, iy, seed + 41) * (1 - tx) + hash(ix + 1, iy, seed + 41) * tx;
+  const bottom = hash(ix, iy + 1, seed + 41) * (1 - tx) + hash(ix + 1, iy + 1, seed + 41) * tx;
+  const vegetation = top * (1 - ty) + bottom * ty;
+  const edge = Math.max(Math.abs(x), Math.abs(y));
+  const forestThreshold = .67 - Math.min(5, Math.max(0, edge - 5)) * .055;
+  return edge >= 5 && vegetation > forestThreshold ? 'forest' : 'meadow';
 }
 export function validSettlementCell(position: GridPosition): boolean {
   return Number.isSafeInteger(position.x) && Number.isSafeInteger(position.y)

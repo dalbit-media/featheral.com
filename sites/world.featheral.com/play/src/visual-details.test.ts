@@ -4,17 +4,18 @@ import { createAccount, snapshot } from '../server/economy.ts';
 import { inventory } from '../server/inventory.ts';
 import type { ApiState } from './api-types.ts';
 import { marketAssets, isMarketResource } from './market.ts';
-import { itemArt } from './item-art.ts';
+import { decorationDrawing, itemArt } from './item-art.ts';
 import { itemDescription, itemDetailRows } from './item-details.ts';
 import { buildingArt } from './building-art.ts';
 import { settlementLayoutPanel, settlementObjectDescription, settlementScene } from './settlement-scene.ts';
-import { settlementBuildings } from './settlement-layout.ts';
+import { settlementBuildings, settlementTerrain } from './settlement-layout.ts';
 import { settlementSectionNavigation, settlementTasks } from './settlement-ui.ts';
 import { icon } from './icons.ts';
 import { translate } from './i18n.ts';
-import { stages } from './engine.ts';
+import { stages, terrainDetails } from './engine.ts';
 import { inventoryPanel } from './inventory-view.ts';
-import { craftableKeys } from './items.ts';
+import { craftableKeys, decorationItems } from './items.ts';
+import { drawTerrainDetail } from './map-art.ts';
 
 test('inventory pins equipped stacks first, keeps filters and pages, and provides bilingual touch and hover details', () => {
   const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
@@ -82,7 +83,7 @@ test('every item renders one self-contained illustrated SVG and translated categ
     assert.equal((art.match(/<svg/g) ?? []).length, 1, id);
     assert.match(art, /aria-hidden="true"/);
     assert.match(art, /data-item-art=/);
-    assert.doesNotMatch(art, /undefined|NaN|<script|<image|url\(/);
+    assert.doesNotMatch(art, /undefined|NaN|<script|<image|url\((?!#)/);
     for (const text of Object.values(details)) {
       assert.ok(text.length > 0, id);
       assert.notEqual(translate(text, 'ko'), text, `${id}: ${text}`);
@@ -119,6 +120,38 @@ test('settlement object inspectors explain every active building and deduplicate
   state.waterUpkeep = before.waterUpkeep;
   assert.deepEqual(state, before);
   for (const task of Object.values(settlementTasks)) assert.notEqual(translate(task.description, 'ko'), task.description);
+});
+test('settlement terrain forms seed-stable natural woodland edges and renders season-aware surface detail', () => {
+  for (const seed of [0, 17, 824]) {
+    const terrain = new Map<string, number>();
+    for (let y = -10; y <= 10; y++) for (let x = -10; x <= 10; x++) {
+      const tile = settlementTerrain(x, y, seed);
+      assert.equal(tile, settlementTerrain(x, y, seed));
+      terrain.set(tile, (terrain.get(tile) ?? 0) + 1);
+    }
+    assert.ok((terrain.get('forest') ?? 0) > 0);
+    assert.ok((terrain.get('meadow') ?? 0) > 0);
+    assert.equal(settlementTerrain(0, 0, seed), 'meadow');
+    assert.equal(settlementTerrain(8, 2, seed), 'river');
+  }
+  const operations: string[] = [];
+  const context = new Proxy({} as CanvasRenderingContext2D, { get(_target, key) {
+    return (..._args: unknown[]) => { operations.push(String(key)); };
+  }, set() { return true; } });
+  for (const terrain of Object.keys(terrainDetails) as (keyof typeof terrainDetails)[]) {
+    drawTerrainDetail(context, 0, 0, terrain, .72, 'Autumn');
+    drawTerrainDetail(context, 0, 0, terrain, .24, 'Winter', true);
+  }
+  assert.ok(operations.includes('quadraticCurveTo'));
+  assert.ok(operations.includes('stroke'));
+});
+test('settlement decoration illustrations share cached ground shading and cast shadows', () => {
+  for (const id of Object.keys(decorationItems) as (keyof typeof decorationItems)[]) {
+    const drawing = decorationDrawing(id);
+    assert.match(drawing, /radialGradient id="ground-shade"/);
+    assert.match(drawing, /feDropShadow/);
+    assert.match(drawing, /filter="url\(#object-shadow\)"/);
+  }
 });
 test('settlement section navigation excludes dedicated inventory and crafting pages', () => {
   for (const task of (Object.keys(settlementTasks) as (keyof typeof settlementTasks)[]).filter(task => task !== 'inventory' && task !== 'crafting')) {

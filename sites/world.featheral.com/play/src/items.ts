@@ -176,6 +176,7 @@ export function craftingCost(item: CraftableItem, quantity = 1): Cost {
 }
 export function craftingIngredients(item: CraftableItem, quantity = 1): Partial<Record<ItemId, number>> {
   const ingredients = isAutoCraftingItem(item) ? Object.fromEntries(Object.keys(terrainDetails).map(terrain => [`relic-${terrain}`, 1]))
+    : isBuilderItem(item) ? builderItems[item].ingredients
     : isTransportItem(item) ? transportItems[item].ingredients : isBulkCraftingItem(item) ? bulkCraftingItems[item].ingredients : isActivityEquipment(item) ? activityEquipmentItems[item].ingredients
     : Object.hasOwn(collectorRecipes, item) ? collectorRecipes[item as CollectorBundle].ingredients : {};
   return Object.fromEntries(Object.entries(ingredients).map(([id, count]) => [id, count * quantity]));

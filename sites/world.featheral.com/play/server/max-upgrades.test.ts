@@ -11,7 +11,8 @@ import { hasBuilderCharter, maxUpgradePlan } from '../src/max-upgrades.ts';
 import type { UpgradeTarget } from '../src/max-upgrades.ts';
 import { constructionKeys, constructionLevel } from '../src/constructions.ts';
 import { dollarsScale } from '../src/dollars.ts';
-import { craftingCost, itemStorage } from '../src/items.ts';
+import { craftingCost, craftingIngredients, decorationItems, itemStorage } from '../src/items.ts';
+import type { ItemId } from '../src/items.ts';
 import { stages } from '../src/engine.ts';
 import { isLiquidAsset, isReserveMarketAsset } from '../src/market.ts';
 import { itemArt } from '../src/item-art.ts';
@@ -112,7 +113,17 @@ test('missing, reserved charters, stale or forged plans reject atomically and re
 test('builder charter crafts, trades without expanding reserves and previews exact aggregate consumption', () => {
   const account = fixture();
   assert.deepEqual(craftingCost(builderCharter), { wood: 20, metal: 10, dollars: 100 });
+  assert.deepEqual(craftingIngredients(builderCharter), Object.fromEntries(Object.keys(decorationItems).map(item => [item, 1])));
+  const missing = structuredClone(account);
+  missing.inventory!.storage = itemStorage.length - 1;
+  missing.inventory!.items = Object.keys(decorationItems).filter(item => item !== 'skybeacon') as ItemId[];
+  const missingBefore = structuredClone(missing);
+  assert.throws(() => craft(missing, builderCharter), /one unused copy of every decoration building/);
+  assert.deepEqual(missing, missingBefore);
+  account.inventory!.storage = itemStorage.length - 1;
+  account.inventory!.items = [...Object.keys(decorationItems), builderCharter, builderCharter] as ItemId[];
   craft(account, builderCharter);
+  assert.deepEqual(account.inventory!.items, [builderCharter, builderCharter, builderCharter]);
   assert.ok(hasBuilderCharter(snapshot(account)));
   assert.equal(isLiquidAsset(builderCharter), true);
   assert.equal(isReserveMarketAsset(builderCharter), false);
