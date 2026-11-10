@@ -393,6 +393,56 @@ test('missing charter, supplies, permits, changed revision and forged totals nev
     assert.throws(() => h.quote(), /unused Master Merchant/);
   } finally { h.store.close(); }
 });
+test('catalog prices, paid analysis and merchant preview initialize approved markets before quoting', async () => {
+  const h = setup(), origin = 'http://127.0.0.1:5173', server = createApi(h.store, origin);
+  const pools = h.store.db.prepare('SELECT * FROM market_pools').all();
+  const requested: string[] = [];
+  Object.defineProperty(h.store, 'liquidityEnabled', { value: true });
+  h.store.ensureLiquidity = async (_token, asset) => {
+    requested.push(asset);
+    const pool = pools.find(pool => pool.asset === asset)!;
+    h.store.db.prepare('UPDATE market_pools SET units=?,dollars=? WHERE asset=?').run(pool.units, pool.dollars, asset);
+  };
+  const clear = () => {
+    requested.length = 0;
+    h.store.db.exec('UPDATE market_pools SET units=0,dollars=0');
+  };
+  const approved = marketAssets.filter(isReserveMarketAsset);
+  try {
+    server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const address = server.address(); assert.ok(address && typeof address !== 'string');
+    const base = `http://127.0.0.1:${address.port}/api/dollar/game`;
+    const headers = { Cookie: `terra-dev=${h.user.token}` };
+    clear();
+    assert.equal((await fetch(`${base}/market?catalog=1`)).status, 401);
+    assert.equal(requested.length, 0);
+    assert.equal((await fetch(`${base}/market?catalog=2`, { headers })).status, 400);
+    const live = await fetch(`${base}/market?asset=torch&quantity=1&catalog=1`, { headers });
+    assert.equal(live.status, 200);
+    const liveBody = await live.json();
+    assert.ok(liveBody.market.tickers.filter((ticker: { asset: string }) => approved.includes(ticker.asset as typeof approved[number]))
+      .every((ticker: { bid: number }) => ticker.bid > 0));
+    assert.deepEqual([...new Set(requested)], approved);
+    clear();
+    const body = JSON.stringify({ id: randomUUID(), revision: h.saved().revision, command: { type: 'profit-analysis' } });
+    const post = (csrf: string) => fetch(`${base}/market/actions`, { method: 'POST',
+      headers: { ...headers, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': csrf }, body });
+    assert.equal((await post('invalid')).status, 403);
+    assert.equal(requested.length, 0);
+    const paid = await post(h.user.csrf);
+    assert.equal(paid.status, 200);
+    assert.deepEqual(requested, approved);
+    const paidBody = await paid.json();
+    assert.ok(paidBody.market.analysis.items.some((row: { profit: number | null }) => row.profit !== null));
+    clear();
+    const merchant = await fetch(`${base}/market/auto-craft`, { headers });
+    assert.equal(merchant.status, 200);
+    assert.deepEqual(requested, approved);
+    assert.ok((await merchant.json()).autoCraft.batches.length > 0);
+    assert.ok(h.saved().inventory!.items.includes(merchantCharter));
+  } finally { server.close(); h.store.close(); }
+});
+
 test('HTTP preview is authenticated and confirmation requires CSRF and the authoritative fingerprint', async () => {
   const h = setup(), origin = 'http://127.0.0.1:5173', server = createApi(h.store, origin);
   try {

@@ -1055,7 +1055,7 @@ async function refreshCraftingPrices(force = false): Promise<void> {
   craftingPricesLoading = true;
   craftingPricesAttemptAt = performance.now();
   try {
-    const response = await readMarket('torch', 1);
+    const response = await readMarket('torch', 1, undefined, true);
     craftingTickers = response.market.tickers;
     craftingAnalysis = response.market.analysis ?? null;
     craftingPricesError = '';

@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { GameError } from '../src/engine.ts';
 import { accrue, ApiError, apply, parseActionEnvelope, parseCommand, snapshot } from './economy.ts';
 import type { Store } from './store.ts';
-import { isMarketAsset, isMarketResource, marketPriceFloor, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
+import { isMarketAsset, isMarketResource, isReserveMarketAsset, marketAssets, marketPriceFloor, marketSaleQuantityLimit, marketResources } from '../src/market.ts';
 import type { MarketAsset } from '../src/market.ts';
 import { parseMarketCommand } from './market.ts';
 import { inventory } from './inventory.ts';
@@ -270,14 +270,22 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
       if (collectionRead && ([...marketUrl.searchParams.keys()].some(key => key !== 'asset' && key !== 'quantity') || marketUrl.searchParams.getAll('asset').length !== 1
         || marketUrl.searchParams.getAll('quantity').length > 1 || !isMarketAsset(asset) || !isMarketResource(asset)
         || marketUrl.searchParams.has('quantity') && (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset)))) throw new ApiError(400, 'Invalid collection query.');
-      if (marketRead && ([...marketUrl.searchParams.keys()].some(key => !['asset', 'quantity', 'budgetPercent', 'price'].includes(key))
+      if (marketRead && ([...marketUrl.searchParams.keys()].some(key => !['asset', 'quantity', 'budgetPercent', 'price', 'catalog'].includes(key))
         || [...marketUrl.searchParams.keys()].some(key => marketUrl.searchParams.getAll(key).length !== 1) || !isMarketAsset(asset)
+        || marketUrl.searchParams.has('catalog') && marketUrl.searchParams.get('catalog') !== '1'
         || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > marketSaleQuantityLimit(asset)
         || marketUrl.searchParams.has('budgetPercent') && !isMarketPercentage(budgetPercent)
         || buyingPrice !== undefined && (!marketUrl.searchParams.has('budgetPercent') || !Number.isFinite(buyingPrice)
           || buyingPrice < marketPriceFloor(asset) || buyingPrice > 1000000 || !/^\d+(?:\.\d{1,4})?$/.test(String(buyingPrice)))))
         throw new ApiError(400, 'Invalid market query.');
       if (!/^[0-9a-f]{64}$/.test(token)) throw new ApiError(401, 'Session required.');
+      const ensureCatalogLiquidity = async () => {
+        for (const asset of marketAssets.filter(isReserveMarketAsset)) await store.ensureLiquidity?.(token, asset);
+      };
+      if (request.method === 'GET' && (autoCraftRead || marketRead && marketUrl.searchParams.has('catalog'))) {
+        store.read(token, () => undefined);
+        await ensureCatalogLiquidity();
+      }
       if (collectionRead && isMarketAsset(asset) && isMarketResource(asset) && marketUrl.searchParams.has('quantity')) {
         store.read(token, session => {
           if (quantity > Math.floor(session.account.pending[asset] / 60000)) throw new ApiError(409, 'Resources changed. Refresh the collection quote.');
@@ -301,8 +309,10 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         });
         const envelope = parseActionEnvelope(body);
         const assets = new Map<MarketAsset, number>();
+        let catalogRequired = false;
         if (marketAction) {
           const command = parseMarketCommand(envelope.command);
+          catalogRequired = command.type === 'profit-analysis';
           if (command.type === 'spot' || command.type === 'limit') assets.set(command.asset, command.side === 'sell' ? command.quantity : 0);
           else if (command.type === 'sell-half') for (const sale of command.sales) assets.set(sale.asset, sale.quantity);
         } else {
@@ -310,6 +320,7 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
           if (command.type === 'collect-sell') assets.set(command.resource, command.quantity);
         }
         const fresh = store.read(token, session => envelope.revision === session.account.revision);
+        if (fresh && catalogRequired) await ensureCatalogLiquidity();
         if (fresh) for (const [asset, saleQuantity] of assets) await store.ensureLiquidity?.(token, asset, saleQuantity);
       }
       const result = request.method === 'POST'

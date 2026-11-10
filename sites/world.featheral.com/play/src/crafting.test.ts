@@ -174,6 +174,40 @@ test('craft cards reuse Marketplace sell quotes and seven-day trends, without sy
   assert.match(korean, /▼ 5.0%/);
   assert.match(korean, /data-direction="down"/);
 });
+test('craft distinguishes absent buyers from unloaded prices and identifies every missing analysis input', () => {
+  const state = fixture();
+  for (const language of ['en', 'ko'] as const) {
+    const report: MarketAnalysis = {
+      generatedAt: state.serverTime, expiresAt: state.serverTime + marketAnalysisDuration, fee: 100,
+      items: [{ item: 'bench', craftingFee: 10, ingredients: [
+        { asset: 'wood', quantity: 6, dollars: null }, { asset: 'metal', quantity: 1, dollars: 2 },
+      ], cost: null, revenue: 160, profit: null }],
+    };
+    const render = (bid: number) => craftingPanel(state, () => '', 'decoration', 'settlement', 1, language,
+      [{ asset: 'bench', bid, ask: 170, last: null }], report, state.serverTime);
+    const card = (html: string) => html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+    let bench = card(render(160));
+    assert.ok(bench.includes(translate('Missing ingredient prices', language)));
+    assert.ok(bench.includes('href="/market/?asset=wood&side=buy"'));
+    assert.ok(!bench.includes('href="/market/?asset=metal&side=buy"'));
+    assert.ok(!bench.includes('href="/market/?asset=bench&side=sell"'));
+    assert.ok(bench.includes(translate('Why no quote?', language)));
+    assert.ok(bench.includes(translate('Check the linked markets. Refresh the paid analysis only after liquidity changes; refreshing does not create buyers or sellers.', language)));
+    assert.match(bench, /data-action="craft"[^>]*data-action-eligible="true"/);
+    report.items[0].revenue = null;
+    bench = card(render(0));
+    assert.ok(bench.includes(translate('No buyers', language)));
+    assert.ok(bench.includes(translate('No sale quote', language)));
+    assert.ok(bench.includes('href="/market/?asset=bench&side=sell"'));
+    assert.ok(bench.includes('href="/market/?asset=wood&side=buy"'));
+    report.items[0].ingredients[0].dollars = 12;
+    report.items[0].cost = 24; report.items[0].revenue = 160; report.items[0].profit = 136;
+    bench = card(render(160));
+    assert.doesNotMatch(bench, /recipe-quote-help/);
+    assert.ok(bench.includes('+136 FTH$'));
+  }
+});
+
 test('compact craft cards show batch consumption before collapsed recipe details and name their icon action', () => {
   const html = craftingPanel(fixture(), () => '<span class="cost">batch resources</span>', 'decoration', 'settlement', 2);
   const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
@@ -193,8 +227,9 @@ test('crafting loads one shared market catalog, throttles requests and surfaces 
     craftingPricesLoading: false, craftingPricesAttemptAt: -Infinity, craftingPricesError: '', craftingTickers: [],
     document: { hidden: false }, inventoryMenuPage: true, inventoryTab: 'craft', busy: false, confirmationOpen: () => false,
     performance: { now: () => now }, serverSyncIntervalMs: 30000,
-    readMarket: async (asset: string, quantity: number) => {
+    readMarket: async (asset: string, quantity: number, buying: unknown, catalog: boolean) => {
       calls++; assert.equal(asset, 'torch'); assert.equal(quantity, 1);
+      assert.equal(buying, undefined); assert.equal(catalog, true);
       if (fail) throw new Error('Market connection unavailable.');
       return { market: { tickers } };
     },

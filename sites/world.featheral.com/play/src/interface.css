@@ -164,3 +164,7 @@
   .enhancement-picker,.enhancement-detail,.enhancement-market{padding:10px}
   .enhanced-market-link span{display:none}
 }
+.recipe-quote-help{grid-column:1/-1;min-width:0;font-size:12px;line-height:1.5}
+.recipe-quote-help summary{cursor:pointer}
+.recipe-quote-help ul{padding-left:18px}
+.recipe-quote-help a{overflow-wrap:anywhere}

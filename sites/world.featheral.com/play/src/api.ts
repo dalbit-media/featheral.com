@@ -36,7 +36,7 @@ async function submit<T>(state: ApiState, command: Command | MarketCommand, path
   if (needsWalletSigner(state) && window.FeatheralProfile.snapshot().account.toLowerCase() !== state.fundWallet) throw new Error('Connect the authorized gameplay wallet before spending FTH$.');
   const body = JSON.stringify({ id: crypto.randomUUID(), revision: state.revision, command });
   const init = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf }, body };
-  const timeoutMs = command.type === 'auto-craft' ? autoCraftTimeoutMs : 10000;
+  const timeoutMs = command.type === 'auto-craft' || command.type === 'profit-analysis' ? autoCraftTimeoutMs : 10000;
   try { return await request<T>(path, init, timeoutMs); }
   catch (error) {
     if (error instanceof HttpError) throw error;
@@ -50,8 +50,8 @@ async function submit<T>(state: ApiState, command: Command | MarketCommand, path
   }
 }
 export const send = (state: ApiState, command: Command): Promise<ApiState> => submit(state, command, 'actions');
-export const readMarket = (asset: MarketAsset, quantity: number, buying?: BuyQuantityRequest): Promise<MarketResponse> =>
-  request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}${buying ? `&budgetPercent=${buying.percent}${buying.price === undefined ? '' : `&price=${buying.price}`}` : ''}`);
+export const readMarket = (asset: MarketAsset, quantity: number, buying?: BuyQuantityRequest, catalog = false): Promise<MarketResponse> =>
+  request(`market?asset=${encodeURIComponent(asset)}&quantity=${quantity}${catalog ? '&catalog=1' : ''}${buying ? `&budgetPercent=${buying.percent}${buying.price === undefined ? '' : `&price=${buying.price}`}` : ''}`, undefined, catalog ? autoCraftTimeoutMs : 10000);
 export const readHalfSale = (): Promise<HalfSaleResponse> => request('market/half');
 export const sendMarket = (state: ApiState, command: MarketCommand): Promise<MarketResponse> => submit(state, command, 'market/actions');
 export async function readAutoCraft(): Promise<import('./auto-crafting.ts').AutoCraftResponse> {

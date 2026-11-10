@@ -219,6 +219,21 @@ receipt retries never spend again. Reserved or pending charters cannot be used.
 
 ## Master Merchant Charter
 
+Craft distinguishes a failed price request from a successfully loaded market
+with no buyers. An incomplete paid profit snapshot shows **No sale quote** or
+**Missing ingredient prices**, with **Why no quote?** listing the output and
+specific missing ingredient markets. These links open the relevant buy/sell
+ticket. Crafting from owned materials is not gated by market quote availability.
+Refreshing analysis is paid and does not create liquidity; no substitute prices
+are invented for missing quotes.
+Craft catalog loads, paid analysis purchases and Merchant previews initialize
+all existing reserve-eligible markets through the same on-demand authority path
+as individual Marketplace reads before calculating quotes. Catalog loads and
+paid analysis allow 60 seconds for this initialization. CSRF and revision checks
+precede paid-analysis funding; invalid requests cannot trigger it. Immutable
+reserve targets, finite funding limits and player-funded-only exclusions remain
+unchanged. An older paid snapshot is not silently rewritten or charged again.
+
 `merchant-charter` is the most expensive per-copy crafting recipe: FTH$10,000
 **plus one of every terrain keepsake collectible**, unlocked at Capital.
 Crafting consumes the full collectible set; pending and market-reserved copies

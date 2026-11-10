@@ -1,4 +1,12 @@
 export const korean: Record<string, string> = {
+  'No buyers': '구매자 없음',
+  'No sale quote': '판매 견적 없음',
+  'Missing ingredient prices': '재료 가격 누락',
+  'Why no quote?': '견적이 없는 이유',
+  'The paid report is a snapshot, not a connection error. Crafting with owned materials is still allowed.': '유료 보고서는 특정 시점의 시장 정보이며 연결 오류가 아닙니다. 보유 재료로 제작하는 것은 가능합니다.',
+  'No funded buyer for the output': '제작품을 구매할 자금이 있는 구매자 없음',
+  'No complete buy quote': '전체 수량 구매 견적 없음',
+  'Check the linked markets. Refresh the paid analysis only after liquidity changes; refreshing does not create buyers or sellers.': '연결된 시장을 확인하세요. 유동성이 바뀐 후에만 유료 분석을 갱신하세요. 갱신해도 구매자나 판매자가 생기지는 않습니다.',
   'Unlock more recipes by advancing your settlement and discovering their resources.': '정착지를 발전시키고 필요한 자원을 발견하여 더 많은 제작법을 해금하세요.',
   'The batch crafting fee exceeds your starting FTH$ balance or the FTH$1,000,000 run limit.': '묶음 제작 비용이 시작 FTH$ 잔액 또는 실행당 FTH$1,000,000 한도를 초과합니다.',
   'Not enough raw resources for a complete owned permit batch. A smaller permit may fit.': '보유 허가증의 전체 수량을 제작할 원자원이 부족합니다. 더 작은 수량의 허가증을 사용해 보세요.',
