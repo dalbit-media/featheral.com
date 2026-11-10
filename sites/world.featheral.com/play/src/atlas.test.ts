@@ -7,6 +7,9 @@ import { translate } from './i18n.ts';
 import { diplomacy, newGame } from './engine.ts';
 import { parseCommand } from '../server/economy.ts';
 import { zoomAtlas } from './atlas-camera.ts';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import { runInNewContext } from 'node:vm';
 
 const entry = (id: string, population: number, netWorth: number, federation: string | null = null): AtlasEntry => ({
   id, player: id, settlement: id, yours: false, location: { x: population, y: 0 }, distance: null,
@@ -28,6 +31,42 @@ test('territory rendering batches cells into one path per federation', () => {
     federations: [], updatedAt: 0 }, 'en');
   assert.equal((html.match(/<rect /g) ?? []).length, 1);
   assert.equal((html.match(/<path /g) ?? []).length, 3);
+});
+
+test('atlas initially covers the usable viewport and stays filled across desktop and phone rotation', () => {
+  const source = readFileSync(new URL('./atlas-camera.ts', import.meta.url), 'utf8');
+  let resize = () => {};
+  const frames: (() => void)[] = [];
+  const scene = { style: { transform: '' } }, status = { textContent: '' };
+  const viewport = { clientWidth: 1440, clientHeight: 900, addEventListener() {} };
+  const padding = { paddingLeft: '88', paddingTop: '96', paddingRight: '0', paddingBottom: '0' };
+  const Camera = runInNewContext(`${stripTypeScriptTypes(source.replace(/^import .*;\r?$/gm, '').replaceAll('export ', ''))}; AtlasCamera`, {
+    atlasSize, AbortController,
+    ResizeObserver: class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} },
+    getComputedStyle: () => padding,
+    requestAnimationFrame: (callback: () => void) => { frames.push(callback); return frames.length; },
+    cancelAnimationFrame() {},
+  });
+  const camera = new Camera(viewport, scene, status);
+  const flush = () => { while (frames.length) frames.shift()!(); };
+  for (const [width, height, left, top, bottom] of [
+    [1440, 900, 88, 96, 0], [1920, 1080, 88, 96, 0], [768, 1024, 0, 96, 64],
+    [375, 812, 0, 96, 64], [812, 375, 0, 72, 0], [320, 568, 0, 96, 64],
+  ]) {
+    viewport.clientWidth = width; viewport.clientHeight = height;
+    padding.paddingLeft = `${left}`; padding.paddingTop = `${top}`; padding.paddingBottom = `${bottom}`;
+    resize(); flush();
+    const match = /translate3d\(([^p]+)px,([^p]+)px,0\) scale\(([^)]+)\)/.exec(scene.style.transform)!;
+    assert.ok(match);
+    const [, x, y, scale] = match.map(Number);
+    assert.ok(x <= left + .001 && y <= top + .001, `${width}: map starts before content`);
+    assert.ok(x + atlasSize * scale >= width - .001 && y + atlasSize * scale >= height - bottom - .001,
+      `${width}: map covers entire content`);
+  }
+  camera.fit(); flush();
+  const fitScale = Number(/scale\(([^)]+)\)/.exec(scene.style.transform)![1]);
+  assert.equal(fitScale, 320 / atlasSize, 'Fit map still shows the whole square world on demand');
+  camera.close();
 });
 test('rankings cover every metric, sort descending and break ties deterministically without mutating input', () => {
   const entries = [entry('z', 10, 50), entry('a', 10, 100), entry('b', 20, 75)];

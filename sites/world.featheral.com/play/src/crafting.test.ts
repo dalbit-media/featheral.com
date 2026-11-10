@@ -67,14 +67,14 @@ test('recipe disclosure counts sufficient ingredient types and shows physical ow
   state.game.stock.wood = 1;
   const html = craftingPanel(state, () => '', 'decoration', 'settlement', 2);
   const bench = html.split('data-detail="recipe-bench"')[1].split('</article>')[0];
-  assert.doesNotMatch(bench, /<span>Recipe<\/span> <strong>/);
+  assert.doesNotMatch(bench, /<span>Ingredients<\/span> <strong>/);
   assert.match(bench, /No item ingredients required/);
   assert.match(bench, /50 kg \/ 300 kg/);
   assert.match(bench, /0.01 t \/ 0.02 t/);
   assert.equal((bench.match(/class="missing"/g) ?? []).length, 2);
   assert.match(bench, /data-action-eligible="false"/);
   const logseat = html.split('data-detail="recipe-logseat"')[1].split('</article>')[0];
-  assert.doesNotMatch(logseat, /<span>Recipe<\/span> <strong>/);
+  assert.doesNotMatch(logseat, /<span>Ingredients<\/span> <strong>/);
   state.game.stock.wood = 10;
   const affordable = craftingPanel(state, () => '', 'affordable');
   assert.match(affordable, /recipe-bench/);
@@ -88,7 +88,7 @@ test('collector recipe 4/8 discloses usable copies only, excluding market escrow
   state.inventory.pending = ['collection-oil-4'];
   const html = craftingPanel(state, () => '', 'collectors');
   const recipe = html.split('data-detail="recipe-collector-all-52"')[1].split('</article>')[0];
-  assert.match(recipe, /<span>Recipe<\/span> <strong>4\/8<\/strong>/);
+  assert.match(recipe, /<span>Ingredients<\/span> <strong>4\/8<\/strong>/);
   assert.equal((recipe.match(/class="available"/g) ?? []).length, 5);
   assert.equal((recipe.match(/class="missing"/g) ?? []).length, 4);
   assert.match(recipe, /Metal auto-collection · 4 game weeks<\/span><strong>0 \/ 1/);
@@ -174,7 +174,7 @@ test('craft cards reuse Marketplace sell quotes and seven-day trends, without sy
   assert.match(korean, /▼ 5.0%/);
   assert.match(korean, /data-direction="down"/);
 });
-test('craft distinguishes absent buyers from unloaded prices and identifies every missing analysis input', () => {
+test('craft keeps missing valuations concise without blocking owned-material crafting', () => {
   const state = fixture();
   for (const language of ['en', 'ko'] as const) {
     const report: MarketAnalysis = {
@@ -188,18 +188,12 @@ test('craft distinguishes absent buyers from unloaded prices and identifies ever
     const card = (html: string) => html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
     let bench = card(render(160));
     assert.ok(bench.includes(translate('Missing ingredient prices', language)));
-    assert.ok(bench.includes('href="/market/?asset=wood&side=buy"'));
-    assert.ok(!bench.includes('href="/market/?asset=metal&side=buy"'));
-    assert.ok(!bench.includes('href="/market/?asset=bench&side=sell"'));
-    assert.ok(bench.includes(translate('Why no quote?', language)));
-    assert.ok(bench.includes(translate('Check the linked markets. Refresh the paid analysis only after liquidity changes; refreshing does not create buyers or sellers.', language)));
+    assert.doesNotMatch(bench, /recipe-quote-help|Why no quote|snapshot, not a connection error/);
     assert.match(bench, /data-action="craft"[^>]*data-action-eligible="true"/);
     report.items[0].revenue = null;
     bench = card(render(0));
     assert.ok(bench.includes(translate('No buyers', language)));
     assert.ok(bench.includes(translate('No sale quote', language)));
-    assert.ok(bench.includes('href="/market/?asset=bench&side=sell"'));
-    assert.ok(bench.includes('href="/market/?asset=wood&side=buy"'));
     report.items[0].ingredients[0].dollars = 12;
     report.items[0].cost = 24; report.items[0].revenue = 160; report.items[0].profit = 136;
     bench = card(render(160));
@@ -208,6 +202,21 @@ test('craft distinguishes absent buyers from unloaded prices and identifies ever
   }
 });
 
+test('craft uses the latest traded sell price only when no live bid is available', () => {
+  for (const language of ['en', 'ko'] as const) {
+    const render = (bid: number, last: number | null) => craftingPanel(fixture(), () => '', 'decoration', 'settlement', 1, language,
+      [{ asset: 'bench', bid, ask: 170, last }]).split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
+    const historical = render(0, 123.4567);
+    assert.ok(historical.includes(translate('Latest trade', language)));
+    assert.match(historical, /123.4567 FTH\$/);
+    const live = render(160, 123.4567);
+    assert.ok(live.includes(translate('Sell price', language)));
+    assert.match(live, /160 FTH\$/);
+    assert.doesNotMatch(live, /123.4567 FTH\$/);
+    for (const last of [null, 0, -1, NaN, Infinity])
+      assert.ok(render(0, last).includes(translate('No buyers', language)));
+  }
+});
 test('compact craft cards show batch consumption before collapsed recipe details and name their icon action', () => {
   const html = craftingPanel(fixture(), () => '<span class="cost">batch resources</span>', 'decoration', 'settlement', 2);
   const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
@@ -293,12 +302,14 @@ test('profit estimates stay hidden without an active paid analysis while sell pr
   const bench = html.split('<h3>Wooden bench</h3>')[1].split('</article>')[0];
   assert.match(bench, /data-snapshot-profit="profit"/);
   assert.match(bench, /\+138 FTH\$/);
-  assert.match(bench, /Wood ×/);
+  assert.match(bench, /class="recipe-analysis-cost"/);
+  assert.match(bench, /FTH\$ 22/);
+  assert.doesNotMatch(html, /recipe-estimate-details|crafting-analysis-rules|crafting-help/);
   const lastMinute = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, report.expiresAt - 1);
   assert.match(lastMinute, /recipe-snapshot-estimate/);
   const expired = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], report, report.expiresAt);
   assert.match(expired, /data-analysis-state="expired"/);
-  assert.match(expired, /Analysis expired/);
+  assert.match(expired, /role="status">Expired</);
   assert.doesNotMatch(expired, /recipe-snapshot-estimate|Profit per copy/);
   const locked = craftingPanel(state, () => '', 'decoration', 'settlement', 1, 'en', [], null, state.serverTime, false, true);
   assert.match(locked, /aria-label="Get profit analysis · FTH\$100"/);

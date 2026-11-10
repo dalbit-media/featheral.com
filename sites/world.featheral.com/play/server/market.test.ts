@@ -180,6 +180,50 @@ test('partially unavailable analysis reports null values instead of inventing in
     assert.ok(row.revenue! > 0);
   } finally { h.store.close(); }
 });
+test('analysis prefers complete live quotes, then values the full quantity at the latest actual trade', () => {
+  const h = setup(), user = h.create();
+  try {
+    const fill = h.store.db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,?,'players','fixture-buyer','fixture-seller')");
+    for (const [asset, price] of [['wood', 2], ['bench', 160]] as const) {
+      fill.run(asset, dollarsUnits(price / 2), dollarsUnits(price / 2), 1);
+      fill.run(asset, dollarsUnits(price), dollarsUnits(price), 2);
+    }
+    let report = h.act(user.token, { type: 'profit-analysis' }).market.analysis!.items.find(row => row.item === 'bench')!;
+    assert.equal(report.revenue, h.read(user.token, 'bench').market.quotes.sell.dollars);
+    const woodQuantity = craftingCost('bench').wood!;
+    assert.equal(report.ingredients.find(input => input.asset === 'wood')!.dollars, h.read(user.token, 'wood', woodQuantity).market.quotes.buy.dollars);
+    h.store.db.prepare("UPDATE market_pools SET dollars=0 WHERE asset IN ('wood','bench')").run();
+    const pools = h.store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all();
+    report = h.act(user.token, { type: 'profit-analysis' }).market.analysis!.items.find(row => row.item === 'bench')!;
+    assert.equal(report.revenue, 160);
+    assert.equal(report.ingredients.find(input => input.asset === 'wood')!.dollars, woodQuantity * 2);
+    assert.equal(report.cost, 10 + report.ingredients.reduce((sum, input) => sum + input.dollars!, 0));
+    assert.equal(report.profit, 160 - report.cost!);
+    assert.deepEqual(h.store.db.prepare('SELECT * FROM market_pools ORDER BY asset').all(), pools);
+    assert.equal(h.read(user.token, 'bench').market.quotes.sell.available, false, 'valuation does not manufacture liquidity');
+    assert.equal(h.read(user.token).market.history.length, 2, 'analysis does not create fills');
+  } finally { h.store.close(); }
+});
+test('trade history alone can supply an analysis, while incomplete live quantities fall back to the full historical value', () => {
+  const h = setup(':memory:', false), user = h.create(), seller = h.create();
+  try {
+    const fill = h.store.db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,1,'players','fixture-buyer','fixture-seller')");
+    for (const [asset, price] of [['wood', 2], ['metal', 3], ['bench', 160]] as const)
+      fill.run(asset, dollarsUnits(price), dollarsUnits(price));
+    h.act(seller.token, { type: 'limit', asset: 'wood', side: 'sell', quantity: 1, price: 99 });
+    const live = h.read(user.token, 'wood', 6).market.quotes.buy;
+    assert.equal(live.available, false);
+    const before = h.read(user.token).dollars;
+    const result = h.act(user.token, { type: 'profit-analysis' });
+    const row = result.market.analysis!.items.find(row => row.item === 'bench')!;
+    assert.equal(row.cost, 19);
+    assert.equal(row.revenue, 160);
+    assert.equal(row.profit, 141);
+    assert.equal(result.dollars, before - marketAnalysisFee);
+    assert.equal(result.market.orders.length, 0);
+    assert.equal(h.read(seller.token).market.orders[0].remaining, 1, 'partial quotes are not executed');
+  } finally { h.store.close(); }
+});
 test('dynamic market quantity counts real purchasable stock and other active sell escrow, not virtual depth or self offers', () => {
   const h = setup(), buyer = h.create(), seller = h.create();
   try {

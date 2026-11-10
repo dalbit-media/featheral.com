@@ -332,12 +332,20 @@ export class Exchange {
     const row = this.db.prepare('SELECT data FROM market_analysis WHERE owner=? AND generatedAt<=? AND expiresAt>?').get(owner, now, now);
     return row ? activeMarketAnalysis(JSON.parse(String(row.data)) as MarketAnalysis, now) : null;
   }
+  private executableQuote(owner: string, asset: MarketAsset, side: MarketSide, quantity: number, realTime: number): number | null {
+    const steps = this.plan(owner, asset, side, quantity, realTime);
+    const units = steps.reduce((sum, step) => sum + step.dollars, 0);
+    return steps.reduce((sum, step) => sum + step.quantity, 0) === quantity && units > 0 && Number.isSafeInteger(units) ? units : null;
+  }
+  private valuationQuote(owner: string, asset: MarketAsset, side: MarketSide, quantity: number, realTime: number): number | null {
+    const live = this.executableQuote(owner, asset, side, quantity, realTime);
+    if (live !== null) return live;
+    const last = this.db.prepare('SELECT price FROM market_fills WHERE asset=? ORDER BY id DESC LIMIT 1').get(asset);
+    if (!last || !Number.isSafeInteger(Number(last.price)) || Number(last.price) <= 0) return null;
+    const units = Number(last.price) * quantity;
+    return Number.isSafeInteger(units) && units > 0 ? units : null;
+  }
   private generateAnalysis(owner: string, now: number, realTime: number): MarketAnalysis {
-    const quote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
-      const steps = this.plan(owner, asset, side, quantity, realTime);
-      const units = steps.reduce((sum, step) => sum + step.dollars, 0);
-      return steps.reduce((sum, step) => sum + step.quantity, 0) === quantity && units > 0 && Number.isSafeInteger(units) ? units : null;
-    };
     const report: MarketAnalysis = { generatedAt: now, expiresAt: now + marketAnalysisDuration, fee: marketAnalysisFee,
       items: craftableKeys.map(item => {
         const recipe = craftingCost(item), craftingFee = dollarsUnits(recipe.dollars ?? 0);
@@ -346,10 +354,10 @@ export class Exchange {
           if (!isMarketAsset(asset)) throw new ApiError(409, 'Crafting ingredient has no market.');
           if (quantity && quantity > 0) inputs.set(asset, (inputs.get(asset) ?? 0) + quantity);
         }
-        const ingredients = [...inputs].map(([asset, quantity]) => ({ asset, quantity, units: quote(asset, 'buy', quantity) }));
+        const ingredients = [...inputs].map(([asset, quantity]) => ({ asset, quantity, units: this.valuationQuote(owner, asset, 'buy', quantity, realTime) }));
         const total = craftingFee + ingredients.reduce((sum, input) => sum + (input.units ?? 0), 0);
         const cost = ingredients.every(input => input.units !== null) && Number.isSafeInteger(total) ? total : null;
-        const revenue = quote(item, 'sell', 1);
+        const revenue = this.valuationQuote(owner, item, 'sell', 1, realTime);
         return { item, craftingFee: craftingFee / dollarsScale,
           ingredients: ingredients.map(({ asset, quantity, units }) => ({ asset, quantity, dollars: units === null ? null : units / dollarsScale })),
           cost: cost === null ? null : cost / dollarsScale, revenue: revenue === null ? null : revenue / dollarsScale,
@@ -394,11 +402,6 @@ export class Exchange {
     const batches: AutoCraftQuote['batches'] = [];
     const blockers = new Map<number, string>();
     let fees = 0, proceeds = 0, valuedCost = 0;
-    const fullQuote = (asset: MarketAsset, side: MarketSide, quantity: number): number | null => {
-      const steps = this.plan(owner, asset, side, quantity, realTime);
-      const dollars = steps.reduce((sum, step) => sum + step.dollars, 0);
-      return Number.isSafeInteger(dollars) && dollars > 0 && steps.reduce((sum, step) => sum + step.quantity, 0) === quantity ? dollars : null;
-    };
     // Only permits owned at confirmation are eligible; crafted permits cannot extend the run.
     const order = [...bulkCraftingKeys].sort((a, b) => bulkCraftingItems[b].quantity - bulkCraftingItems[a].quantity);
     let progress = true;
@@ -429,15 +432,15 @@ export class Exchange {
             blockers.set(4, 'Free an item slot or expand storage to craft the output before selling it.');
             continue;
           }
-          const fee = dollarsUnits(cost.dollars ?? 0), revenue = fullQuote(item, 'sell', quantity);
+          const fee = dollarsUnits(cost.dollars ?? 0), revenue = this.executableQuote(owner, item, 'sell', quantity, realTime);
           if (revenue === null) {
             blockers.set(5, 'No funded buyer or pool can buy the complete batch. A smaller permit may fit available demand.');
             continue;
           }
           const materialCosts = [...Object.entries(cost).filter(([asset]) => asset !== 'dollars'), ...Object.entries(inputs)]
-            .map(([asset, count]) => isMarketAsset(asset) ? fullQuote(asset, 'buy', count) : null);
+            .map(([asset, count]) => isMarketAsset(asset) ? this.valuationQuote(owner, asset, 'buy', count, realTime) : null);
           if (materialCosts.some(cost => cost === null)) {
-            blockers.set(6, 'Live buy quotes are missing for consumed resources, ingredients or the bulk permit, so their value cannot be verified even when you own them.');
+            blockers.set(6, 'No live quote or latest trade is available for consumed materials or permits.');
             continue;
           }
           const estimatedCost = fee + materialCosts.reduce<number>((sum, cost) => sum + cost!, 0);

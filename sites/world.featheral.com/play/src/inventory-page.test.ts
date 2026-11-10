@@ -80,7 +80,7 @@ test('responsive inventory shows 60 desktop, 40 tablet and 20 phone slots withou
     const seen: string[] = [];
     for (let page = 0; page < Math.ceil(200 / pageSize); page++) {
       const html = inventoryPanel(state, () => '', 'all', 'en', 'explore', page, null, '', pageSize);
-      assert.equal((html.match(/class="inventory-slot\b/g) ?? []).length, Math.min(pageSize, 200 - page * pageSize));
+      assert.equal((html.match(/class="inventory-slot(?: |")/g) ?? []).length, Math.min(pageSize, 200 - page * pageSize));
       const items = [...html.matchAll(/data-action="inventory-select" data-item="([^"]+)"/g)].map(match => match[1]);
       if (page === 0) assert.equal(items[0], 'torch');
       seen.push(...items);
@@ -90,7 +90,7 @@ test('responsive inventory shows 60 desktop, 40 tablet and 20 phone slots withou
   }
   state.inventory.storage = 0;
   const small = inventoryPanel(state, () => '', 'all', 'en', 'explore', 0, null, '', 60);
-  assert.equal((small.match(/class="inventory-slot\b/g) ?? []).length, 20);
+  assert.equal((small.match(/class="inventory-slot(?: |")/g) ?? []).length, 20);
   state.inventory.storage = 9;
   assert.deepEqual(state, before);
 });
@@ -130,7 +130,9 @@ test('long item inspectors stay separate from the compact inventory browser and 
   assert.doesNotMatch(browser, /inventory-item-detail/);
   assert.match(inspector, /<h3>Master Merchant Charter<\/h3>/);
   assert.match(inspector, /data-action="auto-craft"/);
-  assert.match(inspector, /<dl class="item-facts">/);
+  assert.doesNotMatch(inspector, /<dl class="item-facts">|inventory-help/);
+  assert.match(browser, /class="inventory-overview"/);
+  assert.match(browser, /class="inventory-slot-name">Master Merchant Charter/);
   const css = readFileSync(new URL('./interface.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /grid-row:1\/5|grid-row:5\/9/);
   assert.match(css, /\.inventory-item-detail\{display:grid;grid-template-columns:64px minmax\(0,1fr\)/);

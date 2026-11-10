@@ -205,10 +205,10 @@ test('merchant failures distinguish missing buyers, ingredient quotes and actual
     const before = h.saved();
     assert.throws(() => h.quote(), (error: unknown) => {
       assert.ok(error instanceof Error);
-      assert.match(error.message, /Live buy quotes are missing/);
+      assert.match(error.message, /No live quote or latest trade/);
       const localized = translate(error.message, 'ko');
       assert.notEqual(localized, error.message);
-      assert.doesNotMatch(localized, /Live buy quotes|No profitable batch/);
+      assert.doesNotMatch(localized, /No live quote|No profitable batch/);
       return true;
     });
     assert.deepEqual(h.saved(), before);
@@ -223,6 +223,45 @@ test('merchant failures distinguish missing buyers, ingredient quotes and actual
     }
     assert.throws(() => h.quote(), /No funded buyer or pool can buy the complete batch/);
     assert.deepEqual(h.saved(), before);
+  } finally { h.store.close(); }
+});
+
+test('merchant values owned materials and permits at the latest trade when live purchase quotes are missing', () => {
+  const h = setup();
+  try {
+    h.store.transaction(h.user.token, session => {
+      inventory(session.account).items = [merchantCharter, 'craft-batch-10'];
+      session.account.game.stock = { wood: 100, water: 0, metal: 0, oil: 0 };
+    });
+    const fill = h.store.db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,1,'players','fixture-buyer','fixture-seller')");
+    fill.run('wood', 2, 2);
+    fill.run('craft-batch-10', 3, 3);
+    h.store.db.prepare("UPDATE market_pools SET dollars=0 WHERE asset IN ('wood','craft-batch-10')").run();
+    for (const item of craftableKeys.filter(autoCraftableOutput))
+      if (item !== 'torch') h.store.db.prepare('UPDATE market_pools SET dollars=0 WHERE asset=?').run(item);
+    const before = h.saved(), quote = h.quote();
+    assert.deepEqual(h.saved(), before);
+    assert.deepEqual(quote.batches.map(batch => [batch.item, batch.quantity]), [['torch', 10]]);
+    assert.equal(quote.batches[0].valuedCost, 23 / dollarsScale);
+    const result = h.post(h.request(quote.fingerprint));
+    assert.equal(result.autoCraft!.fingerprint, quote.fingerprint);
+    assert.equal(h.saved().game.stock.wood, before.game.stock.wood - 10);
+    assert.equal(h.saved().game.dollars, before.game.dollars + dollarsUnits(quote.proceeds));
+    assert.equal(h.saved().inventory!.items.includes(merchantCharter), false);
+  } finally { h.store.close(); }
+});
+test('historical output prices never authorize merchant sales without funded buyers', () => {
+  const h = setup();
+  try {
+    const fill = h.store.db.prepare("INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller) VALUES (?,1,?,?,1,'players','fixture-buyer','fixture-seller')");
+    for (const item of craftableKeys.filter(autoCraftableOutput)) {
+      fill.run(item, dollarsUnits(10000), dollarsUnits(10000));
+      h.store.db.prepare('UPDATE market_pools SET dollars=0 WHERE asset=?').run(item);
+    }
+    const before = h.saved(), fills = h.store.db.prepare('SELECT COUNT(*) AS n FROM market_fills').get()!.n;
+    assert.throws(() => h.quote(), /No funded buyer or pool can buy the complete batch/);
+    assert.deepEqual(h.saved(), before);
+    assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM market_fills').get()!.n, fills);
   } finally { h.store.close(); }
 });
 

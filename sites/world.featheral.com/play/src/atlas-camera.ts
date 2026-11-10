@@ -10,6 +10,7 @@ export function zoomAtlas(camera: AtlasCameraState, factor: number, anchor: Loca
 export class AtlasCamera {
   private camera: AtlasCameraState = { x: 0, y: 0, scale: 1 };
   private minimum = 1;
+  private cover = 1;
   private width = 0;
   private height = 0;
   private centerPoint: Location = { x: 0, y: 0 };
@@ -87,12 +88,17 @@ export class AtlasCamera {
       this.camera.x += center.x - this.centerPoint.x;
       this.camera.y += center.y - this.centerPoint.y;
       this.centerPoint = center;
-      const ratio = this.camera.scale / this.minimum;
+      const ratio = this.camera.scale / this.cover;
       this.width = width; this.height = height;
-      this.minimum = Math.max(1, Math.min(availableWidth, availableHeight)) / (atlasSize + 80);
-      if (first) this.fit();
+      this.minimum = Math.max(1, Math.min(availableWidth, availableHeight)) / atlasSize;
+      this.cover = Math.max(1, Math.max(availableWidth, availableHeight)) / atlasSize;
+      if (first) {
+        const scale = this.cover;
+        this.camera = { x: center.x - atlasSize * scale / 2, y: center.y - atlasSize * scale / 2, scale };
+        this.schedule();
+      }
       else {
-        this.camera = zoomAtlas(this.camera, this.minimum * ratio / this.camera.scale,
+        this.camera = zoomAtlas(this.camera, this.cover * ratio / this.camera.scale,
           center, this.minimum);
         this.schedule();
       }

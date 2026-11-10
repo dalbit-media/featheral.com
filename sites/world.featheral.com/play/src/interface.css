@@ -15,13 +15,20 @@
 #app .inventory-view .inventory-filters .button{font-size:11px;min-height:36px;padding:6px 10px}
 #app .inventory-view .inventory-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start}
 .inventory-browser,.inventory-inspector{min-width:0}
-.inventory-browser{display:flex;flex-direction:column;gap:12px}
+.inventory-browser{display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--surface-border);border-radius:14px;background:linear-gradient(145deg,#c5e7b408,transparent 65%),#14231a}
+.inventory-overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.inventory-overview>div{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--surface-border);border-radius:9px;background:#c5e7b409}
+.inventory-overview span{color:var(--muted);font-size:11px}
+.inventory-overview strong{font-size:22px;font-variant-numeric:tabular-nums}
 #app .inventory-view .inventory-browser .inventory-search{max-width:none;margin:0}
 #app .inventory-view .inventory-browser .inventory-expansion{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;margin:0}
 #app .inventory-view .inventory-browser .inventory-expansion>span{font-size:12px;color:var(--muted)}
 #app .inventory-view .inventory-browser .inventory-filters{margin:0}
-#app .inventory-view .inventory-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;align-content:start;margin:0}
-#app .inventory-view .inventory-slot{min-height:56px;max-height:100px;border-radius:10px}
+#app .inventory-view .inventory-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;align-content:start;margin:0}
+#app .inventory-view .inventory-slot{flex-direction:column;gap:4px;min-height:84px;max-height:none;aspect-ratio:1;padding:8px 5px;border-radius:10px}
+#app .inventory-view .inventory-slot .item-art{width:48%;height:48%;flex-shrink:0}
+.inventory-slot-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:10px;line-height:1.2;text-align:center}
+#app .inventory-view .inventory-equipped-label{bottom:auto;top:3px;right:auto;max-width:65%;padding:0 3px}
 #app .inventory-view .inventory-slot:focus-visible{outline:2px solid var(--mint);outline-offset:3px}
 #app .inventory-view .inventory-slot[aria-pressed=true]{border-color:var(--mint);background:#c5e7b418}
 #app .inventory-view .inventory-pages{flex-wrap:wrap;overflow:visible;gap:6px}
@@ -37,19 +44,29 @@
 #app .inventory-view .inventory-inspector>.item-facts>div:last-child{border-bottom:0}
 #app .inventory-view .item-facts dt{font-size:11px;color:var(--muted)}
 #app .inventory-view .item-facts dd{margin:4px 0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
-#app .inventory-view .craft-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr));align-items:start;gap:12px}
-#app .inventory-view .recipe-card{min-width:0;padding:14px;background:var(--surface);border:1px solid var(--surface-border);border-radius:12px}
+#app .inventory-view .craft-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr));align-items:stretch;gap:12px}
+#app .inventory-view .recipe-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:14px;background:linear-gradient(145deg,#c5e7b40b,transparent 65%),#16271d;border:1px solid var(--surface-border);border-radius:12px}
+#app .inventory-view .recipe-card:has([data-action-eligible=true]){border-color:#c5e7b444}
 #app .inventory-view .recipe-heading{display:flex;align-items:center;gap:10px}
 #app .inventory-view .recipe-heading .item-art{width:48px;height:48px;flex:none;margin:0}
-#app .inventory-view .recipe-heading h3{font-size:14px;margin:0 0 4px;overflow-wrap:anywhere}
-#app .inventory-view .recipe-card .compact-item-action{width:100%;margin-top:10px;min-height:44px}
-#app .inventory-view .recipe-card .consumption-costs{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+#app .inventory-view .recipe-heading h3{font-size:14px;min-height:0;margin:0 0 4px;overflow-wrap:anywhere}
+#app .inventory-view .recipe-card .compact-item-action{width:100%;margin-top:auto;min-height:44px}
+#app .inventory-view .recipe-card .consumption-costs{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:10px;border-radius:8px;background:#08150d66}
+#app .inventory-view .recipe-market{padding-bottom:10px;border-bottom:1px solid var(--surface-border);font-size:11px}
+#app .inventory-view .recipe-market>span{display:flex;flex-direction:column;gap:4px}
+#app .inventory-view .recipe-market>span>strong{font-size:16px}
+.recipe-analysis-cost{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+#app .inventory-view .recipe-snapshot-estimate{padding:10px;background:#c5e7b40c;font-size:11px}
+#app .inventory-view .recipe-snapshot-estimate[data-snapshot-profit=profit]{color:#a7dfb3}
+#app .inventory-view .recipe-snapshot-estimate[data-snapshot-profit=loss]{color:#f5a49d}
 #app .inventory-view .recipe-details{margin-top:8px}
 #app .inventory-view .recipe-details summary{min-height:36px}
 #app .inventory-view .crafting-market-status{margin:0 0 8px}
 #app .inventory-view .crafting-filters{display:flex;flex-wrap:wrap;gap:6px}
 #app .inventory-view .crafting-filters .button{min-height:36px;font-size:11px}
-#app .inventory-view .crafting-analysis-access{margin:10px 0}
+.crafting-toolbar{display:grid;grid-template-columns:minmax(200px,1fr) auto;align-items:center;gap:12px}
+#app .inventory-view .crafting-toolbar .inventory-search{max-width:none;margin:0}
+#app .inventory-view .crafting-analysis-access{grid-template-columns:auto minmax(0,1fr) auto;gap:10px;margin:0;padding:10px 12px;background:#c5e7b40c}
 #app .inventory-view .disclosure{margin-top:12px}
 .notice.water-upkeep>*{min-width:0}
 .water-upkeep .disclosure{margin:0;padding:0;border:0}
@@ -131,6 +148,8 @@
 }
 @media(min-width:1000px){
   #app .inventory-view .inventory-panel{grid-template-columns:minmax(0,1fr) clamp(320px,26vw,380px);gap:24px}
+  #app .inventory-view .inventory-panel:not(:has(.inventory-inspector)){grid-template-columns:minmax(0,1fr)}
+  .inventory-inspector{position:sticky;top:72px}
   #app .inventory-view .inventory-panel>:not(.inventory-browser):not(.inventory-inspector){grid-column:1/-1}
 }
 @media(max-width:479px){
@@ -150,6 +169,15 @@
   #app .inventory-view .inventory-expansion{flex-wrap:wrap}
   #app .inventory-view .inventory-expansion .button{flex-wrap:wrap;min-height:44px}
   #app .inventory-view .pending-finds{flex-wrap:wrap;padding:12px;gap:10px}
+  .inventory-browser{padding:10px}
+  .inventory-overview>div{padding:10px 8px}
+  .crafting-toolbar{grid-template-columns:minmax(0,1fr)}
+  #app .inventory-view .craft-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #app .inventory-view .recipe-card{padding:10px;gap:8px}
+  #app .inventory-view .recipe-card:has(.recipe-details[open]){grid-column:1/-1}
+  #app .inventory-view .recipe-heading{align-items:flex-start;flex-direction:column;gap:6px}
+  #app .inventory-view .recipe-heading h3{font-size:12px}
+  #app .inventory-view .recipe-market>span>strong{font-size:13px}
   #app .settlement-task-panel{inset:8px 8px 78px}
   #app .settlement-task-body{padding:10px}
   #app .settlement-dock{grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:4px}
@@ -164,7 +192,3 @@
   .enhancement-picker,.enhancement-detail,.enhancement-market{padding:10px}
   .enhanced-market-link span{display:none}
 }
-.recipe-quote-help{grid-column:1/-1;min-width:0;font-size:12px;line-height:1.5}
-.recipe-quote-help summary{cursor:pointer}
-.recipe-quote-help ul{padding-left:18px}
-.recipe-quote-help a{overflow-wrap:anywhere}

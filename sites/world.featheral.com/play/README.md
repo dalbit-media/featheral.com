@@ -112,7 +112,9 @@ item-detail popover; tap to inspect and select an owned item for its ordinary
 actions. Reserved-only stacks can be inspected without making them usable.
 Escape or clicking outside dismisses the popover.
 Previews are bounded to the space above or below the slot and never intercept
-pointer clicks. Select an item to read its full details below the grid.
+pointer clicks. Select an item for compact ownership and action controls.
+Named item tiles, storage counters and filled panel surfaces keep the workspace
+scannable; long usage explanations remain in the optional item previews.
 The inventory panel uses compact icon filters and omits the redundant section
 tabs; the settlement dock still provides navigation.
 
@@ -160,8 +162,12 @@ This changes presentation only: storage capacities and expansion costs stay
 unchanged. The final page shows only the remaining unlocked slots.
 The inventory browser and selected-item inspector are independent layout columns,
 so long descriptions cannot stretch search, filters or slot rows. Desktop uses a
-320–380px inspector with full-width action buttons and stacked facts; narrower
+320–380px inspector with full-width action buttons; narrower
 screens place the inspector below the grid.
+Craft uses equal-width recipe cards with prominent prices, batch costs and
+paid per-copy profit estimates. Search and analysis share a compact toolbar.
+Ingredient disclosures retain owned/required quantities without long rules or
+quote explanations. Phone layouts show two recipe columns.
 
 Refinement Cores remain craftable and player-tradeable, but are excluded from
 automatic reserve funding alongside Merchant and Master Builder Charters.
@@ -220,12 +226,13 @@ receipt retries never spend again. Reserved or pending charters cannot be used.
 ## Master Merchant Charter
 
 Craft distinguishes a failed price request from a successfully loaded market
-with no buyers. An incomplete paid profit snapshot shows **No sale quote** or
-**Missing ingredient prices**, with **Why no quote?** listing the output and
-specific missing ingredient markets. These links open the relevant buy/sell
-ticket. Crafting from owned materials is not gated by market quote availability.
-Refreshing analysis is paid and does not create liquidity; no substitute prices
-are invented for missing quotes.
+with no buyers. Craft prices and paid profit analysis prefer complete live
+quotes. When no complete quote is available, they use the latest recorded trade
+price for that asset, multiplied by the entire required quantity (not a mix of
+partial liquidity and history). Recipe sell prices label this **Latest trade**.
+Without either source, the snapshot retains **No sale quote** or **Missing
+ingredient prices**. Crafting from owned materials is not gated by market quotes.
+Refreshing analysis is paid and does not create liquidity or rewrite older reports.
 Craft catalog loads, paid analysis purchases and Merchant previews initialize
 all existing reserve-eligible markets through the same on-demand authority path
 as individual Marketplace reads before calculating quotes. Catalog loads and
@@ -261,8 +268,10 @@ The single-copy analysis determines ranking, not batch eligibility: every
 otherwise eligible owned permit size gets its own executable profitability check.
 If none qualify, the review reports the closest blocker (materials, item space,
 fee ceiling, missing buyers, missing input valuation or a loss) and keeps the
-message visible in Inventory. Missing input buy quotes cannot be replaced with
-invented prices, even for owned materials.
+message visible in Inventory. Owned input materials and permits use complete live
+buy quotes, falling back to their latest recorded trade when needed. Missing both
+sources blocks valuation. Historical output prices can rank recipes but never
+authorize a sale: complete funded live demand is still required for every batch.
 
 The crafting-fee spending ceiling is **FTH$1,000,000 per run**, or the balance
 at confirmation if lower. Preview and execution use the same ceiling and
@@ -341,6 +350,11 @@ Empty federations have no territory. Borders are not player claims or ownership.
 The atlas fills the game viewport behind the navigation and resource bar.
 Drag or use arrow keys to pan; scroll, pinch or use + / - to zoom (up to 16x).
 Home and Fit map restore the whole map; Your settlement recenters it.
+The initial camera fills the entire available game viewport rather than fitting
+the square world inside a smaller centered panel. Controls and the directory
+overlay the map; only the shared header and navigation reserve space. Rotation
+and resizing preserve the filled view, while Fit map remains an explicit
+whole-world overview.
 The searchable settlement directory and federation legend are collapsible overlays.
 Territory geometry is generated only on atlas refresh; camera gestures update a
 single composited transform at most once per animation frame, with no idle loop.
