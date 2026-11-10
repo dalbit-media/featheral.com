@@ -1203,7 +1203,11 @@ app.get(/^\/(?!api|media).*/, (req, res) => {
       `<meta name="site-base" content="${base}"><meta name="site-key" content="${selected?.key || 'sites-featheral-com'}"><meta name="site-directory" content="${selected?.path ? 'false' : 'true'}">`));
   }
   const frontendHost = preview?.hostname || hostName(req);
-  if (['ex.featheral.com', 'stats.featheral.com'].includes(frontendHost))
+  if (frontendHost === 'ex.featheral.com')
+    return res.sendFile(path.join(exchangeFrontend, 'index.html'), {
+      lastModified: false, etag: false, headers: { 'Cache-Control': 'no-store' },
+    });
+  if (frontendHost === 'stats.featheral.com')
     return res.sendFile(path.join(sitesRoot, frontendHost, 'index.html'));
   res.sendFile(path.join(publicFrontend, 'index.html'));
 });

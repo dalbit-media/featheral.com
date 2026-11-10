@@ -21,6 +21,35 @@ test("Exchange terminal keeps signing sessions in memory and preserves submitted
   assert.match(terminal, /FeatheralWallet\.authenticate\(address => api\("\/challenge"/);
   assert.doesNotMatch(terminal, /eth_requestAccounts|featheral:exchange-auth|builtin-connect/);
 });
+test("Terminal rejects stale or incomplete HTML before requests, timers or trading handlers start", () => {
+  const required = vm.runInNewContext(terminal.slice(terminal.indexOf("const requiredElements ="), terminal.indexOf("const missingElements =")) + ";requiredElements;");
+  for (const match of terminal.matchAll(/\$\("([^"]+)"\)/g))
+    assert.ok(required.includes(match[1]), `${match[1]} is part of the terminal DOM contract`);
+  const html = fs.readFileSync(path.join(__dirname, "../../../sites/ex.featheral.com/index.html"), "utf8");
+  for (const missing of [["overview-markets", "pending-movements"], ["terminal-status"], ["funding-form"]]) {
+    const nodes = new Map([...html.matchAll(/id="([^"]+)"/g)].map(match => [match[1], {
+      setAttribute(name, value) { this[name] = value; },
+    }]));
+    missing.forEach(id => nodes.delete(id));
+    const errors = [], controls = [{}, {}], forms = [{ addEventListener(type, handler) { this[type] = handler; } }], body = [];
+    vm.runInNewContext(terminal, {
+      document: { getElementById: id => nodes.get(id) || null, body: { prepend: node => body.push(node) },
+        createElement: () => ({ setAttribute(name, value) { this[name] = value; } }),
+        querySelectorAll: selector => selector === "form" ? forms : controls },
+      console: { error: (...args) => errors.push(args) },
+      fetch() { assert.fail("Incompatible HTML must not make requests"); },
+      setInterval() { assert.fail("Incompatible HTML must not start refresh timers"); },
+    });
+    assert.equal(errors.length, 1);
+    assert.deepEqual(Array.from(errors[0][1].missingElements), missing);
+    assert.ok(controls.every(control => control.disabled));
+    let prevented = false; forms[0].submit({ preventDefault() { prevented = true; } });
+    assert.ok(prevented, "Enter-key form submissions are also blocked");
+    const status = nodes.get("terminal-status") || body[0];
+    assert.equal(status.role, "alert");
+    assert.match(status.textContent, /Ctrl\+Shift\+R/);
+  }
+});
 async function browserFixture(t, respond = () => null, storage = new Map(), hash = "") {
   const owner = "0x" + "ab".repeat(20), requests = [], confirmations = [], errors = [];
   class Element {

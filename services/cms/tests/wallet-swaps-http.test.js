@@ -8,8 +8,8 @@ const { Wallet } = require("ethers");
 test("wallet swap HTTP routes enforce host, origin and ownership and expose real pair executions on Exchange", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wallet-swap-http-"));
   const serverFile = path.join(__dirname, "..", "server.js"), realRequire = createRequire(serverFile);
-  const load = vm.runInThisContext(`(function(require,__dirname,module){${fs.readFileSync(serverFile, "utf8")}\nreturn {app,creation,dollarExchange};})`, { filename: serverFile });
-  const { app, creation, dollarExchange } = load(name => {
+  const load = vm.runInThisContext(`(function(require,__dirname,module){${fs.readFileSync(serverFile, "utf8")}\nreturn {app,creation,dollarExchange,siteManager};})`, { filename: serverFile });
+  const { app, creation, dollarExchange, siteManager } = load(name => {
     const dependency = realRequire(name);
     if (name === "../operations/configuration") return { ...dependency, assertDatabaseConfiguration() {} };
     if (name === "../operations/runtime") return Object.assign(Object.create(dependency), { environment: () => ({ ADMIN_CONFIG_JSON: '{"siteManagement":true}' }) });
@@ -43,6 +43,14 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
     request.on("error", reject); request.end(body ? JSON.stringify(body) : undefined);
   });
   const wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
+  siteManager.create({ hostname: "ex.featheral.com" });
+  const exchangePage = await call("/", undefined, { host: "ex.featheral.com", prefix: "" });
+  assert.equal(exchangePage.status, 200);
+  assert.equal(exchangePage.headers["cache-control"], "no-store");
+  assert.equal(exchangePage.headers["last-modified"], undefined);
+  assert.equal(exchangePage.headers.etag, undefined);
+  for (const id of ["overview-markets", "pending-movements", "initial-dollar-funding"])
+    assert.ok(exchangePage.body.includes(`id="${id}"`), `Exchange HTML includes ${id}`);
   for (const host of ["ex.featheral.com", "notes.featheral.com"]) {
     const activityResponse = await call("/activity", undefined, { host });
     assert.equal(activityResponse.status, 200);

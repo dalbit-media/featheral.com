@@ -1,6 +1,31 @@
 "use strict";
 (() => {
   const $ = id => document.getElementById(id), unit = 10n ** 18n;
+  const requiredElements = [
+    "notes-link", "gold-channel", "candle-chart", "initial-dollar-funding",
+    "overview-markets", "overview-funded", "overview-volume", "pending-movements",
+    "terminal-status", "provider-connect", "disconnect", "trading-owner", "trading-total",
+    "positions", "trade-history", "movement-history", "legacy-requests",
+    "market-list", "market-search", "market-title", "spot-price", "usd-price",
+    "market-detail", "reference-detail", "chart-interval", "chart-reset", "chart-sma", "chart-fullscreen", "refresh-market",
+    "order-form", "order-side", "order-amount-label", "order-amount", "order-slippage", "order-preview", "execute-order",
+    "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
+    "liquidity-form", "liquidity-symbol", "liquidity-action", "liquidity-amount", "liquidity-positions",
+    "funding-form", "funding-dollar", "funding-fthx", "funding-approval",
+  ];
+  const missingElements = requiredElements.filter(id => !$(id));
+  if (missingElements.length) {
+    const message = "Exchange page and script versions do not match. Trading is disabled. Reload this page (Ctrl+Shift+R). If this persists, update the Exchange HTML and scripts together.";
+    console.error(message, { missingElements });
+    const status = $("terminal-status") || document.createElement("p");
+    status.textContent = message;
+    status.setAttribute("role", "alert");
+    if (!$("terminal-status")) document.body.prepend(status);
+    document.querySelectorAll("form input, form select, form button, .signin button, #execute-order")
+      .forEach(control => { control.disabled = true; });
+    document.querySelectorAll("form").forEach(form => form.addEventListener("submit", event => event.preventDefault()));
+    return;
+  }
   const hostUrl = name => `${location.protocol}//${location.hostname.endsWith(".localhost") ? name + ".localhost" : name + ".featheral.com"}${location.port ? ":" + location.port : ""}`;
   $("notes-link").href = hostUrl("notes") + "/";
   $("gold-channel").href = "/gold-channel/";

@@ -336,6 +336,10 @@ without an approved initial target are shown unscaled.
 Unfunded reserve cards link to “Fund and enable”: FTH$ opens the Exchange
 administrator funding form; note pools open native-note administration with the
 eligible market selected. Links never submit funding or bypass approval.
+Exchange HTML is served without caching or file-date validators so deployment
+timestamps cannot keep an older page paired with newer scripts. The terminal
+checks its required page elements before attaching trading handlers; incompatible
+markup disables forms and displays an explicit hard-reload/update message.
 
 Unresolved deposits, withdrawals, liquidity changes and initial funding appear
 with explicit resume controls after reconnecting in the same browser tab.
