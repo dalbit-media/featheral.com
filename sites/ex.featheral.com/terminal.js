@@ -6,7 +6,7 @@
     "overview-markets", "overview-funded", "overview-volume", "pending-movements",
     "terminal-status", "provider-connect", "disconnect", "trading-owner", "trading-total",
     "positions", "trade-history", "movement-history", "legacy-requests",
-    "market-list", "market-search", "market-title", "spot-price", "usd-price",
+    "market-list", "market-search", "market-filter", "market-list-status", "market-title", "spot-price", "usd-price",
     "market-detail", "reference-detail", "chart-interval", "chart-reset", "chart-sma", "chart-fullscreen", "refresh-market",
     "order-form", "order-side", "order-amount-label", "order-amount", "order-slippage", "order-preview", "execute-order",
     "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
@@ -40,7 +40,8 @@
     $("market-mode").textContent = world ? "Executed World inventory market. Trade these items in World; they are not wallet notes. FTHX prices use the internal denomination, not an AMM currency swap."
       : reference ? "Reference / conversion only. No internal FTHG pool or direct Exchange order. Use the Gold reserve channel." : "";
     $("order-form").querySelectorAll("input, select, button").forEach(control => { control.disabled = reference || world; });
-    $("execute-order").disabled = reference || world || !preview;
+    $("execute-order").disabled = !preview || (!preview.submitted && (reference || world));
+    $("execute-order").textContent = preview?.submitted ? "Resume submitted trade" : "Confirm spot trade";
   }
   function renderGoldPools(reference) {
     const root = $("gold-pool-details"); root.replaceChildren();
@@ -92,10 +93,9 @@
   }
   function format(raw, symbol) {
     const value = BigInt(raw), precision = decimals(symbol);
-    const places = symbol === "FTH$" ? 2 : 0, factor = 10n ** BigInt(precision - places);
-    const rounded = (value + factor / 2n) / factor, whole = rounded / 10n ** BigInt(places);
-    const fraction = (rounded % 10n ** BigInt(places)).toString().padStart(places, "0").replace(/0+$/, "");
-    return `${value > 0n && rounded === 0n ? "<0.01" : whole.toLocaleString() + (fraction ? "." + fraction : "")} ${symbol}`;
+    const scale = 10n ** BigInt(precision), whole = value / scale;
+    const fraction = precision ? (value % scale).toString().padStart(precision, "0").replace(/0+$/, "") : "";
+    return `${whole.toLocaleString()}${fraction ? "." + fraction : ""} ${symbol}`;
   }
   function ratio(price, digits = 2) {
     const n = BigInt(price.numerator), d = BigInt(price.denominator), scale = 10n ** BigInt(digits), rounded = (n * scale + d / 2n) / d;
@@ -111,7 +111,12 @@
     const response = await fetch("/api/creation" + path, { method, cache: "no-store",
       headers: { "Content-Type": "application/json", ...(token ? { "x-creation-token": token } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}) });
-    const result = await response.json();
+    let result;
+    try { result = await response.json(); }
+    catch (error) {
+      if (error.name !== "SyntaxError") throw error;
+      throw Error(`Exchange returned an invalid response (HTTP ${response.status}). Please retry.`);
+    }
     if (!response.ok) throw Object.assign(Error(result.error || `HTTP ${response.status}`), { status: response.status });
     return result;
   }
@@ -176,13 +181,15 @@
     const pending = sessionStorage.getItem(`featheral-exchange-pending:${owner}:trade`);
     if (pending && !preview) {
       preview = JSON.parse(pending);
-      $("order-preview").textContent = `Previously submitted order: ${format(preview.amount, preview.side === "buy" ? "FTHX" : preview.symbol)}. Resume the same request to retrieve or complete its result; do not create a replacement.`;
+      $("order-preview").textContent = `Previously submitted ${preview.side} order for ${preview.symbol}/FTHX: spend ${format(preview.amount, preview.side === "buy" ? "FTHX" : preview.symbol)}, minimum ${format(preview.minOutput, preview.side === "buy" ? preview.symbol : "FTHX")}. Resume the same request to retrieve or complete its result; do not create a replacement.`;
       $("execute-order").disabled = false;
     }
     const usd = current.portfolio.usd;
     $("trading-total").textContent = usd === null ? "USD unavailable" : `${current.portfolio.partial ? "Partial " : ""}$${usd} estimated trading assets`;
     rows($("positions"), current.holdings, "No trading assets. Deposit FTHX to start.", asset => {
-      const tr = row([asset.symbol, format(asset.balance, asset.symbol)]); tr.title = format(asset.balance, asset.symbol); return tr;
+      const tr = row([asset.symbol, format(asset.balance, asset.symbol)]);
+      tr.children[0].append(window.FeatheralAssetIcons.create(asset));
+      tr.title = format(asset.balance, asset.symbol); return tr;
     }, 2);
     const previous = $("withdraw-symbol").value;
     $("withdraw-symbol").replaceChildren(...current.holdings.map(asset => { const option = text("option", asset.symbol); option.value = asset.symbol; return option; }));
@@ -217,12 +224,30 @@
     const lp = await api("/markets/account");
     $("liquidity-positions").textContent = lp.positions.length ? lp.positions.map(position => `${position.symbol}: ${position.shares.toLocaleString()} LP shares`).join(" / ") : "No wallet liquidity positions.";
   }
+  function volumeOf(market) {
+    return market.inventoryOnly ? BigInt(market.volumeBaseUnits || "0") : BigInt(market.volume || "0") * unit;
+  }
   function renderMarkets() {
-    const filter = $("market-search").value.toUpperCase();
+    const filter = $("market-search").value.trim().toUpperCase();
+    const active = markets.filter(market => !market.referenceOnly && volumeOf(market) > 0n);
+    const activeOnly = $("market-filter").value === "active" && !filter && active.length > 0;
+    const visible = markets.filter(market => (!activeOnly || volumeOf(market) > 0n || market.symbol === selected)
+      && `${market.symbol} ${market.name || ""} ${market.ticker || ""}`.toUpperCase().includes(filter));
+    if (activeOnly) visible.sort((a, b) => volumeOf(a) > volumeOf(b) ? -1 : volumeOf(a) < volumeOf(b) ? 1 : a.symbol.localeCompare(b.symbol));
+    $("market-list-status").textContent = !visible.length ? "No matching markets."
+      : activeOnly ? `${active.length} active pairs / 24h. Selected market stays visible.`
+        : !active.length ? "No active pairs reported / 24h. Showing all markets." : `${visible.length} markets. Volume is actual 24h FTHX.`;
     $("market-list").replaceChildren();
-    for (const market of markets.filter(m => m.symbol.toUpperCase().includes(filter))) {
+    for (const market of visible) {
       const button = text("button", market.ticker || market.symbol); button.type = "button"; button.setAttribute("aria-pressed", String(market.symbol === selected));
       button.append(text("small", market.inventoryOnly ? "World fills" : market.referenceOnly ? "Reference only" : market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
+      button.append(window.FeatheralAssetIcons.create(market));
+      if (!market.referenceOnly) {
+        const rawVolume = market.inventoryOnly ? market.volumeBaseUnits : market.volume;
+        const volume = text("span", rawVolume == null ? "24h volume unavailable"
+          : market.inventoryOnly ? exactFthx(rawVolume) : format(rawVolume, "FTHX"));
+        volume.className = "market-volume"; volume.title = "Executed volume in the last 24 hours"; button.append(volume);
+      }
       button.addEventListener("click", () => {
         selected = market.symbol;
         if (market.inventoryOnly && !market.trades) $("chart-interval").value = "all";
@@ -237,10 +262,15 @@
     let marketSymbol = selected;
     const data = await api("/trading/markets?interval=" + $("chart-interval").value);
     if (generation !== quoteGeneration) return;
+    const listed = data.markets.map(item => item.symbol === "FTH$" ? { ...item, volume: data.pair.volumeFthx } : item);
     if (autoSelect) {
       autoSelect = false;
+      const active = listed.filter(market => volumeOf(market) > 0n)
+        .sort((a, b) => volumeOf(a) > volumeOf(b) ? -1 : volumeOf(a) < volumeOf(b) ? 1 : a.symbol.localeCompare(b.symbol));
+      const preferred = active.find(market => market.funded && !market.pendingSettlement) || active[0];
       const world = data.markets.find(market => market.inventoryOnly);
-      if (world && !data.markets.some(market => market.funded)) {
+      if (preferred) selected = marketSymbol = preferred.symbol;
+      else if (world && !data.markets.some(market => market.funded)) {
         selected = marketSymbol = world.symbol;
         if (!world.trades) $("chart-interval").value = "all";
       }
@@ -249,7 +279,7 @@
     const gold = data.reference.goldReference, dollar = data.reference.dollarReference;
     const goldPrice = gold && dollar ? { numerator: (BigInt(gold.numerator) * BigInt(dollar.numerator)).toString(),
       denominator: (BigInt(gold.denominator) * BigInt(dollar.denominator) * unit).toString() } : null;
-    markets = [...data.markets.map(item => recovering && !item.inventoryOnly ? { ...item, pendingSettlement: true } : item),
+    markets = [...listed.map(item => recovering && !item.inventoryOnly ? { ...item, pendingSettlement: true } : item),
       { symbol: "FTHG", funded: false, referenceOnly: true, price: goldPrice }];
     const priority = market => market.inventoryOnly ? 3 : ["FTH$", "FTHG", "FTHS"].includes(market.symbol) ? ["FTH$", "FTHG", "FTHS"].indexOf(market.symbol) : 4;
     markets.sort((a, b) => priority(a) - priority(b)); renderMarkets(); renderGoldPools(data.reference); applyMarketMode();
@@ -266,6 +296,7 @@
       chart.update({ currency: "FTHX", candles: [] }); displayedMarket = marketSymbol;
     }
     $("market-title").textContent = (market.ticker || marketSymbol) + " / FTHX" + (market.inventoryOnly ? " · World" : "");
+    $("market-title").append(window.FeatheralAssetIcons.create(market));
     $("spot-price").textContent = market.referenceOnly ? goldPrice ? `Indicative ${ratio(goldPrice)} FTHX` : "Reference unavailable"
       : market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price, market.inventoryOnly ? 18 : 2)} FTHX${market.inventoryOnly ? " · last fill" : ""}` : "Pool not available";
     const usdPerDollar = data.reference.usdValue, rate = data.reference.dollarReference;
@@ -300,6 +331,7 @@
     const lastLiquidity = $("liquidity-symbol").value;
     $("liquidity-symbol").replaceChildren(...markets.filter(m => m.symbol !== "FTH$" && m.funded).map(m => { const option = text("option", m.symbol); option.value = m.symbol; return option; }));
     if (markets.some(m => m.symbol === lastLiquidity)) $("liquidity-symbol").value = lastLiquidity;
+    else if (!lastLiquidity && markets.some(m => m.symbol === selected && m.funded && m.symbol !== "FTH$")) $("liquidity-symbol").value = selected;
     await refreshAccount();
   }
   function requireOwner() { if (!token || !owner) throw Error("Connect the owner wallet before managing trading funds."); }
@@ -335,10 +367,10 @@
     event.preventDefault();
     run(async () => {
       requireOwner(); invalidate();
+      if (preview?.submitted) throw Error("Resolve the submitted trade before requesting another order.");
       if (markets.find(market => market.symbol === selected)?.inventoryOnly)
         throw Error("World inventory trades must be placed in World. These items are not wallet notes.");
       if (selected === "FTHG") throw Error("FTHG is reference-only. Use the Gold conversion channel; no internal FTHG order can be placed.");
-      if (preview?.submitted) throw Error("Resolve the submitted trade before requesting another order.");
       const generation = quoteGeneration, side = $("order-side").value, symbol = selected;
       const raw = amount($("order-amount").value, side === "buy" ? "FTHX" : symbol), tolerance = $("order-slippage").value;
       if (!/^\d{1,2}(?:\.\d{1,2})?$/.test(tolerance)) throw Error("Slippage must be between 0 and 10 percent.");
@@ -357,7 +389,7 @@
     if (!preview || !preview.submitted && preview.expires < Date.now()) { invalidate(); throw Error("Quote expired. Request a new preview."); }
     const order = preview;
     if (order.owner !== owner) throw Error("Trading owner changed. Reconnect and review this owner's order.");
-    if (!confirm(`Execute spot trade? Minimum output: ${format(order.minOutput, order.side === "buy" ? order.symbol : "FTHX")}`)) return;
+    if (!confirm(`${order.submitted ? "Resume submitted" : "Execute"} ${order.side} trade for ${order.symbol}/FTHX? Spend ${format(order.amount, order.side === "buy" ? "FTHX" : order.symbol)}; minimum output ${format(order.minOutput, order.side === "buy" ? order.symbol : "FTHX")}.`)) return;
     order.submitted = true;
     sessionStorage.setItem(`featheral-exchange-pending:${owner}:trade`, JSON.stringify(order));
     try { await api("/trading/trade", "POST", order); }
@@ -435,16 +467,19 @@
     await finishLogin(authorization.address, authorization.signature);
   }));
   async function disconnect(revoke) {
-    if (revoke && token) await api("/logout", "POST", {});
+    const logout = revoke && token ? api("/logout", "POST", {}).catch(error => {
+      throw Error(`Disconnected locally, but server session revocation failed and the session may remain active: ${error.message}`);
+    }) : Promise.resolve();
     token = ""; owner = ""; preview = null; invalidate();
     $("liquidity-positions").textContent = "";
     $("legacy-requests").replaceChildren();
     $("withdraw-symbol").replaceChildren();
-    await refreshAccount();
+    await Promise.all([logout, refreshAccount()]);
   }
   $("disconnect").addEventListener("click", () => run(() => disconnect(true)));
   window.ethereum?.on?.("accountsChanged", () => { disconnect(true).catch(error => { console.error(error); $("terminal-status").textContent = error.message; }); });
   $("market-search").addEventListener("input", renderMarkets);
+  $("market-filter").addEventListener("change", renderMarkets);
   $("chart-interval").addEventListener("change", () => { invalidate(); run(refresh); });
   $("refresh-market").addEventListener("click", () => { invalidate(); run(refresh); });
   $("chart-reset").addEventListener("click", () => chart.reset());

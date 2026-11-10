@@ -16,30 +16,13 @@
   };
   function noteHeading(note) {
     const heading = el("h3");
-    if (["FTH$", "FTHS"].includes(note.symbol)) {
-      const icon = el("img"); icon.src = `/shared/logo-${note.symbol === "FTH$" ? "dollar" : "silver"}.svg`;
-      icon.alt = ""; icon.width = 32; icon.height = 32; heading.append(icon);
-    } else {
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("viewBox", "0 0 64 64"); svg.setAttribute("aria-hidden", "true"); svg.classList.add("note-feather");
-      const color = /^FTH[A-Z]$/.test(note.symbol) ? noteColors[note.symbol.slice(-1)] : "#a855d7";
-      for (const [tag, attrs] of [
-        ["circle", { cx: 32, cy: 32, r: 30, fill: "#172033", stroke: color, "stroke-width": 2 }],
-        ["path", { d: "M48 12C30 12 18 24 16 44l-4 8 8-4c20-2 32-14 28-36z", fill: color }],
-        ["path", { d: "M16 44L40 20", stroke: "#172033", "stroke-width": 2, fill: "none" }],
-      ]) {
-        const shape = document.createElementNS(svg.namespaceURI, tag);
-        for (const [key, value] of Object.entries(attrs)) shape.setAttribute(key, value);
-        svg.append(shape);
-      }
-      heading.append(svg);
-    }
-    heading.append(el("span", note.symbol)); return heading;
+    heading.append(window.FeatheralAssetIcons.create(note), el("span", note.ticker ? `${note.ticker} / FTHX` : note.symbol));
+    return heading;
   }
   function priceTrend(note) {
     const interval = document.querySelector("#note-chart-interval").value;
-    const range = note.inventoryOnly && note.history?.interval === "all"
-      ? { label: "All recorded history" + (note.history.clocks?.includes("historical-game-clock") ? " (legacy game clock)" : ""), start: "Earliest", samples: 30 } : {
+    const range = note.history?.interval === "all" || interval === "all"
+      ? { label: "All recorded history" + (note.history?.clocks?.includes("historical-game-clock") ? " (legacy game clock)" : ""), start: "Earliest", samples: 30 } : {
       "1h": { label: "1-hour", start: "1h ago", samples: 13 },
       "24h": { label: "24-hour", start: "24h ago", samples: 24 },
       "7d": { label: "7-day", start: "7d ago", samples: 28 },
@@ -88,7 +71,7 @@
     for (const y of [12, 52, 92, 132]) shape("line", { x1: 8, y1: y, x2: 352, y2: y, class: "mock-grid" });
     for (const x of [8, 94, 180, 266, 352]) shape("line", { x1: x, y1: 12, x2: x, y2: 132, class: "mock-grid" });
     const coordinates = prices.map((price, sample) => [
-      8 + (Math.max(note.history.from, points[sample].at) - note.history.from) * 344 / (note.history.to - note.history.from),
+      8 + (Math.max(note.history.from, points[sample].at) - note.history.from) * 344 / Math.max(1, note.history.to - note.history.from),
       132 - (price - low) * 120 / (high - low),
     ]);
     shape("polyline", {
@@ -101,6 +84,45 @@
     shape("text", { x: 352, y: 154, "text-anchor": "end" }).textContent = note.inventoryOnly && note.history.interval === "all" ? "Latest recorded" : "Now";
     chart.append(svg);
     return chart;
+  }
+  function nativeTrend(note, activity) {
+    if (note.history?.points?.length) return priceTrend(note);
+    const figure = el("figure", "", "note-price-trend note-activity-trend");
+    const caption = el("figcaption", `${note.symbol} recorded activity`);
+    figure.append(caption);
+    if (activity.error) {
+      figure.append(el("p", `Activity unavailable: ${activity.error}`, "note-chart-empty"));
+      return figure;
+    }
+    const buckets = new Map();
+    for (const bucket of activity.buckets.filter(row => row.symbol === note.symbol))
+      buckets.set(bucket.at, (buckets.get(bucket.at) || 0) + bucket.events);
+    const entries = [...buckets].sort((a, b) => a[0] - b[0]);
+    if (!entries.length) {
+      figure.append(el("p", "No recorded currency activity in this window. Funded pools and actual executions are required for price history.", "note-chart-empty"));
+      return figure;
+    }
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 360 160"); svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `${note.symbol}: recorded ledger activity counts, not prices or trading volume`);
+    const max = Math.max(...entries.map(([, count]) => count));
+    const from = entries[0][0], span = Math.max(activity.bucketMs, entries.at(-1)[0] - from + activity.bucketMs);
+    for (const [at, count] of entries) {
+      const bar = document.createElementNS(svg.namespaceURI, "rect");
+      for (const [key, value] of Object.entries({ x: 8 + (at - from) * 344 / span, y: 132 - count * 116 / max,
+        width: Math.max(1, Math.min(20, activity.bucketMs * 344 / span - 1)), height: count * 116 / max, fill: "#a855d7" }))
+        bar.setAttribute(key, value);
+      const title = document.createElementNS(svg.namespaceURI, "title");
+      title.textContent = `${new Date(at).toLocaleString()}: ${count.toLocaleString()} ledger records`;
+      bar.append(title); svg.append(bar);
+    }
+    for (const [at, x, anchor] of [[from, 8, "start"], [entries.at(-1)[0], 352, "end"]]) {
+      const label = document.createElementNS(svg.namespaceURI, "text");
+      label.setAttribute("x", x); label.setAttribute("y", 154); label.setAttribute("text-anchor", anchor);
+      label.textContent = new Date(at).toLocaleDateString(); svg.append(label);
+    }
+    figure.append(svg, el("p", `${entries.reduce((sum, [, count]) => sum + count, 0).toLocaleString()} recorded ledger postings / transactions. Not a price chart or trade count.`));
+    return figure;
   }
   let token = localStorage.getItem("featheral-creation-token") || "", address = "";
   let root, account, connect, status, walletListener = false, me, updateCreationForm, trendRequest = 0;
@@ -179,7 +201,15 @@
       for (const holding of me.holdings || []) if (holding.symbol !== "FTHX")
         account.append(el("p", `${holding.balance.toLocaleString()} ${holding.symbol}`));
       account.append(el("h3", "Your notes"));
-      for (const note of me.notes) account.append(el("p", `${note.symbol} · ${note.name}`));
+      for (const note of me.notes) {
+        if (!notesPage) { account.append(el("p", `${note.symbol} · ${note.name}`)); continue; }
+        const card = el("article", "", "creation-panel");
+        card.append(noteHeading(note), el("p", note.name));
+        const pool = el("a", "Review pool setup on Exchange");
+        pool.href = hostUrl("ex") + "?market=" + encodeURIComponent(note.symbol) + "#liquidity-network";
+        card.append(pool, el("p", "Complete the linked website first. New pools start unfunded; initial capital requires administrator approval. Add liquidity only to an already funded pool."));
+        account.append(card);
+      }
     }
     {
       account.append(el("h3", "Your websites"));
@@ -477,15 +507,22 @@
   }
   async function trending() {
     const request = ++trendRequest;
-    const data = await api(`/trending?interval=${document.querySelector("#note-chart-interval").value}`);
+    const interval = document.querySelector("#note-chart-interval").value;
+    const [data, activity] = await Promise.all([
+      api(`/trending?interval=${interval}`),
+      api(`/activity?interval=${interval}&limit=1`).catch(error => {
+        console.error("Native activity charts unavailable:", error);
+        return { error: error.message };
+      }),
+    ]);
     if (request !== trendRequest) return;
     const worldGrid = document.querySelector("#world-markets"), worldStatus = document.querySelector("#world-market-coverage");
     if (worldGrid) {
       worldGrid.replaceChildren();
       worldStatus.textContent = data.worldCoverage?.description || "World execution database is not connected on this node.";
-      for (const market of data.worldMarkets || []) {
+      for (const market of (data.worldMarkets || []).filter(market => BigInt(market.volumeBaseUnits) > 0n)) {
         const card = el("article", "", "note-trending");
-        card.append(el("h3", `${market.ticker} / FTHX`), el("p", `${market.name} · World inventory, not a wallet note`),
+        card.append(noteHeading(market), el("p", `${market.name} · World inventory, not a wallet note`),
           priceTrend(market), el("p", `${market.recordedTrades.toLocaleString()} recorded trades`));
         for (const [label, raw] of [["24h World notional", market.volumeBaseUnits], ["All recorded notional", market.recordedVolumeBaseUnits]]) {
           const scale = 10n ** 18n, volume = BigInt(raw), fraction = (volume % scale).toString().padStart(18, "0").replace(/0+$/, "");
@@ -495,11 +532,12 @@
         link.href = hostUrl("ex") + "?market=" + encodeURIComponent(market.marketId);
         card.append(link); worldGrid.append(card);
       }
-      if (!worldGrid.childElementCount && data.worldCoverage?.available)
-        worldGrid.append(el("p", "No recorded World inventory fills yet."));
+      if (!worldGrid.childElementCount)
+        worldGrid.append(el("p", "No World item pairs with executed volume in the last 24 hours. Historical records remain available on Exchange."));
     }
-    const grid = document.querySelector("#trending-notes"), nativeGrid = document.querySelector("#native-notes");
-    grid.replaceChildren(); nativeGrid?.replaceChildren();
+    const grid = document.querySelector("#trending-notes"), nativeGrid = document.querySelector("#native-notes"),
+      inactiveGrid = document.querySelector("#inactive-notes");
+    grid.replaceChildren(); nativeGrid?.replaceChildren(); inactiveGrid?.replaceChildren();
     const formatSupply = (raw, decimals) => {
       const units = BigInt(raw), scale = 10n ** BigInt(decimals);
       const fraction = (units % scale).toString().padStart(decimals, "0").slice(0, 2).replace(/0+$/, "");
@@ -513,6 +551,7 @@
       card.append(noteHeading(note));
       if (note.native) {
         card.append(el("p", note.alias ? `${note.name} · ${note.alias}` : note.name));
+        card.append(nativeTrend(note, activity));
         card.append(el("p", "System-native · Not earnable through regular rewards"));
         card.append(el("p", note.circulating === null ? "Circulation unavailable — Dollar ledger is not connected."
           : `${formatSupply(note.circulating, note.decimals)} ${note.symbol}`, "note-supply"));
@@ -521,37 +560,44 @@
         if (note.reserved != null && BigInt(note.reserved) > 0n)
           card.append(el("p", `${note.symbol === "FTHX" ? "Locked settlement backing" : "Reserved for redemption"}: ${formatSupply(note.reserved, note.decimals)} ${note.symbol}`));
         const currencyExplorerLink = el("a", "Explore ledger activity"); currencyExplorerLink.href = ledgerUrl(note.symbol); card.append(currencyExplorerLink);
-        card.append(priceTrend(note),
-          el("p", `24h volume · ${note.volume.toLocaleString()} FTHX`, "note-volume"));
+        card.append(el("p", `24h volume · ${note.volume.toLocaleString()} FTHX`, "note-volume"));
         const swap = el("a", "Open Exchange");
         swap.href = hostUrl("ex") + "?market=" + encodeURIComponent(note.symbol === "FTHX" ? "FTH$" : note.symbol); card.append(swap);
         (nativeGrid || grid).append(card);
       } else {
-        card.append(priceTrend(note));
+        if (note.volume > 0) card.append(priceTrend(note));
+        else card.append(el("p", note.funded ? "No executed volume / 24h" : "Unfunded / no active trading volume"));
         card.append(el("p", `24h volume · ${note.volume.toLocaleString()} FTHX`, "note-volume"));
         if (note.quoteCurrency) {
           const trade = el("a", note.funded ? "Trade on Exchange" : "View liquidity on Exchange");
           trade.href = hostUrl("ex") + "?market=" + encodeURIComponent(note.symbol); card.append(trade);
         } else card.append(el("span", "No pool", "note-mock-badge"));
         const ledger = el("a", "Explore ledger activity"); ledger.href = ledgerUrl(note.symbol); card.append(ledger);
-        grid.append(card);
+        (note.volume > 0 ? grid : inactiveGrid || grid).append(card);
       }
     }
     if (nativeGrid) {
       const gold = el("article", "", "note-trending");
       gold.append(noteHeading({ symbol: "FTHG" }), el("p", "Featheral Gold / Ethereum"),
-        el("p", "Recorded reserve allocations and confirmed conversions are charted separately in the economic history below. These are not internal FTHX executions."));
+        nativeTrend({ symbol: "FTHG" }, activity),
+        el("p", "Reserve allocations and confirmed conversions are not internal FTHX executions."));
       const link = el("a", "View Gold conversion market");
       link.href = hostUrl("ex") + "?market=FTHG"; gold.append(link); nativeGrid.append(gold);
     }
-    if (!grid.childElementCount) grid.append(el("p", "No community notes yet. Create one below to start a reward program."));
+    if (!grid.childElementCount) grid.append(el("p", "No community notes with executed volume in the last 24 hours. Mint a note above or explore placeholder markets below."));
+  }
+  function trendError(error) {
+    console.error(error);
+    if (status) status.textContent = error.message;
+    document.querySelector("#native-notes")?.replaceChildren(el("p", `Native charts unavailable: ${error.message}. Refresh to retry.`));
   }
   if (notesPage || exchangePage) {
     document.querySelector("#note-chart-interval").addEventListener("change", () => {
-      trending().catch(error => { console.error(error); status.textContent = error.message; });
+      trending().catch(trendError);
     });
-    run(document.querySelector("#refresh-trending"), trending);
-    mount().then(async () => { if (exchangePage) await exchange(); await trending(); }).catch(error => { console.error(error); if (status) status.textContent = error.message; });
+    run(document.querySelector("#refresh-trending"), async () => { try { await trending(); } catch (error) { trendError(error); } });
+    mount().then(async () => { if (exchangePage) { await exchange(); await trending(); } }).catch(error => { console.error(error); if (status) status.textContent = error.message; });
+    if (notesPage) trending().catch(trendError);
   }
   else {
     const observer = new MutationObserver(() => {

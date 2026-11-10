@@ -987,7 +987,25 @@ FTHG is also reserved and excluded from Notes trends and public note-market list
 
 Notes and Exchange show actual pool spot ratios with exact string numerators/denominators, and bucketed executed-trade prices. One interval selects 1 hour, 24 hours, 7 days or 30 days for all charts, without changing the real 24-hour volume ranking. Buy execution price is FTHX input/note output; sell price is FTHX output/note input. Each bucket retains its last executed price; missing buckets are not fabricated. Unfunded/no-pair notes (including native FTH$ and FTHX) show **No market price**. Empty histories explicitly say no executed trades. Spot ratios exclude execution fees and price impact; users must quote before swapping. Mock charts have been removed.
 
-The Notes market view is card-first: feather/symbol, price/change, history and compact real 24-hour volume. Trading controls link to Exchange instead of executing on Notes. Interval and refresh controls sit above the cards. Native circulation and wallet creation/management remain expandable.
+The Notes market view is card-first: feather/symbol, price/change, history and compact real 24-hour volume. Trading controls link to Exchange instead of executing on Notes. Interval and refresh controls sit above the cards.
+Notes now leads with always-visible native currency charts, defaulting to all
+recorded history. When a currency has no executed prices in the selected window,
+its chart uses actual ledger-record counts, explicitly labelled as activity rather
+than price or trading volume. Missing records or readers remain explicit; no
+history is fabricated. Minting and website onboarding are open below these charts,
+with an approved-initial-funding checklist and owned-note links to pool setup.
+Community notes and World item pairs with nonzero real 24-hour FTHX volume appear
+in the active lists; inactive notes and placeholders remain in a separate catalog.
+
+Notes and Exchange share `/shared/asset-icons.js`. World resource/item SVG symbols
+are generated from the existing World artwork with `npm run build:market-icons`;
+regenerate the committed `/shared/market-icons.svg` when that artwork or catalog
+changes. World builds also regenerate this sprite. Enhanced items reuse their base equipment artwork while retaining their
+distinct market symbols. Exchange icons are 20px and grayscale; Notes icons are
+32px and retain their colors. Exchange's market selector defaults to active
+24-hour volume, supports exact fractional World notional, and retains all-market
+and search discovery for inactive placeholders. Economic history lives in its
+Activity workspace so the trading terminal is first.
 
 Featheral Exchange uses `/api/creation` wallet sessions and real FTHX markets, not demo balances. Only the Exchange host accepts trading-account writes or liquidity management; hosted tenants cannot invoke these APIs. `GET /markets/:symbol/history?interval=24h` returns exact executed OHLC ratios, base/quote volumes and close-price points (also `1h`, `7d`, `30d`); empty candles are not fabricated. `GET /markets/account` returns main-wallet LP positions and liquidity history. `POST /markets/liquidity/quote` accepts `{symbol,action:"add"|"remove",amount}` (FTHX budget for add, shares for remove). `POST /markets/liquidity` includes exact quoted `{base,notes,shares}` and request ID. Changed quotes, foreign withdrawals and insufficient balances fail atomically. Liquidity provision transfers both existing currencies proportionally and returns proportional reserves on removal, including fees. Initial funding allocates 1,000 permanently locked shares and 999,000 treasury shares. Initial funding remains admin-approved and creates no FTHX. Old `/api/public/exchange` demo routes on Exchange return 410; independent hosted demo sites are unchanged.
 
@@ -1014,6 +1032,10 @@ but main-wallet spendable balances exclude them.
 The terminal provides spot candlesticks, volume, SMA20, four timeframes,
 zoom/pan/fullscreen, quote expiry, minimum output/slippage confirmation, positions,
 trades and movement history. It preserves request IDs after uncertain submissions.
+Trading amounts, balances and confirmations show the full stored asset precision;
+submitted trades remain resumable even when a reference-only or World market is
+selected. The getting-started guide explains the separate wallet and trading
+balances and the withdrawal required before spending assets on other sites.
 Trading sessions remain in memory. Built-in wallet sign-in uses a central
 user-approved popup returning only the exact sign-in signature, not keys or tokens.
 No leverage, fabricated order book or executable opening liquidity is added.

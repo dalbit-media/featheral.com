@@ -41,6 +41,7 @@
     root.classList.add("market-activity");
     const poolsOnly = root.dataset.marketView === "pools", overviewOnly = root.dataset.marketView === "overview",
       activityOnly = root.dataset.marketView === "activity" || overviewOnly;
+    let requestedPool = poolsOnly ? new URLSearchParams(location.search).get("market") : null;
     const heading = element("h2", poolsOnly ? "Liquidity network" : overviewOnly ? "World market activity" : "Recorded economic history");
     const intro = element("p", overviewOnly
       ? "Recorded game purchases, sales and other financial settlements. These charts show ledger activity, not pool prices or exchange trading volume."
@@ -136,7 +137,7 @@
         const card = element("article", undefined, "liquidity-card"); card.dataset.state = market.status;
         const title = element("div", undefined, "liquidity-pair");
         const tokens = element("span", undefined, "liquidity-tokens"); tokens.setAttribute("aria-hidden", "true");
-        tokens.append(element("span", (market.symbol.replace(/^FTH/, "") || "N").slice(0, 2)), element("span", "X"));
+        tokens.append(window.FeatheralAssetIcons.create(market), window.FeatheralAssetIcons.create({ symbol: "FTHX" }));
         const name = element("div"); name.append(element("h4", `${market.symbol} / FTHX`), element("small", "Constant-product pool"));
         title.append(tokens, name);
         const badge = element("span", market.status.replaceAll("-", " "), "liquidity-status");
@@ -174,6 +175,14 @@
       if (!ordered.length) poolCards.append(element("p", "No internal FTHX pool for this currency. FTHG uses the separate Gold conversion channel."));
     }
     function renderLiquidity(liquidity) {
+      for (const market of liquidity.markets) {
+        if (![...symbol.options].some(option => option.value === market.symbol)) {
+          const option = element("option", market.symbol); option.value = market.symbol; symbol.append(option);
+        }
+      }
+      if (requestedPool && liquidity.markets.some(market => market.symbol === requestedPool)) {
+        symbol.value = requestedPool; requestedPool = null;
+      }
       renderSettlement(liquidity.settlement);
       renderPools(liquidity);
       reserves.body.replaceChildren();

@@ -6,13 +6,15 @@
   <meta name="description" content="FTHX-funded spot trading, real liquidity pools and executed-trade candlesticks.">
   <link rel="icon" href="/shared/logo-ex.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/shared/creation.css">
+  <link rel="stylesheet" href="/shared/asset-icons.css">
   <link rel="stylesheet" href="/shared/site-colors.css">
   <link rel="stylesheet" href="/site/terminal.css">
   <link rel="stylesheet" href="/shared/market-activity.css">
 </head>
 <body data-site-brand="ex.featheral.com">
+  <a class="skip-link" href="#main-content">Skip to exchange content</a>
   <header><a class="logo" href="/"><img src="/shared/logo-ex.svg" alt="" width="34" height="34"><span>Featheral <strong>EX</strong></span></a><nav class="tabs" aria-label="Exchange workspace" data-exchange-tabs><a id="tab-trade" href="#terminal" data-exchange-tab="trade">Trade</a><a id="tab-activity" href="#network-activity" data-exchange-tab="activity">Activity</a><a id="tab-pools" href="#liquidity-network" data-exchange-tab="pools">Pools &amp; routes</a><a id="tab-portfolio" href="#trading-account" data-exchange-tab="portfolio">Portfolio</a></nav><a id="notes-link" href="https://notes.featheral.com/">Notes</a><button type="button" data-central-wallet>Wallet</button></header>
-  <main>
+  <main id="main-content">
     <div class="terminal-heading"><div><p class="eyebrow">THE FEATHERAL LIQUIDITY NETWORK</p><h1>Your network. <span>Your markets.</span></h1><p>Spot trading with transparent reserves and FTHX at the center.</p></div><div class="signin"><button id="provider-connect" type="button">Connect wallet</button><button id="disconnect" type="button" hidden>Disconnect trading</button><small id="trading-owner">Trading account not connected</small></div></div>
     <section class="exchange-overview" aria-label="Market overview">
       <article><span class="metric-label">Available markets</span><strong id="overview-markets">--</strong><small>FTHX quote pairs</small></article>
@@ -22,15 +24,18 @@
     </section>
     <p id="terminal-status" role="status" aria-live="polite"></p>
     <p id="recovery-notice" role="status" aria-live="polite" hidden></p>
-    <section id="world-market-activity" data-market-activity data-market-view="overview" data-market-source="world" aria-label="World market activity"></section>
+    <details class="panel exchange-guide"><summary>Getting started with Exchange</summary>
+      <ol><li>Connect the wallet you use across Featheral sites.</li><li>In <a href="#trading-account">Portfolio</a>, deposit existing whole FTHX from your wallet into your separate trading balance.</li><li>Choose a funded market, preview the trade and review the exact input and minimum output before confirming.</li><li>Withdraw acquired assets to the same wallet before spending them on other sites. Available assets and supported uses vary by site.</li></ol>
+      <p>If a transaction's result is uncertain, reconnect the same wallet and resume the original request instead of creating a replacement. World inventory and Gold reference markets are not direct Exchange orders.</p>
+    </details>
     <div id="workspace-trade" data-exchange-panel="trade" aria-labelledby="tab-trade">
     <section id="terminal" class="terminal-grid">
-      <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol"></label><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
+      <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol or item"></label><label>Show<select id="market-filter"><option value="active">Active volume / 24h</option><option value="all">All markets &amp; placeholders</option></select></label><p id="market-list-status" role="status"></p><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
       <section class="chart-panel panel">
         <div class="chart-toolbar"><div><h2 id="market-title">FTH$ / FTHX</h2><strong id="spot-price">Loading price...</strong><small id="usd-price"></small></div><label>Timeframe<select id="chart-interval"><option value="1h">1h / 5m candles</option><option value="24h" selected>24h / 1h candles</option><option value="7d">7d / 6h candles</option><option value="30d">30d / 1d candles</option><option value="all">All history / daily candles</option></select></label><button id="refresh-market" type="button">Refresh</button></div>
         <div class="chart-tools"><label><input id="chart-sma" type="checkbox" checked> SMA 20</label><button id="chart-reset" type="button">Reset zoom</button><button id="chart-fullscreen" type="button">Fullscreen</button><span>Scroll to zoom / drag to pan</span></div>
         <div id="candle-chart"></div>
-        <p class="workspace-hint">This chart shows executed pool prices only. Game purchases and sales are shown in <a href="#world-market-activity">World market activity above</a> and the <a href="#network-activity">full financial records</a>, even when this pool is unfunded.</p>
+        <p class="workspace-hint">This chart shows executed pool prices only. Game purchases and sales are shown in <a href="#world-market-activity">World market activity</a> and the <a href="#network-activity">full financial records</a>, even when this pool is unfunded.</p>
         <div class="chart-legend"><span class="legend-up">Upward / flat close</span><span class="legend-down">Downward close</span><span class="legend-average">SMA 20</span><span>Executed data only</span></div>
         <p id="market-detail" class="muted"></p><p id="reference-detail" class="muted"></p>
         <div id="world-executions" hidden><a id="world-trade-link" href="https://world.featheral.com/market/">Trade inventory in World</a><div class="table-wrap"><table><caption>Executed World inventory trades · latest 100 in selected interval</caption><thead><tr><th>Time / clock</th><th>Quantity</th><th>Price (FTHX/item)</th><th>FTHX notional</th><th>Original FTH$ paid</th><th>Venue</th><th>Record / settlement</th></tr></thead><tbody id="world-trade-records"></tbody></table></div></div>
@@ -61,6 +66,7 @@
     </section>
     </div>
     <div id="workspace-activity" data-exchange-panel="activity" aria-labelledby="tab-activity">
+    <section id="world-market-activity" data-market-activity data-market-view="overview" data-market-source="world" aria-label="World market activity"></section>
     <section id="network-activity" data-market-activity data-market-view="activity" data-market-interval="all" aria-label="Cross-system market activity"></section>
     </div>
     <div id="workspace-funding" data-exchange-panel="pools" aria-labelledby="tab-pools">
@@ -73,6 +79,7 @@
     </div>
     <footer>Internal ledger spot markets, not an order book or a deployed L3 blockchain. Estimates are not redemption guarantees. USD uses live FTHG/USD; initial references are 1 FTHG = 10,000 FTH$ and 1 FTH$ = 100 FTHX until verified funded pools supply prices.</footer>
   </main>
+  <script src="/shared/asset-icons.js" defer></script>
   <script src="/site/chart.js" defer></script>
   <script src="/site/workspace.js" defer></script>
   <script src="/site/terminal.js" defer></script>

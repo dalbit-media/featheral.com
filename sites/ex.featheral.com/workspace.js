@@ -20,7 +20,6 @@
   }
   function fromHash() {
     const target = document.getElementById(location.hash.slice(1));
-    if (target?.closest("#world-market-activity") && tabs.some(tab => tab.getAttribute("aria-selected") === "true")) return;
     activate(target?.closest("[data-exchange-panel]")?.dataset.exchangePanel || "trade");
   }
   for (const [index, tab] of tabs.entries()) {

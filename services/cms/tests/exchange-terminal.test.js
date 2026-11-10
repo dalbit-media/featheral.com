@@ -9,9 +9,9 @@ test("Exchange terminal parses exact whole notes and 18-decimal dollars without 
   assert.equal(helpers.amount("9007199254740993", "FTHX"), "9007199254740993");
   for (const [value, symbol] of [["1.1", "FTHX"], ["1.0000000000000000001", "FTH$"], ["-1", "FTH$"], ["1e3", "FTHX"], ["0", "FTHX"]])
     assert.throws(() => helpers.amount(value, symbol));
-  assert.equal(helpers.format("9999000000000000000", "FTH$"), "10 FTH$");
-  assert.equal(helpers.format("1", "FTH$"), "<0.01 FTH$");
-  assert.equal(helpers.format("1234567890123456789", "FTH$"), "1.23 FTH$");
+  assert.equal(helpers.format("9999000000000000000", "FTH$"), "9.999 FTH$");
+  assert.equal(helpers.format("1", "FTH$"), "0.000000000000000001 FTH$");
+  assert.equal(helpers.format("1234567890123456789", "FTH$"), "1.234567890123456789 FTH$");
   assert.equal(helpers.ratio({ numerator: "1", denominator: "1000000000" }), "<0.01");
 });
 test("Exchange terminal keeps signing sessions in memory and preserves submitted request IDs across uncertain retries", () => {
@@ -67,11 +67,13 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
   const node = id => { assert.ok(nodes.has(id), `Missing terminal node ${id}`); return nodes.get(id); };
   node("order-form").querySelectorAll = () => ["order-side", "order-amount", "order-slippage"].map(node);
   node("chart-interval").value = "24h"; node("order-side").value = "buy";
+  node("market-filter").value = "all";
   const market = { symbol: "FTH$", funded: false, price: null, history: { candles: [] } };
   const defaults = route => {
     if (route.startsWith("/trading/markets")) return { markets: [market], pair: { notes: [market] }, reference: { usdValue: null } };
     if (route === "/trading/account") return { holdings: [], trades: [], movements: [], portfolio: { usd: null } };
     if (route === "/markets/account") return { positions: [] };
+    if (/^\/markets\/[^/]+\/history\?/.test(route)) return { candles: [] };
     if (route === "/challenge") return { message: "Challenge" };
     if (route === "/login") return { address: owner, token: "fixture-token" };
     if (route === "/logout") return { ok: true };
@@ -81,6 +83,7 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
     document: { getElementById: node, createElement: () => new Element(), querySelectorAll: () => [], hidden: false },
     location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search, hash },
     window: { FeatheralCandleChart: { mount: () => ({ update(value) { histories.push(value); }, reset() {}, sma() {} }) },
+      FeatheralAssetIcons: { create: () => new Element() },
       addEventListener() {},
       FeatheralWallet: { authenticate: async challenge => { await challenge(owner); return { address: owner, signature: "login-signature" }; } },
       ethereum: { on() {}, request: async ({ method }) => method === "eth_accounts" ? [owner] : "payment-signature" } },
@@ -93,7 +96,7 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
       requests.push({ route, body });
       const response = await respond(route, body);
       return { ok: !response?.status || response.status < 400, status: response?.status || 200,
-        json: async () => response ? response.body : defaults(route) };
+        json: async () => { if (response?.invalidJson) throw new SyntaxError("Invalid JSON"); return response ? response.body : defaults(route); } };
     },
   });
   const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -203,6 +206,60 @@ test("Rejected movements clear only after an authoritative missing-operation res
   assert.equal(ui.storage.has(key), false);
   assert.match(ui.node("terminal-status").textContent, /Insufficient FTHX/);
 });
+test("Submitted trades remain resumable on reference-only markets with their original request", async t => {
+  const owner = "0x" + "ab".repeat(20), storage = new Map();
+  const order = { owner, symbol: "FTH$", side: "sell", amount: "1234567890123456789",
+    minOutput: "100", requestId: "saved-trade-request-0001", expires: 1, submitted: true };
+  storage.set(`featheral-exchange-pending:${owner}:trade`, JSON.stringify(order));
+  const ui = await browserFixture(t, route => route === "/trading/trade" ? { body: { status: "complete" } } : null, storage);
+  await ui.dispatch(ui.node("market-list").children[1], "click");
+  assert.equal(ui.node("market-title").textContent, "FTHG / FTHX");
+  assert.equal(ui.node("execute-order").disabled, false);
+  assert.equal(ui.node("execute-order").textContent, "Resume submitted trade");
+  assert.match(ui.node("order-preview").textContent, /1\.234567890123456789 FTH\$/);
+  await ui.dispatch("order-form");
+  assert.match(ui.node("terminal-status").textContent, /Resolve the submitted trade/);
+  await ui.dispatch("execute-order", "click");
+  assert.deepEqual(ui.requests.find(request => request.route === "/trading/trade").body, order);
+  assert.match(ui.confirmations.at(-1), /Resume submitted sell trade for FTH\$\/FTHX\? Spend 1\.234567890123456789 FTH\$/);
+  assert.equal(storage.has(`featheral-exchange-pending:${owner}:trade`), false);
+  assert.equal(ui.node("execute-order").disabled, true);
+});
+test("Trading balance, quote and withdrawal confirmations retain exact Dollar precision", async t => {
+  const ui = await browserFixture(t, route => {
+    if (route === "/trading/account") return { body: { holdings: [{ symbol: "FTH$", balance: "1234567890123456789" }],
+      trades: [], movements: [], portfolio: { usd: null } } };
+    if (route === "/trading/quote") return { body: { from: "FTH$", to: "FTHX", output: "1000" } };
+    if (route === "/trading/withdraw") return { body: { status: "complete" } };
+    return null;
+  });
+  assert.equal(ui.node("positions").children[0].children[1].textContent, "1.234567890123456789 FTH$");
+  ui.node("order-side").value = "sell"; ui.node("order-amount").value = "1.234567890123456789";
+  ui.node("order-slippage").value = "0.5";
+  await ui.dispatch("order-form");
+  assert.match(ui.node("order-preview").textContent, /Spend 1\.234567890123456789 FTH\$/);
+  ui.node("withdraw-symbol").value = "FTH$"; ui.node("withdraw-amount").value = "0.000000000000000001";
+  await ui.dispatch("withdraw-form");
+  assert.match(ui.confirmations.at(-1), /0\.000000000000000001 FTH\$/);
+});
+test("Failed logout clears the local trading session and reports the server error", async t => {
+  const ui = await browserFixture(t, route => route === "/logout" ? { status: 503, body: { error: "Logout unavailable" } } : null);
+  await ui.dispatch("disconnect", "click");
+  assert.match(ui.node("terminal-status").textContent, /Logout unavailable/);
+  assert.match(ui.node("terminal-status").textContent, /server session revocation failed.*session may remain active/);
+  assert.equal(ui.node("trading-owner").textContent, "Trading account not connected");
+  ui.node("deposit-amount").value = "1";
+  await ui.dispatch("deposit-form");
+  assert.match(ui.node("terminal-status").textContent, /Connect the owner wallet/);
+  assert.equal(ui.requests.filter(request => request.route === "/trading/deposit").length, 0);
+});
+test("Non-JSON exchange failures show an actionable error instead of a parser exception", async t => {
+  const ui = await browserFixture(t, route => route === "/trading/deposit" ? { status: 503, invalidJson: true }
+    : route.startsWith("/trading/operations/") ? { status: 404, body: { error: "Not found" } } : null);
+  ui.node("deposit-amount").value = "1";
+  await ui.dispatch("deposit-form");
+  assert.match(ui.node("terminal-status").textContent, /invalid response \(HTTP 503\).*retry/);
+});
 test("Reloaded funding and liquidity requests resume without requiring empty forms to pass validation", async t => {
   const owner = "0x" + "ab".repeat(20), storage = new Map();
   const funding = { dollars: "1000000000000000000", fthx: "100", approval: "FUND FTH$ 1000000000000000000 BASE_UNITS 100 FTHX", requestId: "saved-funding-request01" };
@@ -249,6 +306,29 @@ test("Market overview sums only actual FTHX volume exactly and excludes recoveri
 test("Missing volume is explicitly unavailable rather than displayed as zero", async t => {
   const ui = await browserFixture(t);
   assert.equal(ui.node("overview-volume").textContent, "Unavailable");
+});
+test("Active market filter uses exact 24h volumes, excludes dormant pairs, and keeps search and all-market discovery", async t => {
+  const dollar = { symbol: "FTH$", funded: false, history: { candles: [] } };
+  const ui = await browserFixture(t, route => {
+    if (route.startsWith("/trading/markets")) return { body: {
+      markets: [dollar, { symbol: "FTHA", volume: "10", funded: true },
+        { symbol: "FTHB", volume: "0", funded: false },
+        { symbol: "WORLD:wood", asset: "wood", ticker: "WOOD", name: "Wood", inventoryOnly: true,
+          volume: "0", volumeBaseUnits: "1", recordedVolumeBaseUnits: "1", recordedTrades: 1 }],
+      pair: { notes: [dollar], volumeFthx: "0" }, reference: { usdValue: null },
+    } };
+    return null;
+  });
+  assert.equal(ui.node("market-title").textContent, "FTHA / FTHX", "A funded active market is selected before an unfunded default.");
+  ui.node("market-filter").value = "active"; await ui.dispatch("market-filter", "change");
+  assert.deepEqual(ui.node("market-list").children.map(button => button.textContent), ["FTHA", "WOOD"]);
+  assert.equal(ui.node("market-list").children[1].children.at(-1).textContent, "0.000000000000000001 FTHX");
+  ui.node("market-search").value = "FTHB"; await ui.dispatch("market-search", "input");
+  assert.deepEqual(ui.node("market-list").children.map(button => button.textContent), ["FTHB"]);
+  ui.node("market-search").value = ""; ui.node("market-filter").value = "all";
+  await ui.dispatch("market-filter", "change");
+  assert.ok(ui.node("market-list").children.some(button => button.textContent === "FTHB"));
+  assert.ok(ui.node("market-list").children.some(button => button.textContent === "FTHG"));
 });
 test("Primary markets are pinned and FTHG uses exact reference composition without invented trades or internal orders", async t => {
   const dollar = { symbol: "FTH$", funded: false, price: null, history: { candles: [] } };
@@ -319,6 +399,7 @@ test("Liquidity visuals use exact reserves, independent capped targets, honest s
     "market-tape": { rows: [], description: "Executed legs only." },
   };
   vm.runInNewContext(script, {
+    window: { FeatheralAssetIcons: { create: () => new VisualElement("svg") } },
     document: { querySelectorAll: () => [root], createElement: tag => new VisualElement(tag) },
     location: { protocol: "https:", hostname: "notes.featheral.com", port: "" },
     URLSearchParams, AbortController, setInterval() {}, console: { error: (...args) => errors.push(args) },
@@ -354,21 +435,27 @@ test("Funding deep link opens the review form without submitting a funding reque
   assert.equal(ui.node("initial-dollar-funding").open, true);
   assert.equal(ui.requests.filter(request => request.route === "/dollar-pool/fund").length, 0);
 });
-test("Pools workspace reads only reserves, keeps every pool and never requests unrelated history", async () => {
+test("Pools workspace honors note setup deep links, retains all-pool discovery and never requests unrelated history", async () => {
   const root = new VisualElement("section"), requests = [], errors = [];
   root.dataset.marketView = "pools";
   const markets = Array.from({ length: 9 }, (_, i) => ({
     symbol: `FTH${i}`, status: "unfunded", baseReserve: "0", tokenReserve: "0", initialTarget: null, feeBps: 30,
   }));
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8"), {
+    window: { FeatheralAssetIcons: { create: () => new VisualElement("svg") } },
     document: { querySelectorAll: () => [root], createElement: tag => new VisualElement(tag) },
-    location: { protocol: "https:", hostname: "ex.featheral.com", port: "" },
+    location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search: "?market=FTH4" },
     URLSearchParams, AbortController, setInterval() {}, console: { error: (...args) => errors.push(args) },
     fetch: async url => { requests.push(url); return { ok: true, json: async () => ({ markets, policy: "Existing funds only." }) }; },
   });
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, ["/api/creation/liquidity"]);
+  assert.equal(descendants(root).filter(node => node.className === "liquidity-card").length, 1);
+  const currency = descendants(root).find(node => node.attributes["aria-label"] === "Currency");
+  assert.equal(currency.value, "FTH4");
+  currency.value = ""; currency.listeners.change();
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(descendants(root).filter(node => node.className === "liquidity-card").length, 9);
   assert.ok(descendants(root).filter(node => ["Window", "Activity"].includes(node.textContent)).every(node => node.hidden));
 });

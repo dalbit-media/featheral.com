@@ -58,6 +58,10 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   for (const id of ["overview-markets", "pending-movements", "initial-dollar-funding"])
     assert.ok(exchangePage.body.includes(`id="${id}"`), `Exchange HTML includes ${id}`);
   for (const host of ["ex.featheral.com", "notes.featheral.com"]) {
+    for (const asset of ["asset-icons.js", "asset-icons.css", "market-icons.svg"])
+      assert.equal((await call(`/shared/${asset}`, undefined, { host, prefix: "" })).status, 200, `${host} serves ${asset}`);
+  }
+  for (const host of ["ex.featheral.com", "notes.featheral.com"]) {
     const activityResponse = await call("/activity", undefined, { host });
     assert.equal(activityResponse.status, 200);
     assert.equal(activityResponse.headers["cache-control"], "no-store");
