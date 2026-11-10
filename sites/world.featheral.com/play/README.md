@@ -292,6 +292,9 @@ plan and verifies its fingerprint and account revision. Changed quotes,
 failed fills or ledger errors roll back the entire operation. One idempotent
 market receipt covers all crafts and sales. It never mints currency or requests
 additional reserve funding to force a sale.
+At each step, the planner selects the feasible batch with the highest estimated
+profit using its full-quantity sale quote and current resource/permit values,
+then recalculates after the resulting market fills.
 
 ## Squad dispatch vouchers
 

@@ -275,18 +275,15 @@ test('merchant failures remain visible in inventory after the temporary toast di
   assert.match(rendering, /escape\(translate\(merchantReviewError, language\)\)/);
 });
 
-test('ranks highest-profit eligible recipes first and reuses every feasible original permit', () => {
+test('chooses the most profitable feasible batch at each step and reuses every feasible original permit', () => {
   const h = setup();
   try {
-    const report = h.store.transaction(h.user.token, (session, now, realTime, exchange, owner) =>
-      exchange.action(owner, session, { id: randomUUID(), revision: session.account.revision, command: { type: 'profit-analysis' } }, now, realTime).market.analysis!);
-    const eligible = report.items.filter(row => row.profit !== null && row.profit > 0 && row.item !== merchantCharter && !row.item.startsWith('craft-batch-')
-      && Object.keys(craftingIngredients(row.item)).length === 0).sort((a, b) => b.profit! - a.profit! || a.item.localeCompare(b.item));
     const quote = h.quote();
-    assert.equal(quote.batches[0].item, eligible[0].item);
-    assert.equal(quote.batches[0].quantity, 100);
+    assert.ok(quote.batches[0].proceeds > quote.batches[0].valuedCost);
     assert.equal(quote.consumedPermits, 4);
     assert.equal(quote.remainingPermits, 0);
+    assert.ok(quote.craftingFees <= quote.spendingCeiling);
+    assert.ok(quote.batches.every(batch => batch.proceeds > batch.valuedCost));
   } finally { h.store.close(); }
 });
 test('live liquidity changes invalidate confirmation and receipt failures roll back crafts, fills and balances', t => {

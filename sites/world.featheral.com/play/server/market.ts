@@ -394,9 +394,7 @@ export class Exchange {
     const spendingCeiling = Math.min(startingBalance, dollarsUnits(merchantSpendingLimit));
     const totalPermits = [...permits.values()].reduce((sum, count) => sum + count, 0);
     if (!totalPermits) throw new ApiError(409, 'Own unused bulk crafting permits before using the charter.');
-    const ranked = this.generateAnalysis(owner, now, realTime).items
-      .filter(row => autoCraftableOutput(row.item))
-      .sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity) || a.item.localeCompare(b.item));
+    const ranked = craftableKeys.filter(autoCraftableOutput);
     bag.items.splice(bag.items.indexOf(merchantCharter), 1);
     const costs = new Map<MarketAsset | 'dollars', number>([[merchantCharter, 1]]);
     const batches: AutoCraftQuote['batches'] = [];
@@ -404,11 +402,10 @@ export class Exchange {
     let fees = 0, proceeds = 0, valuedCost = 0;
     // Only permits owned at confirmation are eligible; crafted permits cannot extend the run.
     const order = [...bulkCraftingKeys].sort((a, b) => bulkCraftingItems[b].quantity - bulkCraftingItems[a].quantity);
-    let progress = true;
-    while (progress) {
-      progress = false;
-      for (const row of ranked) {
-        const item = row.item;
+    while (true) {
+      let best: { item: (typeof ranked)[number]; permit: (typeof order)[number]; quantity: number;
+        fee: number; revenue: number; estimatedCost: number; profit: number } | undefined;
+      for (const item of ranked) {
         if (account.game.stage < craftingStage(item) || !recipeDiscovered(account.game, item)) {
           blockers.set(0, 'Unlock more recipes by advancing your settlement and discovering their resources.');
           continue;
@@ -449,20 +446,22 @@ export class Exchange {
             blockers.set(7, 'Sale proceeds do not cover crafting fees plus the live market value of consumed resources, ingredients and the bulk permit.');
             continue;
           }
-          this.craftAndSell(owner, account, item, quantity, revenue, now, realTime);
-          permits.set(permit, permits.get(permit)! - 1);
-          fees += fee; proceeds += revenue; valuedCost += estimatedCost;
-          if (![fees, proceeds, valuedCost].every(Number.isSafeInteger)) throw new ApiError(409, 'Account limit reached.');
-          for (const [asset, count] of [...Object.entries(cost), ...Object.entries(inputs)]) {
-            if (asset !== 'dollars' && !isMarketAsset(asset)) throw new ApiError(409, 'Crafting ingredient has no market.');
-            if (asset === 'dollars' || isMarketAsset(asset)) costs.set(asset, (costs.get(asset) ?? 0) + count);
-          }
-          batches.push({ item, permit, quantity, fee: fee / dollarsScale, proceeds: revenue / dollarsScale, valuedCost: estimatedCost / dollarsScale });
-          progress = true;
-          break;
+          const profit = revenue - estimatedCost;
+          if (!best || profit > best.profit) best = { item, permit, quantity, fee, revenue, estimatedCost, profit };
         }
-        if (progress) break;
       }
+      if (!best) break;
+      this.craftAndSell(owner, account, best.item, best.quantity, best.revenue, now, realTime);
+      permits.set(best.permit, permits.get(best.permit)! - 1);
+      fees += best.fee; proceeds += best.revenue; valuedCost += best.estimatedCost;
+      if (![fees, proceeds, valuedCost].every(Number.isSafeInteger)) throw new ApiError(409, 'Account limit reached.');
+      const cost = craftingCost(best.item, best.quantity), inputs = craftingInputs(best.item, best.quantity);
+      for (const [asset, count] of [...Object.entries(cost), ...Object.entries(inputs)]) {
+        if (asset !== 'dollars' && !isMarketAsset(asset)) throw new ApiError(409, 'Crafting ingredient has no market.');
+        if (asset === 'dollars' || isMarketAsset(asset)) costs.set(asset, (costs.get(asset) ?? 0) + count);
+      }
+      batches.push({ item: best.item, permit: best.permit, quantity: best.quantity, fee: best.fee / dollarsScale,
+        proceeds: best.revenue / dollarsScale, valuedCost: best.estimatedCost / dollarsScale });
     }
     if (!batches.length) throw new ApiError(409, `No profitable batch fits your permits, balance, supplies and sale liquidity. Nothing was consumed. ${blockers.get(Math.max(...blockers.keys()))}`);
     const result = { batches, costs: [...costs].map(([asset, amount]) => ({ asset, amount })), startingBalance: startingBalance / dollarsScale, spendingCeiling: spendingCeiling / dollarsScale,
