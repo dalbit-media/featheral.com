@@ -8,6 +8,8 @@ import { renderPublicFeatureHead, renderPublicFeatureBody, renderPublicWorldNav 
 import { drawPublicPreview } from './public-feature-preview.ts';
 import { landingSeo, publicFeaturePagesPlugin, worldAccountPage } from '../vite.config.ts';
 import { publicHubTarget, renderWorldHub } from './world-hub-render.ts';
+import { federationStories, startingFederations } from './atlas.ts';
+import { translate } from './i18n.ts';
 
 test('six legacy public routes forward to bilingual hub sections without replacing game entries', async () => {
   assert.deepEqual(publicFeaturePages.map(page => page.path), [
@@ -64,18 +66,17 @@ test('shared public navigation and homepage use public destinations and same-tab
   const homepage = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const header = homepage.match(/<header class="top world-header"[\s\S]*?<\/header>/)![0];
   const nav = renderPublicWorldNav('/features/exploration/');
-  for (const link of publicWorldLinks) {
+  for (const path of ['/', '/#community', '/#guide', '/#roadmap', '/account/', '/explore/']) {
     assert.match(header, /<!-- WORLD_PUBLIC_NAV -->/);
-    assert.ok(nav.includes(`href="${link.path}"`), `Public nav ${link.path}`);
+    assert.ok(nav.includes(`href="${path}"`), `Public nav ${path}`);
   }
   assert.equal((nav.match(/aria-current="page"/g) ?? []).length, 1);
   assert.doesNotMatch(nav + header, /target="_blank"|data-game-window/);
   assert.doesNotMatch(header, /href="\/(settlement|market|federation|help)\/"/);
   assert.doesNotMatch(homepage, /<!-- WORLD_ACCOUNT -->|src="\/src\/account-setup.ts"/);
-  assert.equal((nav.match(/class="world-submenu"/g) ?? []).length, 2);
-  assert.match(nav, /<summary data-public-en="Game"/);
+  assert.doesNotMatch(nav, /world-submenu|<details|<summary|world-navigation\.js/);
   assert.doesNotMatch(nav, /data-public-en="Home"|data-public-en="About"/);
-  assert.match(nav, /href="\/login\/\?switch=1"/);
+  assert.doesNotMatch(renderWorldHub(), /hub-quick-links|aria-label="World sections"/);
   assert.match(readFileSync(new URL('./landing.ts', import.meta.url), 'utf8'), /localizePublicCopy\(document\)/);
 });
 
@@ -98,6 +99,17 @@ test('feature metadata is crawlable, escaped and canonical on the production ori
   const escaped = renderPublicFeatureBody(page);
   assert.match(escaped, /A &lt;script&gt; &amp; &quot;title&quot;/);
   assert.doesNotMatch(escaped, /<script>/);
+});
+
+test('World hub shares all five federation origin stories in English and Korean', () => {
+  const html = renderWorldHub();
+  for (const federation of startingFederations) {
+    const story = federationStories[federation.name];
+    assert.ok(html.includes(federation.name));
+    assert.ok(html.includes(story));
+    assert.ok(html.includes(translate(story, 'ko')));
+  }
+  assert.doesNotMatch(html, /hub-quick-links/);
 });
 
 test('default production SEO emits sitemap entries for public pages, not game routes', () => {

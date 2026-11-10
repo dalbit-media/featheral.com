@@ -7,7 +7,7 @@ import type { Language } from './i18n.ts';
 import { formatResourceAmount } from './resource-units.ts';
 import { marketResources as resources, marketBasePrice } from './market.ts';
 import type { Resource } from './engine.ts';
-import { federationArt, foundedFederationName, startingFederations } from './atlas.ts';
+import { federationArt, federationStories, foundedFederationName, startingFederations } from './atlas.ts';
 
 export function federationPanel(state: ApiState, language: Language): string {
   const game = state.game, member = !!game.federation, voted = game.votes.includes('watershed');
@@ -40,7 +40,8 @@ export function federationPanel(state: ApiState, language: Language): string {
       <p class="fineprint">${t('Annual contribution shares are reserved for future federation tax payouts. Tax collection, payout rate and eligibility are pending.')}</p>
       <p class="fineprint">${t('Contributions are permanent. No withdrawal or payout is currently available.')}</p>`
       : `<p role="status">${t('Federation vault is unavailable.')}</p>`}</section>`;
-  const joinReason = game.stage < 3 ? 'Reach Village to join.' : game.relationship < 50 ? 'Build relations to 50 to join.' : '';
+  const joinReasons = [game.stage < 3 ? 'Reach Village to join.' : '', game.relationship < 50 ? 'Build relations to 50 to join.' : ''].filter(Boolean);
+  const joinReason = joinReasons.map(t).join(' ');
   const formReason = member ? 'Already a federation member.' : game.stage < 6 ? 'Reach City to found a federation.'
     : game.population <= 10000 ? 'Requires more than 10,000 residents.' : !canAfford(game, diplomacyCosts.form) ? 'Not enough Metal to found a federation.' : '';
   const voteReason = voted ? 'Your vote is recorded.' : !member ? 'Join a federation to vote.'
@@ -50,10 +51,17 @@ export function federationPanel(state: ApiState, language: Language): string {
   return `<div class="federation-banner">${federationArt(game.federation ?? 'Evergreen Union', 'shield')}${federationArt(game.federation ?? 'Evergreen Union', 'flag')}<div><span class="eyebrow">${t(member ? 'MEMBER' : 'STARTING FEDERATIONS')}</span><h2 data-no-localize>${escape(game.federation ?? 'Evergreen Union')}</h2></div><a class="button" href="/atlas/">${icon('atlas')}${t('Settlement atlas')}</a>${member ? `<a class="button" href="/communicate/?channel=federation">${icon('communicate')}${t('Federation chat')}</a>` : ''}</div>
     <div class="federation-metrics"><div><small>${t('Relationship')}</small><strong>${game.relationship}<small>/100</small></strong><progress value="${game.relationship}" max="100" aria-label="${t('Relationship')}"></progress></div><div><small>${t('Simulation points')}</small><strong>${fmt(game.contribution)}</strong><small>${t('Separate from vault contributions')}</small></div><div><small>${t('Assembly')}</small><strong>${voted ? '1 / 1' : '0 / 1'}</strong><small>${t(voted ? 'Voted' : 'Not voted')}</small></div></div>
     <div class="federation-actions-grid">
-      <section class="federation-action-card"><h3>${t(member ? 'Membership' : 'Join Evergreen Union')}</h3><p>${t('Member bonus: +20% Metal output for new weekly crews.')}</p>
-      ${member ? `<span class="federation-state">${icon('check')}${t('Member')}</span>` : `<div class="federation-cost">${costs(diplomacyCosts.gift)}</div><small>${t('Goodwill adds 25 relationship points.')}</small><div class="panel-actions">${action('gift', 'Send goodwill', canAfford(game, diplomacyCosts.gift) ? '' : 'Not enough supplies for goodwill.')}${action('join', 'Join', joinReason, true)}</div><p id="federation-gift-reason" class="fineprint">${t(canAfford(game, diplomacyCosts.gift) ? '' : 'Not enough supplies for goodwill.')}</p><p id="federation-join-reason" class="fineprint">${t(joinReason || 'Ready to join. No joining fee.')}</p>`}</section>
+      <section class="federation-action-card"><h3>${t('Membership')}</h3><p>${t('Member bonus: +20% Metal output for new weekly crews.')}</p>
+      ${member ? `<span class="federation-state">${icon('check')}${t('Member')}</span><a class="button" href="#federation-vault-title">${t('Contribute')}</a>` : `<p>${t('Choose any starting federation below. One membership at a time.')}</p><div class="federation-cost">${costs(diplomacyCosts.gift)}</div><small>${t('Goodwill adds 25 relationship points.')}</small><div class="panel-actions">${action('gift', 'Send goodwill', canAfford(game, diplomacyCosts.gift) ? '' : 'Not enough supplies for goodwill.')}</div><p id="federation-gift-reason" class="fineprint">${t(canAfford(game, diplomacyCosts.gift) ? '' : 'Not enough supplies for goodwill.')}</p><p class="fineprint">${joinReason || t('Ready to join. No joining fee.')}</p>`}</section>
       <section class="federation-action-card"><h3>${t('Found federation')}</h3><div class="federation-cost">${costs(diplomacyCosts.form)}</div><p>${t('City · more than 10,000 residents')}</p><p data-no-localize>${escape(foundedFederationName(game.seed))}</p>${action('form', 'Found', formReason)}<p id="federation-form-reason" class="fineprint">${t(formReason || 'Ready to found. Review the material cost first.')}</p></section>
       <section class="federation-action-card"><h3>${t('Restore watershed')}</h3><p>${t('Assembly proposal · simulation only')}</p>${action('vote', voted ? 'Voted' : 'Vote', voteReason, true)}<p id="federation-vote-reason" class="fineprint">${t(voteReason || 'Record your support. No payment required.')}</p>${!game.townhall ? `<a href="/settlement/#buildings">${t('Build town hall')}</a>` : ''}</section>
-    </div><h3>${t('Starting federations')}</h3><div class="federation-starters">${startingFederations.map(federation =>
-      `<section class="federation-starter"><header>${federationArt(federation.name, 'flag')}${federationArt(federation.name, 'shield')}<h3 data-no-localize>${escape(federation.name)}</h3></header><p data-no-localize>${escape(federation.motto)}</p><button class="button" data-action="join" data-federation="${escape(federation.name)}" aria-describedby="federation-join-reason" ${member || joinReason ? 'disabled' : ''}>${t('Join')}</button></section>`).join('')}</div>${vaultPanel}<p class="fineprint federation-disclaimer">${icon('lock')}${t('Assembly is simulation only. Game resources are not FTHG. Vault FTH$ uses the existing World budget; no new currency is issued.')}</p>`;
+    </div><h3>${t('Starting federations')}</h3><div class="federation-starters">${startingFederations.map((federation, index) => {
+      const current = game.federation === federation.name;
+      const reason = member ? t('Already a federation member.') : joinReason || t('Ready to join. No joining fee.');
+      return `<section class="federation-starter"><header>${federationArt(federation.name, 'flag')}${federationArt(federation.name, 'shield')}<h3 id="federation-name-${index}" data-no-localize>${escape(federation.name)}</h3></header><p data-no-localize>${escape(federation.motto)}</p>
+        ${current ? `<span class="federation-state">${icon('check')}${t('Member')}</span><a class="button" href="#federation-vault-title">${t('Contribute')}</a>`
+          : `<button class="button" data-action="join" data-federation="${escape(federation.name)}" aria-labelledby="federation-join-${index} federation-name-${index}" aria-describedby="federation-join-reason-${index}" ${member || joinReason ? 'disabled' : ''}><span id="federation-join-${index}">${t('Join')}</span></button>`}
+        <p id="federation-join-reason-${index}" class="fineprint">${current ? t('Contribute to your federation’s common vault.') : reason}</p>
+        <details class="disclosure"><summary>${t('Origin story')}</summary><p>${t(federationStories[federation.name])}</p></details></section>`;
+    }).join('')}</div>${vaultPanel}<p class="fineprint federation-disclaimer">${icon('lock')}${t('Assembly is simulation only. Game resources are not FTHG. Vault FTH$ uses the existing World budget; no new currency is issued.')}</p>`;
 }

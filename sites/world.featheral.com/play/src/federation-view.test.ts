@@ -5,6 +5,7 @@ import { federationPanel } from './federation-view.ts';
 import { gameConsumption } from './consumption.ts';
 import { diplomacyCosts } from './engine.ts';
 import { translate } from './i18n.ts';
+import { federationStories, startingFederations } from './atlas.ts';
 
 function fixture() {
   const account = createAccount(1000000);
@@ -87,4 +88,47 @@ test('common vault shows every asset, all-time and game-year shares with an expl
   for (const label of ['Common resources vault', 'Contribution share', 'This game year', 'Contribute',
     'Contributions are permanent. No withdrawal or payout is currently available.'])
     assert.notEqual(translate(label, 'ko'), label);
+});
+
+test('all default federation cards explain joining gates and link members to their contribution vault', () => {
+  const state = fixture();
+  for (const language of ['en', 'ko'] as const) {
+    const ready = federationPanel(state, language);
+    assert.equal((ready.match(/data-action="join"/g) ?? []).length, startingFederations.length);
+    for (const [index, federation] of startingFederations.entries()) {
+      assert.ok(ready.includes(`data-federation="${federation.name}"`));
+      assert.ok(ready.includes(`aria-describedby="federation-join-reason-${index}"`));
+    }
+    state.game.stage = 2; state.game.relationship = 25;
+    const blocked = federationPanel(state, language);
+    assert.equal((blocked.match(/data-action="join"[^>]*disabled/g) ?? []).length, startingFederations.length);
+    assert.ok(blocked.includes(translate('Reach Village to join.', language)));
+    assert.ok(blocked.includes(translate('Build relations to 50 to join.', language)));
+    state.game.stage = 3; state.game.relationship = 50;
+    for (const federation of startingFederations) {
+      state.game.federation = federation.name;
+      const member = federationPanel(state, language);
+      assert.equal((member.match(/data-action="join"[^>]*disabled/g) ?? []).length, startingFederations.length - 1);
+      assert.ok(member.includes('href="#federation-vault-title"'));
+      assert.ok(member.includes(translate('Contribute to your federation’s common vault.', language)));
+      assert.equal(member.includes(`data-federation="${federation.name}"`), false);
+    }
+    state.game.federation = null;
+  }
+});
+
+test('every starting federation has distinct bilingual lore without changing membership or balances', () => {
+  const state = fixture(), before = structuredClone(state);
+  assert.equal(new Set(Object.values(federationStories)).size, startingFederations.length);
+  for (const language of ['en', 'ko'] as const) {
+    const html = federationPanel(state, language);
+    for (const federation of startingFederations) {
+      const story = federationStories[federation.name];
+      assert.ok(story.length > 100);
+      assert.notEqual(translate(story, 'ko'), story);
+      assert.ok(html.includes(translate(story, language)));
+    }
+    assert.ok(html.includes(`<summary>${translate('Origin story', language)}</summary>`));
+  }
+  assert.deepEqual(state, before);
 });

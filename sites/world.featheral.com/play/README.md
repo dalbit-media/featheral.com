@@ -154,6 +154,11 @@ still apply. Other crafting fees and all reserve-market seed prices are unchange
 
 ## Inventory workspace and equipment refinement
 
+Inventory displays up to 60 unlocked slots per page on desktop (1200px+), 40 on
+tablets (700px+) and 20 on phones. Resizing keeps the current slot range in view.
+This changes presentation only: storage capacities and expansion costs stay
+unchanged. The final page shows only the remaining unlocked slots.
+
 Refinement Cores remain craftable and player-tradeable, but are excluded from
 automatic reserve funding alongside Merchant and Master Builder Charters.
 All eight historical reserve catalogs remain unchanged for deployment preflight;
@@ -316,7 +321,12 @@ The chat overlay joins the authenticated global channel, retaining existing
 profile requirements, moderation, message limits and single-chat-tab policy.
 
 Five starting federations have distinct procedural flags, shields and mottos.
-Choose one on Federation when the existing Village/50-relationship requirements
+Each also has a bilingual origin story, available in expandable cards on the
+public World hub and the in-game Federation page. Lore grants no gameplay bonuses.
+The shared public header uses direct links without dropdown submenus; the hub
+omits duplicate section navigation. Primary game navigation and feature tabs remain.
+Each Federation card shows its joining requirements and a member-only link to the
+common contribution vault. Choose one when the existing Village/50-relationship requirements
 are met; goodwill, membership bonuses, founding costs and voting gates remain.
 Newly founded federations get a seed-derived name and matching heraldry;
 existing federation names and vault balances are preserved.
@@ -347,16 +357,15 @@ Sample scenes reuse actual game drawing code and are labeled as examples,
 never live player activity. Gameplay routes remain unchanged.
 Roadmap names the current World-building phase and separates available systems,
 pending federation economics and proposed future business/governance direction.
-Top-level navigation is Game, Community, Guide and Roadmap, with Account and Play
-actions. The logo returns to the hub; there is no Home menu. Game groups the four
-gameplay introductions; Account groups Sign in, Register, Profile and Switch account.
+Top-level navigation is World, Community, Guide and Roadmap, with direct Account
+and Play links and no dropdown submenus or duplicate section menu.
+The logo and World link return to the hub; its feature introductions remain in-page.
 Community posting and game routes remain separate working applications. Login,
 registration and profile remain dedicated pages with a unified responsive layout.
 Switching displays the current identity and keeps its session until a replacement
 sign-in succeeds; funds and settlements remain wallet-specific. Connected built-in
-wallet registration still reuses that wallet and its password. Native disclosure
-submenus support keyboard/touch use, Escape, outside-click dismissal and active
-page highlighting. World and Community reuse the same navigation template and
+wallet registration still reuses that wallet and its password.
+World and Community reuse the same navigation template and
 explicit navigation font, size, weight and touch-target styles.
 
 World public statistics appear once below the hero, not in the site header. The header retains site navigation and the wallet control.
@@ -547,7 +556,7 @@ expedition deadline arrives. Hidden pages do not poll or paint maps.
 - **Stacked item inventory** shows identical owned and market-reserved items once with their total quantity and reservation counts. Each distinct item type uses one slot regardless of quantity; equipped, placed and market-reserved copies share that slot. Mixed stacks remain selectable; fully reserved stacks cannot be used. One-copy equipment/activation rules and protected placed/equipped copies remain unchanged. Pending finds are also grouped by quantity. Each upgrade unlocks 20 slots and one page, up to 200 slots across 10 pages. Empty unlocked pages remain navigable. Full bags accept more copies of existing stacks; new stacks overflow safely into pending finds.
 - Sell any resource or unequipped item for FTH$, then buy resources or items in the marketplace. Trading has no bank requirement; production gates still apply.
 - **Trader-friendly marketplace:** the initially expanded compact grid browses all 81 markets together; Resources and Item marketplace filter the catalog without changing a prepared order. Search, category, owned-only and reset controls work in either grid or table view. Sort by name, buy price or sell price in either direction, or most owned; unavailable quotes remain last, and prices/quantities use physical units. Table headers are keyboard-accessible sort controls. Buy/sell price buttons prepare a spot draft without spending; only the shared confirmation submits a trade. Resource selling is inside the ticket, retaining Owned/Ready-to-collect source selection, 25/50/75/100% presets and exact physical-unit quantity. Its redundant resource picker and slider are hidden only in Marketplace; other selling surfaces retain them. New resource/source or successful sales default to 50%; manual edits persist across refreshes. Metal uses decimal tonnes; percentage quantities round down to whole lots with a one-lot minimum. 100% includes inventories above 10,000 lots. Item sales retain quick amounts, protected equipped/placed copies and storage limits. Local settlement selling still requires a commercial facility; Marketplace does not. Liquidity donations are collapsed separately. Shared confirmation, 2% spot protection, four-decimal FTH$ accounting, reservations and actual-sale charts are unchanged.
-- **Federation:** compact membership, relationship, contribution and assembly cards show actionable eligibility and material shortages. Villages with 50 relationship points can join Evergreen Union without a fee. Goodwill costs 40 Wood lots and 30 Water lots for +25 relationship. Members at Town with a town hall can vote once on Watershed; a City with **more than** 10,000 residents and 5,000 Metal lots can found its own federation. Costs are displayed in physical units. A direct Federation chat link opens the nearby federation channel. Assembly votes confer no real-world authority.
+- **Federation:** compact membership, relationship, contribution and assembly cards show actionable eligibility and material shortages. Villages with 50 relationship points can join any of the five starting federations without a fee. Membership is exclusive, and contributions go only to the joined federation. Goodwill costs 40 Wood lots and 30 Water lots for +25 relationship. Members at Town with a town hall can vote once on Watershed; a City with **more than** 10,000 residents and 5,000 Metal lots can found its own federation. Costs are displayed in physical units. A direct Federation chat link opens the nearby federation channel. Assembly votes confer no real-world authority.
 - **Paid craft-profit analysis:** a confirmed **FTH$100** purchase saves an owner-private latest-quote snapshot for every craftable item, expiring at exactly **one game day** (24 game hours). Purchase and refresh it in Settlement → Crafting; recipe cards show the snapshot's one-copy profit and ingredient breakdown alongside live batch estimates. Reloading and ordinary market polling are free; each explicit refresh costs another FTH$100. Retrying the same request cannot charge twice or extend expiry. For one output copy, full replacement cost includes the crafting fee plus executable full-quantity purchase quotes for every ingredient; profit subtracts that total from executable one-copy sale proceeds. The report fee is separate from per-item profit. Missing ingredient or sale liquidity remains unavailable, never a made-up price; if no profit can be calculated, no fee is charged. Quotes do not reserve funds, items or prices, and profit is not guaranteed. Expired reports hide snapshot figures; live crafting estimates remain separate.
 - **Dynamic market rarity:** free rarity, available-quantity and crafting-tier sorts complement existing price, ownership and trend sorts. Item colors and labels follow currently purchasable funded-pool inventory plus other players' active sell escrow: **Legendary 1-9**, **Epic 10-49**, **Rare 50-199**, **Uncommon 200-999**, **Common 1,000+**. Zero is unavailable, not legendary; unavailable and unknown supply sort last for rarity. Virtual liquidity depth, unfunded pools and the viewer's own offers are not item stock. Resource quantities have no item-rarity tier. This describes current market availability, not worldwide supply.
 - **Common federation vault:** members can permanently contribute owned Wood, Water, Metal, Oil and FTH$ after exact-amount review. Resource input is whole accounting lots (each option shows its physical size); FTH$ accepts four decimal places. The vault displays all contributed quantities and FTH$, every member's all-time and current-game-year totals, and both contribution percentages. Resources are valued at the existing fixed marketplace base price per lot at deposit; FTH$ is valued one-for-one. Values are recorded in four-decimal integer units and never revalued with spot prices. Exploration points and goodwill costs are not vault contributions and are not backfilled. Game-year records persist in `game.sqlite`; the current annual denominator resets at the existing 52-week year boundary, never at a real-calendar anniversary. Native Dollar journals debit the World budget and credit a federation-specific escrow with balanced, exact-once recovery; no minting, burning or automatic wallet transfer occurs. Public FTH$ and Metal totals include the vault. Tax collection, payout rate and eligibility remain pending: annual shares are retained for future tax distributions, but no tax, withdrawal or payout is enabled.

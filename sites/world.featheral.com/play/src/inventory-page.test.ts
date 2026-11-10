@@ -7,7 +7,8 @@ import { gamePage, primaryGamePageKeys } from './game-pages.ts';
 import { settlementDockTasks, settlementSectionNavigation } from './settlement-ui.ts';
 import { translate } from './i18n.ts';
 import { createAccount, snapshot } from '../server/economy.ts';
-import { inventoryPanel, craftingPanel } from './inventory-view.ts';
+import { inventoryPanel, craftingPanel, inventorySlotsPerPage } from './inventory-view.ts';
+import { marketAssets, isMarketResource } from './market.ts';
 import type { ApiState } from './api-types.ts';
 
 test('inventory is a dedicated primary game destination with safe direct tab links', () => {
@@ -64,6 +65,55 @@ test('refinement cores remain visible in inventory and crafting tool filters', (
   state.inventory.items = ['refinement-core'];
   assert.match(inventoryPanel(state, () => '', 'utility', 'en'), /data-item="refinement-core"/);
   assert.match(craftingPanel(state, () => '', 'utility', 'explore', 1, 'en'), /data-item="refinement-core"/);
+});
+
+test('responsive inventory shows 60 desktop, 40 tablet and 20 phone slots without granting storage', () => {
+  for (const [width, slots] of [[320, 20], [699, 20], [700, 40], [1199, 40], [1200, 60], [2560, 60]]) {
+    assert.equal(inventorySlotsPerPage(width), slots);
+  }
+  const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', population: { global: 0, federation: null }, clockSpeed: 1 };
+  state.inventory.storage = 9;
+  state.inventory.items = marketAssets.filter(asset => !isMarketResource(asset));
+  state.inventory.equipped = 'torch';
+  const before = structuredClone(state);
+  for (const pageSize of [20, 40, 60]) {
+    const seen: string[] = [];
+    for (let page = 0; page < Math.ceil(200 / pageSize); page++) {
+      const html = inventoryPanel(state, () => '', 'all', 'en', 'explore', page, null, '', pageSize);
+      assert.equal((html.match(/class="inventory-slot\b/g) ?? []).length, Math.min(pageSize, 200 - page * pageSize));
+      const items = [...html.matchAll(/data-action="inventory-select" data-item="([^"]+)"/g)].map(match => match[1]);
+      if (page === 0) assert.equal(items[0], 'torch');
+      seen.push(...items);
+    }
+    assert.equal(new Set(seen).size, state.inventory.items.length);
+    assert.equal(seen.length, state.inventory.items.length);
+  }
+  state.inventory.storage = 0;
+  const small = inventoryPanel(state, () => '', 'all', 'en', 'explore', 0, null, '', 60);
+  assert.equal((small.match(/class="inventory-slot\b/g) ?? []).length, 20);
+  state.inventory.storage = 9;
+  assert.deepEqual(state, before);
+});
+
+test('inventory breakpoint changes retain the current slot range and rerender only when density changes', () => {
+  const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
+  const start = main.indexOf("for (const breakpoint of ['(min-width: 700px)'");
+  const source = main.slice(start, main.indexOf("window.addEventListener('pagehide'", start));
+  const callbacks: (() => void)[] = [];
+  let renders = 0;
+  const context = vm.createContext({
+    innerWidth: 1440, inventorySlotsPerPage, inventoryPage: 2, inventoryVisibleSlots: 60,
+    inventoryMenuPage: true, renderInventoryPage: () => { renders++; },
+    matchMedia: () => ({ addEventListener: (_: string, handler: () => void) => callbacks.push(handler) }),
+  });
+  vm.runInContext(source, context);
+  for (const [width, page, size] of [[768, 3, 40], [375, 6, 20], [1440, 2, 60]]) {
+    context.innerWidth = width;
+    callbacks.forEach(callback => callback());
+    assert.equal(context.inventoryPage, page);
+    assert.equal(context.inventoryVisibleSlots, size);
+  }
+  assert.equal(renders, 3);
 });
 
 test('background refreshes restore inventory controls after clearing pending state', async () => {

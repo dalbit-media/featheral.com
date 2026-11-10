@@ -21,10 +21,10 @@ import { resourceForecastPanel } from './resource-forecast.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
 import { editableAllocation, emergencyCollection, explorationCount, nextExploration, nextInvestigation, resourceCapacity, workforceCounts } from './workforce.ts';
-import { canCollectFinds, collectibleFindAvailable, inventoryPageSize, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
+import { canCollectFinds, collectibleFindAvailable, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import { isActivityEquipment, isEquipmentActivity } from './activity-equipment.ts';
 import type { ItemId } from './items.ts';
-import { craftingPanel, inventoryPanel, wireInventoryDetails } from './inventory-view.ts';
+import { craftingPanel, inventoryPanel, inventorySlotsPerPage, wireInventoryDetails } from './inventory-view.ts';
 import type { CraftingFilter, InventoryFilter } from './inventory-view.ts';
 import { settlementLayoutPanel, settlementScene } from './settlement-scene.ts';
 import { arrangementError, isSettlementEntity, settlementBuildings, settlementEntityName, settlementPositions } from './settlement-layout.ts';
@@ -110,6 +110,7 @@ let settlementChat: SettlementChat | null = null;
 const visitingSettlement = settlementPage ? new URL(location.href).searchParams.get('visit') : null;
 let inventoryFilter: InventoryFilter = 'all';
 let inventoryPage = 0;
+let inventoryVisibleSlots = inventorySlotsPerPage(innerWidth);
 let inventorySelection: ItemId | null = null;
 let inventorySearch = '';
 let craftingSearch = '';
@@ -1117,7 +1118,7 @@ function renderInventoryPage(): void {
   const root = document.querySelector('#inventory-content')!;
   let content = '';
   if (inventoryTab === 'inventory') content = enhancedInventoryPanel(state, language)
-    + inventoryPanel(state, costChips, inventoryFilter, language, 'explore', inventoryPage, inventorySelection, inventorySearch);
+    + inventoryPanel(state, costChips, inventoryFilter, language, 'explore', inventoryPage, inventorySelection, inventorySearch, inventoryVisibleSlots);
   else if (inventoryTab === 'craft') {
     void refreshCraftingPrices();
     content = `<p class="fineprint crafting-market-status" role="status">${translate(craftingPricesError ? 'Prices unavailable' : craftingPricesLoading ? 'Loading prices...' : 'Live market prices', language)}${craftingPricesError ? `: ${escape(craftingPricesError)} <button class="button" data-action="crafting-prices">${translate('Retry', language)}</button>` : ''}</p>`
@@ -1685,7 +1686,7 @@ app.addEventListener('click', event => {
     }
     case 'inventory-page': {
       const page = Number(target.dataset.page);
-      if (Number.isSafeInteger(page) && page >= 0 && page < itemStorage[state.inventory.storage].capacity / inventoryPageSize) {
+      if (Number.isSafeInteger(page) && page >= 0 && page < Math.ceil(itemStorage[state.inventory.storage].capacity / inventoryVisibleSlots)) {
         inventoryPage = page; inventorySelection = null;
         render();
       }
@@ -1783,6 +1784,15 @@ window.addEventListener('hashchange', () => {
     document.querySelector<HTMLElement>('.inventory-tabs [aria-current="page"]')?.focus({ preventScroll: true });
   }
 });
+for (const breakpoint of ['(min-width: 700px)', '(min-width: 1200px)']) {
+  matchMedia(breakpoint).addEventListener('change', () => {
+    const next = inventorySlotsPerPage(innerWidth);
+    if (next === inventoryVisibleSlots) return;
+    inventoryPage = Math.floor(inventoryPage * inventoryVisibleSlots / next);
+    inventoryVisibleSlots = next;
+    if (inventoryMenuPage) renderInventoryPage();
+  });
+}
 window.addEventListener('pagehide', () => { inbox?.close(); settlementChat?.close(); atlasChat?.close(); });
 window.addEventListener('focus', async () => {
   if (busy || confirmationOpen() || document.hidden) return;

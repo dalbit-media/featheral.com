@@ -9,7 +9,8 @@ const text = (tag: string, value: PublicCopy, attributes = ''): string => `<${ta
 
 export function renderPublicWorldNav(current = ''): string {
   const page = publicFeaturePages.find(page => page.path === current);
-  if (page) current = `/#${page.visual}`;
+  if (page) current = ['guide', 'roadmap'].includes(page.visual) ? `/#${page.visual}` : '/';
+  if (['/login/', '/register/'].includes(current)) current = '/account/';
   return readFileSync(new URL('../../../../shared/world-navigation.html', import.meta.url), 'utf8')
     .replace(`href="${current}"`, `href="${current}" aria-current="page"`);
 }

@@ -9,6 +9,13 @@ export const startingFederations: readonly FederationIdentity[] = [
   { name: 'Solaris Commonwealth', motto: 'By courage, a brighter dawn', color: '#9a422a', accent: '#ffdd7b', symbol: 3 },
   { name: 'Silverpeak Assembly', motto: 'Steadfast above the clouds', color: '#465473', accent: '#dde5f3', symbol: 4 },
 ];
+export const federationStories: Readonly<Record<string, string>> = {
+  'Evergreen Union': 'When the Long Frost silenced the forest roads, five villages kept a single greenhouse alive by sharing their last firewood. Its first spring sapling became the Union’s emblem. Their oldest promise is simple: no settlement faces winter alone.',
+  'Aurora Concord': 'A storm scattered the northern observatories until a young keeper answered a distant light with a polished mirror. That chain of signals reunited the valleys. The Concord still keeps a lantern burning for discoveries that have not yet found their way home.',
+  'Azure Maritime League': 'Three rival harbors once argued over a vanished lighthouse. When their ships returned together through the same fog, the captains built a new beacon on neutral ground. The League was born around its flame: many shores, but safe passage for all.',
+  'Solaris Commonwealth': 'The first solar tower rose from a broken quarry, assembled by workers who were told the basin could never support a town. At dawn its mirrors lit every unfinished roof. The Commonwealth remembers that morning whenever a new settlement raises its first home.',
+  'Silverpeak Assembly': 'After an avalanche buried the mountain pass, miners, shepherds and mapmakers cut a new route from opposite sides. They met beneath the summit and carved their agreement into the stone. The Assembly’s shield honors the road no single village could have built.',
+};
 export function identityHash(seed: string): number {
   let hash = 2166136261;
   for (const character of seed) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);

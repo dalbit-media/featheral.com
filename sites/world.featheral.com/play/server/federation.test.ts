@@ -11,6 +11,7 @@ import type { ApiState, Command } from '../src/api-types.ts';
 import { dollarsScale } from '../src/dollars.ts';
 import { worldEpoch, worldYearMs } from '../src/environment.ts';
 import { marketBasePrice } from '../src/market.ts';
+import { startingFederations } from '../src/atlas.ts';
 
 type Contribution = Extract<Command, { type: 'federation-contribute' }>;
 function setup(store: SqliteStore, federation: string | null = 'Evergreen Union') {
@@ -33,6 +34,42 @@ function contribute(store: SqliteStore, token: string, command: Contribution, id
       contribution => store.contributeFederation(session.account, owner, contribution, now)));
   return { run, body };
 }
+
+test('every default federation accepts qualified joins and member contributions into its own persisted vault', () => {
+  let now = worldEpoch + 1000;
+  const store = new SqliteStore(':memory:', () => now);
+  try {
+    for (const federation of startingFederations) {
+      const identity = setup(store, null);
+      store.transaction(identity.token, session => {
+        session.account.game.relationship = 50;
+      });
+      const join = () => {
+        const revision = store.read(identity.token, session => session.account.revision);
+        return store.transaction(identity.token, (session, time, realTime) =>
+          apply(session.account, { id: randomUUID(), revision,
+            command: { type: 'diplomacy', action: 'join', federation: federation.name } }, time, realTime));
+      };
+      join();
+      assert.equal(store.read(identity.token, session => session.account.game.federation), federation.name);
+      assert.equal(store.federationView(identity.token)!.totalValue, 0);
+      now += 2000;
+      const request = contribute(store, identity.token, { type: 'federation-contribute', asset: 'wood', amount: 10 });
+      const result = request.run();
+      assert.deepEqual(request.run(), result, 'replay must not debit another contribution');
+      now += 2000;
+      contribute(store, identity.token, { type: 'federation-contribute', asset: 'dollars', amount: 5 }).run();
+      const vault = store.federationView(identity.token)!;
+      assert.equal(vault.stock.wood, 10);
+      assert.equal(vault.stock.dollars, 5);
+      assert.equal(vault.contributors.find(member => member.yours)!.allTimePercent, 100);
+      assert.equal(store.read(identity.token, session => session.account.game.stock.wood), 90);
+      assert.equal(store.read(identity.token, session => session.account.game.dollars), 95 * dollarsScale);
+      now += 2000;
+      assert.throws(join, /already belongs/);
+    }
+  } finally { store.close(); }
+});
 
 test('common vault conserves resources and dollars, combines fixed base values, isolates federations and records game-year shares', () => {
   let now = worldEpoch + 1000;

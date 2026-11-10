@@ -28,6 +28,9 @@ import { isBuilderItem } from './builder-items.ts';
 
 export type InventoryFilter = 'all' | 'utility' | 'efficiency' | 'bulk' | 'decoration' | 'collectible' | 'collectors' | 'customization';
 export type CraftingFilter = Exclude<InventoryFilter, 'collectible'> | 'affordable';
+export function inventorySlotsPerPage(viewportWidth: number): number {
+  return viewportWidth >= 1200 ? 60 : viewportWidth >= 700 ? 40 : inventoryPageSize;
+}
 export function wireInventoryDetails(root: ParentNode): void {
   for (const button of root.querySelectorAll<HTMLButtonElement>('[data-inventory-preview]')) {
     const preview = root.querySelector<HTMLElement>(`#${button.dataset.inventoryPreview}`);
@@ -58,7 +61,7 @@ export function wireInventoryDetails(root: ParentNode): void {
     });
   }
 }
-export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => string, filter: InventoryFilter, language: Language, context: 'settlement' | 'explore' = 'settlement', page = 0, selection: ItemId | null = null, query = ''): string {
+export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => string, filter: InventoryFilter, language: Language, context: 'settlement' | 'explore' = 'settlement', page = 0, selection: ItemId | null = null, query = '', slotsPerPage = inventoryPageSize): string {
   const { game, inventory: bag } = state, tier = itemStorage[bag.storage], next = itemStorage[bag.storage + 1];
   const fmt = (n: number) => n.toLocaleString(locale(language));
   const name = (id: ItemId) => translate(itemName(id), language);
@@ -70,8 +73,10 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
       : filter === 'collectors' ? isCollectionItem(id) : filter === 'customization' ? isCustomizationItem(id) : id.startsWith('relic-')))
     .filter(({ id }) => !search || `${id} ${name(id)} ${itemName(id)}`.toLocaleLowerCase(locale(language)).includes(search))
     .sort((a, b) => Number(b.equipped) - Number(a.equipped));
-  const pages = tier.capacity / inventoryPageSize, current = Math.max(0, Math.min(Number.isSafeInteger(page) ? page : 0, pages - 1));
-  const visible = filtered.slice(current * inventoryPageSize, (current + 1) * inventoryPageSize);
+  const pageSize = [20, 40, 60].includes(slotsPerPage) ? slotsPerPage : inventoryPageSize;
+  const pages = Math.ceil(tier.capacity / pageSize), current = Math.max(0, Math.min(Number.isSafeInteger(page) ? page : 0, pages - 1));
+  const visible = filtered.slice(current * pageSize, (current + 1) * pageSize);
+  const slotCount = Math.min(pageSize, tier.capacity - current * pageSize);
   const selectedStack = visible.find(slot => slot.owned > 0 && slot.id === selection) ?? visible.find(slot => slot.owned > 0);
   const selected = selectedStack?.id;
   const position = selected && isDecorationItem(selected) ? settlementPositions(game, bag)[selected] : undefined;
@@ -80,8 +85,8 @@ export function inventoryPanel(state: ApiState, costChips: (cost: Cost) => strin
     <label class="inventory-search">${icon('search')}<input id="inventory-search" type="search" data-inventory-search data-preserve-draft placeholder="${translate('Find an item', language)}" aria-label="${translate('Find an item', language)}" autocomplete="off"></label>
     <div class="inventory-expansion">${next ? `<span>${translate(`${next.name} · ${next.capacity} item slots`, language)}</span><button class="button" data-action="item-storage" aria-label="Expand item storage" ${game.stage < 0 || !canAfford(game, { metal: next.metal, dollars: next.dollars }) ? 'disabled' : ''}>${icon('plus')}<span>Expand storage</span>${costChips({ metal: next.metal, dollars: next.dollars })}</button>` : '<span>Maximum item storage</span>'}</div>
     <div class="inventory-filters" role="group" aria-label="Inventory filters">${([['all', 'All', 'layers', 'All items'], ['utility', 'Tools', 'tool', 'Equipment & automation'], ['efficiency', 'Savings', 'dollars', 'Cost-saving equipment'], ['bulk', 'Bulk', 'people', 'Bulk actions'], ['decoration', 'Decorations', 'home', 'Decorations'], ['collectible', 'Collectibles', 'spark', 'Collectibles'], ['collectors', 'Collectors', 'download', 'Collectors'], ['customization', 'Names', 'flag', 'Names & titles']] as const).map(([key, label, glyph, description]) => `<button class="button" data-action="inventory-filter" data-filter="${key}" aria-pressed="${key === filter}" aria-label="${translate(description, language)}" title="${translate(description, language)}">${icon(glyph)}<span>${translate(label, language)}</span></button>`).join('')}</div>
-    <div class="inventory-slots" role="group" aria-label="Item slots">${Array.from({ length: inventoryPageSize }, (_, index) => {
-      const slot = visible[index], number = current * inventoryPageSize + index + 1;
+    <div class="inventory-slots" role="group" aria-label="Item slots">${Array.from({ length: slotCount }, (_, index) => {
+      const slot = visible[index], number = current * pageSize + index + 1;
       if (!slot) return `<div class="inventory-slot empty" role="img" aria-label="${translate('Empty slot', language)} ${number}"></div>`;
       const label = `${name(slot.id)} · ${translate('Quantity', language)}: ${fmt(slot.quantity)}${slot.reserved ? ` · ${translate('Reserved in market', language)}: ${fmt(slot.reserved)}` : ''}${slot.equipped ? ` · ${translate('Equipped', language)}` : ''}`;
       const previewId = `inventory-preview-${slot.id}`;

@@ -15,10 +15,9 @@ test("World community reuses the Media feed and assets without duplicating conte
   assert.match(html, /src="\/shared\/world-account.js"/);
   assert.match(html, /id="composerHost"/);
   assert.doesNotMatch(html, /WORLD_PUBLIC_NAV/);
-  assert.equal((html.match(/class="world-submenu"/g) || []).length, 2);
-  assert.match(html, /data-site="world" data-path="\/login\/"/);
-  assert.match(html, /data-site="world" data-path="\/register\/"/);
-  assert.match(mediaNavigationHtml('<!-- WORLD_PUBLIC_NAV -->'), /href="https:\/\/world.featheral.com\/#exploration"/);
+  assert.doesNotMatch(html, /class="world-submenu"|world-navigation\.js/);
+  assert.match(html, /data-site="world" data-path="\/account\/"/);
+  assert.match(mediaNavigationHtml('<!-- WORLD_PUBLIC_NAV -->'), /href="https:\/\/world.featheral.com\/"/);
   assert.match(html, /data-path="\/#community" aria-current="page"/);
 });
 test("legacy World information routes forward to one hub, while gameplay and account routes stay separate", () => {
