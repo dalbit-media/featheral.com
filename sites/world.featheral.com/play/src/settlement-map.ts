@@ -4,7 +4,7 @@ import type { Environment } from './environment.ts';
 import { decorationDrawing } from './item-art.ts';
 import { decorationItems, isDecorationItem } from './items.ts';
 import type { DecorationItem } from './items.ts';
-import { drawDiamond, drawHouse, drawTerrainDetail, drawTree, drawWaterFacility, houseHeight, project, tileColor, unproject } from './map-art.ts';
+import { drawDiamond, drawHouse, drawTree, drawWaterFacility, houseHeight, project, tileColor, unproject } from './map-art.ts';
 import { EnvironmentLayer } from './environment-layer.ts';
 import { isWaterFacility } from './water-facilities.ts';
 import { arrangementError, cellKey, positionEntries, settlementEntityName, settlementPositions, settlementRadius, settlementTerrain } from './settlement-layout.ts';
@@ -26,6 +26,8 @@ export class SettlementMap {
   private hovered: SettlementEntity | null = null;
   private lastFrame = 0;
   private images = new Map<DecorationItem, HTMLImageElement>();
+  private terrainCache = new Map<string, ReturnType<typeof settlementTerrain>>();
+  private terrainSeed: number | undefined;
   private renderKey = '';
   private artworkRevision = 0;
   private canvas: HTMLCanvasElement;
@@ -97,6 +99,14 @@ export class SettlementMap {
   center(position: GridPosition = { x: 0, y: 0 }): void { this.camera = { ...position }; }
   scale(amount: number): void { this.zoom = Math.max(.65, Math.min(3, this.zoom + amount)); }
   private clamp(value: number): number { return Math.max(-settlementRadius - 2, Math.min(settlementRadius + 2, value)); }
+  private terrain(x: number, y: number, seed: number): ReturnType<typeof settlementTerrain> {
+    if (this.terrainSeed !== seed) { this.terrainCache.clear(); this.terrainSeed = seed; }
+    const key = `${x},${y}`, cached = this.terrainCache.get(key);
+    if (cached) return cached;
+    const terrain = settlementTerrain(x, y, seed);
+    this.terrainCache.set(key, terrain);
+    return terrain;
+  }
   private cell(x: number, y: number): GridPosition {
     const bounds = this.canvas.getBoundingClientRect(), delta = unproject((x - bounds.left - this.width / 2) / this.zoom, (y - bounds.top - this.height / 2) / this.zoom);
     return { x: Math.round(this.camera.x + delta.x), y: Math.round(this.camera.y + delta.y) };
@@ -151,11 +161,10 @@ export class SettlementMap {
     c.save(); c.translate(this.width / 2, this.height / 2); c.scale(this.zoom, this.zoom);
     const tiles = [];
     for (let y = -settlementRadius; y <= settlementRadius; y++) for (let x = -settlementRadius; x <= settlementRadius; x++) {
-      const screen = project(x - this.camera.x, y - this.camera.y), terrain = settlementTerrain(x, y, game.seed);
+      const screen = project(x - this.camera.x, y - this.camera.y), terrain = this.terrain(x, y, game.seed);
       if (Math.abs(screen.x) > this.width / this.zoom / 2 + 90 || Math.abs(screen.y) > this.height / this.zoom / 2 + Math.max(110, (houseHeight(game.stage) + 22) * 1.6 + 8)) continue;
       const road = (x === 0 || y === 0) && terrain !== 'river';
       drawDiamond(c, screen.x, screen.y, road ? game.stage >= 4 ? '#9a9f89' : '#aa9e77' : tileColor(terrain, Math.floor(hash(x, y, game.seed + 7) * 3), view.environment.season));
-      drawTerrainDetail(c, screen.x, screen.y, terrain, hash(x, y, game.seed + 17), view.environment.season, road);
       if (view.editing) {
         c.beginPath(); c.moveTo(screen.x, screen.y - 20); c.lineTo(screen.x + 39, screen.y);
         c.lineTo(screen.x, screen.y + 20); c.lineTo(screen.x - 39, screen.y); c.closePath();

@@ -88,7 +88,7 @@ test('2D maps start closer, repaint on interaction and stop painting unchanged s
       decorationItems: {}, isDecorationItem: () => false, isWaterFacility: () => false,
       hash: () => .2, radius: () => 3, terrainAt: () => 'grassland', terrainColors: {},
       explorationFringe: () => new Map(), project, unproject, tileWidth, tileHeight,
-      drawDiamond() {}, drawTerrainDetail() {}, drawHouse() {}, drawTree() {}, drawEnvironment() {}, tileColor: () => '#123456',
+      drawDiamond() {}, drawHouse() {}, drawTree() {}, drawEnvironment() {}, tileColor: () => '#123456',
       houseHeight: () => 24,
       EnvironmentLayer: class { capture() {} draw() {} },
       settlementPositions: () => ({}), positionEntries: () => [], settlementTerrain: () => 'grassland',

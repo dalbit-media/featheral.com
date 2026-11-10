@@ -46,81 +46,19 @@ export function tileColor(terrain: Terrain, variant: number, season: Season): st
 export function drawDiamond(c: CanvasRenderingContext2D, x: number, y: number, fill: string): void {
   c.beginPath(); c.moveTo(x, y - tileHeight / 2); c.lineTo(x + tileWidth / 2, y); c.lineTo(x, y + tileHeight / 2); c.lineTo(x - tileWidth / 2, y); c.closePath();
   c.fillStyle = fill; c.fill();
-  c.beginPath(); c.moveTo(x, y - tileHeight / 2); c.lineTo(x - tileWidth / 2, y); c.lineTo(x, y + tileHeight / 2); c.lineTo(x, y); c.closePath();
-  c.fillStyle = '#f4f0d20a'; c.fill();
-  c.beginPath(); c.moveTo(x, y - tileHeight / 2); c.lineTo(x + tileWidth / 2, y); c.lineTo(x, y + tileHeight / 2); c.lineTo(x, y); c.closePath();
-  c.fillStyle = '#0a18140d'; c.fill();
-  c.beginPath(); c.moveTo(x - tileWidth / 2, y); c.lineTo(x, y + tileHeight / 2); c.lineTo(x + tileWidth / 2, y);
-  c.strokeStyle = '#d9dfc51b'; c.lineWidth = .65; c.stroke();
-  c.beginPath(); c.moveTo(x - tileWidth / 2, y); c.lineTo(x, y - tileHeight / 2); c.lineTo(x + tileWidth / 2, y);
-  c.strokeStyle = '#172d2028'; c.lineWidth = .65; c.stroke();
-}
-export function drawTerrainDetail(c: CanvasRenderingContext2D, x: number, y: number, terrain: Terrain, variant: number, season: Season, road = false): void {
-  c.save();
-  if (road) {
-    c.strokeStyle = '#4d57474a'; c.lineWidth = .8; c.beginPath();
-    c.moveTo(x - 16, y - 4); c.lineTo(x - 8, y); c.lineTo(x, y - 4);
-    c.moveTo(x, y + 4); c.lineTo(x + 8, y); c.lineTo(x + 16, y + 4); c.stroke();
-    c.strokeStyle = '#f0dcb82a'; c.lineWidth = .7; c.beginPath();
-    c.moveTo(x - 24, y); c.lineTo(x, y + 12); c.lineTo(x + 24, y); c.stroke();
-    c.restore(); return;
-  }
-  if (terrain === 'river' || terrain === 'water' || terrain === 'coast') {
-    c.strokeStyle = terrain === 'coast' ? '#d2e7ce55' : '#c1e0d34a'; c.lineWidth = .85;
-    for (let i = 0; i < 2; i++) {
-      const offset = (variant * 12 + i * 7) % 18 - 9;
-      c.beginPath(); c.moveTo(x - 15 + offset, y - 4 + i * 8);
-      c.quadraticCurveTo(x + offset, y - 7 + i * 8, x + 15 + offset, y - 3 + i * 8); c.stroke();
-    }
-  } else if (['mountain', 'hills', 'canyon', 'volcano', 'glacier'].includes(terrain)) {
-    c.strokeStyle = season === 'Winter' ? '#eef4e36a' : '#f0e2c43a'; c.lineWidth = .8;
-    c.beginPath(); c.moveTo(x - 19, y + 1); c.lineTo(x - 5, y - 6); c.lineTo(x + 4, y - 2);
-    c.moveTo(x + 3, y + 6); c.lineTo(x + 13, y + 1); c.lineTo(x + 21, y + 3); c.stroke();
-    c.fillStyle = '#18251e24'; c.beginPath(); c.ellipse(x + (variant - .5) * 22, y + 3, 2.3, 1, -.25, 0, Math.PI * 2); c.fill();
-  } else if (['desert', 'dunes', 'savanna'].includes(terrain)) {
-    c.strokeStyle = '#f7e2b833'; c.lineWidth = .8; c.beginPath();
-    c.moveTo(x - 20, y - 2); c.quadraticCurveTo(x - 8, y - 7, x + 3, y - 2);
-    c.moveTo(x - 9, y + 5); c.quadraticCurveTo(x + 5, y, x + 20, y + 5); c.stroke();
-    if (terrain === 'savanna') drawGrassTuft(c, x + (variant - .5) * 24, y + 1, '#d7c47b');
-  } else if (['wetland', 'mangrove'].includes(terrain)) {
-    c.fillStyle = '#b7c98a50'; c.beginPath(); c.ellipse(x - 7, y + 2, 8, 2.2, -.15, 0, Math.PI * 2); c.fill();
-    drawGrassTuft(c, x + 8, y + 2, '#c6cc8b');
-  } else if (['forest', 'rainforest', 'pineforest'].includes(terrain)) {
-    c.fillStyle = '#c9d18c32'; c.beginPath(); c.ellipse(x - 11, y + 2, 2.2, 1.2, -.2, 0, Math.PI * 2); c.fill();
-    c.fillStyle = '#243e2e38'; c.beginPath(); c.ellipse(x + 10, y + 4, 1.7, 1, .2, 0, Math.PI * 2); c.fill();
-  } else {
-    const color = season === 'Winter' ? '#dce4d876' : season === 'Autumn' ? '#d8b57668' : '#c9d99565';
-    drawGrassTuft(c, x - 11 + variant * 10, y + 3, color);
-    if (variant > .62 && season !== 'Winter') {
-      c.fillStyle = season === 'Spring' ? '#ead5bd88' : '#e8d99177';
-      c.beginPath(); c.arc(x + 11 - variant * 7, y + 1, 1.05, 0, Math.PI * 2); c.fill();
-    }
-  }
-  c.restore();
-}
-function drawGrassTuft(c: CanvasRenderingContext2D, x: number, y: number, color: string): void {
-  c.strokeStyle = color; c.lineWidth = .8; c.beginPath();
-  c.moveTo(x - 3, y + 2); c.quadraticCurveTo(x - 2, y - 2, x, y);
-  c.moveTo(x, y + 2); c.lineTo(x + .5, y - 3);
-  c.moveTo(x + 2, y + 2); c.quadraticCurveTo(x + 1, y - 1, x + 4, y - 2); c.stroke();
+  c.strokeStyle = '#172d2020'; c.lineWidth = .65; c.stroke();
 }
 export function drawTree(c: CanvasRenderingContext2D, x: number, y: number, h: number, variant: number, season: Season): void {
   c.fillStyle = '#152c2845'; c.beginPath(); c.ellipse(x + 6, y + 3, h * .42, 5, -.2, 0, Math.PI * 2); c.fill();
-  c.fillStyle = '#6f6147'; c.beginPath(); c.moveTo(x - 2, y - 8); c.lineTo(x + 1, y - 8); c.lineTo(x + 2, y + 3); c.lineTo(x - 2, y + 3); c.fill();
+  c.fillStyle = '#7b7050'; c.fillRect(x - 1.5, y - 12, 3, 14);
   const shades = season === 'Autumn' ? ['#725b35', '#93753d', '#b39350']
     : season === 'Winter' ? ['#486556', '#74907b', '#b5c8b7']
     : variant > .45 ? ['#31583d', '#456e49', '#5b8052'] : ['#2b5141', '#3b6550', '#50795a'];
   for (let i = 0; i < 3; i++) {
     const top = y - h + i * h * .19, w = h * (.25 + i * .055);
     c.fillStyle = shades[i];
-    c.strokeStyle = '#193b2e75'; c.lineWidth = .8; c.beginPath(); c.moveTo(x, top);
-    c.quadraticCurveTo(x + w * .5, top + h * .24, x + w, top + h * .55);
-    c.quadraticCurveTo(x + w * .7, top + h * .68, x, top + h * .66);
-    c.quadraticCurveTo(x - w * .8, top + h * .65, x - w, top + h * .55);
-    c.quadraticCurveTo(x - w * .5, top + h * .25, x, top); c.closePath(); c.fill(); c.stroke();
-    c.fillStyle = '#d4dda329'; c.beginPath(); c.moveTo(x, top + 2);
-    c.quadraticCurveTo(x - w * .5, top + h * .25, x - w * .82, top + h * .52);
-    c.quadraticCurveTo(x - w * .25, top + h * .41, x, top + 2); c.fill();
+    c.beginPath(); c.moveTo(x, top); c.lineTo(x + w, top + h * .55); c.quadraticCurveTo(x, top + h * .68, x - w, top + h * .55); c.closePath(); c.fill();
+    c.fillStyle = '#b7c88b18'; c.beginPath(); c.moveTo(x, top); c.lineTo(x - w, top + h * .55); c.lineTo(x - 2, top + h * .45); c.fill();
   }
 }
 export interface HouseAppearance { kind: 'home' | 'centre' | 'workshop' | 'supplies' | 'bank' | 'townhall' | 'market-stall' | 'trade-hub'; urban: boolean; night: boolean; stage?: number }

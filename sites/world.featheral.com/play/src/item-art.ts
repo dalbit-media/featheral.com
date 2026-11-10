@@ -65,10 +65,7 @@ const decorationDrawings: Record<DecorationItem, string> = {
   canopy: '<ellipse cx="32" cy="57" rx="29" ry="6" fill="#102c2030"/><path d="M12 26v28m39-28v28" stroke="#9c754e" stroke-width="4"/><path d="m8 47 25 10 24-11v8l-24 10L8 54Z" fill="#b28b5b"/><path d="m6 22 25-13 28 12v14L31 47 6 35Z" fill="#daaa74"/><path d="m15 17 9-5 28 12-9 5Zm-8 7 27 12 8-4v11l-9 4L6 35V24Zm44 1 8-4v14l-8 4Z" fill="#e7d8ac"/><path d="m6 22 27 12 26-13" fill="none" stroke="#a98158" stroke-width="2"/>',
 };
 export function decorationDrawing(id: DecorationItem): string {
-  return `<defs><radialGradient id="ground-shade"><stop offset="0" stop-color="#081610" stop-opacity=".58"/><stop offset="1" stop-color="#081610" stop-opacity="0"/></radialGradient>
-    <filter id="object-shadow" x="0" y="0" width="64" height="64" filterUnits="userSpaceOnUse"><feDropShadow dx="0" dy="1.5" stdDeviation="1.3" flood-color="#08140f" flood-opacity=".5"/></filter></defs>
-    <ellipse cx="32" cy="54" rx="28" ry="9" fill="url(#ground-shade)"/>
-    <g filter="url(#object-shadow)" stroke-linecap="round" stroke-linejoin="round">${decorationDrawings[id]}</g>`;
+  return `<ellipse cx="32" cy="57" rx="27" ry="5" fill="#102c2040"/><g stroke-linecap="round" stroke-linejoin="round">${decorationDrawings[id]}</g>`;
 }
 export function itemArt(id: ItemId): string {
   let drawing = '', badge = '', kind = '', accent = '#e0bc84';

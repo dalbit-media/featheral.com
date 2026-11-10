@@ -4,7 +4,7 @@ import { createAccount, snapshot } from '../server/economy.ts';
 import { inventory } from '../server/inventory.ts';
 import type { ApiState } from './api-types.ts';
 import { marketAssets, isMarketResource } from './market.ts';
-import { decorationDrawing, itemArt } from './item-art.ts';
+import { itemArt } from './item-art.ts';
 import { itemDescription, itemDetailRows } from './item-details.ts';
 import { buildingArt } from './building-art.ts';
 import { settlementLayoutPanel, settlementObjectDescription, settlementScene } from './settlement-scene.ts';
@@ -15,7 +15,6 @@ import { translate } from './i18n.ts';
 import { stages, terrainDetails } from './engine.ts';
 import { inventoryPanel } from './inventory-view.ts';
 import { craftableKeys, decorationItems } from './items.ts';
-import { drawTerrainDetail } from './map-art.ts';
 
 test('inventory pins equipped stacks first, keeps filters and pages, and provides bilingual touch and hover details', () => {
   const state: ApiState = { ...snapshot(createAccount(0)), csrf: 'test', clockSpeed: 1, population: { global: 0, federation: null } };
@@ -121,7 +120,7 @@ test('settlement object inspectors explain every active building and deduplicate
   assert.deepEqual(state, before);
   for (const task of Object.values(settlementTasks)) assert.notEqual(translate(task.description, 'ko'), task.description);
 });
-test('settlement terrain forms seed-stable natural woodland edges and renders season-aware surface detail', () => {
+test('settlement terrain forms seed-stable, clustered woodland around a meadow centre', () => {
   for (const seed of [0, 17, 824]) {
     const terrain = new Map<string, number>();
     for (let y = -10; y <= 10; y++) for (let x = -10; x <= 10; x++) {
@@ -133,24 +132,13 @@ test('settlement terrain forms seed-stable natural woodland edges and renders se
     assert.ok((terrain.get('meadow') ?? 0) > 0);
     assert.equal(settlementTerrain(0, 0, seed), 'meadow');
     assert.equal(settlementTerrain(8, 2, seed), 'river');
-  }
-  const operations: string[] = [];
-  const context = new Proxy({} as CanvasRenderingContext2D, { get(_target, key) {
-    return (..._args: unknown[]) => { operations.push(String(key)); };
-  }, set() { return true; } });
-  for (const terrain of Object.keys(terrainDetails) as (keyof typeof terrainDetails)[]) {
-    drawTerrainDetail(context, 0, 0, terrain, .72, 'Autumn');
-    drawTerrainDetail(context, 0, 0, terrain, .24, 'Winter', true);
-  }
-  assert.ok(operations.includes('quadraticCurveTo'));
-  assert.ok(operations.includes('stroke'));
-});
-test('settlement decoration illustrations share cached ground shading and cast shadows', () => {
-  for (const id of Object.keys(decorationItems) as (keyof typeof decorationItems)[]) {
-    const drawing = decorationDrawing(id);
-    assert.match(drawing, /radialGradient id="ground-shade"/);
-    assert.match(drawing, /feDropShadow/);
-    assert.match(drawing, /filter="url\(#object-shadow\)"/);
+    let neighboringForest = 0, forestCells = 0;
+    for (let y = -10; y <= 10; y++) for (let x = -10; x <= 10; x++) {
+      if (settlementTerrain(x, y, seed) !== 'forest') continue;
+      forestCells++;
+      if (settlementTerrain(x + 1, y, seed) === 'forest' || settlementTerrain(x, y + 1, seed) === 'forest') neighboringForest++;
+    }
+    assert.ok(neighboringForest / forestCells > .5);
   }
 });
 test('settlement section navigation excludes dedicated inventory and crafting pages', () => {
