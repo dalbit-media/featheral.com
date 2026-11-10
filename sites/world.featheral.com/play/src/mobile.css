@@ -102,7 +102,7 @@
   .settlement-saving{bottom:134px}
   .district-heading h1 button,.district-heading>.button{min-width:44px;min-height:44px}
   .settlement-task-body h3,.settlement-task-body .settlement-section-title h3{font-size:15px}
-  .settlement-task-body .crew-controls label,.settlement-task-body .crew-plan,.settlement-task-body .inventory-item-detail p,.settlement-task-body .inventory-page-empty{font-size:12px;line-height:1.7}
+  .settlement-task-body .weight-row label,.settlement-task-body .crew-plan,.settlement-task-body .inventory-item-detail p,.settlement-task-body .inventory-page-empty{font-size:12px;line-height:1.7}
   .settlement-task-body .item-card p,.settlement-task-body .storage-card p,.settlement-task-body .building-card p,.settlement-task-body .settlement-activity small{font-size:13px;line-height:1.7}
   .settlement-task-body .settlement-activity strong{font-size:14px}
   .settlement-task-body .inventory-filters{flex-wrap:wrap}

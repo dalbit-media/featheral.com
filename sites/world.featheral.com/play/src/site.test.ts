@@ -364,31 +364,20 @@ test('shared population header labels active and idle residents from authoritati
   assert.match(css, /\.population-count\{height:32px;align-items:center\}/);
   assert.match(css, /\.population-count>\.icon\{width:18px;height:18px;align-self:center\}/);
 });
-test('manual population allocation pairs sliders and exact counts with shared draft restoration', () => {
+test('custom allocation uses weight sliders for every resource plus idle and retries saves instead of failing while busy', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
-  assert.match(main, /id="crew-slider-\$\{resource\}"[^>]*type="range"[^>]*step="1"/);
-  assert.match(main, /id="crew-\$\{resource\}" type="number"/);
-  assert.match(main, /if \(event.target.type === 'range'\) number.value = event.target.value/);
-  assert.match(main, /crewDrafts.set\(number.id, number.value\)/);
-  assert.match(main, /querySelectorAll<HTMLElement>\('\.crew-controls'\)\.forEach\(syncCrewControls\)/);
-  assert.match(main, /if \(valid\) slider.value = number.value/);
-  assert.match(main, /error.hidden = valid \|\| number.disabled/);
-  assert.doesNotMatch(main, /data-action="assign"/);
-  assert.match(main, /app.addEventListener\('change'/);
-  assert.match(main, /app.addEventListener\('focusout'/);
-  assert.match(main, /event.key === 'Enter'[\s\S]*?requestCrewAssignment/);
-  assert.match(main, /pendingCrewAssignments.set\(resource, input.value\)/);
-  assert.match(main, /const \[resource, draft\] = pendingCrewAssignments.entries/);
-  assert.match(main, /workers > maximum/);
-  assert.match(main, /const saved = await act\(\{ type: 'assign', resource, workers \}\)/);
-  assert.match(main, /if \(!saved\) failedCrewAssignments.add\(resource\)/);
-  assert.match(main, /data-action="retry-assign"/);
-  assert.match(main, /data-action="crew-step" data-step="-1"/);
-  assert.match(main, /data-action="crew-step" data-step="1"/);
-  assert.doesNotMatch(main, /work\.automatic \|\| !access\.available \? 'disabled'/);
-  assert.match(main, /Math\.max\(2, explorers\)/);
-});
-test('direct claims skip review while other gameplay and market payments retain cancellable confirmation', () => {
+  assert.match(main, /data-weight="\$\{key\}" type="range" min="0" max="\$\{maximumAllocationWeight\}" step="1"/);
+  assert.match(main, /allocationWeightKeys\.map\(key => weightRow\(key, plan, 'panel'\)\)/);
+  assert.match(main, /act\(\{ type: 'allocation-weights', weights \}\)/);
+  assert.match(main, /if \(busy \|\| confirmationOpen\(\) \|\| performance\.now\(\) - synchronizedAt > serverClockStaleMs\) \{ queueWeightSave\(500\); return; \}/);
+  assert.match(main, /data-action="retry-weights"/);
+  assert.match(main, /data-action="allocation-mode" data-mode="auto"/);
+  assert.match(main, /data-action="weight-preset" data-preset="even"/);
+  assert.match(main, /weightInput\(event\.target, false\)/);
+  assert.match(main, /weightInput\(event\.target, true\)/);
+  assert.doesNotMatch(main, /type: 'assign'/);
+  assert.doesNotMatch(main, /crew-step|retry-assign|crewDrafts/);
+});test('direct claims skip review while other gameplay and market payments retain cancellable confirmation', () => {
   const main = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   const market = readFileSync(new URL('./marketplace.ts', import.meta.url), 'utf8');
   const dialog = readFileSync(new URL('./confirmation.ts', import.meta.url), 'utf8');
@@ -1165,7 +1154,7 @@ test('compact field cards preserve price, duration and accessible requirements w
   assert.match(main, /fieldActionReason\(quote, 'No known destination available'\)/);
   assert.match(main, /fieldActionReason\(quote, 'No nearby destination'\)/);
   assert.match(main, /Next field team fee multiplier/);
-  assert.match(main, /2 \*\* explorationCount\(state\.workforce\.expeditions\)/);
+  assert.match(main, /1\.5 \*\* explorationCount\(state\.workforce\.expeditions\)/);
   assert.match(main, /button\.setAttribute\('aria-description', translate/);
   assert.match(main, /function fieldDuration\(weeks: number\)/);
   assert.match(main, /fieldDuration\(1\)/);
@@ -1263,7 +1252,7 @@ test('unpublished public links stay empty rather than pointing to invented accou
 test('resource allocation removes tile selection and discloses advanced FTH$ costs in both languages', () => {
   const simulator = readFileSync(new URL('./main.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(simulator, /id="site-|crew-controls select|data-locked-until/);
-  assert.match(simulator, /data-action="automatic"/);
+  assert.match(simulator, /data-action="allocation-mode" data-mode="auto"/);
   assert.match(simulator, /dollars: state\.recruitmentDollars/);
   assert.match(simulator, /requestMove\(destination\.x, destination\.y\)/);
   assert.match(simulator, /work\.expeditions\.map/);

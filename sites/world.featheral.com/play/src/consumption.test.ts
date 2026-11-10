@@ -110,7 +110,8 @@ test('free movement, claims, allocation, equipment and market cancellation need 
   for (const command of [
     { type: 'move', x: 0, y: 0 }, { type: 'home' }, { type: 'claim' }, { type: 'equip', item: null },
     { type: 'assign', resource: 'water', workers: 4 }, { type: 'automatic', enabled: false },
-    { type: 'diplomacy', action: 'join' }, { type: 'diplomacy', action: 'vote' }, { type: 'collect-items' },
+        { type: 'allocation-weights', weights: { wood: 3, water: 3, metal: 2, oil: 2, idle: 0 } },
+        { type: 'diplomacy', action: 'join' }, { type: 'diplomacy', action: 'vote' }, { type: 'collect-items' },
   ] satisfies Command[]) assert.equal(gameConsumption(state, command), null);
   assert.equal(marketConsumption({ type: 'cancel', orderId: 1 }), null);
   state.game.stage = 8;

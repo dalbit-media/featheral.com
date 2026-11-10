@@ -2,7 +2,7 @@ import { radius, stages, terrainAt, terrainDetails, terrainResources } from './e
 import { dollarsScale } from './dollars.ts';
 import { maximumUpgradeLevel } from './costs.ts';
 import type { Game, Resource, Stock, Terrain } from './engine.ts';
-import type { Expedition, ResourceAccess, Workforce } from './api-types.ts';
+import type { AllocationWeights, Expedition, ResourceAccess, Workforce } from './api-types.ts';
 import { dailyWaterPerResident, maximumSettlementWeeklyConsumption, settlementUpkeepResources, waterRequirement } from './upkeep.ts';
 import { waterFacilities, waterFacilityKeys, waterProductionMultiplier } from './water-facilities.ts';
 import { constructionLevel, productionMultiplier } from './constructions.ts';
@@ -35,8 +35,61 @@ export function workforceCounts(population: number, work: Pick<Workforce, 'crews
   return { gathering, exploring, available: Math.max(0, population - gathering - exploring),
     assignmentCapacity: Math.max(0, population - Math.max(2, exploring)) };
 }
-export function editableAllocation(work: Pick<Workforce, 'automatic' | 'crews' | 'allocation'>): Stock {
-  return work.automatic ? {
+export const allocationWeightKeys = ['wood', 'water', 'metal', 'oil', 'idle'] as const;
+export const maximumAllocationWeight = 10;
+export const defaultAllocationWeights = (): AllocationWeights => ({ wood: 3, water: 3, metal: 2, oil: 2, idle: 0 });
+export function isAllocationWeights(value: unknown): value is AllocationWeights {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === allocationWeightKeys.length && allocationWeightKeys.every(key => {
+    const weight = (value as Record<string, unknown>)[key];
+    return typeof weight === 'number' && Number.isSafeInteger(weight) && weight >= 0 && weight <= maximumAllocationWeight;
+  });
+}
+export function allocationWeights(work: Pick<Workforce, 'automatic' | 'crews' | 'allocation' | 'weights'>, assignmentCapacity: number): AllocationWeights {
+  if (work.weights) return { ...work.weights };
+  const base = editableAllocation(work);
+  const assigned = resourceKeys.reduce((sum, resource) => sum + base[resource], 0);
+  if (!assigned || !assignmentCapacity) return defaultAllocationWeights();
+  const scale = (workers: number) => Math.round(workers / Math.max(assigned, assignmentCapacity) * maximumAllocationWeight);
+  return { wood: scale(base.wood), water: scale(base.water), metal: scale(base.metal), oil: scale(base.oil),
+    idle: scale(Math.max(0, assignmentCapacity - assigned)) };
+}
+/** Splits assignable residents by weight in O(resources); full storage or unexplored sites pass their share on. */
+export function weightedAllocation(game: Game, pending: Stock, capacity: number, weights: AllocationWeights,
+  access: Record<Resource, ResourceAccess>, exploringWorkers = 0): Stock {
+  const allocation = emptyAllocation(), limits = emptyAllocation();
+  const assignable = Math.max(0, game.population - Math.max(2, exploringWorkers));
+  const totalWeight = allocationWeightKeys.reduce((sum, key) => sum + weights[key], 0);
+  if (!assignable || !totalWeight) return allocation;
+  for (const resource of resourceKeys) {
+    const site = access[resource];
+    limits[resource] = site.available && site.perWorker > 0 && weights[resource] > 0
+      ? Math.ceil(resourceWorkRoom(capacity, resource, game, pending[resource], site) / site.perWorker) : 0;
+  }
+  let workers = Math.floor(assignable * (totalWeight - weights.idle) / totalWeight);
+  let open = resourceKeys.filter(resource => limits[resource] > 0);
+  while (workers > 0 && open.length) {
+    const weight = open.reduce((sum, resource) => sum + weights[resource], 0);
+    const full = open.filter(resource => limits[resource] <= workers * weights[resource] / weight);
+    if (full.length) {
+      for (const resource of full) { allocation[resource] = limits[resource]; workers -= limits[resource]; }
+      open = open.filter(resource => !full.includes(resource));
+      continue;
+    }
+    let remaining = workers;
+    const shares = open.map(resource => {
+      const share = workers * weights[resource] / weight, whole = Math.floor(share);
+      allocation[resource] = whole; remaining -= whole;
+      return { resource, fraction: share - whole };
+    }).sort((a, b) => b.fraction - a.fraction);
+    for (const { resource } of shares) if (remaining > 0) { allocation[resource]++; remaining--; }
+    break;
+  }
+  return allocation;
+}
+export function editableAllocation(work: Pick<Workforce, 'automatic' | 'crews' | 'allocation'> & { weights?: AllocationWeights }): Stock {
+  return work.automatic || work.weights ? {
     wood: work.crews.wood?.workers ?? 0, water: work.crews.water?.workers ?? 0,
     metal: work.crews.metal?.workers ?? 0, oil: work.crews.oil?.workers ?? 0,
   } : { ...work.allocation };
@@ -216,7 +269,7 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
   const assigned = resourceKeys.reduce((sum, resource) => sum + plan.crews[resource], 0);
   let extra = Math.max(0, available - assigned);
   while (extra > 0) {
-    let best: Resource | undefined, bestValue = 0, bestCost = Infinity;
+    let best: Resource | undefined, bestValue = 0, bestCost = Infinity, bestCount = 0;
     for (const resource of resourceKeys) {
       const site = access[resource];
       if (!site.available || site.perWorker <= 0) continue;
@@ -226,14 +279,19 @@ export function balancedAllocation(game: Game, pending: Stock, capacity: number,
       if (room <= 0 || value < 0 || (game.stock.water < game.population * dailyWaterPerResident && resource !== 'water')
         || (!payOnPickup && cost * dollarsScale > Math.max(0, plan.dollars - reserve * dollarsScale))) continue;
       if (value > bestValue || (value === bestValue && cost < bestCost)) {
+        // Marginal value stays constant while whole workers fit and the basic-worker threshold is not crossed,
+        // so assign that whole block at once instead of one resident per iteration.
+        const basic = basicWorkers(resource) - plan.crews[resource];
+        const affordable = payOnPickup || cost <= 0 ? Infinity : Math.floor(Math.max(0, plan.dollars - reserve * dollarsScale) / (cost * dollarsScale));
         best = resource; bestValue = value; bestCost = cost;
+        bestCount = Math.max(1, Math.min(extra, Math.floor(room / site.perWorker), basic > 0 ? basic : Infinity, affordable));
       }
     }
     if (!best) break;
-    plan.allocation[best]++;
-    plan.crews[best]++;
-    if (!payOnPickup) plan.dollars -= bestCost * dollarsScale;
-    extra--;
+    plan.allocation[best] += bestCount;
+    plan.crews[best] += bestCount;
+    if (!payOnPickup) plan.dollars -= bestCost * bestCount * dollarsScale;
+    extra -= bestCount;
   }
   let waiting = Math.max(0, available - resourceKeys.reduce((sum, resource) => sum + plan.crews[resource], 0));
   plan.unfundedWorkers = 0;

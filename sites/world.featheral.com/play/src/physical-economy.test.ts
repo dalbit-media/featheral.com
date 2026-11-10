@@ -8,8 +8,8 @@ import { dailyUpkeepPerResident, dailyWaterPerResident, maximumSettlementWeeklyC
 import { dollarsUnits } from './dollars.ts';
 import { marketBasePrice, marketPriceFloor } from './market.ts';
 import { translate } from './i18n.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, nextExploration, resourceAccess, resourceCapacity, warehouseCapacity, workforceCounts } from './workforce.ts';
-import { accrue, availableWorkers, collectResource, createAccount, execute, snapshot } from '../server/economy.ts';
+import { balancedAllocation, editableAllocation, emptyAllocation, nextExploration, resourceAccess, resourceCapacity, warehouseCapacity, weightedAllocation, workforceCounts } from './workforce.ts';
+import { accrue, availableWorkers, collectResource, createAccount, execute, parseCommand, snapshot } from '../server/economy.ts';
 
 test('weekly physical output is modest per worker and does not multiply again with settlement population or tier', () => {
   assert.deepEqual(Object.fromEntries(Object.entries(resourceEconomy).map(([resource, details]) =>
@@ -331,4 +331,64 @@ test('exploration finds vary by climate and seed, remain bounded and are determi
   assert.ok(spring > winter * 1.2);
   assert.throws(() => dailyClimate(-1, effect => effect.temperature), RangeError);
   assert.ok(worldWeekMs > worldDayMs);
+});
+
+test('weighted allocation splits residents by resource and idle weights and passes full or unexplored shares on', () => {
+  const game = newGame(1000000);
+  game.stage = 3; game.population = 1002; game.bank = true;
+  game.stock = { wood: 0, water: 0, metal: 0, oil: 0 };
+  const site = (perWorker: number) => ({ available: true, distance: 0, efficiency: 1, perWorker, dollarsPerWorker: 1 });
+  const access = { wood: site(1), water: site(1), metal: site(1), oil: { ...site(1), available: false } };
+  const huge = 1e12;
+  let crews = weightedAllocation(game, emptyAllocation(), huge, { wood: 2, water: 1, metal: 1, oil: 4, idle: 2 }, access);
+  assert.deepEqual(crews, { wood: 400, water: 200, metal: 200, oil: 0 }, 'unexplored Oil share moves to explored resources; idle keeps 20%');
+  crews = weightedAllocation(game, emptyAllocation(), huge, { wood: 0, water: 0, metal: 0, oil: 0, idle: 5 }, access);
+  assert.deepEqual(crews, emptyAllocation());
+  game.stock.wood = huge - 100;
+  crews = weightedAllocation(game, emptyAllocation(), huge, { wood: 8, water: 1, metal: 1, oil: 0, idle: 0 }, access);
+  assert.equal(crews.wood, 100, 'full storage caps a resource');
+  assert.equal(crews.water + crews.metal, 900, 'its remaining share moves to the other weighted resources');
+});
+
+test('huge populations allocate in constant time for weighted and automatic modes', () => {
+  const game = newGame(1000000);
+  game.stage = 11; game.population = 2_000_000_000; game.bank = true;
+  game.explored = ['-3,0', '3,0', '0,3', '0,-3'];
+  game.stock = { wood: 0, water: 0, metal: 0, oil: 0 };
+  const site = (perWorker: number) => ({ available: true, distance: 0, efficiency: 1, perWorker, dollarsPerWorker: 1 });
+  const access = { wood: site(10), water: site(150), metal: site(10), oil: site(2) };
+  const started = performance.now();
+  for (let i = 0; i < 200; i++) {
+    weightedAllocation(game, emptyAllocation(), 1e15, { wood: 3, water: 3, metal: 2, oil: 2, idle: 1 }, access);
+    balancedAllocation(game, emptyAllocation(), 1e15, 0, access, 0, 0, true);
+  }
+  assert.ok(performance.now() - started < 500, `allocation took ${performance.now() - started}ms`);
+});
+
+test('weight edits always save even when an old manual allocation exceeds the shrunken population', () => {
+  const account = createAccount(worldEpoch);
+  account.game.stage = 0; account.game.population = 12;
+  account.game.explored = ['-3,0', '3,0', '0,3'];
+  account.game.stock = { wood: 0, water: 600, metal: 0, oil: 0 };
+  const work = snapshot(account).workforce;
+  work.automatic = false; work.allocation = { wood: 40, water: 40, metal: 40, oil: 0 };
+  work.crews = {}; work.cycleAt = worldEpoch;
+  account.workforce = work;
+  assert.throws(() => execute(account, { type: 'assign', resource: 'oil', workers: 0 }), /Keep two residents/);
+  const weights = { wood: 1, water: 1, metal: 1, oil: 0, idle: 1 };
+  execute(account, parseCommand({ type: 'allocation-weights', weights }));
+  assert.deepEqual(account.workforce!.weights, weights);
+  assert.equal(account.workforce!.automatic, false);
+  accrue(account, worldEpoch);
+  const gathering = Object.values(account.workforce!.crews).reduce((sum, crew) => sum + crew.workers, 0);
+  assert.equal(gathering, 7, 'ten assignable residents minus a quarter idle, rounded down');
+  for (const bad of [{ ...weights, idle: 11 }, { ...weights, idle: -1 }, { ...weights, idle: 0.5 }, { wood: 1, water: 1, metal: 1, oil: 1 }, { ...weights, extra: 1 }])
+    assert.throws(() => parseCommand({ type: 'allocation-weights', weights: bad }));
+  execute(account, { type: 'assign', resource: 'wood', workers: 1 });
+  assert.equal(account.workforce!.weights, undefined, 'exact counts replace weights for API compatibility');
+  execute(account, { type: 'automatic', enabled: true });
+  execute(account, { type: 'automatic', enabled: false });
+  assert.ok(account.workforce!.weights, 'switching to custom seeds weights from the current crews');
+  for (const label of ['Resource weights', 'Custom weights', 'Saved', 'Explore first', 'Even split', 'Half idle', 'Daily supplies first'])
+    assert.notEqual(translate(label, 'ko'), label);
 });

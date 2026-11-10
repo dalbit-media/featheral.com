@@ -79,8 +79,6 @@
 .management-content .crew-card .resource-acquisition{flex-wrap:wrap}
 .management-content .crew-card .resource-acquisition>.button{min-width:0}
 .management-content .resource-card-heading{flex-wrap:wrap;gap:6px}
-.management-content .crew-allocation-heading{flex-wrap:wrap}
-.management-content .crew-stepper{max-width:100%}
 .management-content .fineprint{overflow-wrap:anywhere}
 #app .rail{min-height:0;overflow-y:auto;scrollbar-width:thin}
 #app .rail-links{margin-top:16px;gap:4px}
@@ -182,7 +180,6 @@
   #app .settlement-task-body{padding:10px}
   #app .settlement-dock{grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;padding:4px}
   #app .settlement-dock button{min-width:0;padding:6px;flex:1;font-size:10px}
-  .management-content .crew-stepper input{min-width:0;width:64px}
   .enhancement-items{grid-template-columns:repeat(2,minmax(0,1fr))}
   .enhancement-item{padding:8px;gap:6px}
   .enhancement-item>.item-art{width:32px;height:32px}

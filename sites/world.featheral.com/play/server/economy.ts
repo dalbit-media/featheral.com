@@ -3,7 +3,7 @@ import { randomInt } from 'node:crypto';
 import type { Resource, Stock } from '../src/engine.ts';
 import type { Command, Expedition, Snapshot, Workforce } from '../src/api-types.ts';
 import { claimCooldownMs, environmentAt, worldDayMs, worldWeekMs } from '../src/environment.ts';
-import { balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, workforceCounts } from '../src/workforce.ts';
+import { allocationWeights, balancedAllocation, editableAllocation, emptyAllocation, expeditionSurveyRadius, explorationCount, explorationQuote, investigationQuote, fundAllocation, isAllocationWeights, nextExploration, resourceAccess, resourceCapacity, resourceWorkRoom, warehouseCapacity, weightedAllocation, workforceCounts } from '../src/workforce.ts';
 import { isCraftableItem, isDecorationItem, isDecorationSlot, isVisibilityItem, sellableItemCount } from '../src/items.ts';
 import type { ItemInventory } from '../src/items.ts';
 import { addPermitFind, arrange, collectFinds, craft, decorate, equip, equipActivity, expandInventory, findCollectible, findCollectionItem, investigationItem, inventory } from './inventory.ts';
@@ -346,7 +346,9 @@ function beginCycle(account: Account, now: number, access = resourceAccess(accou
   const reserve = 0;
   const plan = work.automatic
     ? balancedAllocation(account.game, pending, capacity(account), account.warehouse, access, exploringWorkers, reserve, true)
-    : fundAllocation(account.game, pending, capacity(account), work.allocation, access, exploringWorkers, reserve, false, true);
+    : fundAllocation(account.game, pending, capacity(account), work.weights
+      ? weightedAllocation(account.game, pending, capacity(account), work.weights, access, exploringWorkers)
+      : work.allocation, access, exploringWorkers, reserve, false, true);
   work.allocation = plan.allocation;
   work.unfundedWorkers = plan.unfundedWorkers;
   account.game.dollars = plan.dollars;
@@ -520,7 +522,7 @@ export function accrue(account: Account, time: number, captureRelics?: RelicCapt
           const mayRefill = supplyUpkeep && account.game.population > 0
             && Math.floor(resourceCapacity(cap, resource, account.game) - account.pending[resource] / minute) > 0
             && (resource !== 'metal' || account.game.stock.water >= account.game.population * dailyWaterPerResident)
-            && (work.automatic || work.allocation[resource] > 0) && resourceAccess(account.game)[resource].available;
+            && (work.automatic || (work.weights ? work.weights[resource] : work.allocation[resource]) > 0) && resourceAccess(account.game)[resource].available;
           if (!mayRefill) continue;
           const surplus = account.game.stock[resource] - refillBelow;
           if (surplus <= 0) until = Math.min(until, work.cycleAt - 1);
@@ -601,7 +603,7 @@ export function parseCommand(value: unknown): Command {
   const fields: Record<string, string[]> = {
     move: ['x', 'y'], investigate: ['x', 'y'], trade: ['resource', 'direction', 'amount'], build: ['kind'], construction: ['kind'], diplomacy: Object.hasOwn(c, 'federation') ? ['action', 'federation'] : ['action'],
     upgrade: [], invite: [], home: [], gather: [], claim: resourceClaim ? ['resource'] : [], warehouse: [],
-    assign: ['resource', 'workers'], automatic: ['enabled'],
+    assign: ['resource', 'workers'], automatic: ['enabled'], 'allocation-weights': ['weights'],
     craft: Object.hasOwn(c, 'quantity') ? ['item', 'quantity'] : ['item'], 'map-collect': ['x', 'y'], equip: ['item'], decorate: ['slot', 'item'], 'item-storage': [], 'collect-items': [],
     arrange: ['entity', 'position'],
     'activate-collection': ['item'], 'collect-sell': ['resource', 'quantity', 'minimumDollars'],
@@ -652,6 +654,7 @@ export function parseCommand(value: unknown): Command {
     || (c.type === 'assign' && (!oneOf(c.resource, resources)
       || typeof c.workers !== 'number' || !Number.isSafeInteger(c.workers) || c.workers < 0 || c.workers > 1000000))
     || (c.type === 'automatic' && typeof c.enabled !== 'boolean')
+    || (c.type === 'allocation-weights' && !isAllocationWeights(c.weights))
     || (c.type === 'activate-collection' && !isCollectionItem(c.item))
     || (c.type === 'use-customization' && (!isCustomizationItem(c.item) || typeof c.value !== 'string'
       || (isTitleItem(c.item) ? c.value !== titleItems[c.item].title : !customizationName(c.value))))
@@ -786,14 +789,25 @@ function executeCommand(account: Account, command: Command, realTime: number,
       if (resources.reduce((sum, resource) => sum + allocation[resource], 0) > workforceCounts(game.population, work).assignmentCapacity) throw new ApiError(409, 'Keep two residents available for exploration and retain active explorers.');
       if (command.workers && !resourceAccess(game)[command.resource].available) throw new ApiError(409, 'Explore a matching resource first. Oil also requires a city bank.');
       work.automatic = false;
+      delete work.weights;
       work.allocation = allocation;
       return note(game, 'Manual allocation saved. Active deliveries finish before the next allocation starts.');
+    }
+    case 'allocation-weights': {
+      if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');
+      const work = workforce(account);
+      work.automatic = false;
+      work.weights = { ...command.weights };
+      return note(game, 'Resource weights saved. Next week\'s crews follow them automatically.');
     }
     case 'automatic':
       if (game.stage < 0) throw new ApiError(409, 'Establish a settlement before assigning residents.');
       {
         const work = workforce(account);
-        if (!command.enabled && work.automatic) work.allocation = editableAllocation(work);
+        if (!command.enabled && work.automatic) {
+          work.allocation = editableAllocation(work);
+          work.weights = allocationWeights(work, workforceCounts(game.population, work).assignmentCapacity);
+        }
         work.automatic = command.enabled;
         return note(game, command.enabled ? 'Automatic balancing enabled for the next work week.' : 'Manual allocation enabled for the next work week.');
       }

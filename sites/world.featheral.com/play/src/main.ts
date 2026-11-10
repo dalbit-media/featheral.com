@@ -9,7 +9,7 @@ import { Communicate } from './communicate.ts';
 import { fieldMissionActivity, squadOptions } from './squad-options.ts';
 import { canAfford, isWater, radius, stages, terrainAt, terrainDetails, terrainResources } from './engine.ts';
 import type { Cost, Game, Resource } from './engine.ts';
-import type { ApiState, Command, Expedition } from './api-types.ts';
+import type { AllocationWeights, ApiState, Command, Expedition } from './api-types.ts';
 import { connect, readAutoCraft, readCollection, readMarket, refresh, send, sendMarket } from './api.ts';
 import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
@@ -21,7 +21,7 @@ import { compactServerCountdown, completionProgress, environmentDetails, updateW
 import { resourceForecastPanel } from './resource-forecast.ts';
 import { translate } from './i18n.ts';
 import { language, languageLocale, localize } from './i18n-dom.ts';
-import { editableAllocation, emergencyCollection, explorationCount, nextExploration, nextInvestigation, resourceCapacity, workforceCounts } from './workforce.ts';
+import { allocationWeightKeys, allocationWeights, emergencyCollection, explorationCount, maximumAllocationWeight, nextExploration, nextInvestigation, resourceCapacity, weightedAllocation, workforceCounts } from './workforce.ts';
 import { canCollectFinds, collectibleFindAvailable, isCraftableItem, isDecorationItem, isVisibilityItem, itemName, itemStorage } from './items.ts';
 import { isActivityEquipment, isEquipmentActivity } from './activity-equipment.ts';
 import type { ItemId } from './items.ts';
@@ -131,11 +131,9 @@ let craftingPricesAttemptAt = -Infinity;
 let craftingPricesError = '';
 let pendingPlacement: { entity: SettlementEntity; origin: SettlementTask } | null = null;
 let settlementMap: SettlementMap | null = null;
-const crewDrafts = new Map<string, string>();
-const pendingCrewAssignments = new Map<Resource, string>();
-const failedCrewAssignments = new Set<Resource>();
-let processingCrewAssignments = false;
-let savingCrew: Resource | null = null;
+let weightDraft: AllocationWeights | null = null;
+let weightSaveTimer = 0;
+let weightSaveState: 'idle' | 'pending' | 'saving' | 'saved' | 'failed' = 'idle';
 const layoutDrafts = new Map<string, string>();
 const taskScroll = new Map<SettlementTask, number>();
 const disclosedDetails = new Set<string>();
@@ -427,8 +425,6 @@ async function act(command: Command, recenter = false): Promise<boolean> {
   if (timedKey && actionRemaining(state.actionReadyAt, timedKey, Date.now())) {
     toast('Action cooling down. Please wait.', true); return false;
   }
-  const assignmentDraft = command.type === 'assign' ? crewDrafts.get(`crew-${command.resource}`) : undefined;
-  const submittedDraft = command.type === 'assign' && assignmentDraft !== undefined && Number(assignmentDraft) === command.workers ? assignmentDraft : undefined;
   busy = true;
   try {
     if (isUpgradeTarget(command) && hasBuilderCharter(state)) {
@@ -484,15 +480,9 @@ async function act(command: Command, recenter = false): Promise<boolean> {
     app.classList.add('action-pending');
     if (timedKey) { pendingTimedAction = timedKey; renderActionTiming(); }
     synchronize(await send(state, command));
-    if (command.type === 'assign' && submittedDraft !== undefined && crewDrafts.get(`crew-${command.resource}`) === submittedDraft) crewDrafts.delete(`crew-${command.resource}`);
-    if (command.type === 'automatic') {
-      crewDrafts.clear();
-      pendingCrewAssignments.clear();
-      failedCrewAssignments.clear();
-    }
     render();
     if (recenter) world?.center();
-    if (state.message) toast(state.message);
+    if (state.message && command.type !== 'allocation-weights') toast(state.message);
     return true;
   } catch (error) {
     toast(error instanceof Error ? error.message : 'The action could not be completed.', true);
@@ -505,7 +495,6 @@ async function act(command: Command, recenter = false): Promise<boolean> {
     app.classList.remove('action-pending');
     renderActionTiming();
     if (inventoryMenuPage) renderInventoryPage();
-    void saveCrewAssignments();
   }
 }
 function costChips(cost: Cost, showNames = false): string {
@@ -672,11 +661,11 @@ function renderWorkTimers(): void {
       el.setAttribute('aria-label', detailed);
     }
   });
-  for (const resource of resources) {
-    const disabled = stale || game.stage < 0 || !state.resourceAccess[resource].available;
-    document.querySelectorAll<HTMLInputElement | HTMLButtonElement>(`#crew-${resource}, #crew-slider-${resource}, [data-action="retry-assign"][data-resource="${resource}"]`).forEach(control => { control.disabled = disabled; });
-  }
-  document.querySelectorAll<HTMLElement>('.crew-controls').forEach(syncCrewControls);
+  const weightsDisabled = stale || game.stage < 0;
+  document.querySelectorAll<HTMLInputElement>('[data-weight]').forEach(input => {
+    const key = input.dataset.weight ?? '';
+    input.disabled = weightsDisabled || (isResource(key) && !state.resourceAccess[key].available);
+  });
 }
 function canClaim(resource: Resource): boolean {
   return state.capacity > 0 && state.pending[resource] >= 1;
@@ -848,8 +837,8 @@ function renderManagement(): void {
         return `<button class="button automation-item" data-action="activate-collection" ${item ? `data-item="${item}"` : 'disabled'}>${icon('warehouse')}<strong>${weeks}w</strong><small>${all ? 'All resources' : item ? 'Activate' : 'Find or craft'}</small></button>`;
       }).join('')}</div><a class="button" href="/inventory/">Manage collector items</a><details class="disclosure" data-detail="collection-help"><summary>Collection rules ${icon('chevron')}</summary><p class="fineprint">Find, craft or trade collection items for up to 52 game weeks. All-resource bundles cover all four resources. Transport always costs FTH$.</p></details></section>
       <section class="resource-allocation"><h3>Crew allocation</h3><p class="fineprint">${fmt(state.availableWorkers)} ${translate('Available now', language)} · ${fmt(game.population)} ${translate('Population', language)}</p>
-      <button class="button wide" data-action="automatic" aria-pressed="${state.workforce.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${state.workforce.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}</button>
-      ${crewManagementCard(resource, false)}</section><section class="resource-trading"><div data-resource-sale="${resource}"></div>
+      ${allocationModeControls()}
+      ${crewManagementCard(resource, false, true)}</section><section class="resource-trading"><div data-resource-sale="${resource}"></div>
       <div class="collection-links"><button class="button" data-action="population-management">${icon('people')}Manage crews</button><a class="button" href="/market/?asset=collection-${resource}-1">Marketplace ${icon('arrow')}</a></div></section></div>`);
   }
   renderRecruitment(); renderWorkTimers(); localize(managementDialog);
@@ -981,7 +970,7 @@ function replaceContent(root: Element, content: string): void {
   root.querySelectorAll<HTMLDetailsElement>('details[data-detail]').forEach(el => {
     if (el.open) disclosedDetails.add(el.dataset.detail!); else disclosedDetails.delete(el.dataset.detail!);
   });
-  const drafts = new Map([...crewDrafts, ...layoutDrafts]);
+  const drafts = new Map(layoutDrafts);
   root.querySelectorAll<HTMLInputElement>('[data-customization-name]').forEach(input => drafts.set(input.id, input.value));
   root.querySelectorAll<HTMLInputElement>('[data-preserve-draft]').forEach(input => drafts.set(input.id, input.value));
   root.querySelectorAll<HTMLInputElement | HTMLSelectElement>('#federation-asset,#federation-amount').forEach(input => drafts.set(input.id, input.value));
@@ -1008,8 +997,7 @@ function replaceContent(root: Element, content: string): void {
     const el = root.querySelector<HTMLInputElement | HTMLSelectElement>(`#${id}`);
     if (el && !el.disabled) el.value = value;
   }
-  root.querySelectorAll<HTMLElement>('.crew-controls').forEach(syncCrewControls);
-  updateCrewSaveStatus();
+  renderWeightSaveState();
   root.querySelectorAll<HTMLDetailsElement>('details').forEach(el => { el.open = disclosedDetails.has(el.dataset.detail ?? ''); });
   if (previous?.id) root.querySelector<HTMLElement>(`#${previous.id}`)?.focus({ preventScroll: true });
   if (selectionStart !== null && previous?.id) {
@@ -1287,30 +1275,60 @@ function settlementUpkeepPanel(compact = false, only?: 'wood' | 'metal' | 'oil')
       ${use.shortage ? `<small role="status">${translate('Supply shortages pause advanced activity and gradually reduce population. Buildings and paid jobs remain.', language)}</small>` : ''}</div>`;
   }).join('');
 }
-function crewAllocationLimit(resource: Resource): number {
-  const allocation = editableAllocation(state.workforce);
-  const others = resources.reduce((sum, key) => sum + (key === resource ? 0 : allocation[key]), 0);
-  return Math.max(0, workforceCounts(game.population, state.workforce).assignmentCapacity - others);
+function currentWeights(): AllocationWeights {
+  return weightDraft ?? allocationWeights(state.workforce, workforceCounts(game.population, state.workforce).assignmentCapacity);
 }
-function crewManagementCard(resource: Resource, acquisition = true): string {
+function weightPlan(weights = currentWeights()) {
+  const counts = workforceCounts(game.population, state.workforce);
+  const crews = weightedAllocation(game, state.pending, state.capacity, weights, state.resourceAccess, counts.exploring);
+  const total = allocationWeightKeys.reduce((sum, key) => sum + weights[key], 0);
+  const assigned = resources.reduce((sum, resource) => sum + crews[resource], 0);
+  return { weights, crews, total, assigned, idle: Math.max(0, counts.assignmentCapacity - assigned) };
+}
+function weightRowText(key: keyof AllocationWeights, plan: ReturnType<typeof weightPlan>): { share: string; detail: string } {
+  const share = `${plan.total ? Math.round(plan.weights[key] / plan.total * 100) : 0}%`;
+  if (key === 'idle') return { share, detail: `${fmt(plan.idle)} ${translate('idle', language)}` };
+  if (!state.resourceAccess[key].available) return { share, detail: translate('Explore first', language) };
+  const yieldWeekly = plan.crews[key] * state.resourceAccess[key].perWorker;
+  return { share, detail: `${fmt(plan.crews[key])} ${translate('residents', language)} · +${resourceFmt(key, yieldWeekly)}/${translate('week', language)}` };
+}
+function weightRow(key: keyof AllocationWeights, plan: ReturnType<typeof weightPlan>, scope: string): string {
+  const resource = isResource(key) ? key : null;
+  const label = resource ? names[resource] : translate('Idle', language);
+  const text = weightRowText(key, plan);
+  const disabled = game.stage < 0 || (resource && !state.resourceAccess[resource].available);
+  return `<div class="weight-row${resource ? ` resource-${resource}` : ' weight-idle'}"><label for="weight-${scope}-${key}">${icon(resource ?? 'people')}<span>${label}</span></label>
+    <input id="weight-${scope}-${key}" data-weight="${key}" type="range" min="0" max="${maximumAllocationWeight}" step="1" value="${plan.weights[key]}" style="--allocation-progress:${plan.weights[key] / maximumAllocationWeight * 100}%" ${disabled ? 'disabled' : ''} aria-label="${escape(`${label} ${translate('weight', language)}`)}">
+    <output data-weight-share="${key}">${text.share}</output><small data-weight-detail="${key}">${escape(text.detail)}</small></div>`;
+}
+function weightSaveStatus(): string {
+  return `<span class="weight-save" role="status" data-weight-save></span><button class="button" data-action="retry-weights" hidden>Retry</button>`;
+}
+function allocationWeightsPanel(): string {
+  const plan = weightPlan();
+  return `<section class="allocation-weights" aria-labelledby="allocation-weights-title"><div class="allocation-weights-heading"><h3 id="allocation-weights-title">${translate('Resource weights', language)}</h3>${weightSaveStatus()}</div>
+    <p class="fineprint">${translate('Slide to set relative shares. Next week, residents split by weight; full storage or unexplored resources pass their share to the others. Idle residents stay home.', language)}</p>
+    ${allocationWeightKeys.map(key => weightRow(key, plan, 'panel')).join('')}
+    <div class="weight-presets"><button class="button" data-action="weight-preset" data-preset="even">${translate('Even split', language)}</button><button class="button" data-action="weight-preset" data-preset="supplies">${translate('Daily supplies first', language)}</button><button class="button" data-action="weight-preset" data-preset="rest">${translate('Half idle', language)}</button></div></section>`;
+}
+function allocationModeControls(): string {
+  const automatic = state.workforce.automatic, disabled = game.stage < 0 ? 'disabled' : '';
+  return `<div class="allocation-mode" role="group" aria-label="${escape(translate('Allocation mode', language))}"><button class="button" data-action="allocation-mode" data-mode="auto" aria-pressed="${automatic}" ${disabled}>${translate('Auto', language)}<span class="allocation-target">50%</span></button><button class="button" data-action="allocation-mode" data-mode="custom" aria-pressed="${!automatic}" ${disabled}>${translate('Custom weights', language)}</button></div>`;
+}
+function crewManagementCard(resource: Resource, acquisition = true, showWeight = acquisition): string {
   const work = state.workforce, crew = work.crews[resource], access = state.resourceAccess[resource];
-  const limit = crewAllocationLimit(resource);
-  const assigned = editableAllocation(work)[resource];
-  return `<div class="crew-card" data-resource-card="${resource}"><header class="resource-card-heading"><div class="stock-label resource-${resource}">${icon(resource)}<strong>${names[resource]}</strong><span>${crew ? `${crew.workers} ${translate('residents', language)} · +${resourceFmt(resource, crew.weeklyYield)}/${translate('week', language)}` : 'No crew'}</span></div>${acquisition ? resourceSettingsButton(resource) : ''}</header>
+  return `<div class="crew-card" data-resource-card="${resource}"><header class="resource-card-heading"><div class="stock-label resource-${resource}">${icon(resource)}<strong>${names[resource]}</strong><span>${crew ? `${fmt(crew.workers)} ${translate('residents', language)} · +${resourceFmt(resource, crew.weeklyYield)}/${translate('week', language)}` : 'No crew'}</span></div>${acquisition ? resourceSettingsButton(resource) : ''}</header>
     ${acquisition ? `${resourceAcquisitionActions(resource, true)}<small>${(state.collection?.automationUntil[resource] ?? 0) > state.serverTime ? 'Auto-collection active' : 'Manual collection'}</small>` : ''}
     <p class="fineprint">${access.available ? `<span>Distance from settlement</span>: ${access.distance} · <span>Weekly FTH$ per additional resident</span>: ${access.dollarsPerWorker}` : 'Explore a matching resource first. Oil also requires a city bank.'}</p>
-    <p class="fineprint">${translate('Gathering now', language)}: ${crew?.workers ?? 0} · ${work.automatic ? translate('Auto recalculates next week', language) : `${translate('Next-week assignment', language)}: ${assigned}`}</p>
-    <div class="crew-controls"><div class="crew-allocation"><div class="crew-allocation-heading"><label for="crew-slider-${resource}">Next-week assignment</label><div class="crew-stepper"><button class="button" data-action="crew-step" data-step="-1" aria-label="Decrease allocation" ${!access.available ? 'disabled' : ''}>${icon('minus')}</button><input id="crew-${resource}" type="number" min="0" max="${limit}" step="1" value="${assigned}" required ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} crew residents" aria-describedby="crew-error-${resource}"><button class="button" data-action="crew-step" data-step="1" aria-label="Increase allocation" ${!access.available ? 'disabled' : ''}>${icon('plus')}</button></div></div>
-    <input id="crew-slider-${resource}" data-crew-slider="${resource}" type="range" min="0" max="${limit}" step="1" value="${assigned}" ${!access.available ? 'disabled' : ''} aria-label="${names[resource]} allocation slider" aria-describedby="crew-error-${resource}">
-    <small class="crew-input-error" id="crew-error-${resource}" role="status" hidden></small>
-    <div class="crew-save-state" data-crew-save="${resource}" hidden><small role="status"></small><button class="button" data-action="retry-assign" data-resource="${resource}" hidden>Retry</button></div></div></div>
+    ${showWeight ? (work.automatic ? `<p class="fineprint">${translate('Auto recalculates next week', language)}</p>`
+      : `<div class="crew-weight">${weightRow(resource, weightPlan(), `card-${resource}`)}${weightSaveStatus()}</div>`) : ''}
     ${crew ? completionMeter(crew.readyAt - worldWeekMs, crew.readyAt, 'Next delivery') : '<small>No active work. New assignments take a full game week.</small>'}</div>`;
 }
 function workforcePanel(): string {
   const work = state.workforce;
   const counts = workforceCounts(game.population, work);
-  const planned = editableAllocation(work);
-  const plannedTotal = resources.reduce((sum, resource) => sum + planned[resource], 0);
+  const planned = work.automatic ? null : weightPlan();
+  const plannedTotal = planned ? planned.assigned : counts.gathering;
   const next = nextExploration(game, work.expeditions);
   const transport = Object.values(work.crews).reduce((sum, crew) => sum + (crew.weeklyDollarsCost ?? 0), 0);
   const exploreReason = upkeepPauseReason() || (game.stage < 0 ? 'Establish a settlement before sending an expedition.'
@@ -1320,14 +1338,15 @@ function workforcePanel(): string {
     <p class="fineprint">Available residents can explore now. Crew changes start next week.</p>
     <div class="management-supply"><span>Water reserve</span>${meter(game.stock.water, state.waterUpkeep?.weeklyConsumption ?? 0, 'Weekly Water reserve', 'water')}</div>
     ${recruitmentButton()}
-    <h3 class="panel-section-heading">${translate(work.automatic ? 'Gathering now' : 'Next-week assignment', language)} <span>${plannedTotal} / ${counts.assignmentCapacity}</span></h3>
+    <h3 class="panel-section-heading">${translate(work.automatic ? 'Gathering now' : 'Next-week assignment', language)} <span>${fmt(plannedTotal)} / ${fmt(counts.assignmentCapacity)}</span></h3>
     ${waterUpkeepPanel()}
-    <button class="button wide" data-action="automatic" aria-pressed="${work.automatic}" ${game.stage < 0 ? 'disabled' : ''}>${work.automatic ? 'Automatic allocation: ON' : 'Automatic allocation: OFF'}${work.automatic ? '<span class="allocation-target">50%</span>' : ''}</button>
+    ${allocationModeControls()}
     <p class="fineprint">${work.automatic ? 'Auto targets 50% utilization. Recalculates next week.' : 'Edits save automatically. Active jobs finish unchanged.'}</p>
+    ${work.automatic ? '' : allocationWeightsPanel()}
     <details class="disclosure" data-detail="workforce-help"><summary>Allocation & automation ${icon('chevron')}</summary>${activityKinds.map(activityAutomationPanel).join('')}
     <p class="fineprint">Automation consumes a timed item and pays normal FTH$ fees. Blocked jobs retry each game day. Pausing does not stop the expiry clock.</p>
     <details class="disclosure" data-detail="workforce-rules"><summary>Allocation rules ${icon('chevron')}</summary><p class="fineprint">Auto targets 50% total utilization, including explorers, rounded down. Water and growth needs come first within that budget, then net-value gathering. Full storage or supply shortages may lower utilization. Explorers at or above the target pause new gathering. Active paid jobs finish unchanged.</p>
-    <p class="fineprint">Edits save automatically and switch to manual. Current gathering and expeditions finish unchanged; reducing next-week assignments does not free residents immediately.</p>
+    <p class="fineprint">Weights save automatically and switch to custom mode. Current gathering and expeditions finish unchanged; lowering a weight does not free residents immediately.</p>
     <p class="fineprint">Gathering leaves room for at least two explorers in total. Residents already exploring count toward that reserve, not in addition to it.</p>
     <p class="fineprint">Every crew needs active residents and a full game week. Collect each resource to pay FTH$ transport for all workers. Auto-collection requires an active resource-specific item. Full storage pauses new work.</p>
     <p class="fineprint">Residents consume Water, heating Wood and repair Metal daily, plus Oil fuel from Town onward. Oil demand doubles each tier through Capital. Shortages pause new exploration and recruitment and gradually reduce population; paid jobs remain.</p>
@@ -1340,7 +1359,7 @@ function workforcePanel(): string {
     <p class="fineprint">Each field team needs two idle residents. Investigate and Explore share route fees that rise by 50% per active field team: 1x, 1.5x, 2.25x, 3.375x... Investigations take one game week; explorers return after 1–3 game weeks. Known-terrain travel remains free.</p>
     <p class="fineprint">Investigations use two idle residents for one game week on known land. The base fee is 10% of the undiscounted concurrent Explore route fee. Equipped investigation gear lowers the fee; the low-tier permit chance remains 10%.</p>
     <div class="crew-list expedition-list">${work.expeditions.map(expedition => `<div class="expedition-card">${icon(expedition.kind === 'investigate' ? 'search' : 'compass')}<div><strong>${expedition.kind === 'investigate' ? `<span>Investigating</span> · ${expedition.workers} ${translate('residents', language)} (${expedition.x}, ${expedition.y})` : `${expedition.workers} residents exploring (${expedition.x}, ${expedition.y})`}</strong>${completionMeter(expeditionStartedAt(expedition), expedition.readyAt, 'Next return')}</div></div>`).join('') || '<p class="fineprint">No expeditions exploring.</p>'}</div></details></section>
-    <section class="population-crews"><div class="crew-list resource-crews">${resources.map(resource => crewManagementCard(resource)).join('')}</div></section></div>`;
+    <section class="population-crews"><div class="crew-list resource-crews">${resources.map(resource => crewManagementCard(resource, true, false)).join('')}</div></section></div>`;
 }
 function activityAutomationPanel(activity: ActivityKind): string {
   const automation = state.activityAutomation?.[activity], active = (automation?.until ?? 0) > state.serverTime;
@@ -1403,81 +1422,68 @@ function storagePanel(): string {
     <div class="storage-grid">${resources.map(resourceStockCard).join('')}</div>
     ${game.stage < 0 ? `<div class="requirement-list">${requirement('home', 'Settlement', false)}</div>` : ''}`;
 }
-function syncCrewControls(root: HTMLElement): void {
-  const number = root.querySelector<HTMLInputElement>('input[type="number"]')!;
-  const slider = root.querySelector<HTMLInputElement>('input[type="range"]')!;
-  const error = root.querySelector<HTMLElement>('.crew-input-error')!;
-  const valid = number.checkValidity();
-  if (valid) slider.value = number.value;
-  root.querySelectorAll<HTMLButtonElement>('[data-action="crew-step"]').forEach(button => {
-    const next = Number(number.value) + Number(button.dataset.step);
-    button.disabled = number.disabled || !valid || next < Number(number.min) || next > Number(number.max);
-  });
-  slider.style.setProperty('--allocation-progress', `${Number(slider.max) ? Number(slider.value) / Number(slider.max) * 100 : 0}%`);
-  error.hidden = valid || number.disabled;
-  error.textContent = valid ? '' : translate(`Enter a whole number between 0 and ${number.max}.`, language);
-  if (!valid && !number.disabled) number.setAttribute('aria-invalid', 'true');
-  else number.removeAttribute('aria-invalid');
+const weightPresets: Record<string, AllocationWeights> = {
+  even: { wood: 5, water: 5, metal: 5, oil: 5, idle: 0 },
+  supplies: { wood: 4, water: 6, metal: 3, oil: 3, idle: 0 },
+  rest: { wood: 2, water: 3, metal: 2, oil: 2, idle: 9 },
+};
+function sameWeights(a: AllocationWeights, b: AllocationWeights): boolean {
+  return allocationWeightKeys.every(key => a[key] === b[key]);
 }
-function updateCrewSaveStatus(): void {
-  for (const resource of resources) {
-    const root = document.querySelector<HTMLElement>(`[data-crew-save="${resource}"]`);
-    if (!root) continue;
-    const pending = savingCrew === resource || pendingCrewAssignments.has(resource);
-    const failed = failedCrewAssignments.has(resource);
-    root.hidden = !pending && !failed && !crewDrafts.has(`crew-${resource}`);
-    root.dataset.failed = String(failed && !pending);
-    root.querySelector('small')!.textContent = translate(pending ? 'Saving...' : failed ? 'Not saved. Try again.' : 'Finish editing to save.', language);
-    root.querySelector<HTMLButtonElement>('button')!.hidden = !failed || pending;
+function updateWeightPreview(): void {
+  const plan = weightPlan();
+  for (const key of allocationWeightKeys) {
+    const text = weightRowText(key, plan);
+    document.querySelectorAll<HTMLInputElement>(`[data-weight="${key}"]`).forEach(input => {
+      if (document.activeElement !== input) input.value = String(plan.weights[key]);
+      input.style.setProperty('--allocation-progress', `${plan.weights[key] / maximumAllocationWeight * 100}%`);
+    });
+    document.querySelectorAll<HTMLElement>(`[data-weight-share="${key}"]`).forEach(el => { el.textContent = text.share; });
+    document.querySelectorAll<HTMLElement>(`[data-weight-detail="${key}"]`).forEach(el => { el.textContent = text.detail; });
   }
 }
-function requestCrewAssignment(input: HTMLInputElement): void {
-  const resource = resources.find(key => input.id === `crew-${key}`);
-  if (!resource || input.disabled) return;
-  input.setCustomValidity('');
-  syncCrewControls(input.closest<HTMLElement>('.crew-controls')!);
-  if (!input.checkValidity()) { input.reportValidity(); return; }
-  crewDrafts.set(input.id, input.value);
-  pendingCrewAssignments.set(resource, input.value);
-  updateCrewSaveStatus();
-  void saveCrewAssignments();
+function renderWeightSaveState(): void {
+  const label = { idle: '', pending: 'Saving...', saving: 'Saving...', saved: 'Saved', failed: 'Not saved. Try again.' }[weightSaveState];
+  document.querySelectorAll<HTMLElement>('[data-weight-save]').forEach(el => {
+    el.textContent = label ? translate(label, language) : '';
+    el.dataset.state = weightSaveState;
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-action="retry-weights"]').forEach(button => { button.hidden = weightSaveState !== 'failed'; });
 }
-async function saveCrewAssignments(): Promise<void> {
-  if (processingCrewAssignments || busy || confirmationOpen() || performance.now() - synchronizedAt > serverClockStaleMs) return;
-  processingCrewAssignments = true;
-  try {
-    while (pendingCrewAssignments.size && !busy && !confirmationOpen()) {
-      const [resource, draft] = pendingCrewAssignments.entries().next().value!;
-      pendingCrewAssignments.delete(resource);
-      const id = `crew-${resource}`;
-      const workers = Number(draft), maximum = crewAllocationLimit(resource);
-      if (!state.resourceAccess[resource].available) {
-        failedCrewAssignments.add(resource);
-        toast('Requirements changed. Review the updated costs and try again.', true);
-        updateCrewSaveStatus();
-        continue;
-      }
-      if (!draft.trim() || !Number.isSafeInteger(workers) || workers < 0 || workers > maximum) {
-        failedCrewAssignments.add(resource);
-        toast(`Enter a whole number between 0 and ${maximum}.`, true);
-        updateCrewSaveStatus();
-        continue;
-      }
-      if (!state.workforce.automatic && workers === state.workforce.allocation[resource]) {
-        if (crewDrafts.get(id) === draft) crewDrafts.delete(id);
-        failedCrewAssignments.delete(resource);
-        updateCrewSaveStatus();
-        continue;
-      }
-      savingCrew = resource;
-      failedCrewAssignments.delete(resource);
-      updateCrewSaveStatus();
-      const saved = await act({ type: 'assign', resource, workers });
-      savingCrew = null;
-      if (!saved) failedCrewAssignments.add(resource);
-      updateCrewSaveStatus();
-    }
-  } finally { processingCrewAssignments = false; }
+function setWeightDraft(weights: AllocationWeights, save: boolean): void {
+  const saved = state.workforce.automatic ? undefined : state.workforce.weights;
+  weightDraft = saved && sameWeights(weights, saved) ? null : weights;
+  updateWeightPreview();
+  if (!save) return;
+  if (!weightDraft) { window.clearTimeout(weightSaveTimer); weightSaveState = 'idle'; renderWeightSaveState(); return; }
+  queueWeightSave(350);
+}
+function queueWeightSave(delay: number): void {
+  window.clearTimeout(weightSaveTimer);
+  if (weightSaveState !== 'saving') weightSaveState = 'pending';
+  renderWeightSaveState();
+  weightSaveTimer = window.setTimeout(() => { void saveWeights(); }, delay);
+}
+async function saveWeights(): Promise<void> {
+  if (!weightDraft) { weightSaveState = 'idle'; renderWeightSaveState(); return; }
+  // Another request or a paused clock delays, rather than fails, the save.
+  if (busy || confirmationOpen() || performance.now() - synchronizedAt > serverClockStaleMs) { queueWeightSave(500); return; }
+  const weights = { ...weightDraft };
+  weightSaveState = 'saving';
+  renderWeightSaveState();
+  const saved = await act({ type: 'allocation-weights', weights });
+  if (!saved) { weightSaveState = 'failed'; renderWeightSaveState(); return; }
+  if (weightDraft && !sameWeights(weightDraft, weights)) { queueWeightSave(0); return; }
+  weightDraft = null;
+  weightSaveState = 'saved';
+  renderWeightSaveState();
+  updateWeightPreview();
+}
+function weightInput(input: HTMLInputElement, save: boolean): void {
+  const key = allocationWeightKeys.find(candidate => candidate === input.dataset.weight);
+  const value = Number(input.value);
+  if (!key || input.disabled || !Number.isSafeInteger(value) || value < 0 || value > maximumAllocationWeight) return;
+  setWeightDraft({ ...currentWeights(), [key]: value }, save);
 }
 app.addEventListener('change', event => {
   if (event.target instanceof HTMLSelectElement && event.target.hasAttribute('data-management-resource')) {
@@ -1486,19 +1492,7 @@ app.addEventListener('change', event => {
     else toast('Invalid resource selection.', true);
     return;
   }
-  if (event.target instanceof HTMLInputElement && event.target.closest('.crew-controls')) {
-    const input = event.target.closest('.crew-controls')!.querySelector<HTMLInputElement>('input[type="number"]')!;
-    requestCrewAssignment(input);
-  }
-});
-app.addEventListener('focusout', event => {
-  if (event.target instanceof HTMLInputElement && event.target.type === 'number' && crewDrafts.has(event.target.id)) requestCrewAssignment(event.target);
-});
-app.addEventListener('keydown', event => {
-  if (event.key === 'Enter' && event.target instanceof HTMLInputElement && event.target.closest('.crew-controls')) {
-    event.preventDefault();
-    requestCrewAssignment(event.target.closest('.crew-controls')!.querySelector<HTMLInputElement>('input[type="number"]')!);
-  }
+  if (event.target instanceof HTMLInputElement && event.target.dataset.weight) weightInput(event.target, true);
 });
 app.addEventListener('input', event => {
   if (event.target instanceof HTMLInputElement && event.target.hasAttribute('data-inventory-search')) {
@@ -1514,15 +1508,7 @@ app.addEventListener('input', event => {
     renderJournal();
   }
   if (event.target instanceof HTMLInputElement && event.target.dataset.layoutCoordinate) layoutDrafts.set(event.target.id, event.target.value);
-  if (event.target instanceof HTMLInputElement && event.target.closest('.crew-controls')) {
-    const root = event.target.closest<HTMLElement>('.crew-controls')!;
-    const number = root.querySelector<HTMLInputElement>('input[type="number"]')!;
-    if (event.target.type === 'range') number.value = event.target.value;
-    number.setCustomValidity('');
-    crewDrafts.set(number.id, number.value);
-    syncCrewControls(root);
-    updateCrewSaveStatus();
-  }
+  if (event.target instanceof HTMLInputElement && event.target.dataset.weight) weightInput(event.target, false);
 });
 app.addEventListener('click', event => {
   const target = event.target instanceof Element ? event.target.closest<HTMLElement>('button, a') : null;
@@ -1585,15 +1571,9 @@ app.addEventListener('click', event => {
     case 'crafting-analysis':
       void purchaseCraftingAnalysis();
       break;
-    case 'crew-step': {
-      const input = target.closest('.crew-controls')!.querySelector<HTMLInputElement>('input[type="number"]')!;
-      if (target instanceof HTMLButtonElement && !target.disabled && input.checkValidity()) {
-        const workers = Number(input.value) + Number(target.dataset.step);
-        if (workers >= Number(input.min) && workers <= Number(input.max)) {
-          input.value = String(workers);
-          requestCrewAssignment(input);
-        }
-      }
+    case 'weight-preset': {
+      const preset = weightPresets[target.dataset.preset ?? ''];
+      if (preset) setWeightDraft({ ...preset }, true);
       break;
     }
     case 'population-management': openManagement('population'); break;
@@ -1751,12 +1731,15 @@ app.addEventListener('click', event => {
     case 'gather': void act({ type: 'gather' }); break;
     case 'founding-wood': requestMove(0, 0); break;
     case 'founding-water': requestMove(3, 0); break;
-    case 'retry-assign': {
-      const resource = resources.find(key => key === target.dataset.resource);
-      if (resource) requestCrewAssignment(document.querySelector<HTMLInputElement>(`#crew-${resource}`)!);
+    case 'retry-weights': if (weightDraft) queueWeightSave(0); break;
+    case 'allocation-mode': {
+      const automatic = target.dataset.mode === 'auto';
+      if (automatic === state.workforce.automatic) break;
+      window.clearTimeout(weightSaveTimer);
+      weightDraft = null; weightSaveState = 'idle';
+      void act({ type: 'automatic', enabled: automatic });
       break;
     }
-    case 'automatic': void act({ type: 'automatic', enabled: !state.workforce.automatic }); break;
     case 'federation-contribute': {
       const asset = document.querySelector<HTMLSelectElement>('#federation-asset')?.value;
       const amount = Number(document.querySelector<HTMLInputElement>('#federation-amount')?.value);
@@ -1842,7 +1825,7 @@ async function syncProduction(): Promise<void> {
   busy = true;
   try { synchronize(await refresh()); render(); }
   catch (error) { toast(`Could not sync server production: ${error instanceof Error ? error.message : 'Connection failed.'}`, true); }
-  finally { busy = false; if (inventoryMenuPage) renderInventoryPage(); void saveCrewAssignments(); }
+  finally { busy = false; if (inventoryMenuPage) renderInventoryPage(); }
 }
 window.addEventListener('storage', event => {
   if (event.key === 'featheral-wallet-updated' || event.key === 'featheral-world-account') void syncProduction();

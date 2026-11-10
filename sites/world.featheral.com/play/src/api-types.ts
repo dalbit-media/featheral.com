@@ -23,6 +23,7 @@ export type Command =
   | { type: 'dispatch-squad'; item: SquadItem; activity: SquadActivity; quantity: number; maximumDollars: number }
   | { type: 'assign'; resource: Resource; workers: number }
   | { type: 'automatic'; enabled: boolean }
+  | { type: 'allocation-weights'; weights: AllocationWeights }
   | { type: 'trade'; resource: Resource; direction: 'buy' | 'sell'; amount: number }
   | { type: 'build'; kind: 'bank' | 'townhall' | WaterFacility | IncomeFacility }
   | { type: 'construction'; kind: Construction }
@@ -63,11 +64,14 @@ export interface Expedition {
   dollarReward?: number;
   finds?: { collectible: boolean; collection: number; activity: number };
 }
+export type AllocationWeights = Stock & { idle: number };
 export interface Workforce {
   version: 3;
   transportVersion?: 1;
   automatic: boolean;
   allocation: Stock;
+  /** Relative 0-10 shares for manual mode; absent on legacy saves that still use fixed per-resource counts. */
+  weights?: AllocationWeights;
   cycleAt: number;
   unfundedWorkers: number;
   crews: Partial<Record<Resource, ResourceCrew>>;
