@@ -51,6 +51,8 @@ const paths: Record<string, string> = {
   warehouse: '<path d="m3 9 9-6 9 6v12H3V9ZM8 21V11h8v10M8 15h8M8 18h8"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
   settings: '<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="#152218"/><circle cx="15" cy="17" r="3" fill="#152218"/>',
+  volume: '<path d="M11 5 6 9H3v6h3l5 4V5ZM15 9a5 5 0 0 1 0 6M18 6a9 9 0 0 1 0 12"/>',
+  'volume-off': '<path d="M11 5 6 9H3v6h3l5 4V5ZM16 9l5 6m0-6-5 6"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 1 1 4 3c-1 .5-1 1-1 2M12 17v1"/>',
   mobile: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   tablet: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M11 17h2"/>',

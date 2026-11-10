@@ -1,4 +1,6 @@
 export const korean: Record<string, string> = {
+  'Enable ambient audio': '배경음 켜기',
+  'Disable ambient audio': '배경음 끄기',
   'No buyers': '구매자 없음',
   'No sale quote': '판매 견적 없음',
   'Missing ingredient prices': '재료 가격 누락',

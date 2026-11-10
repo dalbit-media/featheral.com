@@ -76,7 +76,7 @@ export function settlementScene(state: ApiState, language: Language, editing = f
     <div class="settlement-panorama" data-season="${environment.season}" data-phase="${environment.phase}">
       <canvas id="settlement-world" tabindex="0" aria-label="Settlement grid. Drag to pan, scroll to zoom. Select a building to manage it. In Layout, drag buildings or choose a land cell to move them. Arrow keys move the cursor; Enter selects.">Open Layout to manage buildings and decorations.</canvas>
       <span class="panorama-hint">${icon('compass')} Drag to pan · Scroll to zoom</span>
-      <div class="settlement-camera-controls" aria-label="Settlement map controls"><button class="button" data-action="settlement-zoom-out" aria-label="Zoom out">${icon('minus')}</button><button class="button" data-action="settlement-centre" aria-label="Center settlement">${icon('home')}</button><button class="button" data-action="settlement-zoom-in" aria-label="Zoom in">${icon('plus')}</button><button class="button" data-settlement-panel="decorate">Arrange buildings</button></div>
+      <div class="settlement-camera-controls" aria-label="Settlement map controls"><button class="button" data-action="settlement-zoom-out" aria-label="Zoom out">${icon('minus')}</button><button class="button" data-action="settlement-centre" aria-label="Center settlement">${icon('home')}</button><button class="button" data-action="settlement-zoom-in" aria-label="Zoom in">${icon('plus')}</button><button class="button ambient-audio-toggle" data-action="toggle-ambience" aria-label="Enable ambient audio" title="Enable ambient audio" aria-pressed="false">${icon('volume-off')}</button><button class="button" data-settlement-panel="decorate">Arrange buildings</button></div>
     </div>
   </section>`;
 }

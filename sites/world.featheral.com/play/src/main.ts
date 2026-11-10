@@ -13,6 +13,7 @@ import type { ApiState, Command, Expedition } from './api-types.ts';
 import { connect, readAutoCraft, readCollection, readMarket, refresh, send, sendMarket } from './api.ts';
 import type { MarketSnapshot } from './market.ts';
 import { icon } from './icons.ts';
+import { AmbientAudio, ambientTrackForPage } from './ambient-audio.ts';
 import { ScreenPreview } from './screen-preview.ts';
 import { World } from './world.ts';
 import { claimCooldownMs, defaultClockSpeed, displayServerTime, environmentAt, serverClockStaleMs, serverSyncIntervalMs, worldDayMs, worldWeekMs } from './environment.ts';
@@ -225,6 +226,7 @@ app.innerHTML = `
       <button data-action="zoom-out" aria-label="Zoom out" title="Zoom out">${icon('minus')}</button>
       <span></span><button data-action="recenter" aria-label="Center on explorer" title="Center on explorer">${icon('locate')}</button>
       <button data-action="home" aria-label="Return to settlement" title="Return to settlement">${icon('home')}</button>
+      <button type="button" class="ambient-audio-toggle" data-action="toggle-ambience" aria-label="Enable ambient audio" title="Enable ambient audio" aria-pressed="false">${icon('volume-off')}</button>
     </div>
     <div class="compass-rose" aria-hidden="true"><span>N</span>${icon('compass')}</div>
     <div class="minimap"><div class="minimap-title">${icon('world')}<span>Your known world</span><span id="known-count"></span></div><canvas id="minimap" aria-label="Minimap showing explored terrain and nearby silhouettes fading into fog. Fogged previews are not explored."></canvas><div class="minimap-bottom"><span><i></i> Explored</span><span>THE REST IS YOURS TO DISCOVER</span></div></div>
@@ -244,6 +246,21 @@ app.innerHTML = `
   </dialog>
 `;
 app.removeAttribute('aria-busy');
+const ambientAudio = explorePage || settlementPage && !visitingSettlement
+  ? new AmbientAudio(ambientTrackForPage(explorePage ? 'explore' : 'settlement', game.stage))
+  : null;
+function renderAmbientAudioControl(): void {
+  const button = app.querySelector<HTMLButtonElement>('[data-action="toggle-ambience"]');
+  if (!button || !ambientAudio) return;
+  const pressed = String(ambientAudio.isEnabled);
+  if (button.getAttribute('aria-pressed') === pressed) return;
+  const label = translate(ambientAudio.isEnabled ? 'Disable ambient audio' : 'Enable ambient audio', language);
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
+  button.setAttribute('aria-pressed', pressed);
+  button.innerHTML = icon(ambientAudio.isEnabled ? 'volume' : 'volume-off');
+}
+renderAmbientAudioControl();
 const screenModeControls = app.querySelector<HTMLElement>('.screen-mode-controls')!;
 const screenModeStatus = screenModeControls.querySelector<HTMLElement>('[data-screen-mode-status]')!;
 const screenPreviewBar = document.createElement('div');
@@ -519,6 +536,8 @@ function render(): void {
   if (explorePage) renderSidebar();
   renderPopulation();
   if (settlementPage) renderSettlement();
+  ambientAudio?.setTrack(ambientTrackForPage(explorePage ? 'explore' : 'settlement', game.stage));
+  renderAmbientAudioControl();
   if (inventoryMenuPage) renderInventoryPage();
   renderManagement();
   renderClaimControls();
@@ -885,7 +904,7 @@ function renderSidebar(): void {
       <a class="button" href="/inventory/#craft">${icon('spark')} Crafting</a>
     </div>
     ${gearCard()}`);
-  renderRecruitment(); renderWorkTimers(); localize(root);
+  renderRecruitment(); renderWorkTimers(); localize(root); renderAmbientAudioControl();
 }
 function fieldActionReason(quote: { dollars: number } | null, noDestination: string): string | null {
   return game.stage < 0 ? 'Establish a settlement first' : upkeepPauseReason() || (!quote ? noDestination
@@ -1517,6 +1536,10 @@ app.addEventListener('click', event => {
   }
   const action = target.dataset.action;
   switch (action) {
+    case 'toggle-ambience':
+      ambientAudio?.toggle();
+      renderAmbientAudioControl();
+      break;
     case 'enhance-select':
       enhancementSelection = target.dataset.copy ?? null;
       if (inventoryTab !== 'enhance') location.hash = 'enhance';

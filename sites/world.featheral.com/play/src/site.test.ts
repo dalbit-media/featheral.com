@@ -23,6 +23,7 @@ import { waterFacilityKeys, waterFacilities } from './water-facilities.ts';
 import { filterMarketCatalog, marketOwned, renderMarketCatalog } from './marketplace-catalog.ts';
 import { translate } from './i18n.ts';
 import { mediaMatchesWidth } from './screen-preview.ts';
+import { ambientTrackForPage } from './ambient-audio.ts';
 import { renderWorldHub } from './world-hub-render.ts';
 
 test('World has dedicated login, registration and profile pages, with no homepage credential form', async () => {
@@ -518,6 +519,16 @@ test('settlement visuals grow through every tier with distinct town and city arc
   }
   game.stage = -1;
   assert.deepEqual(settlementBuildings(game), []);
+});
+test('ambient audio follows exploration and settlement growth tiers', () => {
+  assert.equal(ambientTrackForPage('explore', 14), 'nature');
+  assert.equal(ambientTrackForPage('settlement', -1), 'nature');
+  assert.equal(ambientTrackForPage('settlement', 2), 'nature');
+  assert.equal(ambientTrackForPage('settlement', 3), 'village');
+  assert.equal(ambientTrackForPage('settlement', 5), 'village');
+  assert.equal(ambientTrackForPage('settlement', 6), 'market');
+  assert.equal(ambientTrackForPage('settlement', 13), 'market');
+  assert.equal(ambientTrackForPage('settlement', 14), 'megacity');
 });
 test('both maps share season, day phase and weather indicators with distinct icons', () => {
   for (const [index, seasonIcon] of ['flower', 'sun', 'leaf', 'snowflake'].entries()) {

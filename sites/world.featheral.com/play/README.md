@@ -2,6 +2,8 @@
 
 A responsive, map-first civic world prototype for desktop and mobile browsers. Original procedural artwork is rendered with Canvas; the interface uses TypeScript and Vite.
 
+Explorer and Settlement include optional, locally bundled ambient soundscapes. Explorer uses nature ambience; settlement ambience grows from quiet village sounds to busy markets and a larger-city soundscape. All loops preload on those pages and remain off until enabled.
+
 Existing database paths, session cookie names, and legacy browser-save keys are retained across the rebrand so existing worlds remain accessible.
 
 The shared wallet/profile and site-navigation scripts and styles are served by the
