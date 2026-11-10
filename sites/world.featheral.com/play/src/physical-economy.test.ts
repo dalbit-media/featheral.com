@@ -248,6 +248,8 @@ test('familiar trading units use exact accounting lots without changing price ti
   }
   assert.equal(formatResourceAmount('wood', 180, 'en-US'), '9,000 kg');
   assert.equal(formatResourceAmount('water', 2560, 'ko-KR'), '25,600 L');
+  assert.equal(formatResourceAmount('wood', 246913, 'en-US', true), '12.346M kg');
+  assert.equal(formatResourceAmount('wood', 246913, 'en-US'), '12,345,650 kg');
   assert.equal(displayQuantity('wood', 1), 50);
   assert.equal(displayQuantity('water', 1), 10);
   assert.equal(accountingQuantity('wood', 50), 1);

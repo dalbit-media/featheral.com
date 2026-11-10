@@ -10,7 +10,7 @@ export const publicSite = {
 
 export function formatPublicTotal(value: number, locale: string, fullText = value.toLocaleString(locale)): string {
   return value < 10000 ? fullText
-    : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+    : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 3 }).format(value);
 }
 
 export function resolvePublicSite(config = publicSite): typeof publicSite {

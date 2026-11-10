@@ -53,8 +53,8 @@ function tokens(raw, maxFractionDigits = 2) {
   return (Number(whole) + fraction).toLocaleString("en-US", { maximumFractionDigits: maxFractionDigits });
 }
 function compact(raw) {
-  const value = Number(BigInt(raw) / ONE);
-  return value.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 2 });
+  const value = BigInt(raw), fraction = (value % ONE).toString().padStart(18, "0").replace(/0+$/, "");
+  return (value / ONE).toLocaleString("en-US") + (fraction ? "." + fraction : "");
 }
 function usd(raw) {
   const updated = Date.parse(usdMarket?.updatedAt);
@@ -130,7 +130,7 @@ function renderPrimary(chain, explorer) {
   const count = (value) => Number.isFinite(value) ? value.toLocaleString("en-US") : "—";
   const live = pooled();
   const reserves = live && usdMarket.reserves?.tvlUsd ? usdMarket.reserves : null;
-  const compactNumber = (value) => value.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 2 });
+  const compactNumber = (value) => value.toLocaleString("en-US", { maximumFractionDigits: 3 });
   $("primaryStats").replaceChildren(
     stat("FTHG price", /^\d+$/.test(usdMarket?.usdPerFthg || "") ? dollars(fromWei(usdMarket.usdPerFthg)) : "—", live
       ? `Uniswap spot · ${compactNumber(fromWei(usdMarket.fthgPerEth))} per ETH` : "Reference price until the pool has data", "feature"),

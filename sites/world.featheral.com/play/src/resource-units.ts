@@ -51,6 +51,6 @@ export function formatResourceAmount(asset: string, lots: number, locale: string
     return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(lots * resourceUnits.metal.kilogramsPerLot)} kg`;
   const value = displayQuantity(asset, lots);
   return `${new Intl.NumberFormat(locale, compact && value >= 10000
-    ? { notation: 'compact', maximumFractionDigits: 1 }
+    ? { notation: 'compact', maximumFractionDigits: 3 }
     : { maximumFractionDigits: 2 }).format(value)} ${tradingUnit(asset, locale)}`;
 }

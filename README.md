@@ -341,6 +341,16 @@ timestamps cannot keep an older page paired with newer scripts. The terminal
 checks its required page elements before attaching trading handlers; incompatible
 markup disables forms and displays an explicit hard-reload/update message.
 
+Shared site navigation loads a presentation-only compact-number layer for
+prominent metrics and balances across Featheral. Values from 10,000 use K/M/B/T
+(then Qa/Qi) with up to three decimals, rounded using integer arithmetic. Full
+display values remain in accessible labels and focusable hover titles; live
+updates retain the same DOM nodes. Tables, trading panels, forms, small print
+(12px or smaller), code, dates and identifiers stay unchanged. Components can
+mark additional metrics with `data-compact-number` or preserve an exact subtree
+with `data-exact-number`. World retains locale-specific units with three-decimal
+compact precision. No ledger amounts, inputs, quotes or transaction data change.
+
 Unresolved deposits, withdrawals, liquidity changes and initial funding appear
 with explicit resume controls after reconnecting in the same browser tab.
 Changing form inputs never replaces a submitted movement or funding request.

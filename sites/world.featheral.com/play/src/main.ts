@@ -592,7 +592,7 @@ function renderEnvironment(): void {
   localize(document.querySelector('#world')!);
 }
 function renderPopulation(): void {
-  const compact = new Intl.NumberFormat(languageLocale, { notation: 'compact', maximumFractionDigits: 1, maximumSignificantDigits: 3 });
+  const compact = new Intl.NumberFormat(languageLocale, { notation: 'compact', maximumFractionDigits: 3 });
   const counts = workforceCounts(game.population, state.workforce);
   const idle = counts.available, active = counts.gathering + counts.exploring;
   document.querySelector('[data-population-active]')!.textContent = compact.format(active);

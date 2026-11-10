@@ -1,5 +1,14 @@
 "use strict";
 
+(() => {
+  if (document.querySelector('script[data-number-display]')) return;
+  const script = document.createElement("script");
+  script.src = "/shared/number-display.js";
+  script.dataset.numberDisplay = "true";
+  script.onerror = () => console.error("Compact number display unavailable; full values are retained.");
+  document.head.append(script);
+})();
+
 // Animations stay paused (see site-links.css) until the page, its fonts and any app marked
 // with html[data-app-loading] have finished loading.
 (() => {

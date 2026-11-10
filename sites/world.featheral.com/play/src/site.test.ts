@@ -1207,10 +1207,10 @@ test('homepage totals abbreviate at 10,000 using Korean and English units while 
   }
   for (const [value, korean, english] of [
     [10000, '1만', '10K'],
-    [12345, '1.2만', '12.3K'],
+    [12345, '1.235만', '12.345K'],
     [1000000, '100만', '1M'],
     [100000000, '1억', '100M'],
-    [10838853843.3, '108.4억', '10.8B'],
+    [10838853843.3, '108.389억', '10.839B'],
     [1000000000000, '1조', '1T'],
   ] as const) {
     assert.equal(formatPublicTotal(value, 'ko-KR'), korean);
