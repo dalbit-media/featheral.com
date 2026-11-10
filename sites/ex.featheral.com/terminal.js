@@ -48,7 +48,7 @@
     controls.forEach(button => { button.disabled = true; });
     try { $("terminal-status").textContent = ""; await work(); }
     catch (error) { console.error(error); $("terminal-status").textContent = error.message; }
-    finally { busy = false; controls.forEach(button => { button.disabled = false; }); $("execute-order").disabled = !preview; }
+    finally { busy = false; controls.forEach(button => { button.disabled = false; }); $("execute-order").disabled = !preview; renderPendingMovements(); }
   }
   function rows(root, entries, empty, render) {
     root.replaceChildren();
@@ -56,9 +56,25 @@
     for (const entry of entries) root.append(render(entry));
   }
   function row(values) { const tr = document.createElement("tr"); values.forEach(value => tr.append(text("td", value))); return tr; }
+  function renderPendingMovements() {
+    $("pending-movements").replaceChildren();
+    if (!token) return;
+    for (const kind of ["deposit", "withdraw", "liquidity", "funding"]) {
+      const saved = sessionStorage.getItem(`featheral-exchange-pending:${owner}:${kind}`);
+      if (!saved) continue;
+      const input = JSON.parse(saved), detail = kind === "funding" ? `${format(input.dollars, "FTH$")} + ${format(input.fthx, "FTHX")}`
+        : kind === "liquidity" ? `${input.action} ${input.symbol}` : format(input.amount, input.symbol);
+      const box = text("p", `Unresolved ${kind}: ${detail}. `);
+      const resume = text("button", "Review and resume"); resume.type = "button";
+      resume.addEventListener("click", () => run(() => kind === "funding" ? funding()
+        : kind === "liquidity" ? liquidity() : movement(kind, input.symbol, input.amount)));
+      box.append(resume); $("pending-movements").append(box);
+    }
+  }
   async function refreshAccount() {
     $("disconnect").hidden = !token;
     $("trading-owner").textContent = owner ? `Trading owner: ${owner}` : "Trading account not connected";
+    renderPendingMovements();
     if (!token) { account = null; $("trading-total").textContent = ""; return; }
     const currentOwner = owner, current = await api("/trading/account");
     if (owner !== currentOwner) return;
@@ -112,7 +128,7 @@
     $("market-list").replaceChildren();
     for (const market of markets.filter(m => m.symbol.includes(filter))) {
       const button = text("button", market.symbol); button.type = "button"; button.setAttribute("aria-pressed", String(market.symbol === selected));
-      button.append(text("small", market.funded ? "Live pool" : "Unfunded"));
+      button.append(text("small", market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
       button.addEventListener("click", () => { selected = market.symbol; invalidate(); refresh().catch(error => { console.error(error); $("terminal-status").textContent = error.message; }); });
       $("market-list").append(button);
     }
@@ -126,7 +142,7 @@
     const market = markets.find(m => m.symbol === marketSymbol);
     if (!market) throw Error("Requested market is unavailable. Select an available market.");
     $("market-title").textContent = marketSymbol + " / FTHX";
-    $("spot-price").textContent = market?.price ? `${ratio(market.price)} FTHX` : "Pool not available";
+    $("spot-price").textContent = market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price)} FTHX` : "Pool not available";
     const usdPerDollar = data.reference.usdValue, rate = data.reference.dollarReference;
     if (market?.price && usdPerDollar !== null && rate) {
       const usdPerFthx = BigInt(usdPerDollar) * BigInt(rate.denominator) / BigInt(rate.numerator);
@@ -134,7 +150,8 @@
       const fractional = (usd % unit).toString().padStart(18, "0").slice(0, 8).replace(/0+$/, "");
       $("usd-price").textContent = `~ $${usd > 0n && usd < 10000000000n ? "<0.00000001" : `${usd / unit}${fractional ? "." + fractional : ""}`} USD / ${marketSymbol}`;
     } else $("usd-price").textContent = "USD unavailable — live FTHG/USD and verified reference rates required";
-    $("market-detail").textContent = market?.funded ? `0.3% fee • ${marketSymbol === "FTH$" ? data.pair.volumeFthx : market.volume} FTHX executed volume / 24h`
+    $("market-detail").textContent = market?.pendingSettlement ? "A Dollar settlement requires recovery. Resume the original request before trading; do not fund a replacement pool."
+      : market?.funded ? `0.3% fee • ${marketSymbol === "FTH$" ? data.pair.volumeFthx : market.volume} FTHX executed volume / 24h`
       : "Unfunded. Opening reference prices do not enable trading or guarantee redemption.";
     $("reference-detail").textContent = data.reference.source;
     $("order-amount-label").firstChild.textContent = `Input (${ $("order-side").value === "buy" ? "FTHX" : marketSymbol })`;
@@ -151,10 +168,23 @@
     requireOwner();
     const key = `featheral-exchange-pending:${owner}:${kind}`, previous = sessionStorage.getItem(key);
     const saved = previous ? JSON.parse(previous) : null;
-    const input = saved?.symbol === symbol && saved?.amount === raw ? saved : { symbol, amount: raw, requestId: crypto.randomUUID() };
-    if (!confirm(`${kind === "deposit" ? "Deposit into Exchange trading" : "Withdraw to your own wallet"}: ${format(raw, symbol)}? This moves existing funds only.`)) return;
+    const input = saved || { symbol, amount: raw, requestId: crypto.randomUUID() };
+    if (!confirm(`${saved ? "Resume the previous request first. " : ""}${kind === "deposit" ? "Deposit into Exchange trading" : "Withdraw to your own wallet"}: ${format(input.amount, input.symbol)}? This moves existing funds only.`)) return;
     sessionStorage.setItem(key, JSON.stringify(input));
-    await api("/trading/" + kind, "POST", input);
+    try { await api("/trading/" + kind, "POST", input); }
+    catch (error) {
+      if (error.status) {
+        try { await api(`/trading/operations/${encodeURIComponent(input.requestId)}`); }
+        catch (lookupError) {
+          if (lookupError.status === 404) sessionStorage.removeItem(key);
+          else {
+            console.error("Exchange operation recovery lookup failed:", lookupError);
+            error.message += " Recovery status could not be verified; the original request is retained.";
+          }
+        }
+      }
+      throw error;
+    }
     sessionStorage.removeItem(key);
     invalidate(); await refresh(); $("terminal-status").textContent = `${kind === "deposit" ? "Deposit" : "Withdrawal"} complete.`;
   }
@@ -199,46 +229,52 @@
   }));
   $("liquidity-form").addEventListener("submit", event => {
     event.preventDefault();
-    run(async () => {
-      requireOwner();
-      const key = `featheral-exchange-pending:${owner}:liquidity`, pending = sessionStorage.getItem(key);
-      if (pending) {
-        const previous = JSON.parse(pending);
-        if (!confirm(`Resolve the previous submitted liquidity request first: ${JSON.stringify(previous)}?`)) return;
-        await api("/markets/liquidity", "POST", previous);
-        sessionStorage.removeItem(key); await refresh(); return;
-      }
-      const symbol = $("liquidity-symbol").value, action = $("liquidity-action").value, value = Number($("liquidity-amount").value);
-      const quote = await api("/markets/liquidity/quote", "POST", { symbol, action, amount: value });
-      if (!confirm(`Wallet liquidity ${action}: ${JSON.stringify(quote)}. Accept price and impermanent-loss risk?`)) return;
-      const input = { symbol, action, amount: value, requestId: crypto.randomUUID(), base: quote.base, notes: quote.notes, shares: quote.shares };
-      sessionStorage.setItem(key, JSON.stringify(input));
-      try { await api("/markets/liquidity", "POST", input); }
-      catch (error) {
-        if ([400, 402, 409].includes(error.status)) sessionStorage.removeItem(key);
-        throw error;
-      }
-      sessionStorage.removeItem(key); await refresh();
-    });
-    $("funding-form").addEventListener("submit", event => {
-      event.preventDefault();
-      run(async () => {
-        requireOwner();
-        const dollars = amount($("funding-dollar").value, "FTH$"), fthx = amount($("funding-fthx").value, "FTHX"), approval = $("funding-approval").value;
-        if (approval !== `FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`) throw Error(`Exact approval required: FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`);
-        if (!confirm(`Commit ${format(dollars, "FTH$")} and ${format(fthx, "FTHX")} from your MAIN wallet to initial liquidity? No new supply is created. This capital has no LP withdrawal interface.`)) return;
-        const key = `featheral-exchange-pending:${owner}:funding`, previous = sessionStorage.getItem(key), saved = previous ? JSON.parse(previous) : null;
-        const input = saved?.dollars === dollars && saved?.fthx === fthx ? saved : { dollars, fthx, approval, requestId: crypto.randomUUID() };
-        sessionStorage.setItem(key, JSON.stringify(input));
-        const request = await api("/dollar-pool/fund", "POST", input);
-        if (request.status !== "complete") {
-          const signature = request.message ? await providerSignature(request.message, owner) : undefined;
-          await api(`/dollar-pool/${encodeURIComponent(request.id)}/complete`, "POST", { signature });
-        }
-        sessionStorage.removeItem(key); await refresh(); $("terminal-status").textContent = "Initial liquidity funded with existing balances.";
-      });
-    });
+    run(liquidity);
   });
+  async function completeLiquidity(key, input) {
+    try { await api("/markets/liquidity", "POST", input); }
+    catch (error) {
+      if ([400, 402, 409].includes(error.status)) sessionStorage.removeItem(key);
+      throw error;
+    }
+    sessionStorage.removeItem(key); await refresh();
+  }
+  async function liquidity() {
+    requireOwner();
+    const key = `featheral-exchange-pending:${owner}:liquidity`, pending = sessionStorage.getItem(key);
+    if (pending) {
+      const previous = JSON.parse(pending);
+      if (!confirm(`Resolve the previous submitted liquidity request first: ${JSON.stringify(previous)}?`)) return;
+      await completeLiquidity(key, previous); return;
+    }
+    const symbol = $("liquidity-symbol").value, action = $("liquidity-action").value, value = Number($("liquidity-amount").value);
+    const quote = await api("/markets/liquidity/quote", "POST", { symbol, action, amount: value });
+    if (!confirm(`Wallet liquidity ${action}: ${JSON.stringify(quote)}. Accept price and impermanent-loss risk?`)) return;
+    const input = { symbol, action, amount: value, requestId: crypto.randomUUID(), base: quote.base, notes: quote.notes, shares: quote.shares };
+    sessionStorage.setItem(key, JSON.stringify(input));
+    await completeLiquidity(key, input);
+  }
+  $("funding-form").addEventListener("submit", event => {
+    event.preventDefault();
+    run(funding);
+  });
+  async function funding() {
+    requireOwner();
+    const key = `featheral-exchange-pending:${owner}:funding`, previous = sessionStorage.getItem(key);
+    const saved = previous ? JSON.parse(previous) : null;
+    const dollars = saved?.dollars || amount($("funding-dollar").value, "FTH$");
+    const fthx = saved?.fthx || amount($("funding-fthx").value, "FTHX"), approval = saved?.approval || $("funding-approval").value;
+    if (approval !== `FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`) throw Error(`Exact approval required: FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`);
+    if (!confirm(`${saved ? "Resume the previous funding request first. " : ""}Commit ${format(dollars, "FTH$")} and ${format(fthx, "FTHX")} from your MAIN wallet to initial liquidity? No new supply is created. This capital has no LP withdrawal interface.`)) return;
+    const input = saved || { dollars, fthx, approval, requestId: crypto.randomUUID() };
+    sessionStorage.setItem(key, JSON.stringify(input));
+    const request = await api("/dollar-pool/fund", "POST", input);
+    if (request.status !== "complete") {
+      const signature = request.message ? await providerSignature(request.message, owner) : undefined;
+      await api(`/dollar-pool/${encodeURIComponent(request.id)}/complete`, "POST", { signature });
+    }
+    sessionStorage.removeItem(key); await refresh(); $("terminal-status").textContent = "Initial liquidity funded with existing balances.";
+  }
   async function finishLogin(address, signature) {
     const session = await api("/login", "POST", { address, signature });
     token = session.token; owner = session.address.toLowerCase(); preview = null; invalidate(); await refresh();

@@ -107,7 +107,8 @@ class Exchange {
     const row = this.db.prepare("SELECT * FROM dollar_note_pool WHERE id=1").get();
     return { dollars: row.dollars, fthx: row.fthx, version: row.version, funded: BigInt(row.dollars) > 0n,
       settlementEnabled: !!this.dollar, dollarAccount: DOLLAR_POOL, quoteCurrency: "FTHX", feeBps: 30,
-      pendingSettlement: !!this.db.prepare("SELECT 1 FROM dollar_note_requests WHERE status IN ('paying','paid','settling','awaiting_signature')").get() };
+      pendingSettlement: !!this.db.prepare("SELECT 1 FROM dollar_note_requests WHERE status IN ('paying','paid','settling','awaiting_signature')").get()
+        || !!this.trading?.db.prepare("SELECT 1 FROM trading_operations WHERE status='settling'").get() };
   }
   market(interval = "24h", now = Date.now()) {
     const { period, candles } = require("./candles");
@@ -134,7 +135,7 @@ class Exchange {
         return { at: row.at, sequence: row.sequence, base: dollar ? dollars : fthx, quote: dollar ? fthx : dollars };
       }));
       executions.sort((a, b) => a.at - b.at || a.sequence - b.sequence);
-      return { symbol, funded: ready, quoteCurrency: currency,
+      return { symbol, funded: ready, pendingSettlement: pool.pendingSettlement, quoteCurrency: currency,
         price: ready ? { numerator: dollar ? (BigInt(pool.fthx) * 10n ** 18n).toString() : pool.dollars,
           denominator: dollar ? pool.dollars : (BigInt(pool.fthx) * 10n ** 18n).toString(), currency } : null,
         history: { symbol, currency, interval, from: now - duration, to: now,

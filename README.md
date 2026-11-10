@@ -326,6 +326,33 @@ The terminal shows executed OHLC candles, volume, SMA20, timeframes, zoom/pan,
 full-screen charts, slippage previews, balances, trades, movement history and
 wallet-funded liquidity positions. It does not simulate an order book or leverage.
 
+Unresolved deposits, withdrawals, liquidity changes and initial funding appear
+with explicit resume controls after reconnecting in the same browser tab.
+Changing form inputs never replaces a submitted movement or funding request.
+The owner-scoped `GET /api/creation/trading/operations/:requestId` endpoint on
+Exchange returns the persisted operation and settlement status, without payment
+signatures or settlement authority. A failed movement is discarded locally only
+after that endpoint confirms no operation exists; uncertain outcomes retain the
+original request ID. FTH$ markets and portfolio reference rates remain unavailable
+while either a wallet settlement or a trading withdrawal requires recovery.
+Executed history remains visible, and replaying recovery cannot create supply.
+
+The accounting boundaries are deliberate: Notes owns whole-unit FTHX and community
+notes; Exchange routes pairs through FTHX and segregates trading custody; Dollar
+owns 18-decimal FTH$ and its signed settlement journal; World uses separately
+reconciled FTH$ accounts; Gold owns actual Ethereum FTHG and reserve conversion.
+Neither portfolio estimates nor sign-in authorizations transfer funds across
+these boundaries. Liquidity must be explicitly funded before trading, and
+deployment must preserve the single authoritative financial writer.
+
+Run `npm run test:exchange` for the integrated Notes, AMM, custody, recovery,
+wallet, portfolio, HTTP ownership/origin and executable terminal-handler tests.
+Run World's `server/funds.test.ts` and `server/economy.test.ts` tests for its
+separate fund journal. These fixtures require an isolated writer checkout without
+a read-only replica marker; do not remove a deployed replica's protection to run
+tests. Local tests are not a production liquidity, deployment or external audit
+certification.
+
 Dollar retains its original CMS landing page at `/`, with the shared wallet at `/wallet/`: Assets, Send, Receive, Swap, Activity and Account. Every site's wallet dialog uses the same contextual renderer; Foundation and Gold lead with FTHG, Dollar and World with FTH$, and all other sites with FTHX. The large primary balance is the active account's actual available currency, never a combined valuation. Smaller lines beneath show the estimated portfolio USD total and the estimated total in the site's primary currency; linked accounts, World and Exchange funds remain separate. Unavailable prices and partial estimates are explicitly labeled. Host colors and themes are preserved. The shared renderer supports extensions and a site-local encrypted built-in wallet inline. Extension private keys remain outside the site; built-in signers run in the current site's memory. Wallets continue to read authoritative holdings independently of Exchange liquidity. World’s existing wallet transfers, deposits/withdrawals and gameplay APIs are retained.
 
 Empty wallet primary balances initially display `0.00` for FTH$/FTHX and `0.000` for FTHG/FTHS. Confirmed zero balances use the same precision; failed or unavailable reads remain explicitly unavailable.

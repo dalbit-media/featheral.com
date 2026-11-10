@@ -444,6 +444,7 @@ creationRouter.get('/trading/account', wrap(async (req, res) => {
     walletTrades: dollarExchange.walletTrades(owner),
     portfolio: await walletPortfolio(account.holdings, {}) });
 }));
+creationRouter.get('/trading/operations/:requestId', wrap((req, res) => res.json(trading.operation(creationOwner(req), req.params.requestId))));
 creationRouter.get('/trading/markets', wrap(async (req, res) => {
   const pair = dollarExchange.market(req.query.interval || '24h');
   const reference = await walletPortfolio([{ symbol: 'FTH$', balance: '1000000000000000000' }], {});

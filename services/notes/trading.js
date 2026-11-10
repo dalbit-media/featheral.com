@@ -48,6 +48,14 @@ class Trading {
         .sort((a, b) => b.at - a.at).slice(0, 50),
       movements: this.db.prepare("SELECT request,kind,symbol,amount,status,at FROM trading_operations WHERE owner=? AND kind!='trade' ORDER BY at DESC LIMIT 50").all(owner) };
   }
+  operation(owner, requestId) {
+    if (typeof requestId !== "string" || !/^[a-zA-Z0-9-]{16,80}$/.test(requestId))
+      throw fail(400, "A unique Exchange request ID is required.");
+    const row = this.db.prepare("SELECT * FROM trading_operations WHERE owner=? AND request=?").get(owner, requestId);
+    if (!row) throw fail(404, "Exchange operation not found.");
+    return { requestId: row.request, kind: row.kind, symbol: row.symbol, amount: row.amount,
+      status: row.status, result: row.status === "complete" ? JSON.parse(row.result) : null, at: row.at };
+  }
   portfolioHoldings(owner, holdings) {
     const totals = new Map(holdings.map(asset => [asset.symbol, BigInt(asset.balance)]));
     for (const asset of this.holdings(owner)) totals.set(asset.symbol, (totals.get(asset.symbol) || 0n) + BigInt(asset.balance));
