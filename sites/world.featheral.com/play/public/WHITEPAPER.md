@@ -213,7 +213,7 @@ The simulated weather/temperature sequence has a deterministic **16-game-year cy
 
 Water supply has priority before growth and surplus. Only owned Water pays daily upkeep; pending Water must first be picked up. Independent daily deadlines and same-time arrivals are preserved; new arrivals join after upkeep. Legacy weekly-upkeep saves receive one full day of grace. Offline processing settles daily consumption, pending production, funded item-enabled auto-collection, weekly population changes and paid arrivals. Bulk skips stop at population boundaries so subsequent consumption uses the changed population.
 
-**Weekly population:** fully supplied nonempty settlements gain 1% of residents, rounded down with a minimum of one, each game week. The largest unmet-demand fraction across the week's Water, Wood and Metal consumption determines gradual loss, up to 5% of population per week; resource shortages do not stack beyond that cap. Fractional losses carry into later weeks and clear after a fully supplied week. Only owned resources meet demand. Population may reach zero and must then recover through paid recruitment. Old saves start a fresh population deadline without retroactive growth or loss. All changes are server-authoritative and persist with census updates; retries cannot replay a week.
+**Weekly population:** fully supplied nonempty settlements accrue natural growth at 0.5% of residents each game week. Fractional growth carries forward; no minimum resident is forced. Natural growth pauses at the next tier's population requirement until that tier is upgraded, so progression beyond each threshold requires player effort. Paid recruitment remains available beyond the threshold and does not repeat automatically. The largest unmet-demand fraction across the week's Water, Wood and Metal consumption determines gradual loss, up to 5% of population per week; resource shortages do not stack beyond that cap. Fractional losses carry into later weeks and clear after a fully supplied week. Only owned resources meet demand. Population may reach zero and must then recover through paid recruitment. Old saves start a fresh population deadline without retroactive growth or loss. All changes are server-authoritative and persist with census updates; retries cannot replay a week.
 
 **Settlement downgrade:** below 50% of the current tier's required population, a weekly update lowers as many tiers as necessary, stopping at Settlement. Equality does not downgrade. Buildings, items, home, paid work, pending arrivals and funds remain intact; new tier-gated actions use the lower tier. Re-upgrading is manual and costs the normal resources and fee.
 
@@ -227,11 +227,11 @@ The seeded map includes forests, meadows, lakes, mountains, oil seeps, crystal o
 
 Known-tile travel is instant and does not uncover new terrain. Each expedition reserves **two available residents** for one to three game weeks according to terrain difficulty. Send multiple teams concurrently, limited only by available residents and FTH$. Weekly resource allocation never reassigns residents who are still exploring. New teams reveal a radius-2 circle of at most 13 tiles and return independently; the player stays in place. Active duplicate destinations are rejected, and overlapping surveys count newly revealed tiles only once. Each team has its own countdown. Equipment expands visibility and destination reach, not survey area. Already-travelling teams retain their saved radii and deadlines. Open water, rivers, coasts, and glaciers are not valid founding sites.
 
-An expedition costs `(10 + 5 * ceil(distance from settlement) + 5 * (terrain weeks - 1)) * 2 ** active field teams` FTH$ upfront: 1x, 2x, 4x, 8x, and so on. Investigate and Explore share the count taken at departure; returned teams no longer increase the next fee. Both map clicks and quick exploration confirm the same authoritative quote. Moving the player cannot reduce settlement-based costs; known-terrain travel stays free. Already-paid expeditions keep their original costs and deadlines.
+An expedition costs `(10 + 5 * ceil(distance from settlement) + 5 * (terrain weeks - 1)) * 1.5 ** active field teams` FTH$ upfront: 1x, 1.5x, 2.25x, 3.375x, and so on. Investigate and Explore share the count taken at departure; returned teams no longer increase the next fee. Both map clicks and quick exploration confirm the same authoritative quote. Moving the player cannot reduce settlement-based costs; known-terrain travel stays free. Already-paid expeditions keep their original costs and deadlines.
 
 FTH$ is the main game currency; Metal is a construction resource. Gold is separate and exchangeable with FTH$. Neither currency is cash or a promise of future token allocation.
 
-**Investigate** is a cheaper, repeatable action on discovered land, shown left of Explore. Two idle residents work for exactly one game week. The upfront base fee is 10% of the undiscounted concurrent Explore route fee (minimum FTH$0.10 before equipment). Equipped investigation gear alone can reduce it by up to 50%. Every active Investigate or Explore team doubles the next field fee. Each job has a 10% chance of one collection or activity permit; successful finds are 90% one-week and 10% four-week permits, never keepsakes or high-tier items. The server locks the result at departure, so retries and reloads cannot reroll it. Different known destinations may be investigated concurrently and reused after return. Investigations do not reveal land, add contribution or block exploration automation. Paid jobs finish despite later shortages; full item storage retains findings as pending. Already-paid legacy investigations retain their original one-resident, one-day deadline.
+**Investigate** is a cheaper, repeatable action on discovered land, shown left of Explore. Two idle residents work for exactly one game week. The upfront base fee is 10% of the undiscounted concurrent Explore route fee (minimum FTH$0.10 before equipment). Base investigation gear lowers the fee by up to 32%; refinement can raise total savings to 75%. Every active Investigate or Explore team raises the next base field fee by 50%. Each job has a 10% chance of one collection or activity permit; successful finds are 90% one-week and 10% four-week permits, never keepsakes or high-tier items. The server locks the result at departure, so retries and reloads cannot reroll it. Different known destinations may be investigated concurrently and reused after return. Investigations do not reveal land, add contribution or block exploration automation. Paid jobs finish despite later shortages; full item storage retains findings as pending. Already-paid legacy investigations retain their original one-resident, one-day deadline.
 
 ### Item inventory, equipment, and crafting
 
@@ -285,15 +285,16 @@ use signed additive authorization.
 ### Permanent activity equipment
 
 Nine craftable equipment items reuse decorations, unused collector permits and raw
-materials to lower new activity fees. Investigation has Survey satchel (10%,
-Settlement), Field survey station (25%, Village) and Precision survey array (50%,
-City). Exploration has Trail supply kit (10%, Settlement), Expedition outpost kit
-(25%, Village) and Expedition logistics network (50%, City). Attraction, meaning
-resident recruitment, has Settler welcome kit (10%, Settlement), Community welcome
-pavilion (25%, Town) and Settler hospitality network (50%, City).
+materials to lower new activity fees. Investigation has Survey satchel (8%,
+Settlement), Field survey station (18%, Village) and Precision survey array (32%,
+City). Exploration has Trail supply kit (8%, Settlement), Expedition outpost kit
+(18%, Village) and Expedition logistics network (32%, City). Attraction, meaning
+resident recruitment, has Settler welcome kit (8%, Settlement), Community welcome
+pavilion (18%, Town) and Settler hospitality network (32%, City).
 
 Equip one permanent item per activity in inventory. Owning additional copies does
-not stack effects, and the maximum discount is 50%. Fees round upward to FTH$0.0001;
+not stack effects. Refinement adds 2 percentage points per successful level, up to
+75% total savings. Fees round upward to FTH$0.0001;
 manual actions, automatic departures, affordability checks and confirmations use
 the same server-validated equipment. Investigation starts from its undiscounted
 route fee, not an exploration-discounted quote. Staffing, discovery probabilities,

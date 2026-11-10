@@ -64,9 +64,9 @@ test('auto recruitment pays each batch once, respects housing fees and stops new
   assert.equal(activated.recruitment!.population, cost / 50);
   assert.equal(account.game.dollars, before - cost * dollarsScale);
   accrue(account, activated.recruitment!.readyAt - 1);
-  assert.equal(account.game.population, 13, 'natural growth precedes the paid arrival');
+  assert.equal(account.game.population, 12, 'fractional natural growth does not force a resident');
   accrue(account, activated.recruitment!.readyAt);
-  assert.equal(account.game.population, 13 + cost / 50);
+  assert.equal(account.game.population, 12 + cost / 50);
   assert.equal(account.recruitment, null);
   assert.equal(account.game.dollars, before - cost * dollarsScale);
 });
@@ -109,16 +109,18 @@ test('automation stacking, offline catch-up and fee deductions are polling-invar
 test('housing-adjusted affordability and Water shortages pause rather than throwing during accrual', () => {
   const account = fixture();
   account.game.constructionLevels = { housing: 4 };
-  account.game.dollars = 1000 * dollarsScale;
+  account.game.dollars = 0;
   act(account, { type: 'activate-activity', item: 'activity-attraction-4' });
   assert.equal(account.recruitment, null);
   accrue(account, account.updatedAt + worldDayMs);
   assert.equal(snapshot(account).activityAutomation!.attraction.reason, 'Not enough FTH$ for recruitment.');
+  account.game.dollars = 1000000 * dollarsScale;
   account.game.stock.water = 0;
   act(account, { type: 'activate-activity', item: 'activity-exploration-4' });
   assert.equal(snapshot(account).workforce.expeditions.length, 0);
   assert.equal(snapshot(account).activityAutomation!.exploration.reason, 'Restore Water supplies before starting advanced activity.');
   account.game.stock.water = 1000000;
+  account.game.stock.wood = 1000000;
   const nextAt = account.activityAutomation!.exploration.nextAt;
   accrue(account, nextAt - 1);
   assert.equal(snapshot(account).workforce.expeditions.length, 0);
@@ -134,7 +136,7 @@ test('resuming preserves expiry, waits for the current batch and then starts the
   const resumed = act(account, resume);
   assert.equal(resumed.activityAutomation!.attraction.until, first.activityAutomation!.attraction.until);
   assert.equal(resumed.activityAutomation!.attraction.nextAt, first.recruitment!.readyAt);
-  const population = 13 + first.recruitment!.population;
+  const population = 12 + first.recruitment!.population;
   const cost = recruitmentDollars(population, 0, first.recruitment!.readyAt), dollars = account.game.dollars;
   accrue(account, first.recruitment!.readyAt);
   assert.equal(account.game.population, population);

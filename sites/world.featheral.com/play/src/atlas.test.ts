@@ -13,7 +13,7 @@ import { runInNewContext } from 'node:vm';
 
 const entry = (id: string, population: number, netWorth: number, federation: string | null = null): AtlasEntry => ({
   id, player: id, settlement: id, yours: false, location: { x: population, y: 0 }, distance: null,
-  federation, population, netWorth, dollars: netWorth, stage: 3, explored: population, contribution: population,
+  federation, population, netWorth, dollars: netWorth, stage: 3, explored: population, contribution: population, relic: population === 0,
 });
 test('atlas zoom preserves the pointer anchor, clamps to 1x–16x and does not mutate the camera', () => {
   const camera = { x: 20, y: 30, scale: .5 }, anchor = { x: 200, y: 150 };

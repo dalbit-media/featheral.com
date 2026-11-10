@@ -100,18 +100,18 @@ test('crafting combines inputs even in a full inventory without consuming active
   account.automationUntil!.wood = start + 5000;
   const timers = structuredClone(account.automationUntil), before = bag.items.length;
   craft(account, 'survey-satchel');
-  assert.equal(bag.items.length, before - 3);
+  assert.equal(bag.items.length, before - 2);
   assert.deepEqual(account.automationUntil, timers);
 });
 test('one permanent slot per activity replaces rather than stacks and protects only equipped copies', () => {
   const account = fixture(), bag = inventory(account);
   bag.items.push('survey-satchel', 'survey-array', 'survey-array', 'trail-network', 'welcome-network');
   equipActivity(account, 'investigation', 'survey-satchel');
-  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 10);
+  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 8);
   equipActivity(account, 'investigation', 'survey-array');
   equipActivity(account, 'exploration', 'trail-network');
   equipActivity(account, 'attraction', 'welcome-network');
-  for (const activity of equipmentActivities) assert.equal(activityEquipmentDiscount(account.game, activity), 50);
+  for (const activity of equipmentActivities) assert.equal(activityEquipmentDiscount(account.game, activity), 32);
   assert.equal(sellableItemCount(bag, 'survey-array'), 1);
   assert.equal(sellableItemCount(bag, 'survey-satchel'), 1);
   assert.throws(() => equipActivity(account, 'investigation', 'trail-network'), /matching/);
@@ -120,7 +120,7 @@ test('one permanent slot per activity replaces rather than stacks and protects o
   equipActivity(account, 'investigation', null);
   assert.equal(sellableItemCount(bag, 'survey-array'), 1);
   assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 0);
-  assert.equal(activityEquipmentDiscount(account.game, 'exploration'), 50);
+  assert.equal(activityEquipmentDiscount(account.game, 'exploration'), 32);
 });
 test('every equipment tier applies exactly its own discount with upward four-decimal rounding', () => {
   for (const [id, recipe] of Object.entries(activityEquipmentItems)) {
@@ -129,7 +129,7 @@ test('every equipment tier applies exactly its own discount with upward four-dec
       const units = Math.round(base * dollarsScale);
       const expected = Math.ceil(units * (100 - recipe.discount) / 100);
       assert.equal(discountedActivityCost(game, recipe.activity, base), expected / dollarsScale);
-      assert.ok(expected >= units / 2, 'never grants more than 50% off');
+      assert.ok(expected >= units * .68, 'unrefined equipment never grants more than 32% off');
       assert.ok(expected > 0);
     }
   }
@@ -169,7 +169,7 @@ test('manual field prices exactly match quotes, remain independent and preserve 
     equipActivity(account, activity, null);
     assert.deepEqual(account.workforce, paid);
     assert.equal(explorationCount(snapshot(account).workforce.expeditions), 1);
-    assert.equal(quoteFor(game, destination.x, destination.y, 1).dollars, base * 2);
+    assert.equal(quoteFor(game, destination.x, destination.y, 1).dollars, base * 1.5);
   }
 });
 test('recruitment fees, snapshot and confirmation agree without changing arrival population', () => {
@@ -178,11 +178,11 @@ test('recruitment fees, snapshot and confirmation agree without changing arrival
   const base = snapshot(account).recruitmentDollars;
   equipActivity(account, 'attraction', 'welcome-network');
   const state = snapshot(account), quote = gameConsumption(state, { type: 'invite' })!;
-  assert.equal(state.recruitmentDollars, base / 2);
-  assert.equal(quote.costs[0].amount, base / 2);
+  assert.equal(state.recruitmentDollars, Math.ceil(base * 0.68));
+  assert.equal(quote.costs[0].amount, Math.ceil(base * 0.68));
   const money = account.game.dollars;
   execute(account, { type: 'invite' }, account.updatedAt);
-  assert.equal(account.game.dollars, money - base / 2 * dollarsScale);
+  assert.equal(account.game.dollars, money - Math.ceil(base * 0.68) * dollarsScale);
   assert.equal(account.recruitment!.population, quote.arrivals);
   const paid = structuredClone(account.recruitment);
   equipActivity(account, 'attraction', null);
@@ -221,7 +221,7 @@ test('equipment survives SQLite session serialization and idempotent command ret
     });
     store.read(session.token, ({ account }) => {
       assert.equal(snapshot(account).inventory.activityEquipment!.investigation, 'survey-satchel');
-      assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 10);
+      assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 8);
     });
   } finally { store.close(); }
 });
@@ -231,7 +231,7 @@ test('cost equipment UI has nine compact recipes, available input counts and equ
   const state = snapshot(account);
   const html = craftingPanel(state, () => '', 'efficiency', 'settlement', 1, 'en');
   assert.equal([...html.matchAll(/data-action="craft" data-item="([^"]+)"/g)].filter(match => isActivityEquipment(match[1])).length, 9);
-  assert.match(html, /10% lower investigation fees/);
+  assert.equal(activityEquipmentBenefit('survey-satchel'), '8% lower investigation fees');
   assert.match(html, /Wood auto-collection/);
   assert.match(html, /1 \/ 1/);
   inventory(account).items.push('survey-satchel');

@@ -9,18 +9,18 @@ import { translate } from '../src/i18n.ts';
 
 function settled(population = 100) {
   const account = createAccount(worldEpoch);
-  account.game.stage = 0;
+  account.game.stage = stages.reduce((current, stage, index) => stage.population <= population ? index : current, 0);
   account.game.population = population;
   account.game.home = { ...account.game.position };
-  account.game.stock = { wood: 1000000, water: 1000000, metal: 1000000, oil: 0 };
+  account.game.stock = { wood: 1000000, water: 1000000, metal: 1000000, oil: 1000000 };
   account.workforce!.automatic = false;
   account.workforce!.cycleAt = worldEpoch + worldWeekMs;
   initializeUpkeep(account, worldEpoch);
   return account;
 }
 
-test('natural growth is exactly 1% rounded down, minimum one, once per supplied game week', () => {
-  for (const [population, growth] of [[12, 1], [100, 1], [250, 2], [10000, 100]]) {
+test('natural growth is half a percent per supplied week with fractional carry and no forced minimum', () => {
+  for (const [population, growth] of [[12, 0], [100, 0], [250, 1], [10000, 50]]) {
     const account = settled(population);
     accrue(account, worldEpoch + worldWeekMs - 1);
     assert.equal(account.game.population, population);
@@ -32,6 +32,17 @@ test('natural growth is exactly 1% rounded down, minimum one, once per supplied 
     accrue(account, account.updatedAt);
     assert.deepEqual(account, before);
   }
+});
+test('natural growth stops at the next tier requirement until the player upgrades', () => {
+  const account = settled(stages[3].population - 1);
+  assert.equal(account.game.stage, 2);
+  accrue(account, worldEpoch + worldWeekMs);
+  assert.equal(account.game.population, stages[3].population);
+  accrue(account, worldEpoch + 20 * worldWeekMs);
+  assert.equal(account.game.population, stages[3].population);
+  account.game.stage = 3;
+  accrue(account, worldEpoch + 21 * worldWeekMs);
+  assert.equal(account.game.population, stages[3].population + 1);
 });
 
 test('each consumed resource independently prevents growth and produces proportional capped weekly decline', () => {
@@ -62,8 +73,9 @@ test('fractional losses carry forward for small communities without rounding a w
   assert.equal(account.game.population, 11);
   account.game.stock.water = 1000000;
   accrue(account, worldEpoch + 3 * worldWeekMs);
-  assert.equal(account.game.population, 12);
+  assert.equal(account.game.population, 11);
   assert.equal(account.populationCycle!.lossRemainder, 0);
+  assert.ok(account.populationCycle!.growthRemainder > 0);
 });
 
 test('downgrades use strict below-half thresholds, repeat tiers and retain structures, items and home', () => {
@@ -108,10 +120,13 @@ test('online and offline population, climate bills and fractional resource carry
   accrue(offline, worldEpoch + 400 * worldDayMs);
   assert.deepEqual(offline, online);
   assert.ok(offline.game.population > initial.game.population);
-  let population = 250, wood = 0;
+  let population = 250, growthRemainder = 0, wood = 0;
   for (let week = 0; week < 2; week++) {
     wood += settlementConsumptionForDays('wood', population, worldEpoch + week * worldWeekMs + worldDayMs, 7);
-    population += Math.max(1, Math.floor(population * .01));
+    const growth = population * .005 + growthRemainder;
+    const change = Math.floor(growth);
+    population += change;
+    growthRemainder = growth - change;
   }
   const twoWeeks = settled(250);
   accrue(twoWeeks, worldEpoch + 2 * worldWeekMs);
@@ -168,30 +183,33 @@ test('paid expeditions and arrivals survive population decline and newly availab
   assert.equal(account.recruitment, null);
 });
 
-test('weekly deadlines, supply carry and census changes persist atomically and cannot be replayed', () => {
+test('weekly fractional growth and census changes persist atomically and cannot be replayed', () => {
   let now = worldEpoch;
   const store = new SqliteStore(':memory:', () => now), identity = store.create();
   try {
-    store.transaction(identity.token, session => { session.account = settled(100); });
-    assert.equal(store.population(null).global, 100);
+    store.transaction(identity.token, session => { session.account = settled(200); });
+    assert.equal(store.population(null).global, 200);
     now += worldWeekMs;
     store.transaction(identity.token, (session, time) => accrue(session.account, time));
-    assert.equal(store.population(null).global, 101);
+    assert.equal(store.population(null).global, 201);
+    now += worldWeekMs;
+    store.transaction(identity.token, (session, time) => accrue(session.account, time));
+    assert.equal(store.population(null).global, 202);
     const saved = store.read(identity.token, session => structuredClone(session.account));
     assert.equal(saved.populationCycle!.lastChange, 1);
     assert.equal(saved.populationCycle!.readyAt, now + worldWeekMs);
     store.transaction(identity.token, (session, time) => accrue(session.account, time));
-    assert.equal(store.population(null).global, 101);
+    assert.equal(store.population(null).global, 202);
     assert.deepEqual(store.read(identity.token, session => session.account), saved);
     now += worldWeekMs;
     assert.throws(() => store.transaction(identity.token, (session, time) => {
       accrue(session.account, time);
       throw new Error('Fixture rollback');
     }), /Fixture rollback/);
-    assert.equal(store.population(null).global, 101);
+    assert.equal(store.population(null).global, 202);
     assert.deepEqual(store.read(identity.token, session => session.account), saved);
     store.transaction(identity.token, (session, time) => accrue(session.account, time));
-    assert.equal(store.population(null).global, 102);
+    assert.equal(store.population(null).global, 203);
   } finally { store.close(); }
 });
 

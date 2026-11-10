@@ -31,8 +31,8 @@ export function atlasMap(snapshot: AtlasSnapshot, language: Language): string {
   return `<svg class="atlas-map" viewBox="0 0 ${atlasSize} ${atlasSize}" role="img" aria-label="${escape(translate('Settlement atlas and federation territories', language))}">
     <rect width="${atlasSize}" height="${atlasSize}" fill="#14251f"/>${[...territoryPaths].map(([federation, path]) => `<path d="${path}" fill="${escape(colors.get(federation) ?? generatedFederation(federation).color)}" opacity=".6"/>`).join('')}
     <path d="${borders}" stroke="#e0ebd5" stroke-width="2" fill="none" opacity=".7"/>
-    ${settlements.map(entry => `<g><title>${escape(entry.settlement!)} (${entry.location!.x}, ${entry.location!.y}) - ${escape(entry.federation ?? translate('Independent', language))}</title>
-      <circle cx="${entry.location!.x}" cy="${entry.location!.y}" r="${entry.yours ? 9 : 4}" fill="${entry.yours ? '#ffdf81' : '#fff'}" stroke="#101d17" stroke-width="2"/>
+    ${settlements.map(entry => `<g><title>${escape(`${entry.settlement!}${entry.relic ? ` · ${translate('Relic', language)}` : ''}`)} (${entry.location!.x}, ${entry.location!.y}) - ${escape(entry.federation ?? translate('Independent', language))}</title>
+      <circle cx="${entry.location!.x}" cy="${entry.location!.y}" r="${entry.yours ? 9 : 4}" fill="${entry.relic ? '#d9ad67' : entry.yours ? '#ffdf81' : '#fff'}" stroke="#101d17" stroke-width="2"/>
       ${entry.yours ? `<circle cx="${entry.location!.x}" cy="${entry.location!.y}" r="16" fill="none" stroke="#ffdf81" stroke-width="3"/>` : ''}</g>`).join('')}
   </svg>`;
 }
@@ -173,7 +173,7 @@ export class AtlasPage {
     const legend = this.root.querySelector<HTMLElement>('[data-atlas-legend]');
     if (legend) legend.innerHTML = `<h2>${this.t('Federation territories')}</h2><p>${this.t('Automatic nearest-settlement territories, shown on a 25 km grid. Independent settlements leave neutral territory. Borders are informational, not land claims.')}</p>
       ${(this.snapshot?.federations ?? []).map(federation => `<div class="atlas-legend-row">${federationArt(federation.name, 'shield')}<span data-no-localize><strong>${escape(federation.name)}</strong><small>${escape(federation.motto)}</small></span><span>${federation.members} ${this.t('Settlements')}</span></div>`).join('')}
-      <p>${this.t('Coordinates and straight-line distances use game kilometers, not real-world locations. Local exploration maps are unchanged.')}</p>`;
+      <p>${this.t('Coordinates and straight-line distances use game kilometers, not real-world locations. Expeditions reveal relics at their shared Atlas coordinates.')}</p>`;
     const entries = this.rows(), t = (text: string) => this.t(text);
     const pages = Math.max(1, Math.ceil(entries.length / 25));
     const showLocation = !this.geography && (this.metric === 'population' || this.metric === 'netWorth');
@@ -183,7 +183,7 @@ export class AtlasPage {
       ${entries.slice(this.page * 25, (this.page + 1) * 25).map((entry, index) => `<tr class="${entry.yours ? 'atlas-yours' : ''}"><td>${this.page * 25 + index + 1}</td>
       <th scope="row"><div class="atlas-name">${generatedAvatar(entry.id)}<span data-no-localize><strong>${escape(this.scope === 'players' ? entry.player : entry.settlement!)}</strong><small>${escape(this.scope === 'players' ? entry.settlement ?? t('Unsettled') : entry.player)}${entry.yours ? ` (${t('You')})` : ''}</small>${this.geography && entry.location ? `<small>(${entry.location.x}, ${entry.location.y}) km</small>` : ''}</span></div></th>
       <td>${entry.federation ? `<div class="atlas-name">${federationArt(entry.federation, 'shield')}<span data-no-localize>${escape(entry.federation)}</span></div>` : t('Independent')}</td><td>${format(entry.population)}</td><td>${format(entry.netWorth)} FTH$</td>
-      <td>${this.geography ? entry.distance === null ? '-' : `${format(entry.distance)} km` : showLocation ? entry.location ? `(${entry.location.x}, ${entry.location.y}) km` : '-' : this.metric === 'stage' ? t(stages[entry.stage]?.name ?? 'Unsettled') : `${format(entry[this.metric])}${this.metric === 'dollars' ? ' FTH$' : ''}`}</td></tr>`).join('') || `<tr><td colspan="6">${t('No matching players or settlements.')}</td></tr>`}
+      <td>${this.geography ? entry.distance === null ? '-' : `${format(entry.distance)} km` : showLocation ? entry.location ? `(${entry.location.x}, ${entry.location.y}) km` : '-' : this.metric === 'stage' ? t(entry.relic ? 'Relic' : stages[entry.stage]?.name ?? 'Unsettled') : `${format(entry[this.metric])}${this.metric === 'dollars' ? ' FTH$' : ''}`}</td></tr>`).join('') || `<tr><td colspan="6">${t('No matching players or settlements.')}</td></tr>`}
       </tbody></table></div><div class="atlas-pagination"><span>${format(entries.length)} ${t('Results')} - ${this.page + 1} / ${pages}</span><button class="button" data-atlas-action="previous" ${this.page === 0 ? 'disabled' : ''}>${t('Previous')}</button><button class="button" data-atlas-action="next" ${this.page + 1 >= pages ? 'disabled' : ''}>${t('Next')}</button></div>`;
   }
 }

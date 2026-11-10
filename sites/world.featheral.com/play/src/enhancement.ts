@@ -30,14 +30,15 @@ export function validEnhancedEquipment(value: EnhancedEquipment): boolean {
     && Number.isSafeInteger(value.level) && value.level >= 0 && value.level <= enhancementMaximumLevel;
 }
 export function enhancementChance(level: number): number {
-  return Math.max(10, 90 - level * .1);
+  return Math.max(40, 80 - level * 2);
 }
 export function enhancedDiscount(item: ActivityEquipment, level: number): number {
-  return Math.min(99, activityEquipmentItems[item].discount * (1000 + level) / 1000);
+  return Math.min(75, activityEquipmentItems[item].discount + level * 2);
 }
 export function enhancementCost(level: number): Cost {
-  const multiplier = level + 1;
-  return { wood: 1000 * multiplier, water: 500 * multiplier, metal: 500 * multiplier, oil: 100 * multiplier, dollars: 100 * multiplier };
+  const tenths = 10 + level;
+  const cost = (base: number) => Math.floor((base * tenths + 9) / 10);
+  return { wood: cost(100), water: cost(50), metal: cost(50), oil: cost(10), dollars: cost(25) };
 }
 export function enhancementQuote(game: Game, bag: ItemInventory, target: string): EnhancementQuote {
   const copy = bag.enhancedEquipment?.find(copy => copy.id === target);
@@ -49,7 +50,7 @@ export function enhancementQuote(game: Game, bag: ItemInventory, target: string)
   const reason = !item || !available ? 'Own an unequipped copy before refining.'
     : game.stage < 0 ? 'Establish a settlement before refining.'
       : level >= enhancementMaximumLevel ? 'Maximum refinement level reached.'
-        : discount >= 99 ? 'Maximum equipment discount reached.'
+        : discount >= 75 ? 'Maximum equipment discount reached.'
         : !bag.items.includes(refinementCore) ? 'A Refinement Core is required.'
           : Object.entries(cost).some(([resource, amount]) => resource === 'dollars'
             ? game.dollars < amount * dollarsScale : game.stock[resource as keyof Game['stock']] < amount)

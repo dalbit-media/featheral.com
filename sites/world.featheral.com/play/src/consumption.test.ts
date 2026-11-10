@@ -81,7 +81,7 @@ test('concurrent expedition previews and confirmation costs match authoritative 
     const command = { type: 'move', x: destination.x, y: destination.y } as const;
     const base = explorationQuote(before.game, command.x, command.y);
     const confirmation = gameConsumption(before, command)!;
-    assert.equal(destination.dollars, base.dollars * 2 ** concurrent);
+    assert.equal(destination.dollars, base.dollars * 1.5 ** concurrent);
     assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: destination.dollars }]);
     const after = apply(account, { id: randomUUID(), revision: account.revision, command }, account.updatedAt + 1000);
     assert.equal(before.dollars - after.dollars, destination.dollars);

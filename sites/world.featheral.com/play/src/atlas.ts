@@ -40,7 +40,7 @@ export function settlementDistance(a: Location, b: Location): number {
 export interface AtlasEntry {
   id: string; player: string; settlement: string | null; yours: boolean;
   location: Location | null; distance: number | null; federation: string | null;
-  population: number; netWorth: number; dollars: number; stage: number; explored: number; contribution: number;
+  population: number; netWorth: number; dollars: number; stage: number; explored: number; contribution: number; relic: boolean;
 }
 export interface AtlasFederation extends FederationIdentity { members: number; population: number }
 export interface AtlasSnapshot { entries: AtlasEntry[]; federations: AtlasFederation[]; updatedAt: number }

@@ -43,6 +43,7 @@ export interface Store {
   population(federation: string | null): PopulationTotals;
   publicTotals(): PublicTotals;
   atlasView?(token: string): AtlasSnapshot;
+  captureRelics(owner: string, account: Account, discovered: readonly string[], now: number): string[];
   federationView?(token: string): FederationVault | null;
   contributeFederation?(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string;
   ensureLiquidity?(token: string, asset: MarketAsset, saleQuantity?: number): Promise<void>;
@@ -264,6 +265,9 @@ export class SqliteStore implements Store {
   atlasView(token: string): AtlasSnapshot {
     const { owner } = this.chatSession(token);
     return this.atlas.view(owner, this.clock());
+  }
+  captureRelics(owner: string, account: Account, discovered: readonly string[], now: number): string[] {
+    return this.atlas.captureRelics(owner, account, discovered, now);
   }
   contributeFederation(account: Account, owner: string, command: Extract<Command, { type: 'federation-contribute' }>, now: number): string {
     return this.federationTreasury.contribute(account, owner, command, now);

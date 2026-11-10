@@ -8,12 +8,13 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { SqliteStore } from './store.ts';
 import { WorldAtlas } from './atlas.ts';
-import { createAccount } from './economy.ts';
+import { accrue, createAccount } from './economy.ts';
 import { inventory } from './inventory.ts';
 import { createApi } from './http.ts';
 import { dollarsScale } from '../src/dollars.ts';
 import { marketBasePrice } from '../src/market.ts';
 import { settlementDistance } from '../src/atlas.ts';
+import { worldWeekMs } from '../src/environment.ts';
 import type { AtlasSnapshot } from '../src/atlas.ts';
 
 test('atlas includes all saved players, migrates unique persistent locations and never changes gameplay', () => {
@@ -76,6 +77,61 @@ test('net worth preserves owned value across resource, item and FTH$ market escr
         exchange.action(owner, session, { id: randomUUID(), revision: session.account.revision, command }, time, realTime));
       assert.equal(store.atlasView(identity.token).entries[0].netWorth, expected);
     }
+  } finally { store.close(); }
+});
+test('zero-population relics stay hidden until exploration captures their stored resources and dollars once', () => {
+  let now = 1000000;
+  const store = new SqliteStore(':memory:', () => now), explorer = store.create(), abandoned = store.create();
+  try {
+    store.transaction(explorer.token, (session, time) => {
+      const account = session.account, game = account.game;
+      game.stage = 0; game.population = 50; game.home = { x: 0, y: 0 };
+      game.explored = ['0,0'];
+      account.workforce!.automatic = false;
+      account.workforce!.cycleAt = time + worldWeekMs;
+    });
+    store.transaction(abandoned.token, session => {
+      const account = session.account, game = account.game;
+      game.stage = 0; game.population = 0; game.home = { x: 0, y: 0 };
+      game.stock = { wood: 11, water: 22, metal: 33, oil: 44 };
+      game.dollars = 12 * dollarsScale + 3456;
+    });
+
+    const explorerAtlas = store.atlasView(explorer.token), relicAtlas = store.atlasView(abandoned.token);
+    const explorerEntry = explorerAtlas.entries.find(entry => entry.yours)!;
+    const hiddenRelic = explorerAtlas.entries.find(entry => !entry.yours)!;
+    const relicEntry = relicAtlas.entries.find(entry => entry.yours)!;
+    assert.equal(hiddenRelic.relic, false);
+    assert.equal(hiddenRelic.location, null);
+    assert.equal(hiddenRelic.settlement, null);
+    assert.equal(hiddenRelic.netWorth, 0);
+    assert.ok(explorerEntry.location && relicEntry.location);
+    const target = { x: relicEntry.location.x - explorerEntry.location.x, y: relicEntry.location.y - explorerEntry.location.y };
+
+    store.transaction(explorer.token, (session, time) => {
+      const account = session.account, game = account.game;
+      account.workforce!.expeditions = [{ ...target, workers: 2, startedAt: time, readyAt: time + 1, surveyRadius: 0 }];
+    });
+    const publicTotalsBefore = store.publicTotals();
+    now += 2;
+    store.transaction(explorer.token, (session, time, _realTime, _exchange, owner) => {
+      accrue(session.account, time, (account, tiles, at) => store.captureRelics(owner, account, tiles, at));
+    });
+
+    const captured = store.read(explorer.token, session => session.account);
+    const remaining = store.read(abandoned.token, session => session.account);
+    assert.deepEqual(captured.game.stock, { wood: 11, water: 22, metal: 33, oil: 44 });
+    assert.equal(captured.game.dollars, 12 * dollarsScale + 3456);
+    assert.deepEqual(remaining.game.stock, { wood: 0, water: 0, metal: 0, oil: 0 });
+    assert.equal(remaining.game.dollars, 0);
+    assert.equal(remaining.relicCaptured, true);
+    assert.ok(captured.game.log.some(message => message.includes('Relic discovered at Atlas coordinates')));
+    assert.deepEqual(store.publicTotals(), publicTotalsBefore);
+
+    const revealedRelic = store.atlasView(explorer.token).entries.find(entry => !entry.yours)!;
+    assert.equal(revealedRelic.relic, true);
+    assert.deepEqual(revealedRelic.location, relicEntry.location);
+    assert.deepEqual(store.captureRelics(store.chatSession(explorer.token).owner, captured, [`${target.x},${target.y}`], now), []);
   } finally { store.close(); }
 });
 test('atlas HTTP route requires a session, rejects mutations and queries, and returns the complete directory', async () => {

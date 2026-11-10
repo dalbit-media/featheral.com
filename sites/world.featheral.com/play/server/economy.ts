@@ -73,10 +73,11 @@ export interface Account {
   recruitment?: Snapshot['recruitment'];
   waterUpkeep?: { version?: 2; readyAt: number; lastPopulationLoss: number; paused?: boolean };
   settlementUpkeep?: { version: 1; readyAt: number; oilStartedAt?: number; remainder: { wood: number; metal: number; oil?: number } };
-  populationCycle?: { readyAt: number; required: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; shortage: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; lossRemainder: number; lastChange: number };
+  populationCycle?: { readyAt: number; required: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; shortage: Record<'water' | 'wood' | 'metal', number> & { oil?: number }; lossRemainder: number; growthRemainder?: number; lastChange: number };
   workforce?: StoredWorkforce;
   inventory?: ItemInventory;
   receipt: { id: string; request: string; result: Omit<Snapshot, 'workforce' | 'inventory' | 'waterUpkeep'> & { workforce?: StoredWorkforce; inventory?: ItemInventory; waterUpkeep?: StoredSnapshotUpkeep | null; message: string } } | null;
+  relicCaptured?: boolean;
 }
 export const resources: Resource[] = ['wood', 'water', 'metal', 'oil'];
 const empty = (): Stock => ({ wood: 0, water: 0, metal: 0, oil: 0 });
@@ -230,7 +231,7 @@ export function initializeUpkeep(account: Account, now: number): void {
   }
   if (account.game.stage >= 0 && !account.populationCycle) {
     account.populationCycle = { readyAt: now + worldWeekMs, required: { water: 0, wood: 0, metal: 0 },
-      shortage: { water: 0, wood: 0, metal: 0 }, lossRemainder: 0, lastChange: 0 };
+      shortage: { water: 0, wood: 0, metal: 0 }, lossRemainder: 0, growthRemainder: 0, lastChange: 0 };
   }
 }
 function recordPopulationSupply(account: Account, resource: Resource, required: number, shortage: number, firstDay: number, days: number): void {
@@ -258,7 +259,10 @@ function updatePopulation(account: Account): void {
     change = -Math.min(population, Math.floor(loss));
     cycle.lossRemainder = loss - Math.floor(loss);
   } else if (population > 0 && (['water', 'wood', 'metal'] as const).every(resource => cycle.required[resource] > 0)) {
-    change = Math.max(1, Math.floor(population * .01));
+    const growth = population * .005 + (cycle.growthRemainder ?? 0);
+    const nextTierPopulation = stages[account.game.stage + 1]?.population ?? stages[account.game.stage].population;
+    change = Math.min(Math.floor(growth), Math.max(0, nextTierPopulation - population));
+    cycle.growthRemainder = population + change >= nextTierPopulation ? 0 : growth - Math.floor(growth);
     cycle.lossRemainder = 0;
   }
   if (!Number.isSafeInteger(population + change)) throw new ApiError(409, 'Population limit reached.');
@@ -419,7 +423,8 @@ function runActivityAutomation(account: Account, event: number): void {
     account.revision++;
   }
 }
-export function accrue(account: Account, time: number): void {
+export type RelicCapture = (account: Account, discovered: readonly string[], time: number) => string[];
+export function accrue(account: Account, time: number, captureRelics?: RelicCapture): void {
   inventory(account);
   const now = Math.max(account.updatedAt, time);
   initializeUpkeep(account, now);
@@ -442,15 +447,17 @@ export function accrue(account: Account, time: number): void {
           : expedition.itemFind ? 'Investigation returned with a permit. 2 residents are available.' : 'Investigation returned without an item. 2 residents are available.');
         continue;
       }
-      const before = account.game.explored.length;
+      const previouslyExplored = new Set(account.game.explored);
       survey(account.game, expedition, expedition.surveyRadius);
-      const discovered = account.game.explored.length - before;
+      const newlyDiscovered = account.game.explored.filter(tile => !previouslyExplored.has(tile));
+      const discovered = newlyDiscovered.length;
       if (discovered > 0) {
         const terrain = terrainAt(expedition.x, expedition.y, account.game.seed);
         if (expedition.finds?.collectible ?? true) findCollectible(account, terrain);
         for (let i = 0; i < (expedition.finds?.collection ?? 1); i++) findCollectionItem(account, terrain);
         for (let i = 0; i < (expedition.finds?.activity ?? 1); i++) findActivityItem(account, terrain);
         if (expedition.finds?.collectible ?? true) findCustomizationItem(account, terrain);
+        for (const message of captureRelics?.(account, newlyDiscovered, event) ?? []) note(account.game, message);
       }
       account.game.contribution += discovered;
       exploringWorkers -= expedition.workers;
@@ -543,6 +550,7 @@ export function accrue(account: Account, time: number): void {
     }
   }
   if (completed) work.expeditions.splice(0, completed);
+  if (account.relicCaptured && account.game.population > 0) delete account.relicCaptured;
   account.updatedAt = now;
 }
 export function snapshot(account: Account): Snapshot {
@@ -951,7 +959,8 @@ export function parseActionEnvelope(value: unknown): { id: string; revision: num
 }
 export function apply(account: Account, value: unknown, time: number, realTime = time,
   sellPickup?: (command: Extract<Command, { type: 'collect-sell' }>) => string,
-  contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string): Snapshot & { message: string } {
+  contribute?: (command: Extract<Command, { type: 'federation-contribute' }>) => string,
+  captureRelics?: RelicCapture): Snapshot & { message: string } {
   const body = parseActionEnvelope(value);
   const request = JSON.stringify({ revision: body.revision, command: body.command });
   if (account.receipt?.id === body.id) {
@@ -971,11 +980,12 @@ export function apply(account: Account, value: unknown, time: number, realTime =
   }
   const command = parseCommand(body.command);
   if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
-  accrue(account, time);
+  accrue(account, time, captureRelics);
   if (body.revision !== account.revision) throw new ApiError(409, 'World changed. Refresh and retry.');
   if (realTime - account.lastActionAt < 250) throw new ApiError(429, 'Actions are limited to four per second.');
   const message = execute(account, command, realTime, sellPickup, contribute);
-  if (command.type === 'activate-activity' || command.type === 'activity-automation') accrue(account, account.updatedAt);
+  if (command.type === 'activate-activity' || command.type === 'activity-automation') accrue(account, account.updatedAt, captureRelics);
+  if (account.relicCaptured && account.game.population > 0) delete account.relicCaptured;
   if (!Object.keys(workforce(account).crews).length) beginCycle(account, account.updatedAt);
   if (!resources.every(r => Number.isSafeInteger(account.game.stock[r]) && account.game.stock[r] >= 0)
     || !Number.isSafeInteger(account.game.population)) throw new ApiError(409, 'Account limit reached.');

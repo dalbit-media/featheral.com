@@ -58,18 +58,18 @@ test('refinement core uses actual stage-zero recipe costs and has dedicated art 
   craft(account, 'refinement-core');
   assert.equal(account.game.dollars, previous - 25 * dollarsScale);
 });
-test('chance declines from 90 to a floor of 10; each success adds 0.1 percent of base and caps at 99', () => {
-  assert.equal(enhancementChance(0), 90);
-  assert.equal(enhancementChance(1), 89.9);
+test('refinement adds useful savings at a measured success rate and caps at 75%', () => {
+  assert.equal(enhancementChance(0), 80);
+  assert.equal(enhancementChance(1), 78);
+  assert.equal(enhancementChance(20), 40);
   assert.equal(enhancementChance(500), 40);
-  assert.equal(enhancementChance(800), 10);
-  assert.equal(enhancementChance(1000), 10);
-  assert.equal(enhancedDiscount('survey-satchel', 1), 10.01);
-  assert.equal(enhancedDiscount('survey-satchel', 1000), 20);
-  assert.equal(enhancedDiscount('survey-array', 1000), 99);
-  assert.deepEqual(enhancementCost(1), { wood: 2000, water: 1000, metal: 1000, oil: 200, dollars: 200 });
-  for (const [level, roll, success] of [[0, .899999, true], [0, .9, false], [1, .898999, true],
-    [1, .899, false], [800, .099999, true], [800, .1, false], [999, 0, true]] as const) {
+  assert.equal(enhancementChance(1000), 40);
+  assert.equal(enhancedDiscount('survey-satchel', 1), 10);
+  assert.equal(enhancedDiscount('survey-satchel', 1000), 75);
+  assert.equal(enhancedDiscount('survey-array', 1000), 75);
+  assert.deepEqual(enhancementCost(1), { wood: 110, water: 55, metal: 55, oil: 11, dollars: 28 });
+  for (const [level, roll, success] of [[0, .799999, true], [0, .8, false], [1, .779999, true],
+    [1, .78, false]] as const) {
     const account = fixture(), bag = inventory(account), id = randomUUID();
     bag.items = ['refinement-core'];
     bag.enhancedEquipment = [{ id, item: 'survey-satchel', level }];
@@ -98,11 +98,11 @@ test('first failure converts exactly one spare ordinary copy and keeps a stable 
 });
 test('affordability, cores, equipped ordinary copies and market escrow are validated without spending', () => {
   const changes = [
-    (account: ReturnType<typeof fixture>) => { account.game.stock.wood = 999; },
-    (account: ReturnType<typeof fixture>) => { account.game.stock.water = 499; },
-    (account: ReturnType<typeof fixture>) => { account.game.stock.metal = 499; },
-    (account: ReturnType<typeof fixture>) => { account.game.stock.oil = 99; },
-    (account: ReturnType<typeof fixture>) => { account.game.dollars = 100 * dollarsScale - 1; },
+    (account: ReturnType<typeof fixture>) => { account.game.stock.wood = 99; },
+    (account: ReturnType<typeof fixture>) => { account.game.stock.water = 49; },
+    (account: ReturnType<typeof fixture>) => { account.game.stock.metal = 49; },
+    (account: ReturnType<typeof fixture>) => { account.game.stock.oil = 9; },
+    (account: ReturnType<typeof fixture>) => { account.game.dollars = 25 * dollarsScale - 1; },
     (account: ReturnType<typeof fixture>) => { inventory(account).items = ['survey-satchel']; },
     (account: ReturnType<typeof fixture>) => { equipActivity(account, 'investigation', 'survey-satchel'); },
     (account: ReturnType<typeof fixture>) => {
@@ -140,10 +140,10 @@ test('stale quotes, cap and invalid random values do not charge, mutate identity
     assert.throws(() => refineEquipment(account, copy.id, current.fingerprint, () => roll), /randomness/);
     assert.deepEqual(account, invalid);
   }
-  copy.item = 'survey-array'; copy.level = 980;
+  copy.item = 'survey-array';   copy.level = 22;
   const discountCap = quote(account, copy.id), cappedCopy = structuredClone(account);
-  assert.equal(discountCap.discount, 99);
-  assert.equal(discountCap.nextDiscount, 99);
+  assert.equal(discountCap.discount, 75);
+  assert.equal(discountCap.nextDiscount, 75);
   assert.equal(discountCap.eligible, false);
   assert.match(discountCap.reason!, /Maximum equipment discount/);
   assert.throws(() => refineEquipment(account, copy.id, discountCap.fingerprint, () => 0), /Maximum equipment discount/);
@@ -154,13 +154,13 @@ test('individual identities and equipped IDs validate persistently and never ent
   bag.enhancedEquipment = [{ id: randomUUID(), item: 'survey-array', level: 100 }];
   const copy = bag.enhancedEquipment[0];
   equipEnhanced(account, 'investigation', copy.id);
-  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 55);
+  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 75);
   assert.equal(sellableItemCount(bag, copy.item), 0);
   assert.throws(() => equipActivity(account, 'investigation', copy.item), /Own matching/);
   assert.throws(() => equipEnhanced(account, 'exploration', copy.id), /Own matching/);
   equipActivity(account, 'investigation', 'survey-satchel');
   assert.equal(bag.enhancedEquipped!.investigation, undefined);
-  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 10);
+  assert.equal(activityEquipmentDiscount(account.game, 'investigation'), 8);
   equipEnhanced(account, 'investigation', copy.id);
   assert.equal(bag.activityEquipment!.investigation, undefined);
   equipEnhanced(account, 'investigation', null);
@@ -453,7 +453,7 @@ test('refinement receipt and resources roll back together when the outer transac
     const result = world.store.transaction(token, (session, now, realTime, exchange, owner) =>
       exchange.enhancementAction(owner, session.account, body, now, realTime));
     assert.equal(result.inventory.enhancedEquipment!.length, 1);
-    assert.equal(result.dollars, state.dollars - 100);
+    assert.equal(result.dollars, state.dollars - 25);
   } finally { world.close(); }
 });
 test('existing fiscal ledger stages refinement payments and exact player-to-player transfers without issuance or pool changes', () => {
@@ -484,7 +484,7 @@ test('existing fiscal ledger stages refinement payments and exact player-to-play
         command: { type: 'refine-equipment', target: estimate.target, fingerprint: estimate.fingerprint } }, now, realTime);
     });
     assert.equal(staged.length, 1);
-    assert.equal(staged[0].reduce((sum, entry) => sum + BigInt(entry.delta), 0n), -100n * 10n ** 18n);
+    assert.equal(staged[0].reduce((sum, entry) => sum + BigInt(entry.delta), 0n), -25n * 10n ** 18n);
     const copy = refined.inventory.enhancedEquipment![0];
     const listed = world.action(seller, { type: 'enhancement-list', equipmentId: copy.id, price: 50 });
     assert.equal(staged.length, 1);
@@ -494,7 +494,7 @@ test('existing fiscal ledger stages refinement payments and exact player-to-play
     assert.equal(staged[1].length, 2);
     assert.equal(staged[1].reduce((sum, entry) => sum + BigInt(entry.delta), 0n), 0n);
     assert.deepEqual(world.read(buyer).market.tickers, pools);
-    assert.equal(world.read(seller).dollars, 950);
+    assert.equal(world.read(seller).dollars, 1025);
     assert.equal(world.read(buyer).dollars, 950);
   } finally { world.close(); }
 });
@@ -522,7 +522,7 @@ test('authenticated HTTP refinement and player listings require origin, CSRF, au
     const refined = await response.json() as ApiState;
     const copy = refined.inventory.enhancedEquipment![0];
     assert.deepEqual(await (await post(seller, 'actions', body)).json(), refined);
-    assert.equal(refined.dollars, state.dollars - 100);
+    assert.equal(refined.dollars, state.dollars - 25);
     world.advance();
     const listBody = { id: randomUUID(), revision: refined.revision,
       command: { type: 'enhancement-list', equipmentId: copy.id, price: 37.1234 } };

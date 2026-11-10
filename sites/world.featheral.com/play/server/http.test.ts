@@ -623,7 +623,7 @@ test('development API exposes one accelerated game clock with baseline rules and
     time += 1;
     state = await (await fetch(`${base}/state`, { headers: { Cookie: cookie } })).json() as ApiState;
     state = await (await action({ type: 'invite' })).json() as ApiState;
-    assert.equal(state.game.population, 13 + firstArrivals);
+    assert.equal(state.game.population, 12 + firstArrivals);
     assert.equal(state.recruitment!.population * 50, state.recruitmentDollars);
     assert.equal(state.inviteReadyAt - state.serverTime, worldWeekMs);
   } finally {

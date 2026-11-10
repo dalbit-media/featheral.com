@@ -292,7 +292,7 @@ test('boosted automatic Water gathering sustains weekly population consumption w
   for (let week = 0; week < 12; week++) {
     const due = snapshot(account).workforce.cycleAt;
     accrue(account, due);
-    assert.equal(account.game.population, 13 + week, `natural population growth in week ${week + 1}`);
+    assert.equal(account.game.population, 12, `fractional natural growth in week ${week + 1}`);
     assert.equal(snapshot(account).waterUpkeep!.lastPopulationLoss, 0);
     if (snapshot(account).pending.water >= Math.ceil(resourceCapacity(snapshot(account).capacity, 'water') / 2)) act(account, { type: 'claim', resource: 'water' }, due);
     assert.ok(account.game.stock.water >= waterRequirement(12), `next bill funded in week ${week + 1}`);
@@ -683,6 +683,7 @@ test('legacy migration preserves old completed batches, fractions, unfinished de
 });
 test('concurrent expeditions are limited only by available residents and their individual FTH$ costs', () => {
   const account = manual(emptyAllocation());
+  account.game.stock.wood = 1000000;
   account.game.dollars = 1000 * dollarsScale;
   const targets = [[5, 0], [-5, 0], [0, 5], [0, -5], [4, 2], [-4, 2]];
   let spent = 0, sent = 0;
@@ -701,6 +702,7 @@ test('concurrent expeditions are limited only by available residents and their i
 });
 test('quick exploration skips active destinations and failed duplicate or unaffordable launches spend nothing', () => {
   const account = manual(emptyAllocation());
+  account.game.stock.wood = 1000000;
   const target = nextExploration(account.game)!;
   act(account, { type: 'move', x: target.x, y: target.y });
   const before = snapshot(account);
@@ -759,7 +761,7 @@ test('teams return independently in deadline order and automatic allocation neve
   assert.ok(account.game.explored.includes(`${short.x},${short.y}`));
   assert.ok(!account.game.explored.includes(`${long.x},${long.y}`));
   const remaining = snapshot(account).workforce.expeditions, next = nextExploration(account.game, remaining)!;
-  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars * 2);
+  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars * 1.5);
   accrue(account, long.readyAt);
   assert.deepEqual(snapshot(account).workforce.expeditions, []);
   assert.ok(account.game.explored.includes(`${long.x},${long.y}`));
@@ -814,20 +816,20 @@ test('recruitment pays FTH$ upfront but adds residents only at the exact one-wee
   assert.equal(result.inviteReadyAt - result.serverTime, worldWeekMs);
   accrue(account, result.inviteReadyAt - 1);
   assert.throws(() => act(account, { type: 'invite' }, result.inviteReadyAt - 1), /Recruitment ready/);
-  assert.equal(account.game.population, 13);
+  assert.equal(account.game.population, 12);
   accrue(account, result.inviteReadyAt);
-  assert.equal(account.game.population, 13 + arrivals);
+  assert.equal(account.game.population, 12 + arrivals);
   assert.equal(snapshot(account).recruitment, null);
   assert.equal(snapshot(account).inviteReadyAt, 0);
   accrue(account, result.inviteReadyAt + worldWeekMs * 100);
-  assert.ok(account.game.population > 13 + arrivals, 'natural growth continues without repeating the paid batch');
+  assert.ok(account.game.population > 12 + arrivals, 'natural growth continues without repeating the paid batch');
   const population = account.game.population;
   assert.equal(snapshot(account).recruitmentDollars, recruitmentDollars(account.game.population, 0, account.updatedAt));
   const second = act(account, { type: 'invite' });
   const secondArrivals = second.recruitment!.population;
   assert.equal(account.game.population, population);
   accrue(account, second.inviteReadyAt);
-  assert.equal(account.game.population, population + Math.max(1, Math.floor(population * .01)) + secondArrivals);
+  assert.equal(account.game.population, population + Math.max(0, account.populationCycle!.lastChange) + secondArrivals);
 });
 test('recruitment survives idle-cycle fast-forward, completes once offline, and never grants early workforce or production', () => {
   const account = manual(emptyAllocation());
@@ -854,6 +856,7 @@ test('recruitment survives idle-cycle fast-forward, completes once offline, and 
 test('recruitment size is locked at dispatch', () => {
   const account = manual({ ...emptyAllocation(), wood: 30 });
   account.game.population = 10000;
+  account.game.stage = 6;
   account.game.stock.metal = 10000;
   const result = act(account, { type: 'invite' });
   assert.equal(result.recruitment?.population, recruitmentAmount(10000, 0, result.serverTime));
@@ -863,7 +866,7 @@ test('recruitment size is locked at dispatch', () => {
   assert.equal(account.game.population, 10001);
   const pending = snapshot(account).pending.wood;
   accrue(account, due);
-  assert.equal(account.game.population, 10001 + result.recruitment!.population);
+  assert.equal(account.game.population, 10051 + result.recruitment!.population);
   assert.equal(snapshot(account).pending.wood, pending);
 });
 test('already-paid larger recruitment batches retain their exact arrivals after the growth rebalance', () => {

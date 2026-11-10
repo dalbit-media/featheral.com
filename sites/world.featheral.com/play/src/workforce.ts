@@ -96,7 +96,7 @@ function routeQuote(game: Game, x: number, y: number, concurrent = 0): { dollars
   const weeks = terrainDetails[terrainAt(x, y, game.seed)].weeks;
   const dollars = monetaryPolicy.explorationBase + Math.ceil(Math.hypot(x - home.x, y - home.y)) * monetaryPolicy.explorationPerTile
     + (weeks - 1) * monetaryPolicy.explorationPerExtraWeek;
-  return { dollars: dollars * 2 ** concurrent, weeks, reward: 0 };
+  return { dollars: dollars * 1.5 ** concurrent, weeks, reward: 0 };
 }
 export function explorationQuote(game: Game, x: number, y: number, concurrent = 0): { dollars: number; weeks: number; reward: number } {
   const quote = routeQuote(game, x, y, concurrent);

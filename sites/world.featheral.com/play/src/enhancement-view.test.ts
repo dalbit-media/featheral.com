@@ -22,10 +22,10 @@ function fixture(): ApiState {
 test('enhancement preview shows the precise relative gain, full failure cost and a single review action', () => {
   const state = fixture(), before = structuredClone(state);
   const plan = enhancementQuote(state.game, state.inventory, 'survey-satchel');
-  assert.equal(plan.discount, 10); assert.equal(plan.nextDiscount, 10.01);
+  assert.equal(plan.discount, 8); assert.equal(plan.nextDiscount, 10);
   for (const language of ['en', 'ko'] as const) {
     const html = enhancementPanel(state, 'survey-satchel', null, false, '', false, language, () => '<span>resources</span>');
-    assert.match(html, /10\.00%/); assert.match(html, /10\.01%/); assert.match(html, /90%/);
+    assert.match(html, /8\.00%/); assert.match(html, /10\.00%/); assert.match(html, /80%/);
     assert.equal((html.match(/data-action="refine-equipment"/g) ?? []).length, 1);
     assert.ok(html.includes(translate('Failure consumes all listed costs. Equipment and level are retained.', language)));
     assert.ok(html.includes(translate('The first attempt converts one unused ordinary copy into individual equipment.', language)));

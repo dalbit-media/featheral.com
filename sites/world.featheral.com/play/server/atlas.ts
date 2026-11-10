@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SqliteDatabase } from '../../../../services/database/sqlite.js';
 import type { Session } from './store.ts';
+import type { Account } from './economy.ts';
 import { atlasSize, generatedFederation, identityHash, settlementDistance, startingFederations } from '../src/atlas.ts';
 import type { AtlasEntry, AtlasSnapshot, Location } from '../src/atlas.ts';
 import { dollarsScale } from '../src/dollars.ts';
@@ -26,6 +27,56 @@ export class WorldAtlas {
     }
     throw new Error('Settlement atlas is full.');
   }
+  captureRelics(owner: string, captor: Account, discovered: readonly string[], now: number): string[] {
+    if (!discovered.length || captor.game.stage < 0 || !captor.game.home) return [];
+    const origin = this.location(owner), home = captor.game.home, discoveredTiles = new Set(discovered);
+    const messages: string[] = [];
+    const relics = this.db.prepare(`SELECT id,data FROM sessions
+      WHERE id!=? AND json_extract(data,'$.account.game.stage')>=0
+        AND json_extract(data,'$.account.game.population')=0
+        AND COALESCE(json_extract(data,'$.account.relicCaptured'),0)=0
+      ORDER BY id`).all(owner);
+    for (const row of relics) {
+      const relicOwner = String(row.id), session = JSON.parse(String(row.data)) as Session;
+      const relicLocation = this.location(relicOwner);
+      const localX = home.x + relicLocation.x - origin.x, localY = home.y + relicLocation.y - origin.y;
+      if (!discoveredTiles.has(`${localX},${localY}`)) continue;
+      const source = session.account, sourceGame = source.game, stock = sourceGame.stock;
+      const amounts = Object.keys(captor.game.stock) as (keyof typeof captor.game.stock)[];
+      if (!amounts.every(resource => Number.isSafeInteger(stock[resource]) && stock[resource] >= 0
+        && Number.isSafeInteger(captor.game.stock[resource] + stock[resource]))
+        || !Number.isSafeInteger(sourceGame.dollars) || sourceGame.dollars < 0
+        || !Number.isSafeInteger(captor.game.dollars + sourceGame.dollars)) {
+        throw new Error('Relic capture exceeds the safe balance limit.');
+      }
+      const stolen = { ...stock }, dollars = sourceGame.dollars;
+      for (const resource of amounts) {
+        captor.game.stock[resource] += stolen[resource];
+        stock[resource] = 0;
+      }
+      captor.game.dollars += dollars;
+      sourceGame.dollars = 0;
+      source.relicCaptured = true;
+      source.revision++;
+      source.updatedAt = now;
+      source.receipt = null;
+      sourceGame.log = ['An explorer claimed the remaining resources from this relic.', ...sourceGame.log].slice(0, 40);
+      this.db.prepare('UPDATE sessions SET data=? WHERE id=?').run(JSON.stringify(session), relicOwner);
+      this.db.prepare('UPDATE public_totals SET metal=metal-?,dollars=dollars-? WHERE id=1')
+        .run(stolen.metal, dollars);
+      const summary = [
+        ...amounts.map(resource => {
+          const value = stolen[resource];
+          return value ? `${value.toLocaleString()} ${resource}` : '';
+        }).filter(Boolean),
+        dollars ? `FTH$ ${(dollars / dollarsScale).toLocaleString('en-US', { maximumFractionDigits: 4 })}` : '',
+      ].filter(Boolean).join(', ');
+      messages.push(summary
+        ? `Relic discovered at Atlas coordinates (${relicLocation.x}, ${relicLocation.y}). Captured ${summary}.`
+        : `Relic discovered at Atlas coordinates (${relicLocation.x}, ${relicLocation.y}); it held no remaining resources or FTH$.`);
+    }
+    return messages;
+  }
   view(owner: string, now: number): AtlasSnapshot {
     const escrow = new Map<string, number>();
     for (const order of this.db.prepare("SELECT owner,asset,side,price,remaining FROM market_orders WHERE status='open'").all()) {
@@ -35,12 +86,28 @@ export class WorldAtlas {
       const id = String(order.owner);
       escrow.set(id, (escrow.get(id) ?? 0) + value);
     }
+    const rows = this.db.prepare(`SELECT s.id,s.data,p.nickname FROM sessions s
+      LEFT JOIN chat_profiles p ON p.owner=s.id ORDER BY s.id`).all();
+    const accounts = new Map<string, Account>(), locations = new Map<string, Location>();
+    for (const row of rows) {
+      const id = String(row.id), account = (JSON.parse(String(row.data)) as Session).account;
+      accounts.set(id, account);
+      if (account.game.stage >= 0) locations.set(id, this.location(id));
+    }
+    const viewer = accounts.get(owner), viewerLocation = locations.get(owner), exploredAtlas = new Set<string>();
+    if (viewer?.game.home && viewerLocation) for (const tile of viewer.game.explored) {
+      const match = /^(-?\d+),(-?\d+)$/.exec(tile);
+      if (!match) continue;
+      exploredAtlas.add(`${viewerLocation.x + Number(match[1]) - viewer.game.home.x},${viewerLocation.y + Number(match[2]) - viewer.game.home.y}`);
+    }
     const entries: AtlasEntry[] = [];
-    for (const row of this.db.prepare(`SELECT s.id,s.data,p.nickname FROM sessions s
-      LEFT JOIN chat_profiles p ON p.owner=s.id ORDER BY s.id`).all()) {
-      const id = String(row.id), account = (JSON.parse(String(row.data)) as Session).account, game = account.game;
+    for (const row of rows) {
+      const id = String(row.id), account = accounts.get(id)!;
+      const game = account.game, relicLocation = locations.get(id) ?? null;
+      const isRelic = game.stage >= 0 && game.population === 0;
+      const visible = !isRelic || id === owner || Boolean(relicLocation && exploredAtlas.has(`${relicLocation.x},${relicLocation.y}`));
       const publicId = createHash('sha256').update(`atlas:${id}`).digest('hex').slice(0, 20);
-      const dollars = game.dollars / dollarsScale;
+      const dollars = isRelic && !visible ? 0 : game.dollars / dollarsScale;
       let netWorth = dollars + (escrow.get(id) ?? 0);
       for (const resource of marketResources) netWorth += game.stock[resource] * marketBasePrice(resource);
       for (const item of inventory(account).items) {
@@ -49,10 +116,11 @@ export class WorldAtlas {
       }
       if (!Number.isFinite(netWorth) || netWorth < 0) throw new Error('Invalid atlas net worth.');
       entries.push({ id: publicId, player: row.nickname ? String(row.nickname) : `Builder ${publicId.slice(0, 6).toUpperCase()}`,
-        settlement: game.stage >= 0 ? account.customization?.settlementName || `Haven ${publicId.slice(0, 6).toUpperCase()}` : null,
-        yours: id === owner, location: game.stage >= 0 ? this.location(id) : null, distance: null,
-        federation: game.federation, population: game.population, netWorth, dollars,
-        stage: game.stage, explored: game.explored.length, contribution: game.contribution });
+        settlement: game.stage >= 0 && visible ? account.customization?.settlementName || `Haven ${publicId.slice(0, 6).toUpperCase()}` : null,
+        yours: id === owner, location: game.stage >= 0 && visible ? relicLocation : null, distance: null,
+        federation: game.federation, population: game.population, netWorth: isRelic && !visible ? 0 : netWorth, dollars,
+        stage: game.stage >= 0 && visible ? game.stage : -1, explored: game.explored.length, contribution: game.contribution,
+        relic: isRelic && visible });
     }
     const origin = entries.find(entry => entry.yours)?.location;
     for (const entry of entries) if (origin && entry.location) entry.distance = settlementDistance(origin, entry.location);

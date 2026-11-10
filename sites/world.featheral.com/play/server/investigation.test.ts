@@ -50,7 +50,7 @@ test('investigation locks two residents for exactly one week, charges one tenth 
   assert.equal(account.game.dollars, before.game.dollars - quote.dollars * 10000);
   assert.equal(explorationCount(account.workforce.expeditions), 1);
   const next = nextExploration(account.game, account.workforce.expeditions)!;
-  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars * 2);
+  assert.equal(next.dollars, explorationQuote(account.game, next.x, next.y).dollars * 1.5);
   const savedFind = team.itemFind;
   accrue(account, team.readyAt - 1);
   assert.equal(account.workforce.expeditions.length, 1);
@@ -163,7 +163,7 @@ test('investigations do not block automated exploration or take over its return 
   assert.equal(account.workforce.expeditions.length, 2);
   assert.equal(account.activityAutomation!.exploration.nextAt, normal.readyAt);
 });
-test('mixed field teams charge shared 1x, 2x, 4x, 8x fees identically in previews and execution', () => {
+test('mixed field teams charge shared 1x, 1.5x, 2.25x, 3.375x fees in previews and execution', () => {
   const account = fixture();
   for (let active = 0; active < 4; active++) {
     const before = snapshot(account);
@@ -172,7 +172,7 @@ test('mixed field teams charge shared 1x, 2x, 4x, 8x fees identically in preview
     const command = { type: active % 2 ? 'move' : 'investigate', x: destination.x, y: destination.y } as const;
     const base = command.type === 'move' ? explorationQuote(account.game, command.x, command.y).dollars
       : investigationQuote(account.game, command.x, command.y).dollars;
-    assert.equal(destination.dollars, base * 2 ** active);
+    assert.equal(destination.dollars, base * 1.5 ** active);
     const confirmation = gameConsumption(before, command)!;
     assert.deepEqual(confirmation.costs, [{ asset: 'dollars', amount: destination.dollars }]);
     execute(account, command, start + active * 2000);
@@ -183,7 +183,7 @@ test('mixed field teams charge shared 1x, 2x, 4x, 8x fees identically in preview
   accrue(account, firstReturn);
   const remaining = account.workforce.expeditions.length;
   const next = nextInvestigation(account.game, account.workforce.expeditions)!;
-  assert.equal(next.dollars, investigationQuote(account.game, next.x, next.y).dollars * 2 ** remaining);
+  assert.equal(next.dollars, investigationQuote(account.game, next.x, next.y).dollars * 1.5 ** remaining);
 });
 test('already-paid legacy investigations keep their one resident and one-day deadline', () => {
   const account = fixture();

@@ -139,7 +139,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       const cost = explorationQuote(game, command.x, command.y, explorationCount(state.workforce.expeditions));
       return { ...quote('Explore', `${command.x}, ${command.y}`, { dollars: cost.dollars },
         ['Assigned residents return when the expedition finishes.',
-          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.',
+          'Investigate and Explore share a 1x, 1.5x, 2.25x, 3.375x... route fee multiplier. Each active field team raises the next base fee by 50% at departure.',
           ...(activityEquipmentDiscount(game, 'exploration') ? [`Equipped gear reduces exploration fees by ${activityEquipmentDiscount(game, 'exploration')}%. Paid jobs stay unchanged.`] : [])]), weeks: cost.weeks, residents: 2 };
     }
     case 'investigate': {
@@ -149,7 +149,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
           '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.',
           'Costs 10% of the undiscounted concurrent Explore route fee, minimum FTH$0.10 before equipment discounts.',
           ...(activityEquipmentDiscount(game, 'investigation') ? [`Equipped gear reduces investigation fees by ${activityEquipmentDiscount(game, 'investigation')}%. Paid jobs stay unchanged.`] : []),
-          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.']),
+          'Investigate and Explore share a 1x, 1.5x, 2.25x, 3.375x... route fee multiplier. Each active field team raises the next base fee by 50% at departure.']),
         weeks: cost.weeks, residents: 2 };
     }
     case 'dispatch-squad': {
@@ -157,7 +157,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
       return { ...quote('Dispatch squad', squadItems[command.item].name, {},
         ['Consumes one voucher for the displayed missions only. Cancellation or failure consumes nothing.',
           'Targets are chosen automatically within your current reach. Two available residents are assigned per mission.',
-          'Investigate and Explore share a 1x, 2x, 4x, 8x... route fee multiplier. Each active field team doubles the next fee at departure.',
+          'Investigate and Explore share a 1x, 1.5x, 2.25x, 3.375x... route fee multiplier. Each active field team raises the next base fee by 50% at departure.',
           'Exploration avoids destinations already covered by active or selected surveys. Terrain is revealed only on return.',
           ...(command.activity === 'investigation' ? ['Two idle residents return after one game week. Known terrain is not expanded.',
             '10% chance of one permit: 90% one-week tier, 10% four-week tier. No keepsakes or high-tier items.'] : []),
@@ -196,7 +196,7 @@ export function gameConsumption(state: Snapshot, command: Command): ConsumptionQ
         ],
         warning: refinement.fingerprint !== command.fingerprint ? 'Enhancement requirements changed. Review again.' : refinement.reason ?? 'Failure consumes all listed costs. Equipment and level are retained.',
         notes: ['One attempt only. The server determines the result after confirmation.',
-          'Each successful level adds 0.1% of the original discount, not 0.1 percentage points. Savings are capped at 99%.',
+          'Each successful level adds 2 percentage points of fee savings. Total savings are capped at 75%.',
           'Enhanced copies keep their identity and level when traded. New actions only; paid jobs stay unchanged.'] };
     }
     case 'construction': {

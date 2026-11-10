@@ -327,6 +327,8 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
         ? store.transaction(token, (session, time, realTime, exchange, owner) => {
           const csrf = request.headers['x-csrf-token'];
           if (typeof csrf !== 'string' || !equal(csrf, session.csrf)) throw new ApiError(403, 'CSRF token rejected.');
+          const captureRelics = (account: typeof session.account, tiles: readonly string[], at: number) =>
+            store.captureRelics(owner, account, tiles, at);
           const command = marketAction ? null : parseCommand(parseActionEnvelope(body).command);
           return { ...(marketAction ? exchange.action(owner, session, body, time, realTime)
             : command?.type === 'refine-equipment' || command?.type === 'enhanced-gear'
@@ -335,10 +337,10 @@ export function createApi(store: Store, origin: string, readWorldProfile?: (addr
             command => {
               if (!store.contributeFederation) throw new ApiError(503, 'Federation vault is unavailable.');
               return store.contributeFederation(session.account, owner, command, time);
-            })), csrf: session.csrf };
+            }, captureRelics)), csrf: session.csrf };
         })
         : store.transaction(token, (session, time, realTime, exchange, owner) => {
-          accrue(session.account, time);
+          accrue(session.account, time, (account, tiles, at) => store.captureRelics(owner, account, tiles, at));
           return { ...(autoCraftRead ? exchange.autoCraftQuote(owner, session.account, time, realTime) : collectionRead && isMarketAsset(asset) && isMarketResource(asset) ? exchange.collectionQuote(owner, session.account, asset, realTime, marketUrl.searchParams.has('quantity') ? quantity : undefined) : halfRead ? exchange.halfQuote(owner, session.account, realTime) : marketRead && isMarketAsset(asset) ? exchange.read(owner, session.account, time, realTime, asset, quantity,
             isMarketPercentage(budgetPercent) ? { percent: budgetPercent, ...(buyingPrice === undefined ? {} : { price: buyingPrice }) } : undefined) : snapshot(session.account)),
             csrf: session.csrf };

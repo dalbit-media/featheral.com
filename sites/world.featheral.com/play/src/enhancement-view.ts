@@ -40,8 +40,8 @@ export function enhancementPanel(state: ApiState, selection: string | null, mark
     <div class="enhancement-layout"><section class="enhancement-picker"><h2>${t('Choose equipment')}</h2><div class="enhancement-items">${targets.map(target => `<button class="enhancement-item" data-action="enhance-select" data-copy="${target.target}" aria-pressed="${target.target === selected?.target}">${itemArt(target.item)}<span><strong>${t(itemName(target.item))}</strong><small>${target.active ? `${t('Equipped')} · ` : ''}${target.target === target.item ? `${t('Ordinary copies')}: ${target.quantity}` : `${t('Level')} ${target.level}`}</small></span></button>`).join('')}</div>
     ${!targets.length ? `<p class="fineprint">${t('Craft or buy fee-saving equipment to begin.')}</p><a class="button" href="#craft">${t('Craft')}</a>` : ''}
     <details class="disclosure" data-detail="enhancement-rules"><summary>${t('Enhancement rules')} ${icon('chevron')}</summary>
-    <p>${t('Each successful level adds 0.1% of the original discount, not 0.1 percentage points. Savings are capped at 99%.')}</p>
-    <p>${t('Up to 1,000 levels. Success starts at 90% and falls to a 10% floor. Costs grow with the current level.')}</p>
+    <p>${t('Each successful level adds 2 percentage points of fee savings. Total savings are capped at 75%.')}</p>
+    <p>${t('Up to 1,000 levels. Success starts at 80% and falls to a 40% floor. Costs rise by 10% per current level.')}</p>
     <p>${t('One attempt only. The server determines the result after confirmation.')}</p>
     <p>${t('Enhanced copies keep their identity and level when traded. New actions only; paid jobs stay unchanged.')}</p></details></section>
     <section class="enhancement-detail" aria-label="${t('Enhancement preview')}">${selected && quote ? `<header>${itemArt(selected.item)}<div><h2>${t(itemName(selected.item))}</h2><small>${t('Level')} ${quote.level} / 1,000</small></div></header>
