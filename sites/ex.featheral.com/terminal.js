@@ -6,6 +6,11 @@
   $("gold-channel").href = "/gold-channel/";
   let token = "", owner = "", markets = [], selected = new URLSearchParams(location.search).get("market") || "FTH$", account, preview, quoteGeneration = 0, refreshing = false, busy = false;
   const chart = window.FeatheralCandleChart.mount($("candle-chart"));
+  function openFundingTarget() {
+    if (location.hash === "#initial-dollar-funding") $("initial-dollar-funding").open = true;
+  }
+  window.addEventListener("hashchange", openFundingTarget);
+  openFundingTarget();
   const text = (tag, value) => { const node = document.createElement(tag); node.textContent = value; return node; };
   const decimals = symbol => symbol === "FTH$" ? 18 : 0;
   function amount(value, symbol) {
@@ -50,9 +55,9 @@
     catch (error) { console.error(error); $("terminal-status").textContent = error.message; }
     finally { busy = false; controls.forEach(button => { button.disabled = false; }); $("execute-order").disabled = !preview; renderPendingMovements(); }
   }
-  function rows(root, entries, empty, render) {
+  function rows(root, entries, empty, render, columns = 5) {
     root.replaceChildren();
-    if (!entries.length) { const row = text("tr", ""); const cell = text("td", empty); cell.colSpan = 5; row.append(cell); root.append(row); }
+    if (!entries.length) { const row = text("tr", ""); const cell = text("td", empty); cell.colSpan = columns; row.append(cell); root.append(row); }
     for (const entry of entries) root.append(render(entry));
   }
   function row(values) { const tr = document.createElement("tr"); values.forEach(value => tr.append(text("td", value))); return tr; }
@@ -75,7 +80,14 @@
     $("disconnect").hidden = !token;
     $("trading-owner").textContent = owner ? `Trading owner: ${owner}` : "Trading account not connected";
     renderPendingMovements();
-    if (!token) { account = null; $("trading-total").textContent = ""; return; }
+    if (!token) {
+      account = null; $("trading-total").textContent = "";
+      rows($("positions"), [], "Connect to view trading balances.", undefined, 2);
+      rows($("trade-history"), [], "Connect to view your executed trades.");
+      rows($("movement-history"), [], "Connect to view deposits and withdrawals.", undefined, 4);
+      $("legacy-requests").replaceChildren();
+      return;
+    }
     const currentOwner = owner, current = await api("/trading/account");
     if (owner !== currentOwner) return;
     account = current;
@@ -89,7 +101,7 @@
     $("trading-total").textContent = usd === null ? "USD unavailable" : `${current.portfolio.partial ? "Partial " : ""}$${usd} estimated trading assets`;
     rows($("positions"), current.holdings, "No trading assets. Deposit FTHX to start.", asset => {
       const tr = row([asset.symbol, format(asset.balance, asset.symbol)]); tr.title = format(asset.balance, asset.symbol); return tr;
-    });
+    }, 2);
     const previous = $("withdraw-symbol").value;
     $("withdraw-symbol").replaceChildren(...current.holdings.map(asset => { const option = text("option", asset.symbol); option.value = asset.symbol; return option; }));
     if (current.holdings.some(asset => asset.symbol === previous)) $("withdraw-symbol").value = previous;
@@ -107,7 +119,7 @@
         tr.lastChild.append(resume);
       }
       return tr;
-    });
+    }, 4);
     $("legacy-requests").replaceChildren();
     for (const request of current.legacyRequests || []) {
       const box = text("p", `Previous wallet settlement ${request.id}: ${request.status}. `), resume = text("button", "Review and resume");
@@ -138,7 +150,13 @@
     const marketSymbol = selected;
     const data = await api("/trading/markets?interval=" + $("chart-interval").value);
     if (generation !== quoteGeneration) return;
-    markets = data.markets; renderMarkets();
+    const recovering = data.pair.notes.some(item => item.pendingSettlement);
+    markets = data.markets.map(item => recovering ? { ...item, pendingSettlement: true } : item); renderMarkets();
+    $("overview-markets").textContent = String(markets.length);
+    $("overview-funded").textContent = String(markets.filter(item => item.funded && !item.pendingSettlement).length);
+    const volumes = markets.map(item => item.symbol === "FTH$" ? data.pair.volumeFthx : item.volume);
+    $("overview-volume").textContent = volumes.every(value => /^\d+$/.test(String(value)))
+      ? `${volumes.reduce((sum, value) => sum + BigInt(value), 0n).toLocaleString()} FTHX` : "Unavailable";
     const market = markets.find(m => m.symbol === marketSymbol);
     if (!market) throw Error("Requested market is unavailable. Select an available market.");
     $("market-title").textContent = marketSymbol + " / FTHX";
@@ -295,7 +313,6 @@
   async function disconnect(revoke) {
     if (revoke && token) await api("/logout", "POST", {});
     token = ""; owner = ""; preview = null; invalidate();
-    for (const id of ["positions", "trade-history", "movement-history"]) rows($(id), [], "Trading account disconnected.", () => {});
     $("liquidity-positions").textContent = "";
     $("legacy-requests").replaceChildren();
     $("withdraw-symbol").replaceChildren();

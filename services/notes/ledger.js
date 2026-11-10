@@ -23,6 +23,8 @@ function initialize(db) {
       kind TEXT NOT NULL, roll INTEGER NOT NULL, paid INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(site,post_id,reactor));
   `);
   if (!symbolIndexExists) db.exec("INSERT OR IGNORE INTO notes_currency_symbols(symbol) SELECT DISTINCT symbol FROM notes_entries");
+  if (!db.readOnlyReplica) db.exec(`CREATE INDEX IF NOT EXISTS notes_activity_time ON notes_entries(at DESC,id DESC);
+    CREATE INDEX IF NOT EXISTS notes_activity_symbol ON notes_entries(symbol,at DESC,id DESC)`);
 }
 
 function migrate(source, target, site) {

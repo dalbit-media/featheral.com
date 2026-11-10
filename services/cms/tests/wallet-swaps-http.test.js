@@ -43,6 +43,16 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
     request.on("error", reject); request.end(body ? JSON.stringify(body) : undefined);
   });
   const wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
+  for (const host of ["ex.featheral.com", "notes.featheral.com"]) {
+    const activityResponse = await call("/activity", undefined, { host });
+    assert.equal(activityResponse.status, 200);
+    assert.equal(activityResponse.headers["cache-control"], "no-store");
+    assert.equal(activityResponse.body.partial, true);
+    assert.equal((await call("/liquidity", undefined, { host })).body.automaticFunding, false);
+    assert.equal((await call("/market-tape", undefined, { host })).status, 200);
+  }
+  assert.equal((await call("/activity?limit=999", undefined, { host: "ex.featheral.com" })).status, 400);
+  assert.equal((await call("/activity", undefined, { host: "untrusted.invalid" })).status, 404);
   for (const [address, amount] of [[owner, 1000], [require("../../notes/game-funds").SYSTEM_TREASURY_ACCOUNT, 1000000]])
     creation.db.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,?,'fixture',0,'test')").run(address, amount);
   creation.markets.fund("FTHA", "FUND FTHA 1000000 FTHX 1000000 NOTES");
@@ -72,6 +82,12 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   assert.equal(account.body.walletTrades[0].symbol, "FTHA");
   assert.equal(account.body.walletTrades[0].amount, 100);
   assert.equal(account.body.walletTrades[0].output, 99);
+  const publicActivity = (await call("/activity", undefined, { host: "notes.featheral.com" })).body;
+  assert.ok(publicActivity.rows.some(entry => entry.source === "exchange"));
+  assert.doesNotMatch(JSON.stringify(publicActivity.rows), new RegExp(owner, "i"));
+  const publicTape = (await call("/market-tape?symbol=FTHA", undefined, { host: "ex.featheral.com" })).body;
+  assert.equal(publicTape.rows.length, 1);
+  assert.equal(publicTape.rows[0].output, "99");
   const depositInput = { symbol: "FTHX", amount: "10", requestId: "http-trading-deposit-01" };
   assert.equal((await call("/trading/deposit", depositInput, { token, host: "ex.featheral.com" })).status, 200);
   const operationPath = `/trading/operations/${depositInput.requestId}`;

@@ -21,7 +21,7 @@ test("Exchange terminal keeps signing sessions in memory and preserves submitted
   assert.match(terminal, /FeatheralWallet\.authenticate\(address => api\("\/challenge"/);
   assert.doesNotMatch(terminal, /eth_requestAccounts|featheral:exchange-auth|builtin-connect/);
 });
-async function browserFixture(t, respond = () => null, storage = new Map()) {
+async function browserFixture(t, respond = () => null, storage = new Map(), hash = "") {
   const owner = "0x" + "ab".repeat(20), requests = [], confirmations = [], errors = [];
   class Element {
     constructor() { this.value = ""; this.children = []; this.listeners = new Map(); this.firstChild = { textContent: "" }; }
@@ -48,8 +48,9 @@ async function browserFixture(t, respond = () => null, storage = new Map()) {
   };
   vm.runInNewContext(terminal, {
     document: { getElementById: node, createElement: () => new Element(), querySelectorAll: () => [], hidden: false },
-    location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search: "" },
+    location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search: "", hash },
     window: { FeatheralCandleChart: { mount: () => ({ update() {}, reset() {}, sma() {} }) },
+      addEventListener() {},
       FeatheralWallet: { authenticate: async challenge => { await challenge(owner); return { address: owner, signature: "login-signature" }; } },
       ethereum: { on() {}, request: async ({ method }) => method === "eth_accounts" ? [owner] : "payment-signature" } },
     URLSearchParams, TextEncoder, crypto: require("node:crypto"), setInterval() {},
@@ -162,8 +163,106 @@ test("Reloaded funding and liquidity requests resume without requiring empty for
 test("A settling Dollar market is labeled for recovery, not for fresh funding", async t => {
   const market = { symbol: "FTH$", funded: false, pendingSettlement: true, price: null, history: { candles: [] } };
   const ui = await browserFixture(t, route => route.startsWith("/trading/markets")
-    ? { body: { markets: [market], pair: { notes: [market] }, reference: { usdValue: null } } } : null);
+    ? { body: { markets: [market, { symbol: "FTHA", funded: true, volume: "0" }], pair: { notes: [market] }, reference: { usdValue: null } } } : null);
   assert.equal(ui.node("spot-price").textContent, "Settlement recovery required");
   assert.match(ui.node("market-detail").textContent, /do not fund a replacement pool/);
   assert.equal(ui.node("market-list").children[0].children[0].textContent, "Recovery required");
+  assert.equal(ui.node("market-list").children[1].children[0].textContent, "Recovery required");
+  assert.equal(ui.node("overview-funded").textContent, "0");
+});
+test("Market overview sums only actual FTHX volume exactly and excludes recovering pools from executable count", async t => {
+  const dollar = { symbol: "FTH$", funded: true, price: null, history: { candles: [] } };
+  const ui = await browserFixture(t, route => route.startsWith("/trading/markets")
+    ? { body: { markets: [dollar, { symbol: "FTHA", funded: true, volume: "9007199254740993" },
+      { symbol: "FTHB", funded: true, pendingSettlement: true, volume: "7" }],
+    pair: { notes: [dollar], volumeFthx: "11" }, reference: { usdValue: null } } } : null);
+  assert.equal(ui.node("overview-markets").textContent, "3");
+  assert.equal(ui.node("overview-funded").textContent, "2");
+  assert.equal(ui.node("overview-volume").textContent, `${9007199254741011n.toLocaleString()} FTHX`);
+});
+test("Missing volume is explicitly unavailable rather than displayed as zero", async t => {
+  const ui = await browserFixture(t);
+  assert.equal(ui.node("overview-volume").textContent, "Unavailable");
+});
+
+class VisualElement {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.attributes = {}; this.value = ""; this.dataset = {}; this.style = {};
+    this.className = ""; this.listeners = {}; this.isConnected = true;
+    this.classList = { add: name => { this.className += " " + name; } };
+  }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; }
+  setAttribute(name, value) { this.attributes[name] = value; }
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+  get options() { return this.children; }
+}
+const descendants = root => [root, ...root.children.flatMap(descendants)];
+test("Empty candle chart is illustrative, labeled, and never draws data candles or volume", () => {
+  const root = new VisualElement("div"), context = { window: {},
+    document: { createElement: tag => new VisualElement(tag), createElementNS: (_, tag) => new VisualElement(tag) } };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../sites/ex.featheral.com/chart.js"), "utf8"), context);
+  context.window.FeatheralCandleChart.mount(root).update({ candles: [] });
+  const all = descendants(root);
+  assert.ok(all.some(node => node.textContent?.includes("No executed candles yet")));
+  assert.equal(all.filter(node => node.tag === "rect").length, 1, "Only the placeholder background, not candles");
+  assert.ok(all.some(node => node.textContent?.includes("Empty periods are not fabricated")));
+});
+test("Liquidity visuals use exact reserves, independent capped targets, honest statuses and currency filters", async () => {
+  const root = new VisualElement("section"), errors = [], markets = [
+    { symbol: "FTH$", status: "unfunded", baseReserve: "0", tokenReserve: "0", initialTarget: null, feeBps: 30 },
+    { symbol: "FTHA", status: "funded", baseReserve: "2000000", tokenReserve: "500000", initialTarget: { FTHX: "1000000", notes: "1000000" }, feeBps: 30 },
+    { symbol: "FTHB", status: "recovery-required", baseReserve: "9007199254740993", tokenReserve: "0", initialTarget: null, feeBps: 30 },
+  ];
+  const script = fs.readFileSync(path.join(__dirname, "../../../shared/market-activity.js"), "utf8");
+  const responses = {
+    activity: { rows: [], summary: [], buckets: [], from: 0, to: 1, coverage: {}, nextCursor: null },
+    liquidity: { markets, policy: "Existing funds only." },
+    "market-tape": { rows: [], description: "Executed legs only." },
+  };
+  vm.runInNewContext(script, {
+    document: { querySelectorAll: () => [root], createElement: tag => new VisualElement(tag) },
+    location: { protocol: "https:", hostname: "notes.featheral.com", port: "" },
+    URLSearchParams, AbortController, setInterval() {}, console: { error: (...args) => errors.push(args) },
+    fetch: async url => ({ ok: true, json: async () => responses[url.split("/").at(-1).split("?")[0]] }),
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(errors, []);
+  const cards = () => descendants(root).filter(node => node.className === "liquidity-card");
+  assert.equal(cards().length, 3);
+  assert.equal(cards()[0].dataset.state, "funded");
+  assert.deepEqual(descendants(cards()[0]).filter(node => node.style.width).map(node => node.style.width), ["100%", "50%"]);
+  assert.ok(descendants(root).some(node => node.textContent === "No initial target defined / reserve shown unscaled"));
+  assert.ok(descendants(root).some(node => node.textContent === `${9007199254740993n.toLocaleString()} FTHX`));
+  assert.ok(descendants(root).some(node => node.textContent === "Awaiting approved initial funding. No executable price."));
+  assert.ok(descendants(root).some(node => node.href === "https://ex.featheral.com/?market=FTHA"));
+  assert.ok(descendants(root).some(node => node.textContent === "Fund and enable" && node.href === "https://ex.featheral.com/?market=FTH%24#initial-dollar-funding"));
+  assert.equal(cards().filter(card => card.dataset.state !== "unfunded").flatMap(descendants).filter(node => node.textContent === "Fund and enable").length, 0);
+  assert.ok(descendants(root).some(node => node.className === "activity-empty"));
+  const currency = descendants(root).find(node => node.attributes["aria-label"] === "Currency");
+  currency.value = "FTHG"; currency.listeners.change();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(cards().length, 0);
+  assert.ok(descendants(root).some(node => node.textContent?.includes("FTHG uses the separate Gold conversion channel")));
+  currency.value = "";
+  responses.liquidity.markets = [...markets, ...Array.from({ length: 5 }, (_, i) => ({ ...markets[0], symbol: `FTH${i}` }))];
+  currency.listeners.change();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(cards().length, 6);
+  assert.ok(descendants(root).some(node => node.textContent?.startsWith("Showing 6 of 8 pools.")));
+  assert.ok(descendants(root).some(node => node.href === "https://admin.featheral.com/#/notes?site=ex.featheral.com&market=FTH0"));
+});
+test("Funding deep link opens the review form without submitting a funding request", async t => {
+  const ui = await browserFixture(t, undefined, undefined, "#initial-dollar-funding");
+  assert.equal(ui.node("initial-dollar-funding").open, true);
+  assert.equal(ui.requests.filter(request => request.route === "/dollar-pool/fund").length, 0);
+});
+test("Disconnect restores connection placeholders with correctly sized table cells", async t => {
+  const ui = await browserFixture(t);
+  await ui.dispatch("disconnect", "click");
+  for (const [id, columns] of [["positions", 2], ["trade-history", 5], ["movement-history", 4]]) {
+    const cell = ui.node(id).children[0].children[0];
+    assert.match(cell.textContent, /^Connect to view/);
+    assert.equal(cell.colSpan, columns);
+  }
 });

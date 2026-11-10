@@ -8,15 +8,18 @@
   <link rel="stylesheet" href="/site/notes.css">
   <link rel="stylesheet" href="/shared/site-colors.css">
   <link rel="stylesheet" href="/shared/creation.css">
+  <link rel="stylesheet" href="/shared/market-activity.css">
 </head>
 <body data-site-brand="notes.featheral.com">
   <header><a class="logo" href="/"><img src="/shared/logo-notes.svg" alt="" width="34" height="34"><span>Featheral Notes</span></a><nav class="tabs" aria-label="Notes"><a href="https://ledger.featheral.com/" data-site="ledger">Ledger explorer</a><a href="https://ex.featheral.com/">Exchange ↗</a><a href="/wallet/#swap" data-wallet-view="swap">Swap</a><a id="sites-link" href="#creation-root">Mint a note</a></nav><button type="button" data-central-wallet>Wallet</button></header>
   <main>
     <p>Swap wallet FTH$, FTHX and funded notes inline at live <a href="https://ex.featheral.com/">Exchange</a> pool prices. Exchange trading funds and World funds stay separate; withdraw them to your wallet before swapping here. Ethereum FTHG conversion stays on Gold.</p>
     <section class="notes-market"><div class="notes-chart-header"><label><select id="note-chart-interval" aria-label="Chart interval"><option value="1h">1 hour</option><option value="24h" selected>24 hours</option><option value="7d">7 days</option><option value="30d">30 days</option></select></label><button id="refresh-trending" type="button" aria-label="Refresh volumes" title="Refresh real 24-hour volumes">&#8635;</button></div><div id="trending-notes" class="creation-grid" aria-label="Notes ranked by real 24-hour volume"></div></section>
+    <section data-market-activity aria-label="Cross-system market activity"></section>
     <details class="notes-tools"><summary>Native circulation</summary><div id="native-notes" class="creation-grid"></div></details>
     <details class="notes-tools"><summary>Create &amp; manage</summary><div id="creation-root"></div></details>
   </main>
   <script src="/shared/creation.js" defer></script>
+  <script src="/shared/market-activity.js" defer></script>
 </body>
 </html>

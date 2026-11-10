@@ -652,6 +652,7 @@ function createDollarApi({ env = require("../operations/runtime").environment(),
     };
   }
   return { handle, start, close, ledger, mode, nodeId, syncFromUpstream, exchangeSettlement,
+    marketActivity: query => require("./activity").readRows(ledger.sql.db, "currency_activity", query),
     walletAccount: owner => ({ balance: ledger.balance(normalizeAccount(owner)), nonce: ledger.nonce(normalizeAccount(owner)),
       transactions: ledger.accountHistory(normalizeAccount(owner), 50) }),
     noteSupply: () => {

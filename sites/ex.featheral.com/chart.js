@@ -30,25 +30,33 @@
       end = Math.min(Math.max(1, end), all.length);
       const start = Math.max(0, end - count); visible = all.slice(start, end);
       show(visible.at(-1));
-      if (!visible.length) { add("text", { x: 450, y: 180, "text-anchor": "middle", fill: "#a3a3b8", "font-size": 16 }, "No executed candles yet"); return; }
+      if (!visible.length) {
+        for (let i = 0; i < 6; i++) add("line", { x1: 25, x2: 875, y1: 35 + i * 70, y2: 35 + i * 70, stroke: "#1d2b3c", "stroke-dasharray": "3 6" });
+        add("circle", { cx: 450, cy: 157, r: 33, fill: "#102d2b", stroke: "#29665a" });
+        add("path", { d: "M436 168V151M450 174V141M464 163V147", stroke: "#52ddb2", "stroke-width": 5, "stroke-linecap": "round" });
+        add("rect", { x: 245, y: 205, width: 410, height: 85, rx: 12, fill: "#0c1521", stroke: "#233449" });
+        add("text", { x: 450, y: 237, "text-anchor": "middle", fill: "#e5eef7", "font-size": 18 }, "Your next market starts here");
+        add("text", { x: 450, y: 265, "text-anchor": "middle", fill: "#93a8bd", "font-size": 12 }, "No executed candles yet. Real trades will appear here.");
+        return;
+      }
       let low = Math.min(...visible.map(c => value(c.low))), high = Math.max(...visible.map(c => value(c.high)));
       const pad = (high - low || high || 1) * .08; low = Math.max(0, low - pad); high += pad;
       const y = n => 300 - (n - low) / (high - low) * 270;
       step = 790 / Math.max(visible.length, 8);
       for (let i = 0; i < 6; i++) {
         const yy = 30 + i * 54;
-        add("line", { x1: 10, x2: 800, y1: yy, y2: yy, stroke: "#2c2c39" });
-        add("text", { x: 810, y: yy + 4, fill: "#a3a3b8", "font-size": 11 }, number(high - (high - low) * i / 5));
+        add("line", { x1: 10, x2: 800, y1: yy, y2: yy, stroke: "#243248" });
+        add("text", { x: 810, y: yy + 4, fill: "#9aadc2", "font-size": 11 }, number(high - (high - low) * i / 5));
       }
       const maxVolume = Math.max(...visible.map(c => Number(c.quoteVolume)), 1), width = Math.max(1, Math.min(20, step * .65));
       visible.forEach((c, i) => {
-        const x = 14 + (i + .5) * step, open = value(c.open), close = value(c.close), color = close >= open ? "#3dd9a0" : "#f97583";
+        const x = 14 + (i + .5) * step, open = value(c.open), close = value(c.close), color = close >= open ? "#52ddb2" : "#ff8296";
         add("line", { x1: x, x2: x, y1: y(value(c.high)), y2: y(value(c.low)), stroke: color });
         add("rect", { x: x - width / 2, y: Math.min(y(open), y(close)), width, height: Math.max(1, Math.abs(y(open) - y(close))), fill: color });
         const height = Number(c.quoteVolume) / maxVolume * 65;
         add("rect", { x: x - width / 2, y: 390 - height, width, height, fill: color, opacity: .5 });
         if (i % Math.max(1, Math.ceil(visible.length / 5)) === 0)
-          add("text", { x, y: 416, fill: "#a3a3b8", "font-size": 10 }, new Date(c.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+          add("text", { x, y: 416, fill: "#9aadc2", "font-size": 10 }, new Date(c.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
       });
       if (sma) {
         const points = [];
@@ -59,9 +67,9 @@
             points.push(`${14 + (i + .5) * step},${Math.max(20, Math.min(310, y(average)))}`);
           }
         }
-        if (points.length) add("polyline", { points: points.join(" "), fill: "none", stroke: "#d7b86d", "stroke-width": 1.5 });
+        if (points.length) add("polyline", { points: points.join(" "), fill: "none", stroke: "#e4c478", "stroke-width": 1.5 });
       }
-      add("text", { x: 15, y: 438, fill: "#a3a3b8", "font-size": 10 }, `Executed volume (${history.currency}) / SMA20 uses executed candles only`);
+      add("text", { x: 15, y: 438, fill: "#9aadc2", "font-size": 10 }, `Executed volume (${history.currency}) / SMA20 uses executed candles only`);
     }
     svg.addEventListener("wheel", event => { event.preventDefault(); count = Math.max(5, Math.min(300, count + (event.deltaY > 0 ? 5 : -5))); draw(); }, { passive: false });
     svg.addEventListener("pointerdown", event => { drag = { x: event.clientX, end }; svg.setPointerCapture(event.pointerId); });

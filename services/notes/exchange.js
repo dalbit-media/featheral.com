@@ -26,6 +26,7 @@ class Exchange {
       CREATE TABLE IF NOT EXISTS wallet_note_swaps(id TEXT PRIMARY KEY,owner TEXT NOT NULL,request_id TEXT NOT NULL,
         parameters TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL,at INTEGER NOT NULL,UNIQUE(owner,request_id));
     `);
+    if (!this.db.readOnlyReplica) this.db.exec("CREATE INDEX IF NOT EXISTS dollar_note_trades_time ON dollar_note_trades(at DESC,id DESC)");
     if (!this.db.readOnlyReplica) this.db.exec("INSERT OR IGNORE INTO dollar_note_pool VALUES (1,'0',0,0)");
   }
   setDollar(adapter) { this.dollar = adapter; }

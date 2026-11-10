@@ -4,6 +4,7 @@ const { LedgerDb } = require("../ledger-sql/ledgerDb");
 const { canonical, txHash } = require("./codec");
 const { accountWallet } = require("./transfer");
 const { goldEntries } = require("../gold/reserve");
+const { activityRows } = require("./activity");
 
 const SCHEMA = `
 CREATE TABLE blocks (
@@ -20,6 +21,12 @@ CREATE INDEX transactions_height ON transactions(height, idx);
 CREATE INDEX transactions_account ON transactions(account);
 CREATE INDEX transactions_counterparty ON transactions(counterparty);
 CREATE INDEX transactions_kind ON transactions(kind);
+CREATE TABLE currency_activity (
+  id TEXT PRIMARY KEY, at INTEGER NOT NULL, symbol TEXT NOT NULL, source TEXT NOT NULL,
+  kind TEXT NOT NULL, amount TEXT NOT NULL, credits TEXT NOT NULL, debits TEXT NOT NULL, record_type TEXT NOT NULL
+);
+CREATE INDEX currency_activity_time ON currency_activity(at DESC,id DESC);
+CREATE INDEX currency_activity_source ON currency_activity(source,at DESC,id DESC);
 CREATE TABLE accounts (
   account_id TEXT PRIMARY KEY, wallet TEXT NOT NULL, balance TEXT NOT NULL, balance_fth REAL NOT NULL,
   reserved TEXT NOT NULL, reserved_fth REAL NOT NULL, nonce INTEGER NOT NULL
@@ -37,6 +44,7 @@ CREATE TABLE redemptions (
 const COMMENTS = {
   blocks: "One row per sealed block of the hash-chained FTH$ ledger.",
   transactions: "Every sealed transaction. amount is exact base units (18 decimals, text); amount_fth is a convenience float for sums and sorting.",
+  currency_activity: "Public financial activity reconstructed from sealed transactions. FTHG obligations and confirmed reserve transfers remain separate record types; no private payloads.",
   accounts: "Current balance, reserved amount and transfer nonce per account id (a wallet address left-padded to bytes32, or a game-only id).",
   profiles: "Wallet-signed usernames. Avatars are not exposed here.",
   redemptions: "FTH$ to FTHG withdrawals and their reserve/settle/release status.",
@@ -58,12 +66,16 @@ function ingestFthBlock(ledger, block, file) {
       const d = tx.d;
       const counterparty = tx.k === "TRANSFER" ? d.to : "";
       const data = tx.k === "PROFILE" ? { ...d, avatar: d.avatar ? "(image)" : "" } : d;
+      const hash = txHash(tx);
       db.run(
         "INSERT OR REPLACE INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        txHash(tx), tx.i, tx.k, block.h, index, new Date(tx.t).toISOString(), tx.t, tx.a,
+        hash, tx.i, tx.k, block.h, index, new Date(tx.t).toISOString(), tx.t, tx.a,
         tx.a ? accountWallet(tx.a) : "", counterparty, counterparty ? accountWallet(counterparty) : "",
         tx.v, toFth(tx.v), tx.k === "TRANSFER" ? d.m || "" : "", canonical(data),
       );
+      for (const activity of activityRows(ledger, tx, hash)) db.run("INSERT OR REPLACE INTO currency_activity VALUES (?,?,?,?,?,?,?,?,?)",
+        activity.id, activity.at, activity.symbol, activity.source, activity.kind, activity.amount,
+        activity.credits, activity.debits, activity.recordType);
       if (tx.a) touched.add(tx.a);
       if (counterparty) touched.add(counterparty);
       if (tx.k === "GAME") for (const entry of d.entries) touched.add(entry.account);

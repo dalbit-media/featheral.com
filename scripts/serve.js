@@ -177,6 +177,7 @@ cms.setCreationPayments(api.creationPayments);
 cms.setWorkspaceProfiles(address => cms.database.profiles.get(address));
 if (worldAccounts) cms.setWorkspaceWorldHandoff((code, origin, purpose) => worldAccounts.consumeAppHandoff(code, origin, purpose));
 cms.setNoteSupply(api.noteSupply);
+cms.setMarketActivity(api.marketActivity);
 cms.setDollarWallet(api.walletAccount, api.exchangeSettlement);
 const ethereumWalletCache = new Map();
 cms.setWalletSources(async (owner, publicWorldAccount) => {

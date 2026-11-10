@@ -233,6 +233,8 @@ app.setCreationPayments = payment => { if (creation) { creation.payment = paymen
 const dollarExchange = creation ? new (require('../notes/exchange').Exchange)(creation) : null;
 const trading = creation ? new (require('../notes/trading').Trading)(creation, dollarExchange) : null;
 let dollarWalletReader;
+let dollarActivityReader;
+app.setMarketActivity = reader => { dollarActivityReader = reader; };
 let portfolioGoldReader;
 let walletSourceReader;
 app.setPortfolioGold = reader => { portfolioGoldReader = reader; };
@@ -430,6 +432,18 @@ creationRouter.get('/trending', wrap((req, res) => {
   res.json({ notes, dollarPair: pair, noteCost: 1000, siteCost: 500 });
 }));
 creationRouter.get('/markets', wrap((req, res) => res.json({ markets: creation.markets.catalog() })));
+creationRouter.get('/activity', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(require('../notes/activity').activity(creation, dollarActivityReader, req.query));
+}));
+creationRouter.get('/liquidity', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(require('../notes/activity').liquidity(creation, dollarExchange));
+}));
+creationRouter.get('/market-tape', wrap((req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(require('../notes/activity').trades(creation, req.query));
+}));
 creationRouter.get('/markets/:symbol/history', wrap((req, res) => res.json(creation.markets.history(req.params.symbol, req.query.interval))));
 creationRouter.get('/markets/account', wrap((req, res) => res.json(creation.markets.account(creationOwner(req)))));
 creationRouter.use('/trading', (req, res, next) => {

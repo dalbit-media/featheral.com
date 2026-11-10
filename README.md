@@ -325,6 +325,17 @@ estimates include trading holdings without making them spendable outside Exchang
 The terminal shows executed OHLC candles, volume, SMA20, timeframes, zoom/pan,
 full-screen charts, slippage previews, balances, trades, movement history and
 wallet-funded liquidity positions. It does not simulate an order book or leverage.
+Its responsive mint/slate interface shows actual market counts, executable pools
+and 24-hour FTHX pair-leg volume. Empty charts and quote previews are explicitly
+illustrative placeholders, never sample prices or trades. Exchange and Notes
+show reserve cards for up to six pools, with all pools available in the reserve
+table and currency filter. Each reserve bar compares only against that currency's
+initial funding target (visually capped at 100%); it is not TVL, market depth,
+an allocation percentage, or a request to top up a funded pool. FTH$ reserves
+without an approved initial target are shown unscaled.
+Unfunded reserve cards link to “Fund and enable”: FTH$ opens the Exchange
+administrator funding form; note pools open native-note administration with the
+eligible market selected. Links never submit funding or bypass approval.
 
 Unresolved deposits, withdrawals, liquidity changes and initial funding appear
 with explicit resume controls after reconnecting in the same browser tab.
@@ -336,6 +347,39 @@ after that endpoint confirms no operation exists; uncertain outcomes retain the
 original request ID. FTH$ markets and portfolio reference rates remain unavailable
 while either a wallet settlement or a trading withdrawal requires recovery.
 Executed history remains visible, and replaying recovery cannot create supply.
+
+Exchange and Notes share an **Across the economy** panel: public executed-pool
+trade tape, financial activity charts, paginated records, currency/source/window
+filters, and actual FTHX/token reserves. Visible first pages refresh every 30
+seconds; browsing older pages pauses automatic refresh. Windows cover 1h, 24h,
+7d or 30d. Activity charts cover the entire selected window, not just the current
+50-record page. Amounts and aggregates use exact base-unit strings.
+
+`GET /api/creation/activity` accepts `interval`, `symbol`, `source`, `limit`
+(1-100) and the returned `cursor`; keep filters unchanged when paging.
+`GET /api/creation/market-tape` returns up to 100 actual pool legs for `interval`
+and optional `symbol`. `GET /api/creation/liquidity` reports reconciled reserves,
+initial note-funding targets and recovery/writer availability; it never moves
+funds. Initial targets are not an instruction to rebalance healthy pools after
+trades. Dollar initial funding still requires explicit approval of both amounts.
+
+Activity includes committed Notes postings (FTHX, FTHS and community notes),
+sealed Dollar financial transactions (including World gameplay settlement,
+wallet transfers, payments, Gold and Exchange settlement), and separate Exchange
+FTH$ custody-trade records. Gold's existing reserve history supplies the same
+classification for off-chain FTHG obligations and Ethereum-confirmed reserve
+transfers; their charts remain separate. This does **not** index arbitrary FTHG
+transfers elsewhere on Ethereum or non-financial World gameplay. World deposits
+are wallet transfers; World `GAME` commits are World settlement records.
+Historical sealed activity is rebuilt from the authoritative ledger at startup.
+No signatures, account owners, payment memos or private gameplay payloads are
+returned by the new public feed. Missing Dollar coverage is explicitly partial;
+reader errors are surfaced, not silently replaced with empty activity.
+
+Gross postings, custody movements and settlements are different accounting
+records, not unique user actions or net issuance. Neither these charts nor
+ordinary transfers alter OHLC prices, market liquidity, or trading volume.
+Only executed FTHX-pair trades do so.
 
 The accounting boundaries are deliberate: Notes owns whole-unit FTHX and community
 notes; Exchange routes pairs through FTHX and segregates trading custody; Dollar

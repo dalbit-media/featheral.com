@@ -148,7 +148,7 @@ test("Uncommitted Dollar withdrawals hide executable prices and survive Exchange
   assert.deepEqual(supply(), initial);
 });
 test("Exchange-acquired dollars reach World only through explicit wallet withdrawal and signed World funding", async t => {
-  const { trading, exchange, api, owner, wallet, funds, supply, order } = await fixture(t);
+  const { trading, exchange, creation, api, owner, wallet, funds, supply, order } = await fixture(t);
   const { SqliteStore } = require("../../../sites/world.featheral.com/play/server/store.ts");
   const store = new SqliteStore(":memory:", Date.now, 1, funds);
   t.after(() => store.close());
@@ -175,6 +175,12 @@ test("Exchange-acquired dollars reach World only through explicit wallet withdra
   await store.completeFund(token, withdrawal.id, approval);
   assert.equal(store.fundView(token).available, "0");
   assert.equal(BigInt(api.ledger.balance(walletAccountId(owner)).available), BigInt(walletBefore) + BigInt(bought.output));
+  const { activity, trades } = require("../../notes/activity");
+  const worldActivity = activity(creation, api.marketActivity, { source: "world" });
+  assert.ok(worldActivity.rows.some(entry => entry.kind === "GAME" && entry.amount === amount));
+  const allActivity = activity(creation, api.marketActivity, {});
+  assert.ok(allActivity.rows.some(entry => entry.recordType === "custody-trade" && entry.amount === bought.output));
+  assert.equal(trades(creation, { symbol: "FTH$" }).rows.length, 1, "World transfers do not fabricate additional pool trades.");
   assert.doesNotThrow(() => exchange.validatePool(exchange.pool()));
   assert.deepEqual(supply(), initial);
 });

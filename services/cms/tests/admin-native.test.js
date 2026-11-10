@@ -140,7 +140,7 @@ test('native loader ignores stale templates and keeps tab changes inside the Adm
 test('Notes uses one funding handler with exact budget, eligibility, approval and lifecycle checks', async () => {
   const source = fs.readFileSync(path.join(admin, 'js', 'notes.js'), 'utf8');
   for (const scenario of ['insufficient', 'wrong-approval', 'reserved', 'cancelled', 'stale', 'success']) {
-    let html = '', posts = 0, confirmed = 0;
+    let html = '', posts = 0, confirmed = 0, selectedMarket;
     const nodes = new Map(), button = {};
     const get = selector => {
       if (!nodes.has(selector)) nodes.set(selector, { textContent: '', handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; } });
@@ -148,7 +148,8 @@ test('Notes uses one funding handler with exact budget, eligibility, approval an
     };
     const context = vm.createContext({
       VIEWS: {}, state: { seq: 1 }, renderSidebar() {}, setCrumbs() {}, toast() {},
-      setView: value => { html = value; }, fmtNum: String, esc: String, options: () => '',
+      setView: value => { html = value; }, fmtNum: String, esc: String,
+      options: (list, selected) => { selectedMarket = selected; return ''; },
       $: selector => selector === 'button' ? button : get(selector), $$: () => [],
       console: { error() {} },
       confirm: () => { confirmed++; return scenario !== 'cancelled'; },
@@ -160,7 +161,9 @@ test('Notes uses one funding handler with exact budget, eligibility, approval an
           markets: [{ symbol: 'ABC', targetFthx: 1000000, reserved: scenario === 'reserved', funded: false }] };
       },
     });
-    await vm.runInContext(source + '\nVIEWS.notes({}, 1)', context);
+    await vm.runInContext(source + '\nVIEWS.notes({market: "ABC"}, 1)', context);
+    assert.equal(selectedMarket, 'ABC', 'Funding deep link selects the requested market');
+    assert.equal(posts, 0, 'Opening a funding link never submits funding');
     if (['insufficient', 'reserved'].includes(scenario)) assert.match(html, /button class="btn" disabled/);
     else assert.doesNotMatch(html, /button class="btn" disabled/);
     if (scenario === 'stale') context.state.seq++;

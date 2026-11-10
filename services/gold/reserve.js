@@ -63,6 +63,13 @@ function goldEntries(ledger, data) {
   }
   return [];
 }
+function reserveActivity(data) {
+  if (!["fund-market", "refill-market", "resource-liquidity", "market-liquidity", "redeem", "convert", "sync"].includes(data.op)) return null;
+  const incoming = ["fund-market", "resource-liquidity", "market-liquidity", "convert"].includes(data.op) || data.direction === "origin-to-reserve";
+  const fthg = data.op === "refill-market" ? "0" : data.op === "convert" ? data.request.amount : data.fthg;
+  const treasury = data.op === "refill-market" || ["fund-market", "resource-liquidity"].includes(data.op) && BigInt(fthg) === 0n;
+  return { incoming, fthg, treasury, recordType: data.op === "sync" ? "ethereum-confirmed" : BigInt(fthg) ? "off-chain-obligation" : "treasury-circulation" };
+}
 
 // Gold authorization and Dollar balance changes replay together in the same signed journal.
 function validateGoldTransaction(ledger, tx, fresh, now) {
@@ -344,9 +351,7 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
         }
         const tx = ledger.rawBlock(height).x[index], data = tx.d;
         if (tx.k === "GOLD" && ["fund-market", "refill-market", "resource-liquidity", "market-liquidity", "redeem", "convert", "sync"].includes(data.op)) {
-          const incoming = data.op === "fund-market" || data.op === "resource-liquidity" || data.op === "market-liquidity" || data.op === "convert" || data.direction === "origin-to-reserve";
-          const fthg = data.op === "refill-market" ? "0" : data.op === "convert" ? data.request.amount : data.fthg;
-          const treasury = data.op === "refill-market" || ["fund-market", "resource-liquidity"].includes(data.op) && BigInt(fthg) === 0n;
+          const { incoming, fthg, treasury, recordType } = reserveActivity(data);
           items.push({ id: tx.i, hash: ledger.ids.get(tx.i), height, time: new Date(tx.t).toISOString(),
             operation: data.op, direction: treasury ? "treasury-to-market" : incoming ? "origin-to-reserve" : "reserve-to-origin",
             from: treasury ? TREASURY : incoming ? sourceWallet : reserveWallet,
@@ -355,7 +360,7 @@ function createReserveEngine({ ledger, privateKey, provider, confirmations = 12,
               : data.op === "convert" ? data.dollars ?? (BigInt(fthg) * RATE).toString() : data.dollars,
             treasuryDollars: treasury ? data.dollars : data.op === "fund-market" ? (BigInt(data.dollars) - BigInt(fthg) * RATE).toString() : "0",
             asset: data.asset || null, quantity: data.quantity || null,
-            recordType: data.op === "sync" ? "ethereum-confirmed" : BigInt(fthg) ? "off-chain-obligation" : "treasury-circulation",
+            recordType,
             ethereumTx: data.txHash || null, logIndex: data.logIndex ?? null });
         }
         while (height >= 0 && index < 0) { height--; if (height >= 0) index = ledger.rawBlock(height).x.length - 1; }
@@ -540,4 +545,4 @@ function quoteMemo(genesis, state, direction, amount) {
   return `G2:${ethers.id(pricing.commitment(genesis, state, direction, amount, pricing.quote(state, direction, amount))).slice(2, 62)}`;
 }
 
-module.exports = { createReserveEngine, validateGoldTransaction, conversionMessage, goldEntries, RATE, TREASURY, REDEMPTION_ESCROW, SOURCE_ADDRESS, RESERVE_ADDRESS };
+module.exports = { createReserveEngine, validateGoldTransaction, conversionMessage, goldEntries, reserveActivity, RATE, TREASURY, REDEMPTION_ESCROW, SOURCE_ADDRESS, RESERVE_ADDRESS };

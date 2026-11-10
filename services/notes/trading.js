@@ -19,6 +19,7 @@ class Trading {
       CREATE TABLE IF NOT EXISTS trading_dollar_trades(id INTEGER PRIMARY KEY,owner TEXT NOT NULL,side TEXT NOT NULL,
         amount TEXT NOT NULL,output TEXT NOT NULL,at INTEGER NOT NULL);
     `);
+    if (!this.db.readOnlyReplica) this.db.exec("CREATE INDEX IF NOT EXISTS trading_dollar_activity_time ON trading_dollar_trades(at DESC,id DESC)");
     exchange.trading = this;
   }
   custody(owner) { return `exchange-trading:${owner}`; }

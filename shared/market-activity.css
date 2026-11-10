@@ -1,0 +1,40 @@
+.market-activity { margin: 24px 0; padding: 20px; border: 1px solid currentColor; border-radius: 12px; min-width: 0; }
+.market-activity-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.market-activity-controls label { display: grid; gap: 6px; }
+.market-activity button, .market-activity select { min-height: 44px; max-width: 100%; font: inherit; }
+.market-activity-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; margin: 16px 0; }
+.market-activity-charts article { padding: 12px; border: 1px solid currentColor; border-radius: 8px; overflow-wrap: anywhere; }
+.market-activity-charts svg { display: block; width: 100%; height: 100px; }
+.market-activity-scroll { overflow-x: auto; margin: 16px 0; }
+.market-activity table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.market-activity th, .market-activity td { text-align: left; vertical-align: top; padding: 10px; border-bottom: 1px solid currentColor; overflow-wrap: anywhere; min-width: 100px; }
+.market-activity caption { text-align: left; font-weight: bold; padding: 8px 0; }
+.market-activity summary { cursor: pointer; padding: 12px 0; }
+.liquidity-heading { margin-top: 24px; }
+.liquidity-heading h3 { margin: 0 0 6px; font-size: 1.15rem; }
+.liquidity-heading p, .liquidity-legend { font-size: .75rem; opacity: .8; line-height: 1.6; }
+.liquidity-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 14px; margin: 16px 0; }
+.liquidity-card { border: 1px solid var(--line, #d6dbe7); background: var(--panel, transparent); border-radius: 12px; padding: 20px; min-width: 0; }
+.liquidity-pair { display: flex; align-items: center; gap: 10px; }
+.liquidity-pair h4 { margin: 0 0 4px; font-size: .9rem; overflow-wrap: anywhere; }
+.liquidity-pair small { font-size: .65rem; opacity: .75; }
+.liquidity-tokens { display: flex; flex-shrink: 0; padding-right: 4px; }
+.liquidity-tokens span { display: grid; place-items: center; width: 32px; height: 32px; border: 2px solid var(--panel, #fff); border-radius: 50%; background: var(--brand, #a855d7); color: #080e18; font-size: 12px; font-weight: 750; }
+.liquidity-tokens span + span { margin-left: -9px; background: #b6cadd; }
+.liquidity-status { display: inline-block; font-size: .6rem; letter-spacing: .7px; text-transform: uppercase; margin: 14px 0 18px; padding: 5px 8px; border: 1px solid var(--line, #d6dbe7); border-radius: 5px; }
+.liquidity-card[data-state="funded"] .liquidity-status { color: #147852; background: #52ddb226; }
+.liquidity-card:not([data-state="funded"]) .liquidity-status { color: #936317; background: #e4c4781c; }
+.liquidity-reserve { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: .65rem; }
+.liquidity-reserve strong { text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; font-size: .8rem; }
+.liquidity-track { overflow: hidden; height: 5px; border: 1px solid var(--line, #d6dbe7); border-radius: 5px; margin: 8px 0 16px; }
+.liquidity-track span { display: block; height: 100%; background: var(--brand, #a855d7); }
+.liquidity-track-unscaled { background: repeating-linear-gradient(120deg, transparent, transparent 4px, var(--line, #d6dbe7) 4px, var(--line, #d6dbe7) 6px); }
+.liquidity-target { display: block; margin: -8px 0 14px; font-size: .6rem; opacity: .8; }
+.liquidity-card > p { font-size: .7rem; line-height: 1.6; min-height: 38px; }
+.liquidity-link { display: block; border-top: 1px solid var(--line, #d6dbe7); padding-top: 12px; font-size: .7rem; font-weight: 650; }
+.liquidity-more { grid-column: 1 / -1; font-size: .75rem; }
+.activity-empty { text-align: center; background-image: linear-gradient(120deg, transparent, #52ddb20a); padding: 28px !important; }
+.activity-empty-icon { display: inline-block; padding: 12px 18px; border: 1px solid var(--line, #d6dbe7); border-radius: 10px; font: bold 24px ui-monospace, monospace; color: var(--brand, #a855d7); }
+.activity-empty small { font-size: .7rem; }
+body[data-site-brand="ex.featheral.com"] .liquidity-card[data-state="funded"] .liquidity-status { color: #82e8c9; }
+body[data-site-brand="ex.featheral.com"] .liquidity-card:not([data-state="funded"]) .liquidity-status { color: #e4c478; }
