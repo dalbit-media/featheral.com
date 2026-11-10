@@ -81,6 +81,10 @@ small { font-size: 11px; }
 .chart-legend .legend-down:before { background: var(--down); }
 .chart-legend .legend-average:before { background: var(--gold); }
 #market-detail, #reference-detail { font-size: 11px; }
+#gold-pool-details { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
+#gold-pool-details p { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+#gold-pool-details > a { font-size: 12px; }
+#market-mode:not(:empty) { border: 1px solid #6f5c32; border-radius: 8px; padding: 12px; color: var(--gold); background: #e4c4780a; }
 .order-panel { border-top: 2px solid #428d79; }
 .order-heading { display: flex; justify-content: space-between; align-items: baseline; }
 .order-panel p { font-size: 11px; }

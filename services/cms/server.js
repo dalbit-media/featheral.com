@@ -281,7 +281,22 @@ async function walletPortfolio(holdings, extra) {
     console.error('Portfolio market prices unavailable:', error); marketError = error.message;
     pool = { funded: false, dollars: '0', fthx: 0, priceError: marketError }; markets = [];
   }
-  return { ...require('../notes/portfolio').portfolio(holdings, pool, markets, gold, extra), goldError, marketError };
+  return { ...require('../notes/portfolio').portfolio(holdings, pool, markets, gold, extra), goldError, marketError,
+    goldPools: gold ? {
+      checkedAt: gold.checkedAt || null,
+      chainId: gold.chain?.id || null,
+      bridge: gold.bridge ? {
+        address: gold.bridge.address || null, configured: gold.bridge.configured === true,
+        deployed: gold.bridge.deployed === true, initialized: gold.bridge.initialized === true,
+        paused: gold.bridge.paused !== false, reserveFthg: gold.bridge.reserveFthg ?? null,
+        reserveFthDollar: gold.bridge.reserveFthDollar ?? null, actualFthgBalance: gold.bridge.actualFthgBalance ?? null,
+      } : null,
+      nativeReserve: gold.goldReserve ? {
+        enabled: gold.goldReserve.enabled === true, initialized: gold.goldReserve.initialized === true,
+        cap: gold.goldReserve.cap ?? null, allocated: gold.goldReserve.allocated ?? null,
+        remaining: gold.goldReserve.remaining ?? null, redeemableBacking: gold.goldReserve.redeemableBacking ?? null,
+      } : null,
+    } : null };
 }
 app.setDollarWallet = (reader, settlement) => {
   dollarWalletReader = reader;

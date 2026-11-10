@@ -31,8 +31,14 @@
         <p id="market-detail" class="muted"></p><p id="reference-detail" class="muted"></p>
       </section>
       <section class="order-panel panel"><div class="order-heading"><h2>Spot order</h2><span class="status-tag">AMM</span></div><p>No leverage. 0.3% fee per pool. Pool prices move with supply and demand.</p>
+        <p id="market-mode" role="status"></p>
         <form id="order-form"><label>Side<select id="order-side"><option value="buy">Buy with FTHX</option><option value="sell">Sell for FTHX</option></select></label><label id="order-amount-label">Input amount<input id="order-amount" inputmode="decimal" placeholder="0" required autocomplete="off"></label><label>Slippage tolerance (%)<input id="order-slippage" type="number" min="0" max="10" step="0.1" value="0.5" required></label><button type="submit">Preview order</button></form>
         <div id="order-preview" aria-live="polite"></div><button id="execute-order" type="button" disabled>Confirm spot trade</button><p class="muted">Orders spend only your Exchange trading balance, never your main wallet. Quotes expire after 30 seconds; minimum output is enforced again at execution.</p>
+      </section>
+      <section class="panel" aria-labelledby="route-heading"><h2 id="route-heading">Swap routes and underlying pools</h2>
+        <p>Wallet swaps and Exchange trading use the same internal FTHX pools and executed history. Note-to-note and FTH$-to-note swaps route through FTHX, with a fee per pool leg. Wallet funds and Exchange custody remain separate. Every internal pool is listed below, including unfunded pools.</p>
+        <p>FTHG / FTHX is reference-only: Ethereum FTHG → Gold conversion → FTH$ → FTHX. These are separate operations, not an atomic Exchange swap. Opening references are not executable prices. The ETH / FTHG valuation pool is separate again and does not fund internal trades.</p>
+        <div id="gold-pool-details" aria-live="polite"></div>
       </section>
     </section>
     <section id="trading-account" class="panel"><div class="account-heading"><h2>Trading account</h2><span id="trading-total" class="muted"></span></div><p>Only FTHX can be deposited. Acquired FTH$, community notes and unused FTHX may be withdrawn to the same owner's wallet. These funds remain part of your network wallet's estimated total, but are not spendable there until withdrawn.</p>

@@ -12,6 +12,7 @@
     "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
     "liquidity-form", "liquidity-symbol", "liquidity-action", "liquidity-amount", "liquidity-positions",
     "funding-form", "funding-dollar", "funding-fthx", "funding-approval",
+    "market-mode", "gold-pool-details",
   ];
   const missingElements = requiredElements.filter(id => !$(id));
   if (missingElements.length) {
@@ -31,6 +32,45 @@
   $("gold-channel").href = "/gold-channel/";
   let token = "", owner = "", markets = [], selected = new URLSearchParams(location.search).get("market") || "FTH$", account, preview, quoteGeneration = 0, refreshing = false, busy = false;
   const chart = window.FeatheralCandleChart.mount($("candle-chart"));
+  function applyMarketMode() {
+    const reference = selected === "FTHG";
+    $("market-mode").textContent = reference ? "Reference / conversion only. No internal FTHG pool or direct Exchange order. Use the Gold reserve channel." : "";
+    $("order-form").querySelectorAll("input, select, button").forEach(control => { control.disabled = reference; });
+  }
+  function renderGoldPools(reference) {
+    const root = $("gold-pool-details"); root.replaceChildren();
+    const pools = reference.goldPools, market = reference.usdMarket;
+    const heading = text("h3", "Gold / Ethereum transparency"); root.append(heading);
+    const snapshotFresh = pools?.checkedAt && Date.parse(pools.checkedAt) >= Date.now() - 60000 && Date.parse(pools.checkedAt) <= Date.now() + 30000;
+    root.append(text("p", pools?.checkedAt ? `Gold snapshot: ${pools.checkedAt} / chain ${pools.chainId} / ${snapshotFresh ? "recent" : "stale"}. ${reference.goldError || ""}`
+      : `Gold reserve snapshot unavailable. ${reference.goldError || "The Gold reader is not connected."}`));
+    const show = (raw, symbol) => raw === null || raw === undefined ? "Unavailable" : ["FTHG", "ETH", "FTH$"].includes(symbol)
+      ? (() => { const n = BigInt(raw), fraction = (n % unit).toString().padStart(18, "0").replace(/0+$/, "");
+        return `${(n / unit).toLocaleString()}${fraction ? "." + fraction : ""} ${symbol}`; })() : format(raw, symbol);
+    const bridge = pools?.bridge;
+    root.append(text("p", bridge ? `Ethereum Gold bridge: ${bridge.deployed ? "deployed" : "not deployed"} / ${bridge.initialized ? "initialized" : "uninitialized"} / ${bridge.paused ? "paused" : "unpaused"}. Conversion availability requires a fresh Gold quote.
+      FTHG reserve: ${show(bridge.reserveFthg, "FTHG")}; FTH$ reserve: ${show(bridge.reserveFthDollar, "FTH$")}; actual Ethereum custody: ${show(bridge.actualFthgBalance, "FTHG")}.`
+      : "Ethereum Gold bridge: unavailable."));
+    const native = pools?.nativeReserve;
+    root.append(text("p", native ? `Native Gold reserve: ${native.enabled && native.initialized ? "initialized" : "not initialized"}.
+      Origin cap: ${show(native.cap, "FTHG")}; allocated obligations: ${show(native.allocated, "FTHG")}; remaining origin: ${show(native.remaining, "FTHG")}; confirmed redeemable backing: ${show(native.redeemableBacking, "FTHG")}. Allocations are not Ethereum custody.`
+      : "Native Gold reserve: unavailable."));
+    const fresh = market?.updatedAt && Date.parse(market.updatedAt) >= Date.now() - 300000 && Date.parse(market.updatedAt) <= Date.now() + 30000;
+    root.append(text("p", market ? `ETH / FTHG valuation pool: ${!fresh ? "stale" : market.fallback ? "indicative fallback, not a live pool price" : "pool snapshot"}.
+      ${market.source || ""} ${market.marketError || market.reservesError || market.error || ""}
+      ${fresh && !market.fallback && market.reserves ? `FTHG: ${show(market.reserves.fthg, "FTHG")}; ETH: ${show(market.reserves.eth, "ETH")}. Block ${market.block}.` : "Pool reserves unavailable."}`
+      : "ETH / FTHG valuation pool: unavailable."));
+    const link = text("a", "Inspect Gold conversion and Ethereum pools"); link.href = hostUrl("gold") + "/"; root.append(link);
+    if (pools?.chainId === 1 && /^0x[0-9a-f]{40}$/i.test(bridge?.address || "")) {
+      const contract = text("a", `Ethereum bridge contract: ${bridge.address}`); contract.href = "https://etherscan.io/address/" + bridge.address;
+      const line = text("p", ""); line.append(contract); root.append(line);
+    }
+    if (/^0x[0-9a-f]{64}$/i.test(market?.pool || "")) {
+      const poolLink = text("a", `ETH / FTHG pool: ${market.pool}`);
+      poolLink.href = "https://app.uniswap.org/explore/pools/ethereum/" + market.pool;
+      const line = text("p", ""); line.append(poolLink); root.append(line);
+    }
+  }
   function openFundingTarget() {
     if (location.hash === "#initial-dollar-funding") $("initial-dollar-funding").open = true;
   }
@@ -78,7 +118,7 @@
     controls.forEach(button => { button.disabled = true; });
     try { $("terminal-status").textContent = ""; await work(); }
     catch (error) { console.error(error); $("terminal-status").textContent = error.message; }
-    finally { busy = false; controls.forEach(button => { button.disabled = false; }); $("execute-order").disabled = !preview; renderPendingMovements(); }
+    finally { busy = false; controls.forEach(button => { button.disabled = false; }); $("execute-order").disabled = !preview; applyMarketMode(); renderPendingMovements(); }
   }
   function rows(root, entries, empty, render, columns = 5) {
     root.replaceChildren();
@@ -165,7 +205,7 @@
     $("market-list").replaceChildren();
     for (const market of markets.filter(m => m.symbol.includes(filter))) {
       const button = text("button", market.symbol); button.type = "button"; button.setAttribute("aria-pressed", String(market.symbol === selected));
-      button.append(text("small", market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
+      button.append(text("small", market.referenceOnly ? "Reference only" : market.pendingSettlement ? "Recovery required" : market.funded ? "Live pool" : "Unfunded"));
       button.addEventListener("click", () => { selected = market.symbol; invalidate(); refresh().catch(error => { console.error(error); $("terminal-status").textContent = error.message; }); });
       $("market-list").append(button);
     }
@@ -176,16 +216,23 @@
     const data = await api("/trading/markets?interval=" + $("chart-interval").value);
     if (generation !== quoteGeneration) return;
     const recovering = data.pair.notes.some(item => item.pendingSettlement);
-    markets = data.markets.map(item => recovering ? { ...item, pendingSettlement: true } : item); renderMarkets();
-    $("overview-markets").textContent = String(markets.length);
-    $("overview-funded").textContent = String(markets.filter(item => item.funded && !item.pendingSettlement).length);
-    const volumes = markets.map(item => item.symbol === "FTH$" ? data.pair.volumeFthx : item.volume);
+    const gold = data.reference.goldReference, dollar = data.reference.dollarReference;
+    const goldPrice = gold && dollar ? { numerator: (BigInt(gold.numerator) * BigInt(dollar.numerator)).toString(),
+      denominator: (BigInt(gold.denominator) * BigInt(dollar.denominator) * unit).toString() } : null;
+    markets = [...data.markets.map(item => recovering ? { ...item, pendingSettlement: true } : item),
+      { symbol: "FTHG", funded: false, referenceOnly: true, price: goldPrice }];
+    const priority = symbol => { const rank = ["FTH$", "FTHG", "FTHS"].indexOf(symbol); return rank < 0 ? 3 : rank; };
+    markets.sort((a, b) => priority(a.symbol) - priority(b.symbol)); renderMarkets(); renderGoldPools(data.reference); applyMarketMode();
+    $("overview-markets").textContent = String(data.markets.length);
+    $("overview-funded").textContent = String(data.markets.filter(item => item.funded && !recovering && !item.pendingSettlement).length);
+    const volumes = data.markets.map(item => item.symbol === "FTH$" ? data.pair.volumeFthx : item.volume);
     $("overview-volume").textContent = volumes.every(value => /^\d+$/.test(String(value)))
       ? `${volumes.reduce((sum, value) => sum + BigInt(value), 0n).toLocaleString()} FTHX` : "Unavailable";
     const market = markets.find(m => m.symbol === marketSymbol);
     if (!market) throw Error("Requested market is unavailable. Select an available market.");
     $("market-title").textContent = marketSymbol + " / FTHX";
-    $("spot-price").textContent = market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price)} FTHX` : "Pool not available";
+    $("spot-price").textContent = market.referenceOnly ? goldPrice ? `Indicative ${ratio(goldPrice)} FTHX` : "Reference unavailable"
+      : market?.pendingSettlement ? "Settlement recovery required" : market?.price ? `${ratio(market.price)} FTHX` : "Pool not available";
     const usdPerDollar = data.reference.usdValue, rate = data.reference.dollarReference;
     if (market?.price && usdPerDollar !== null && rate) {
       const usdPerFthx = BigInt(usdPerDollar) * BigInt(rate.denominator) / BigInt(rate.numerator);
@@ -193,12 +240,14 @@
       const fractional = (usd % unit).toString().padStart(18, "0").slice(0, 8).replace(/0+$/, "");
       $("usd-price").textContent = `~ $${usd > 0n && usd < 10000000000n ? "<0.00000001" : `${usd / unit}${fractional ? "." + fractional : ""}`} USD / ${marketSymbol}`;
     } else $("usd-price").textContent = "USD unavailable — live FTHG/USD and verified reference rates required";
-    $("market-detail").textContent = market?.pendingSettlement ? "A Dollar settlement requires recovery. Resume the original request before trading; do not fund a replacement pool."
+    $("market-detail").textContent = market.referenceOnly ? `FTHG → FTH$ → FTHX reference (${gold?.source || "Gold unavailable"} / ${dollar?.source || "Dollar unavailable"}). No direct executions, candles or FTHX volume are implied.`
+      : market?.pendingSettlement ? "A Dollar settlement requires recovery. Resume the original request before trading; do not fund a replacement pool."
       : market?.funded ? `0.3% fee • ${marketSymbol === "FTH$" ? data.pair.volumeFthx : market.volume} FTHX executed volume / 24h`
       : "Unfunded. Opening reference prices do not enable trading or guarantee redemption.";
     $("reference-detail").textContent = data.reference.source;
     $("order-amount-label").firstChild.textContent = `Input (${ $("order-side").value === "buy" ? "FTHX" : marketSymbol })`;
-    const history = marketSymbol === "FTH$" ? data.pair.notes[0].history : await api(`/markets/${encodeURIComponent(marketSymbol)}/history?interval=${$("chart-interval").value}`);
+    const history = market.referenceOnly ? { currency: "FTHX", candles: [], referenceOnly: true }
+      : marketSymbol === "FTH$" ? data.pair.notes[0].history : await api(`/markets/${encodeURIComponent(marketSymbol)}/history?interval=${$("chart-interval").value}`);
     if (generation !== quoteGeneration) return;
     chart.update(history);
     const lastLiquidity = $("liquidity-symbol").value;
@@ -239,6 +288,7 @@
     event.preventDefault();
     run(async () => {
       requireOwner(); invalidate();
+      if (selected === "FTHG") throw Error("FTHG is reference-only. Use the Gold conversion channel; no internal FTHG order can be placed.");
       if (preview?.submitted) throw Error("Resolve the submitted trade before requesting another order.");
       const generation = quoteGeneration, side = $("order-side").value, symbol = selected;
       const raw = amount($("order-amount").value, side === "buy" ? "FTHX" : symbol), tolerance = $("order-slippage").value;

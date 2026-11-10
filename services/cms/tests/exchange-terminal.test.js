@@ -51,7 +51,7 @@ test("Terminal rejects stale or incomplete HTML before requests, timers or tradi
   }
 });
 async function browserFixture(t, respond = () => null, storage = new Map(), hash = "") {
-  const owner = "0x" + "ab".repeat(20), requests = [], confirmations = [], errors = [];
+  const owner = "0x" + "ab".repeat(20), requests = [], confirmations = [], errors = [], histories = [];
   class Element {
     constructor() { this.value = ""; this.children = []; this.listeners = new Map(); this.firstChild = { textContent: "" }; }
     addEventListener(event, handler) {
@@ -60,10 +60,12 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
     setAttribute() {}
+    querySelectorAll() { return []; }
   }
   const nodes = new Map([...fs.readFileSync(path.join(__dirname, "../../../sites/ex.featheral.com/index.html"), "utf8").matchAll(/id="([^"]+)"/g)]
     .map(match => [match[1], new Element()]));
   const node = id => { assert.ok(nodes.has(id), `Missing terminal node ${id}`); return nodes.get(id); };
+  node("order-form").querySelectorAll = () => ["order-side", "order-amount", "order-slippage"].map(node);
   node("chart-interval").value = "24h"; node("order-side").value = "buy";
   const market = { symbol: "FTH$", funded: false, price: null, history: { candles: [] } };
   const defaults = route => {
@@ -78,7 +80,7 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
   vm.runInNewContext(terminal, {
     document: { getElementById: node, createElement: () => new Element(), querySelectorAll: () => [], hidden: false },
     location: { protocol: "https:", hostname: "ex.featheral.com", port: "", search: "", hash },
-    window: { FeatheralCandleChart: { mount: () => ({ update() {}, reset() {}, sma() {} }) },
+    window: { FeatheralCandleChart: { mount: () => ({ update(value) { histories.push(value); }, reset() {}, sma() {} }) },
       addEventListener() {},
       FeatheralWallet: { authenticate: async challenge => { await challenge(owner); return { address: owner, signature: "login-signature" }; } },
       ethereum: { on() {}, request: async ({ method }) => method === "eth_accounts" ? [owner] : "payment-signature" } },
@@ -103,7 +105,7 @@ async function browserFixture(t, respond = () => null, storage = new Map(), hash
   await settle();
   await dispatch("provider-connect", "click");
   assert.equal(errors.length, 0, "Terminal initializes and connects");
-  return { owner, requests, confirmations, storage, node, dispatch, errors };
+  return { owner, requests, confirmations, storage, node, dispatch, errors, histories };
 }
 test("Initial funding is wired at startup exactly once and resumes saved parameters despite edited form inputs", async t => {
   let submissions = 0;
@@ -196,7 +198,8 @@ test("A settling Dollar market is labeled for recovery, not for fresh funding", 
   assert.equal(ui.node("spot-price").textContent, "Settlement recovery required");
   assert.match(ui.node("market-detail").textContent, /do not fund a replacement pool/);
   assert.equal(ui.node("market-list").children[0].children[0].textContent, "Recovery required");
-  assert.equal(ui.node("market-list").children[1].children[0].textContent, "Recovery required");
+  assert.equal(ui.node("market-list").children[1].children[0].textContent, "Reference only");
+  assert.equal(ui.node("market-list").children[2].children[0].textContent, "Recovery required");
   assert.equal(ui.node("overview-funded").textContent, "0");
 });
 test("Market overview sums only actual FTHX volume exactly and excludes recovering pools from executable count", async t => {
@@ -212,6 +215,38 @@ test("Market overview sums only actual FTHX volume exactly and excludes recoveri
 test("Missing volume is explicitly unavailable rather than displayed as zero", async t => {
   const ui = await browserFixture(t);
   assert.equal(ui.node("overview-volume").textContent, "Unavailable");
+});
+test("Primary markets are pinned and FTHG uses exact reference composition without invented trades or internal orders", async t => {
+  const dollar = { symbol: "FTH$", funded: false, price: null, history: { candles: [] } };
+  const ui = await browserFixture(t, route => route.startsWith("/trading/markets") ? { body: {
+    markets: [dollar, { symbol: "ART", funded: false, volume: "5" }, { symbol: "FTHS", funded: false, volume: "0" }],
+    pair: { notes: [dollar], volumeFthx: "0" },
+    reference: { usdValue: null, goldReference: require("../../notes/exchange-price").publicGoldReference({
+      dollars: 10000n * 10n ** 18n, fthg: 10n ** 18n, source: "opening" }),
+      dollarReference: require("../../notes/exchange-price").publicReference({ funded: false, version: 0, dollars: "0", fthx: 0 }) },
+  } } : route.startsWith("/markets/") && route.includes("/history") ? { body: { candles: [] } } : null);
+  assert.deepEqual(ui.node("market-list").children.map(button => button.textContent), ["FTH$", "FTHG", "FTHS", "ART"]);
+  await ui.dispatch(ui.node("market-list").children[1], "click");
+  assert.equal(ui.node("market-title").textContent, "FTHG / FTHX");
+  assert.equal(ui.node("spot-price").textContent, "Indicative 1000000 FTHX");
+  assert.equal(ui.histories.at(-1).referenceOnly, true);
+  assert.equal(ui.histories.at(-1).candles.length, 0);
+  assert.equal(ui.node("order-amount").disabled, true);
+  assert.match(ui.node("market-mode").textContent, /No internal FTHG pool/);
+  assert.equal(ui.requests.filter(request => request.route.includes("/markets/FTHG/history")).length, 0);
+  await ui.dispatch("order-form");
+  assert.match(ui.node("terminal-status").textContent, /reference-only/);
+  assert.equal(ui.requests.filter(request => request.route === "/trading/quote").length, 0);
+  await ui.dispatch(ui.node("market-list").children[2], "click");
+  assert.equal(ui.node("market-title").textContent, "FTHS / FTHX");
+  assert.equal(ui.node("order-amount").disabled, false);
+  assert.equal(ui.node("overview-volume").textContent, "5 FTHX", "Reference-only Gold has no fabricated volume");
+});
+test("Unavailable Gold references stay unavailable and expose missing underlying snapshots", async t => {
+  const ui = await browserFixture(t);
+  await ui.dispatch(ui.node("market-list").children[1], "click");
+  assert.equal(ui.node("spot-price").textContent, "Reference unavailable");
+  assert.ok(ui.node("gold-pool-details").children.some(node => node.textContent.includes("Gold reserve snapshot unavailable")));
 });
 
 class VisualElement {
@@ -277,8 +312,7 @@ test("Liquidity visuals use exact reserves, independent capped targets, honest s
   responses.liquidity.markets = [...markets, ...Array.from({ length: 5 }, (_, i) => ({ ...markets[0], symbol: `FTH${i}` }))];
   currency.listeners.change();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(cards().length, 6);
-  assert.ok(descendants(root).some(node => node.textContent?.startsWith("Showing 6 of 8 pools.")));
+  assert.equal(cards().length, 8, "Every underlying pool is visible without a six-pool cap");
   assert.ok(descendants(root).some(node => node.href === "https://admin.featheral.com/#/notes?site=ex.featheral.com&market=FTH0"));
 });
 test("Funding deep link opens the review form without submitting a funding request", async t => {

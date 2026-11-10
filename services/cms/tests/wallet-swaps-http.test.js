@@ -43,6 +43,12 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
     request.on("error", reject); request.end(body ? JSON.stringify(body) : undefined);
   });
   const wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase();
+  app.setPortfolioGold(async () => ({
+    chain: { id: 1 }, checkedAt: new Date().toISOString(),
+    bridge: { address: "0x" + "12".repeat(20), deployed: false, initialized: false,
+      reserveFthg: "0", reserveFthDollar: "0", actualFthgBalance: "0", privateField: "not-public" },
+    goldReserve: { enabled: false, initialized: false, cap: "1000000000000000000000000", privateField: "not-public" },
+  }));
   siteManager.create({ hostname: "ex.featheral.com" });
   const exchangePage = await call("/", undefined, { host: "ex.featheral.com", prefix: "" });
   assert.equal(exchangePage.status, 200);
@@ -64,6 +70,20 @@ test("wallet swap HTTP routes enforce host, origin and ownership and expose real
   for (const [address, amount] of [[owner, 1000], [require("../../notes/game-funds").SYSTEM_TREASURY_ACCOUNT, 1000000]])
     creation.db.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,?,'fixture',0,'test')").run(address, amount);
   creation.markets.fund("FTHA", "FUND FTHA 1000000 FTHX 1000000 NOTES");
+  const catalog = (await call("/markets", undefined, { host: "ex.featheral.com" })).body.markets;
+  const terminalMarkets = (await call("/trading/markets", undefined, { host: "ex.featheral.com" })).body;
+  const pools = (await call("/liquidity", undefined, { host: "ex.featheral.com" })).body.markets;
+  for (const market of catalog) {
+    assert.ok(terminalMarkets.markets.some(row => row.symbol === market.symbol), `Swap note ${market.symbol} is listed in Exchange`);
+    const pool = pools.find(row => row.symbol === market.symbol);
+    assert.ok(pool, `Swap pool ${market.symbol} is public`);
+    assert.equal(pool.baseReserve, String(market.baseReserve));
+    assert.equal(pool.tokenReserve, String(market.noteReserve));
+  }
+  assert.ok(terminalMarkets.markets.some(row => row.symbol === "FTHS"));
+  assert.equal(terminalMarkets.reference.goldPools.bridge.reserveFthg, "0");
+  assert.equal(terminalMarkets.reference.goldPools.nativeReserve.cap, "1000000000000000000000000");
+  assert.doesNotMatch(JSON.stringify(terminalMarkets.reference.goldPools), /not-public|privateField/);
   const challenge = (await call("/challenge", { address: owner })).body;
   const token = (await call("/login", { address: owner, signature: await wallet.signMessage(challenge.message) })).body.token;
   const input = { from: "FTHX", to: "FTHA", amount: "100" };

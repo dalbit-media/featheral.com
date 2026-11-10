@@ -328,11 +328,20 @@ wallet-funded liquidity positions. It does not simulate an order book or leverag
 Its responsive mint/slate interface shows actual market counts, executable pools
 and 24-hour FTHX pair-leg volume. Empty charts and quote previews are explicitly
 illustrative placeholders, never sample prices or trades. Exchange and Notes
-show reserve cards for up to six pools, with all pools available in the reserve
+show reserve cards for every internal pool, also available in the reserve
 table and currency filter. Each reserve bar compares only against that currency's
 initial funding target (visually capped at 100%); it is not TVL, market depth,
 an allocation percentage, or a request to top up a funded pool. FTH$ reserves
 without an approved initial target are shown unscaled.
+Exchange pins FTH$/FTHX, FTHG/FTHX and FTHS/FTHX before all other eligible
+note markets. Every wallet-swap note pool is drawn from the same market catalog,
+and wallet and custody executions share each pool's price history. FTHG/FTHX
+is a **reference-only conversion view**, composing the verified Gold/FTH$ and
+FTH$/FTHX references (including explicitly labeled opening references). It has
+no internal order, artificial candles or trading volume. The transparency panel
+separates native Gold obligations, Ethereum bridge reserves/actual custody,
+and ETH/FTHG valuation liquidity, with missing/stale sources labeled. Gold
+conversion followed by an internal swap is not an atomic Exchange trade.
 Unfunded reserve cards link to “Fund and enable”: FTH$ opens the Exchange
 administrator funding form; note pools open native-note administration with the
 eligible market selected. Links never submit funding or bypass approval.

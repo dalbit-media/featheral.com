@@ -108,7 +108,7 @@
       poolCards.replaceChildren();
       const selected = symbol.value, visible = liquidity.markets.filter(market => !selected || selected === "FTHX" || market.symbol === selected);
       const ordered = [...visible].sort((a, b) => Number(b.status === "funded") - Number(a.status === "funded"));
-      for (const market of ordered.slice(0, 6)) {
+      for (const market of ordered) {
         const card = element("article", undefined, "liquidity-card"); card.dataset.state = market.status;
         const title = element("div", undefined, "liquidity-pair");
         const tokens = element("span", undefined, "liquidity-tokens"); tokens.setAttribute("aria-hidden", "true");
@@ -148,7 +148,6 @@
         }
       }
       if (!ordered.length) poolCards.append(element("p", "No internal FTHX pool for this currency. FTHG uses the separate Gold conversion channel."));
-      if (ordered.length > 6) poolCards.append(element("p", `Showing 6 of ${ordered.length} pools. Select a currency or expand actual pool reserves below for the full list.`, "liquidity-more"));
     }
     async function load(append = false) {
       if (loading && append) return;

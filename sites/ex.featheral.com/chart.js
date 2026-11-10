@@ -35,8 +35,8 @@
         add("circle", { cx: 450, cy: 157, r: 33, fill: "#102d2b", stroke: "#29665a" });
         add("path", { d: "M436 168V151M450 174V141M464 163V147", stroke: "#52ddb2", "stroke-width": 5, "stroke-linecap": "round" });
         add("rect", { x: 245, y: 205, width: 410, height: 85, rx: 12, fill: "#0c1521", stroke: "#233449" });
-        add("text", { x: 450, y: 237, "text-anchor": "middle", fill: "#e5eef7", "font-size": 18 }, "Your next market starts here");
-        add("text", { x: 450, y: 265, "text-anchor": "middle", fill: "#93a8bd", "font-size": 12 }, "No executed candles yet. Real trades will appear here.");
+        add("text", { x: 450, y: 237, "text-anchor": "middle", fill: "#e5eef7", "font-size": 18 }, history.referenceOnly ? "Reference / conversion market" : "Your next market starts here");
+        add("text", { x: 450, y: 265, "text-anchor": "middle", fill: "#93a8bd", "font-size": 12 }, history.referenceOnly ? "No direct FTHG / FTHX pool or executed candles." : "No executed candles yet. Real trades will appear here.");
         return;
       }
       let low = Math.min(...visible.map(c => value(c.low))), high = Math.max(...visible.map(c => value(c.high)));
