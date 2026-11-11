@@ -717,13 +717,15 @@ Exploration and recruitment permits last 1, 4 or 12 game weeks, like collection 
 Player limit orders use price-time priority and cannot match themselves. Better player offers take priority over resource pools. Exact integer accounting uses 0.0001 FTH$ subunits. Spot orders enforce a maximum 2% total-price movement and either fill completely or fail without spending. Live pools start empty and can receive permanent donations of existing funds and owned assets. Gold can bootstrap each eligible market once, up to 10,000 accounting lots at its unchanged genesis-pinned seed price.
 
 Resource prices have no fixed commodity floor; only the accounting increment remains.
-The resource curve pins virtual offsets of nine times its first funded inventory
-and dollars in `market_resource_depth`, providing tenfold initial pricing depth.
+New resource pools pin virtual offsets of nineteen times their first funded inventory
+and dollars in `market_resource_depth`, providing twentyfold initial pricing depth.
+The one-time pricing migration doubles existing resource pools' effective pricing
+depth without changing their current price, real inventory, dollars or history.
 Both directions use the same curve and conservative rounding, with no profitable
 round trip. Offsets are never spendable or recalculated on trades/refills. Actual
 inventory and dollars cap execution, including collect-and-sell and half-sales.
-Other item pools keep their ordinary curve. Existing balances, receipts, valid
-low-price orders, filled history and genesis reserve seeds are preserved.
+Item pools keep their ordinary curve and pinned seed prices. Existing balances,
+receipts, valid low-price orders, filled history and genesis reserve seeds are preserved.
 
 An authenticated settled player's resource sale quotes and trades check funding
 for the actual owned/pending quantity, including large half-sales. Funding solves

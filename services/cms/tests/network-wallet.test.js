@@ -209,25 +209,71 @@ async function fixture(host, { embedded = false, storageBlocked = false, walletD
     rejectNextSignature: () => { rejectSignature = true; }, loseTipReceipt: () => { tipReceiptLost = true; },
     loseSwapReceipt: () => { swapReceiptLost = true; }, completes: () => completes };
 }
+test('standalone config failures are bounded and show an actionable reload without signing', async () => {
+  for (const failure of ['fetch-timeout', 'body-timeout', 'network', 'http', 'schema']) {
+    const status = new Element('status'), controller = new AbortController(), deadlines = [], errors = [];
+    let reloads = 0, requests = 0;
+    const waitForAbort = signal => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      queueMicrotask(() => controller.abort(new DOMException('Deadline exceeded', 'TimeoutError')));
+    });
+    const window = { opener: null };
+    window.parent = window;
+    vm.runInNewContext(source, {
+      window, document: { getElementById: id => id === 'status' ? status : null, createElement: () => new Element() },
+      location: { search: '?view=send', reload: () => { reloads++; } }, URLSearchParams,
+      AbortSignal: { timeout: delay => { deadlines.push(delay); return controller.signal; } },
+      console: { error: (...args) => errors.push(args) },
+      fetch: async (url, options) => {
+        requests++;
+        assert.equal(url, '/api/wallet/ui?view=send');
+        assert.equal(options.cache, 'no-store');
+        assert.equal(options.signal, controller.signal);
+        if (failure === 'fetch-timeout') return waitForAbort(options.signal);
+        if (failure === 'network') throw new Error('Wallet server offline');
+        return { ok: failure !== 'http', json: () => failure === 'body-timeout' ? waitForAbort(options.signal)
+          : Promise.resolve(failure === 'http' ? { error: 'Wallet configuration unavailable.' } : { schema: 'unsupported', version: 1 }) };
+      },
+    });
+    await new Promise(setImmediate);
+    assert.deepEqual(deadlines, [20000]);
+    assert.equal(requests, 1);
+    assert.equal(errors.length, 1);
+    assert.match(status.textContent, failure.endsWith('timeout') ? /loading timed out/ : failure === 'network' ? /server offline/
+      : failure === 'http' ? /configuration unavailable/ : /Unsupported wallet UI schema/);
+    const retry = status.children[0];
+    assert.equal(retry.type, 'button');
+    assert.equal(retry.textContent, 'Retry wallet loading');
+    await retry.click();
+    assert.equal(reloads, 1);
+    assert.equal(requests, 1, 'retry reloads the document instead of mounting duplicate handlers');
+  }
+});
 test('payment links prefill FTH$ without transferring until explicit exact-amount review', async () => {
-  const payment = { to: '0x' + '22'.repeat(20), amount: '0.000000000000000001', name: 'Test shop' };
-  const ui = await fixture('dollar', { payment, manualReview: true, view: 'assets' });
-  assert.equal(ui.nodes['send-symbol'].value, 'FTH$');
-  assert.equal(ui.nodes['send-amount'].value, payment.amount);
-  assert.equal(ui.nodes.recipient.value, '0x' + '00'.repeat(12) + '22'.repeat(20));
-  assert.match(ui.nodes['payment-request'].textContent, /unverified/);
-  assert.equal(ui.nodes.send.hidden, false);
-  assert.equal(ui.calls.some(call => call.url.includes('/send/prepare') || call.url.includes('/transfers')), false);
-  const cancelled = ui.nodes['send-form'].fire('submit');
-  await new Promise(resolve => setImmediate(resolve));
-  assert.match(ui.nodes['wallet-review-message'].textContent, /<0\.01 FTH\$/);
-  await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
-  assert.equal(ui.calls.some(call => call.url.includes('/transfers')), false);
-  const approved = ui.nodes['send-form'].fire('submit');
-  await new Promise(resolve => setImmediate(resolve));
-  await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
-  assert.equal(ui.calls.find(call => call.url.endsWith('/send/prepare')).body.amount, '1');
-  assert.equal(ui.calls.filter(call => call.url.includes('/transfers')).length, 1);
+  for (const [amount, raw] of [['0.000000000000000001', '1'], ['1.234567890123456789', '1234567890123456789'], ['2', '2000000000000000000']]) {
+    const payment = { to: '0x' + '22'.repeat(20), amount, name: 'Test shop' };
+    const ui = await fixture('dollar', { payment, manualReview: true, view: 'assets' });
+    assert.equal(ui.nodes['send-symbol'].value, 'FTH$');
+    assert.equal(ui.nodes['send-amount'].value, payment.amount);
+    assert.equal(ui.nodes.recipient.value, '0x' + '00'.repeat(12) + '22'.repeat(20));
+    assert.match(ui.nodes['payment-request'].textContent, /unverified/);
+    assert.equal(ui.nodes.send.hidden, false);
+    assert.equal(ui.calls.some(call => call.url.includes('/send/prepare') || call.url.includes('/transfers')), false);
+    const cancelled = ui.nodes['send-form'].fire('submit');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.nodes['wallet-review-title'].textContent, 'Approve transfer');
+    assert.equal(ui.nodes['wallet-review-origin'].textContent, 'http://dollar.localhost:8080');
+    assert.equal(ui.nodes['wallet-review-message'].textContent,
+      `Send ${amount} FTH$ to ${ui.nodes.recipient.value}?\nNetwork: native Featheral ledger. This moves existing funds.`);
+    assert.equal(ui.providerCalls.includes('personal_sign'), false);
+    await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
+    assert.equal(ui.calls.some(call => call.url.includes('/transfers')), false);
+    const approved = ui.nodes['send-form'].fire('submit');
+    await new Promise(resolve => setImmediate(resolve));
+    await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
+    assert.equal(ui.calls.find(call => call.url.endsWith('/send/prepare')).body.amount, raw);
+    assert.equal(ui.calls.filter(call => call.url.includes('/transfers')).length, 1);
+  }
 });
 test('saved header public account appears in the popout without pretending it is authorized', async () => {
   const address = '0x' + '22'.repeat(20);
@@ -666,6 +712,33 @@ test('World signature approval contains unlock, errors and cancellation inside t
   const rejected = assert.rejects(pending, /cancelled/);
   await ui.closeContext(); release('late signature'); await rejected;
   assert.equal(cancelled, 1); assert.equal(ui.nodes['world-wallet-password'].value, '');
+  ui.mounted.dispose();
+});
+test('wallet linking already requires an explicit no-transfer review before delegating signatures', async () => {
+  const address = '0x' + '11'.repeat(20);
+  let links = 0;
+  class LocalVault {
+    constructor() { this.signer = { address }; }
+    read() { return { address, links: [] }; }
+    verifiedLinks() { return []; }
+    async link() { links++; }
+    lock() { this.signer = null; }
+  }
+  const ui = await fixture('notes', { contextual: true, manualReview: true, vaultApi: { Vault: LocalVault } });
+  const cancelled = ui.nodes['vault-link'].fire('click'); await new Promise(setImmediate);
+  assert.equal(ui.nodes['wallet-review'].open, true);
+  assert.equal(ui.nodes['wallet-review-title'].textContent, 'Approve wallet link');
+  assert.equal(ui.nodes['wallet-review-origin'].textContent, 'http://notes.localhost:8080');
+  assert.equal(ui.nodes['wallet-review-account'].textContent, address);
+  assert.equal(ui.nodes['wallet-review-message'].textContent,
+    'Link this external wallet? Both accounts must sign. Balances stay separate and no transfers are authorized.');
+  assert.equal(links, 0);
+  await ui.nodes['wallet-review-cancel'].fire('click'); await cancelled;
+  assert.equal(links, 0);
+  const approved = ui.nodes['vault-link'].fire('click'); await new Promise(setImmediate);
+  assert.equal(links, 0);
+  await ui.nodes['wallet-review-confirm'].fire('click'); await approved;
+  assert.equal(links, 1);
   ui.mounted.dispose();
 });
 test('Silver purchase approval explicitly warns of payment and shows the exact amount/recipient', async () => {

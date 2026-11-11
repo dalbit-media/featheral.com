@@ -4,7 +4,7 @@ import type { Account } from './economy.ts';
 import { craft, inventory } from './inventory.ts';
 import { canAfford, note } from '../src/engine.ts';
 import { craftableKeys, craftingCost, craftingFits, craftingInputs, craftingStage, inventoryFits, inventoryUsed, isCollectible, itemStorage, recipeDiscovered, sellableItemCount } from '../src/items.ts';
-import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketStartingQuantity, marketResources } from '../src/market.ts';
+import { isLiquidAsset, isMarketAsset, isMarketResource, marketAssets, marketPriceFloor, marketQuantityLimit, marketSaleQuantityLimit, marketStartingQuantity, marketResources, resourcePricingDepthMultiplier } from '../src/market.ts';
 import type { HalfSaleQuote, MarketAsset, MarketCommand, MarketFill, MarketOrder, MarketResource, MarketSide, MarketSnapshot } from '../src/market.ts';
 import type { Snapshot } from '../src/api-types.ts';
 import type { Session } from './store.ts';
@@ -159,6 +159,33 @@ export class Exchange {
     db.exec(`CREATE TABLE IF NOT EXISTS enhancement_sales (
       listingId INTEGER PRIMARY KEY, buyer TEXT NOT NULL, seller TEXT NOT NULL, dollars INTEGER NOT NULL, time INTEGER NOT NULL);`);
     db.exec('CREATE TABLE IF NOT EXISTS market_resource_depth (asset TEXT PRIMARY KEY, units TEXT NOT NULL, dollars TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS market_pricing_policy (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL)');
+    const pricingPolicy = db.prepare('SELECT version FROM market_pricing_policy WHERE id=1').get();
+    if (pricingPolicy && Number(pricingPolicy.version) > 2)
+      throw new Error('Unsupported market pricing policy version.');
+    if (!pricingPolicy || Number(pricingPolicy.version) < 2) {
+      db.exec('SAVEPOINT market_pricing_policy_v2');
+      try {
+        const depth = db.prepare('SELECT units,dollars FROM market_resource_depth WHERE asset=?');
+        const pool = db.prepare('SELECT units,dollars FROM market_pools WHERE asset=?');
+        const update = db.prepare('UPDATE market_resource_depth SET units=?,dollars=? WHERE asset=?');
+        for (const asset of marketResources) {
+          const previous = depth.get(asset);
+          if (!previous) continue;
+          const reserves = pool.get(asset)!;
+          update.run(
+            (BigInt(String(reserves.units)) + 2n * BigInt(String(previous.units))).toString(),
+            (BigInt(String(reserves.dollars)) + 2n * BigInt(String(previous.dollars))).toString(),
+            asset,
+          );
+        }
+        db.prepare('INSERT INTO market_pricing_policy VALUES(1,2) ON CONFLICT(id) DO UPDATE SET version=excluded.version').run();
+        db.exec('RELEASE market_pricing_policy_v2');
+      } catch (error) {
+        db.exec('ROLLBACK TO market_pricing_policy_v2; RELEASE market_pricing_policy_v2');
+        throw error;
+      }
+    }
     const insert = db.prepare('INSERT OR IGNORE INTO market_pools VALUES (?, ?, ?)');
     for (const asset of marketAssets) {
       insert.run(asset, 0, 0);
@@ -171,7 +198,8 @@ export class Exchange {
       // Retain the historical table name. Depth is not spendable; pin once for every asset.
       if (pool.units > 0 && pool.dollars > 0)
         this.db.prepare('INSERT OR IGNORE INTO market_resource_depth VALUES(?,?,?)')
-          .run(asset, (BigInt(pool.units) * 9n).toString(), (BigInt(pool.dollars) * 9n).toString());
+          .run(asset, (BigInt(pool.units) * (isMarketResource(asset) ? resourcePricingDepthMultiplier : 9n)).toString(),
+            (BigInt(pool.dollars) * (isMarketResource(asset) ? resourcePricingDepthMultiplier : 9n)).toString());
       const depth = this.db.prepare('SELECT units,dollars FROM market_resource_depth WHERE asset=?').get(asset);
       if (depth) { pool.depthUnits = BigInt(String(depth.units)); pool.depthDollars = BigInt(String(depth.dollars)); }
     }
@@ -304,7 +332,8 @@ export class Exchange {
         const depth = depths.get(asset);
         if (depth) { pool.depthUnits = BigInt(String(depth.units)); pool.depthDollars = BigInt(String(depth.dollars)); }
         else if (isLiquidAsset(asset) && pool.units > 0 && pool.dollars > 0) {
-          pool.depthUnits = BigInt(pool.units) * 9n; pool.depthDollars = BigInt(pool.dollars) * 9n;
+          const multiplier = isMarketResource(asset) ? resourcePricingDepthMultiplier : 9n;
+          pool.depthUnits = BigInt(pool.units) * multiplier; pool.depthDollars = BigInt(pool.dollars) * multiplier;
           pinDepth.run(asset, pool.depthUnits.toString(), pool.depthDollars.toString());
         }
         const last = latest.get(asset), offer = offers.get(asset);
@@ -546,6 +575,25 @@ export class Exchange {
     return result;
   }
   action(owner: string, session: Session, value: unknown, now: number, realTime: number): ExchangeResult {
+    // The store owns session persistence, totals and funds staging under BEGIN IMMEDIATE.
+    if (!('isTransaction' in this.db) || !this.db.isTransaction)
+      throw new Error('Market actions require a store transaction.');
+    const draft = { ...session, account: structuredClone(session.account) };
+    this.db.exec('SAVEPOINT market_action');
+    let result: ExchangeResult;
+    try {
+      result = this.executeAction(owner, draft, value, now, realTime);
+      this.db.exec('RELEASE market_action');
+    } catch (error) {
+      this.db.exec('ROLLBACK TO market_action; RELEASE market_action');
+      throw error;
+    }
+    for (const key of Object.keys(session.account))
+      if (!(key in draft.account)) Reflect.deleteProperty(session.account, key);
+    Object.assign(session.account, draft.account);
+    return result;
+  }
+  private executeAction(owner: string, session: Session, value: unknown, now: number, realTime: number): ExchangeResult {
     const body = parseActionEnvelope(value), account = session.account;
     const request = JSON.stringify({ revision: body.revision, command: body.command });
     const receipt = this.db.prepare('SELECT request, result FROM market_receipts WHERE owner = ? AND id = ?').get(owner, body.id);
@@ -648,8 +696,9 @@ export class Exchange {
       this.db.prepare('INSERT INTO enhancement_sales VALUES(?,?,?,?,?)').run(command.listingId, owner, row.owner!, price, now);
     }
     copies.push(copy);
-    this.db.prepare('UPDATE enhancement_listings SET status=? WHERE id=? AND status=\'open\'')
+    const updated = this.db.prepare('UPDATE enhancement_listings SET status=? WHERE id=? AND status=\'open\'')
       .run(command.type === 'enhancement-cancel' ? 'cancelled' : 'filled', command.listingId);
+    if (updated.changes !== 1) throw new ApiError(409, 'Open enhanced equipment listing not found.');
     inventory(account);
     return copy.item;
   }
@@ -694,7 +743,9 @@ export class Exchange {
           const maker = record.session.account;
           if (step.maker.side === 'buy') this.credit(maker, asset, step.quantity); else maker.game.dollars += step.dollars;
           this.release(maker, asset, step.quantity, step.maker.side);
-          this.db.prepare("UPDATE market_orders SET remaining = remaining - ?, status = CASE WHEN remaining = ? THEN 'filled' ELSE 'open' END WHERE id = ?").run(step.quantity, step.quantity, step.maker.id);
+          const updated = this.db.prepare("UPDATE market_orders SET remaining = remaining - ?, status = CASE WHEN remaining = ? THEN 'filled' ELSE 'open' END WHERE id = ? AND status = 'open' AND remaining >= ?")
+            .run(step.quantity, step.quantity, step.maker.id, step.quantity);
+          if (updated.changes !== 1) throw new ApiError(409, 'Market order changed. Refresh and retry.');
           maker.revision++;
           note(maker.game, 'Marketplace trade completed.');
         } else movePool(pool, command.side, step.quantity, step.dollars);

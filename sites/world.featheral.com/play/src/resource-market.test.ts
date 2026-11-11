@@ -8,21 +8,22 @@ import type { Terrain } from './engine.ts';
 import { accrue, createAccount, execute, snapshot } from '../server/economy.ts';
 import { worldWeekMs } from './environment.ts';
 
-test('tenfold resource depth declines at least five times slower than ordinary liquidity', () => {
-  const shallow = { units: 10000, dollars: 400000000 };
-  const deep = { ...shallow, depthUnits: 90000n, depthDollars: 3600000000n };
-  const decline = (pool: typeof deep | typeof shallow) => {
+test('twentyfold resource depth halves price movement compared with the former curve', () => {
+  const pool = { units: 10000, dollars: 400000000 };
+  const former = { ...pool, depthUnits: 90000n, depthDollars: 3600000000n };
+  const revised = { ...pool, depthUnits: 190000n, depthDollars: 7600000000n };
+  const decline = (pool: typeof revised) => {
     const before = poolPayment(pool, 'sell', 1);
     const dollars = poolPayment(pool, 'sell', 1000);
     const after = poolPayment({ ...pool, units: pool.units + 1000, dollars: pool.dollars - dollars }, 'sell', 1);
     return 1 - after / before;
   };
-  assert.ok(decline(deep) > 0);
-  assert.ok(decline(deep) < decline(shallow) / 5);
-  assert.ok(decline(deep) < .025);
+  assert.ok(decline(revised) > 0);
+  assert.ok(decline(revised) < decline(former) / 1.8);
+  assert.ok(decline(revised) < .0125);
 });
 test('conservative resource curve rounding never pays for a profitable round trip', () => {
-  const pool = { units: 10000, dollars: 400000000, depthUnits: 90000n, depthDollars: 3600000000n };
+  const pool = { units: 10000, dollars: 400000000, depthUnits: 190000n, depthDollars: 7600000000n };
   for (const quantity of [1, 3, 100, 1000, 10000]) {
     const bought = poolPayment(pool, 'buy', quantity);
     const sold = poolPayment({ ...pool, units: pool.units - quantity, dollars: pool.dollars + bought }, 'sell', quantity);

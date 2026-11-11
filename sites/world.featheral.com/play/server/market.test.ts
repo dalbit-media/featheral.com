@@ -1,9 +1,10 @@
 import { strict as assert } from 'node:assert';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
+import { Worker } from 'node:worker_threads';
+import { createRequire } from 'node:module';
 import { test } from 'node:test';
 import sqlite from '../../../../services/database/sqlite.js';
 import { SqliteStore } from './store.ts';
@@ -14,6 +15,7 @@ import { Exchange, parseMarketCommand } from './market.ts';
 import { isLiquidAsset, isMarketResource, marketAssets, marketPriceFloor, marketResources } from '../src/market.ts';
 import { createFundedFixtureAccount } from './test-support.ts';
 import { dollarsScale, dollarsUnits } from '../src/dollars.ts';
+import { poolPaymentUnits } from '../src/pool-pricing.ts';
 import { worldWeekMs } from '../src/environment.ts';
 import { terrainDetails } from '../src/engine.ts';
 import type { MarketAsset, MarketCommand, MarketResponse } from '../src/market.ts';
@@ -81,6 +83,267 @@ function setup(path = ':memory:', seeded = true, excluded: readonly MarketAsset[
   };
   const act = (token: string, command: MarketCommand) => post(token, request(token, command));
   return { store, create, read, request, post, act, advance: (amount: number) => { time += amount; } };
+}
+
+function persistedMarketState(db: ReturnType<typeof sqlite.open>) {
+  return Object.fromEntries(['sessions', 'public_totals', 'population_totals', 'market_pools', 'market_resource_depth',
+    'market_orders', 'market_fills', 'market_receipts', 'enhancement_listings', 'enhancement_sales', 'enhancement_receipts']
+    .map(table => [table, db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
+}
+
+function caughtMarketFailure(h: ReturnType<typeof setup>, token: string, body: unknown, error: RegExp) {
+  const before = persistedMarketState(h.store.db);
+  h.advance(1000);
+  h.store.transaction(token, (session, now, realTime, exchange, owner) => {
+    const account = session.account, game = account.game, bag = account.inventory, saved = structuredClone(account);
+    assert.throws(() => exchange.action(owner, session, body, now, realTime), error);
+    assert.equal(session.account, account);
+    assert.equal(account.game, game);
+    assert.equal(account.inventory, bag);
+    assert.deepEqual(account, saved, 'failed actions must not mutate even retained account references');
+    assert.deepEqual(persistedMarketState(h.store.db), before, 'all action writes roll back inside the callback');
+  });
+  assert.deepEqual(persistedMarketState(h.store.db), before, 'catching an error must not commit a partial action');
+}
+
+test('market actions reject calls outside the store transaction before changing anything', () => {
+  const h = setup(), user = h.create();
+  try {
+    const body = h.request(user.token, { type: 'limit', asset: 'wood', side: 'sell', quantity: 1, price: 99 });
+    const before = persistedMarketState(h.store.db);
+    h.store.read(user.token, (session, now, realTime) => {
+      const saved = structuredClone(session);
+      assert.throws(() => new Exchange(h.store.db).action(h.store.chatSession(user.token).owner, session, body, now, realTime),
+        /require a store transaction/);
+      assert.deepEqual(session, saved);
+    });
+    assert.deepEqual(persistedMarketState(h.store.db), before);
+  } finally { h.store.close(); }
+});
+
+test('successful market drafts preserve account identity and publish accrual property removals', () => {
+  const h = setup(':memory:', false), user = h.create();
+  try {
+    h.store.transaction(user.token, session => {
+      session.account.game.population = 1;
+      session.account.relicCaptured = true;
+    });
+    h.advance(1000);
+    h.store.transaction(user.token, (session, now, realTime, exchange, owner) => {
+      const account = session.account;
+      exchange.action(owner, session, { id: randomUUID(), revision: account.revision,
+        command: { type: 'limit', asset: 'wood', side: 'sell', quantity: 1, price: 99 } }, now, realTime);
+      assert.equal(session.account, account);
+      assert.equal('relicCaptured' in account, false);
+    });
+    assert.equal(h.store.read(user.token, session => 'relicCaptured' in session.account), false);
+  } finally { h.store.close(); }
+});
+
+for (const phase of ['seller', 'sale', 'listing', 'receipt'] as const) {
+  test(`enhanced purchase rolls back both accounts, escrow, sales and receipts after ${phase} failure caught by caller`, () => {
+    const h = setup(), seller = h.create(), buyer = h.create();
+    try {
+      const copy = { id: randomUUID(), item: 'survey-satchel' as const, level: 21 };
+      h.store.transaction(seller.token, session => { inventory(session.account).enhancedEquipment = [copy]; });
+      const listing = h.act(seller.token, { type: 'enhancement-list', equipmentId: copy.id, price: 100 }).market.enhancedListings![0];
+      const body = h.request(buyer.token, { type: 'enhancement-buy', listingId: listing.id, price: 100 });
+      const event = phase === 'seller' ? `UPDATE ON sessions WHEN OLD.id='${h.store.chatSession(seller.token).owner}'` : phase === 'sale' ? 'INSERT ON enhancement_sales'
+        : phase === 'listing' ? 'UPDATE ON enhancement_listings' : 'INSERT ON market_receipts';
+      h.store.db.exec(`CREATE TRIGGER market_fault BEFORE ${event} BEGIN SELECT RAISE(ABORT,'injected market failure'); END`);
+      caughtMarketFailure(h, buyer.token, body, /injected market failure/);
+      h.store.db.exec('DROP TRIGGER market_fault');
+      const total = h.store.publicTotals().dollars, sellerDollars = h.read(seller.token).dollars;
+      const bought = h.post(buyer.token, body);
+      assert.deepEqual(bought.inventory.enhancedEquipment, [copy]);
+      assert.equal(h.read(seller.token).dollars, sellerDollars + 100);
+      assert.equal(h.store.publicTotals().dollars, total);
+      assert.deepEqual(h.post(buyer.token, body), bought, 'the same request succeeds once after rollback');
+      assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM enhancement_sales').get()!.n, 1);
+    } finally { h.store.close(); }
+  });
+}
+
+for (const cancel of [false, true]) {
+  test(`enhanced ${cancel ? 'cancellation' : 'listing'} restores inventory and escrow on receipt failure`, () => {
+    const h = setup(), seller = h.create();
+    try {
+      const copy = { id: randomUUID(), item: 'survey-satchel' as const, level: 1 };
+      h.store.transaction(seller.token, session => { inventory(session.account).enhancedEquipment = [copy]; });
+      const command: MarketCommand = cancel
+        ? { type: 'enhancement-cancel', listingId: h.act(seller.token, { type: 'enhancement-list', equipmentId: copy.id, price: 100 }).market.enhancedListings![0].id }
+        : { type: 'enhancement-list', equipmentId: copy.id, price: 100 };
+      const body = h.request(seller.token, command);
+      h.store.db.exec("CREATE TRIGGER market_fault BEFORE INSERT ON market_receipts BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END");
+      caughtMarketFailure(h, seller.token, body, /injected receipt failure/);
+      h.store.db.exec('DROP TRIGGER market_fault');
+      const result = h.post(seller.token, body);
+      assert.deepEqual(result.inventory.enhancedEquipment, cancel ? [copy] : []);
+      assert.equal(result.market.enhancedListings!.length, cancel ? 0 : 1);
+    } finally { h.store.close(); }
+  });
+}
+
+for (const side of ['buy', 'sell'] as const) {
+  for (const phase of ['order', 'fill', 'maker', 'pool', 'remainder', 'receipt'] as const) {
+    test(`${side} settlement rolls back multiple makers, pool and item reservations after ${phase} failure`, () => {
+      const h = setup(':memory:', false), a = h.create(), b = h.create(), taker = h.create();
+      try {
+        for (const user of [a, b, taker]) h.store.transaction(user.token, session => {
+          inventory(session.account).items = ['torch', 'torch', 'torch', 'torch'];
+        });
+        for (const maker of [a, b]) h.act(maker.token, {
+          type: 'limit', asset: 'torch', side: side === 'buy' ? 'sell' : 'buy', quantity: 1, price: side === 'buy' ? 1 : 10,
+        });
+        h.store.db.prepare("UPDATE market_pools SET units=100,dollars=? WHERE asset='torch'")
+          .run((side === 'buy' ? 10000 : 100) * dollarsScale);
+        const body = h.request(taker.token, { type: 'limit', asset: 'torch', side, quantity: 3, price: side === 'buy' ? 200 : .5 });
+        const secondMaker = h.store.chatSession(b.token).owner;
+        const event = phase === 'order' ? 'UPDATE ON market_orders'
+          : phase === 'fill' ? 'INSERT ON market_fills WHEN (SELECT COUNT(*) FROM market_fills)>0'
+          : phase === 'maker' ? `UPDATE ON sessions WHEN OLD.id='${secondMaker}'`
+          : phase === 'pool' ? 'UPDATE ON market_pools'
+          : phase === 'remainder' ? 'INSERT ON market_orders' : 'INSERT ON market_receipts';
+        h.store.db.exec(`CREATE TRIGGER market_fault BEFORE ${event} BEGIN SELECT RAISE(ABORT,'injected settlement failure'); END`);
+        caughtMarketFailure(h, taker.token, body, /injected settlement failure/);
+        h.store.db.exec('DROP TRIGGER market_fault');
+        const total = h.store.publicTotals().dollars;
+        const result = h.post(taker.token, body);
+        assert.equal(result.market.trades.filter(fill => fill.venue === 'players').length, 2);
+        assert.equal(result.market.trades.filter(fill => fill.venue === 'system').length, 1);
+        assert.deepEqual(result.inventory.marketReserved, []);
+        assert.deepEqual(result.inventory.marketSelling ?? [], []);
+        assert.equal(result.inventory.items.filter(item => item === 'torch').length, side === 'buy' ? 7 : 1);
+        assert.equal(h.store.publicTotals().dollars, total);
+        assert.deepEqual(h.post(taker.token, body), result);
+      } finally { h.store.close(); }
+    });
+  }
+}
+
+test('a later maker reservation error rolls back earlier fills and taker reservations', () => {
+  const h = setup(':memory:', false), a = h.create(), b = h.create(), buyer = h.create();
+  try {
+    for (const maker of [a, b]) {
+      h.store.transaction(maker.token, session => { inventory(session.account).items = ['torch']; });
+      h.act(maker.token, { type: 'limit', asset: 'torch', side: 'sell', quantity: 1, price: 10 });
+    }
+    h.store.transaction(b.token, session => { inventory(session.account).marketReserved = []; });
+    const body = h.request(buyer.token, { type: 'spot', asset: 'torch', side: 'buy', quantity: 2, limitDollars: 20 });
+    caughtMarketFailure(h, buyer.token, body, /Invalid item reservation/);
+    h.store.transaction(b.token, session => { inventory(session.account).marketReserved = ['torch']; });
+    assert.equal(h.post(buyer.token, body).inventory.items.filter(item => item === 'torch').length, 2);
+  } finally { h.store.close(); }
+});
+
+for (const enhanced of [false, true]) {
+  test(`${enhanced ? 'listing purchase' : 'order settlement'} rolls back receipts and counterparties when initiating session persistence fails`, () => {
+    const h = setup(':memory:', false), seller = h.create(), buyer = h.create();
+    try {
+      let command: MarketCommand;
+      if (enhanced) {
+        const copy = { id: randomUUID(), item: 'survey-satchel' as const, level: 1 };
+        h.store.transaction(seller.token, session => { inventory(session.account).enhancedEquipment = [copy]; });
+        const listing = h.act(seller.token, { type: 'enhancement-list', equipmentId: copy.id, price: 100 }).market.enhancedListings![0];
+        command = { type: 'enhancement-buy', listingId: listing.id, price: 100 };
+      } else {
+        h.act(seller.token, { type: 'limit', asset: 'wood', side: 'sell', quantity: 1, price: 10 });
+        command = { type: 'spot', asset: 'wood', side: 'buy', quantity: 1, limitDollars: 10 };
+      }
+      const body = h.request(buyer.token, command), before = persistedMarketState(h.store.db);
+      h.store.db.exec(`CREATE TRIGGER market_fault BEFORE UPDATE ON sessions WHEN OLD.id='${h.store.chatSession(buyer.token).owner}'
+        BEGIN SELECT RAISE(ABORT,'injected initiating session failure'); END`);
+      assert.throws(() => h.post(buyer.token, body), /injected initiating session failure/);
+      assert.deepEqual(persistedMarketState(h.store.db), before);
+      h.store.db.exec('DROP TRIGGER market_fault');
+      const result = h.post(buyer.token, body);
+      assert.deepEqual(h.post(buyer.token, body), result);
+    } finally { h.store.close(); }
+  });
+}
+
+async function concurrentMarketActions(path: string, requests: { token: string; body: unknown }[]) {
+  const workers = requests.map(request => new Worker(`
+    const { parentPort, workerData } = require('node:worker_threads');
+    require(workerData.replicaPath).readReplica = () => null;
+    (async () => {
+      const { SqliteStore } = await import(workerData.storeUrl);
+      const store = new SqliteStore(workerData.path, () => 1100000);
+      parentPort.once('message', () => {
+        try {
+          const result = store.transaction(workerData.token, (session, now, realTime, exchange, owner) =>
+            exchange.action(owner, session, workerData.body, now, realTime));
+          parentPort.postMessage({ ok: true, result });
+        } catch (error) {
+          parentPort.postMessage({ ok: false, error: error.message });
+        } finally { store.close(); parentPort.close(); }
+      });
+      parentPort.postMessage('ready');
+    })().catch(error => { throw error; });
+  `, { eval: true, workerData: { ...request, path, storeUrl: new URL('./store.ts', import.meta.url).href,
+    replicaPath: createRequire(import.meta.url).resolve('../../../../services/operations/replica.js') } }));
+  try {
+    await Promise.all(workers.map(async worker => assert.deepEqual(await once(worker, 'message'), ['ready'])));
+    const results = workers.map(worker => once(worker, 'message'));
+    for (const worker of workers) worker.postMessage('start');
+    return (await Promise.all(results)).map(([result]) => result as { ok: boolean; error?: string; result?: MarketResponse });
+  } finally { await Promise.all(workers.map(worker => worker.terminate())); }
+}
+
+for (const replay of [false, true]) {
+  test(`concurrent enhanced ${replay ? 'request replays charge once' : 'buyers cannot purchase the same listing twice'}`, { timeout: 20000 }, async t => {
+    t.mock.method(createRequire(import.meta.url)('../../../../services/operations/replica.js'), 'readReplica', () => null);
+    const directory = mkdtempSync(join(process.cwd(), '.market-listing-race-')), path = join(directory, 'test.sqlite');
+    const h = setup(path), seller = h.create(), a = h.create(), b = replay ? a : h.create();
+    try {
+      const copy = { id: randomUUID(), item: 'survey-satchel' as const, level: 21 };
+      h.store.transaction(seller.token, session => { inventory(session.account).enhancedEquipment = [copy]; });
+      const listing = h.act(seller.token, { type: 'enhancement-list', equipmentId: copy.id, price: 100 }).market.enhancedListings![0];
+      const command: MarketCommand = { type: 'enhancement-buy', listingId: listing.id, price: 100 };
+      const first = h.request(a.token, command), second = replay ? first : h.request(b.token, command);
+      const total = h.store.publicTotals().dollars, sellerDollars = h.read(seller.token).dollars;
+      const results = await concurrentMarketActions(path, [{ token: a.token, body: first }, { token: b.token, body: second }]);
+      assert.equal(results.filter(result => result.ok).length, replay ? 2 : 1);
+      if (replay) assert.deepEqual(results[0].result, results[1].result);
+      else assert.match(results.find(result => !result.ok)!.error!, /Open enhanced equipment listing not found/);
+      assert.equal(h.read(seller.token).dollars, sellerDollars + 100);
+      assert.equal(h.store.publicTotals().dollars, total);
+      assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM enhancement_sales').get()!.n, 1);
+      assert.equal(h.store.db.prepare("SELECT COUNT(*) AS n FROM market_receipts WHERE json_extract(request,'$.command.type')='enhancement-buy'").get()!.n, 1);
+      const accounts = [seller, a, ...(replay ? [] : [b])].map(user => h.store.read(user.token, session => session.account));
+      assert.equal(accounts.flatMap(account => inventory(account).enhancedEquipment ?? []).filter(item => item.id === copy.id).length, 1);
+    } finally { h.store.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+}
+
+for (const side of ['buy', 'sell'] as const) {
+  test(`concurrent ${side} takers cannot fill the same order twice or leak losing item reservations`, { timeout: 20000 }, async t => {
+    t.mock.method(createRequire(import.meta.url)('../../../../services/operations/replica.js'), 'readReplica', () => null);
+    const directory = mkdtempSync(join(process.cwd(), '.market-order-race-')), path = join(directory, 'test.sqlite');
+    const h = setup(path), maker = h.create(), a = h.create(), b = h.create();
+    try {
+      h.store.db.prepare("UPDATE market_pools SET units=0,dollars=0 WHERE asset='torch'").run();
+      for (const user of side === 'buy' ? [maker] : [a, b])
+        h.store.transaction(user.token, session => { inventory(session.account).items = ['torch']; });
+      const order = h.act(maker.token, { type: 'limit', asset: 'torch', side: side === 'buy' ? 'sell' : 'buy', quantity: 1, price: 10 }).market.orders[0];
+      const command: MarketCommand = { type: 'spot', asset: 'torch', side, quantity: 1, limitDollars: 10 };
+      const requests = [a, b].map(user => ({ token: user.token, body: h.request(user.token, command) }));
+      const total = h.store.publicTotals().dollars, makerDollars = h.read(maker.token).dollars;
+      const results = await concurrentMarketActions(path, requests);
+      assert.equal(results.filter(result => result.ok).length, 1);
+      assert.match(results.find(result => !result.ok)!.error!, side === 'buy' ? /Not enough assets/ : /Backing is unavailable/);
+      assert.equal(h.read(maker.token).dollars, makerDollars + (side === 'buy' ? 10 : 0));
+      assert.equal(h.store.publicTotals().dollars, total);
+      assert.deepEqual({ ...h.store.db.prepare('SELECT remaining,status FROM market_orders WHERE id=?').get(order.id) }, { remaining: 0, status: 'filled' });
+      assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM market_fills').get()!.n, 1);
+      const accounts = [maker, a, b].map(user => h.store.read(user.token, session => session.account));
+      assert.equal(accounts.flatMap(account => inventory(account).items).filter(item => item === 'torch').length, side === 'buy' ? 1 : 2);
+      for (const account of accounts) {
+        assert.deepEqual(inventory(account).marketReserved ?? [], []);
+        assert.deepEqual(inventory(account).marketSelling ?? [], []);
+      }
+    } finally { h.store.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
 }
 test('profit analysis charges exactly FTH$100 once, persists, expires at one game day and never changes trading prices', () => {
   const h = setup(), user = h.create(), other = h.create();
@@ -299,11 +562,47 @@ test('resource pricing depth survives exchange reinitialization and never grows 
     db.prepare("UPDATE market_pools SET units=10000,dollars=400000000 WHERE asset='wood'").run();
     const first = exchange.read('buyer', account, 1000000, 1000000, 'wood', 1).market.quotes.sell;
     const depth = db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get()!;
-    assert.equal(String(depth.units), '90000'); assert.equal(String(depth.dollars), '3600000000');
+    assert.equal(String(depth.units), '190000'); assert.equal(String(depth.dollars), '7600000000');
     db.prepare("UPDATE market_pools SET units=11000,dollars=360792080 WHERE asset='wood'").run();
     const next = new Exchange(db).read('buyer', account, 1000000, 1000000, 'wood', 1).market.quotes.sell;
     assert.ok(next.dollars < first.dollars);
     assert.deepEqual(db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get(), depth);
+  } finally { db.close(); }
+});
+test('pricing migration doubles only existing resource depth without repricing or touching balances', () => {
+  const db = sqlite.open(':memory:');
+  try {
+    db.exec(`CREATE TABLE market_pools (asset TEXT PRIMARY KEY, units INTEGER NOT NULL, dollars INTEGER NOT NULL);
+      CREATE TABLE market_resource_depth (asset TEXT PRIMARY KEY, units TEXT NOT NULL, dollars TEXT NOT NULL);
+      CREATE TABLE market_fills (id INTEGER PRIMARY KEY AUTOINCREMENT, asset TEXT NOT NULL, quantity INTEGER NOT NULL,
+        dollars INTEGER NOT NULL, price REAL NOT NULL, time INTEGER NOT NULL, venue TEXT NOT NULL, buyer TEXT NOT NULL, seller TEXT NOT NULL);
+      INSERT INTO market_pools VALUES ('wood',10000,400000000),('fire',10000,11200000000);
+      INSERT INTO market_resource_depth VALUES ('wood','90000','3600000000'),('fire','90000','100800000000');
+      INSERT INTO market_fills(asset,quantity,dollars,price,time,venue,buyer,seller)
+        VALUES ('wood',3,120000,40000,1000,'players','buyer','seller')`);
+    const priorFills = db.prepare('SELECT * FROM market_fills ORDER BY id').all();
+    const formerWood = { units: 10000, dollars: 400000000, depthUnits: 90000n, depthDollars: 3600000000n };
+    const priorQuote = poolPaymentUnits(formerWood, 'sell', 1);
+    const priorSale = poolPaymentUnits(formerWood, 'sell', 1000);
+    new Exchange(db);
+    const depth = db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get()!;
+    const migratedWood = { units: 10000, dollars: 400000000, depthUnits: BigInt(String(depth.units)), depthDollars: BigInt(String(depth.dollars)) };
+    assert.equal(String(depth.units), '190000');
+    assert.equal(String(depth.dollars), '7600000000');
+    assert.ok(poolPaymentUnits(migratedWood, 'sell', 1000) > priorSale);
+    const migratedQuote = poolPaymentUnits(migratedWood, 'sell', 1);
+    assert.ok(migratedQuote >= priorQuote);
+    assert.ok((migratedQuote - priorQuote) * 100n < priorQuote);
+    const itemDepth = db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='fire'").get()!;
+    assert.equal(String(itemDepth.units), '90000');
+    assert.equal(String(itemDepth.dollars), '100800000000');
+    const pool = db.prepare("SELECT units,dollars FROM market_pools WHERE asset='wood'").get()!;
+    assert.equal(Number(pool.units), 10000);
+    assert.equal(Number(pool.dollars), 400000000);
+    assert.deepEqual(db.prepare('SELECT * FROM market_fills ORDER BY id').all(), priorFills);
+    new Exchange(db);
+    assert.deepEqual(db.prepare("SELECT units,dollars FROM market_resource_depth WHERE asset='wood'").get(), depth);
+    assert.equal(Number(db.prepare('SELECT version FROM market_pricing_policy WHERE id=1').get()!.version), 2);
   } finally { db.close(); }
 });
 test('Wood sale funding covers accounting precision as well as payout for 85,400 kg', () => {
@@ -416,8 +715,9 @@ test('insufficient real liquidity never spends virtual dollars or partially spen
     assert.ok(h.read(player.token, 'wood', 2).market.quotes.sell.dollars < 5);
   } finally { h.store.close(); }
 });
-test('weekly market receipts return daily Water metadata without replaying trades or billing', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'featheral-daily-market-')), path = join(directory, 'test.sqlite');
+test('weekly market receipts return daily Water metadata without replaying trades or billing', t => {
+  t.mock.method(createRequire(import.meta.url)('../../../../services/operations/replica.js'), 'readReplica', () => null);
+  const directory = mkdtempSync(join(process.cwd(), '.featheral-daily-market-')), path = join(directory, 'test.sqlite');
   const h = setup(path), identity = h.create(), db = sqlite.open(path);
   try {
     h.store.transaction(identity.token, session => {
@@ -747,8 +1047,9 @@ test('open order limits and expired makers protect capacity without changing poo
     assert.equal(h.read(b.token).market.trades[0].venue, 'system');
   } finally { h.store.close(); }
 });
-test('orders, pool reserves, history and exact retry receipts persist through restart with atomic public totals', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'featheral-market-')), path = join(dir, 'game.sqlite');
+test('orders, pool reserves, history and exact retry receipts persist through restart with atomic public totals', t => {
+  t.mock.method(createRequire(import.meta.url)('../../../../services/operations/replica.js'), 'readReplica', () => null);
+  const dir = mkdtempSync(join(process.cwd(), '.featheral-market-')), path = join(dir, 'game.sqlite');
   const h = setup(path), a = h.create(), b = h.create();
   let reopened: SqliteStore | undefined;
   try {

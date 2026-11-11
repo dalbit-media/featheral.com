@@ -440,3 +440,30 @@ test("native Ethereum pages retain signer IDs and expose a separate central FTHG
   assert.match(embed, /const primary = button\.dataset\.walletPrimary \|\| defaultPrimary/);
   assert.match(embed, /open\(\{ primary, compact: true \}\)/);
 });
+test("wallet swaps default to 1% slippage and compute exact minimum outputs", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../../../sites/wallet.featheral.com/wallet-app.js"), "utf8");
+  const helpers = source.slice(source.indexOf("function parseSwapTolerance("), source.indexOf("async function mountFeatheralWallet("));
+  const context = vm.createContext({});
+  vm.runInContext(helpers, context);
+
+  assert.match(source, /swapSlippage\.value = "1"/, "the visible per-swap control starts at 1%");
+  assert.match(source, /Quoted output: \$\{format\(quote\.output, quote\.to\)\}/);
+  assert.match(source, /Minimum output: \$\{format\(minimum, quote\.to\)\}/);
+  assert.match(source, /minOutput: minimum/, "the confirmed minimum is sent unchanged for settlement");
+
+  assert.equal(context.parseSwapTolerance("1"), 100n);
+  assert.equal(context.minimumSwapOutput("1000", context.parseSwapTolerance("1")), "990");
+  assert.equal(context.parseSwapTolerance("0.25"), 25n);
+  assert.equal(context.minimumSwapOutput("1000", context.parseSwapTolerance("0.25")), "997");
+
+  const largeOutput = "9007199254740993123456789";
+  assert.equal(context.minimumSwapOutput(largeOutput, context.parseSwapTolerance("1")),
+    (BigInt(largeOutput) * 9900n / 10000n).toString());
+  assert.equal(context.parseSwapTolerance("0"), 0n);
+  assert.equal(context.minimumSwapOutput("0", 0n), "0");
+  assert.equal(context.minimumSwapOutput("101", context.parseSwapTolerance("50.00")), "50");
+  assert.equal(context.minimumSwapOutput("1", context.parseSwapTolerance("1")), "0",
+    "minimum output rounds down rather than overstating the guaranteed amount");
+  for (const invalid of ["", "-0.01", "50.01", "1.001", "1e2", "abc"])
+    assert.throws(() => context.parseSwapTolerance(invalid), /between 0% and 50%/);
+});

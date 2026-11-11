@@ -14,6 +14,18 @@ async function resetWalletLocalData(local, session, revoke, signOut, activeToken
   }
   local.setItem("featheral-wallet-reset", "1");
 }
+function parseSwapTolerance(value) {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value));
+  if (!match) throw new Error("Slippage tolerance must be between 0% and 50%, with up to 2 decimal places.");
+  const basisPoints = BigInt(match[1]) * 100n + BigInt((match[2] || "").padEnd(2, "0") || "0");
+  if (basisPoints > 5000n) throw new Error("Slippage tolerance must be between 0% and 50%, with up to 2 decimal places.");
+  return basisPoints;
+}
+function minimumSwapOutput(output, toleranceBasisPoints) {
+  const amount = BigInt(output), tolerance = BigInt(toleranceBasisPoints);
+  if (amount < 0n || tolerance < 0n || tolerance > 5000n) throw new Error("Invalid swap output or slippage tolerance.");
+  return (amount * (10000n - tolerance) / 10000n).toString();
+}
 async function mountFeatheralWallet(context) {
   const nativeDocument = globalThis.document, cleanup = [];
   const listen = (target, name, callback, options) => {
@@ -41,9 +53,18 @@ async function mountFeatheralWallet(context) {
   }
   const $ = id => document.getElementById(id);
   const el = (tag, text, className) => { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; };
+  const swapSlippage = document.createElement("input");
+  swapSlippage.id = "swap-slippage"; swapSlippage.type = "text"; swapSlippage.inputMode = "decimal";
+  swapSlippage.value = "1"; swapSlippage.setAttribute("aria-label", "Slippage tolerance percentage");
+  swapSlippage.setAttribute("aria-describedby", "swap-slippage-help"); swapSlippage.autocomplete = "off";
+  const swapSlippageLabel = el("label", "Slippage tolerance (%)");
+  swapSlippageLabel.append(swapSlippage);
+  const swapSlippageHelp = el("small", "Default 1%. Choose 0–50%, in increments of 0.01%.");
+  swapSlippageHelp.id = "swap-slippage-help"; swapSlippageLabel.append(swapSlippageHelp);
+  $("swap-form").insertBefore(swapSlippageLabel, $("swap-submit"));
   if (window.parent !== window) throw new Error("Open the wallet directly in a tab or window. Wallet frames are not supported.");
   const configResponse = await fetch("/api/wallet/ui" + (context ? context.search : location.search), {
-    cache: "no-store", ...(context ? { signal: AbortSignal.timeout(20000) } : {}),
+    cache: "no-store", signal: AbortSignal.timeout(20000),
   });
   const config = await configResponse.json();
   if (!configResponse.ok) throw new Error(config.error || "Wallet configuration unavailable.");
@@ -1037,8 +1058,12 @@ async function mountFeatheralWallet(context) {
   $("copy-wallet-address").addEventListener("click", copyAddress);
   $("copy-wallet-address").disabled = !owner;
   let swapRequest;
-  function swapReview(quote, minimum = quote.output) {
-    return `Swap ${format(quote.amount, quote.from)} → at least ${format(minimum, quote.to)}?\nRoute: ${quote.route.join(" → ")}\nLive Exchange pools · 0.3% fee per hop, including price impact.\nRecorded as Exchange trades. Ethereum FTHG conversion is separate.`;
+  function swapReview(quote, minimum, toleranceBasisPoints) {
+    const fraction = toleranceBasisPoints === undefined ? "" :
+      (toleranceBasisPoints % 100n).toString().padStart(2, "0").replace(/0+$/, "");
+    const tolerance = toleranceBasisPoints === undefined ? "" :
+      `Slippage tolerance: ${toleranceBasisPoints / 100n}${fraction ? "." + fraction : ""}%\n`;
+    return `Swap ${format(quote.amount, quote.from)}?\nQuoted output: ${format(quote.output, quote.to)}\nMinimum output: ${format(minimum, quote.to)}\n${tolerance}Route: ${quote.route.join(" → ")}\nLive Exchange pools · 0.3% fee per hop, including price impact.\nRecorded as Exchange trades. Ethereum FTHG conversion is separate.`;
   }
   async function finishSwap(request, account) {
     if (owner !== account) throw new Error("Wallet changed. Review the swap again.");
@@ -1065,19 +1090,22 @@ async function mountFeatheralWallet(context) {
   $("swap-form").addEventListener("submit", async event => {
     event.preventDefault(); if (busy) return; lock(true);
     try {
+      const toleranceBasisPoints = parseSwapTolerance(swapSlippage.value);
       if (!await ensureSession()) return;
       const account = owner;
       if (!swapRequest) {
         const from = $("swap-from").value, to = $("swap-to").value, amount = units($("swap-amount").value, from);
         const quote = await api("/wallet/swaps/quote", { from, to, amount });
         $("swap-status").textContent = `${format(quote.amount, from)} → ${format(quote.output, to)} · ${quote.route.join(" → ")}`;
-        if (!await review(swapReview(quote), "Approve swap")) return;
+        const minimum = minimumSwapOutput(quote.output, toleranceBasisPoints);
+        if (!await review(swapReview(quote, minimum, toleranceBasisPoints), "Approve swap")) return;
         if (owner !== account) throw new Error("Wallet changed. Review the swap again.");
-        swapRequest = { from, to, amount, minOutput: quote.output, requestId: crypto.randomUUID() };
+        swapRequest = { from, to, amount, minOutput: minimum, requestId: crypto.randomUUID() };
       }
       const request = await api("/wallet/swaps/prepare", swapRequest);
       await finishSwap(request, account);
     } catch (error) {
+      if (error.message.startsWith("Slippage tolerance")) $("swap-status").textContent = error.message;
       if (swapRequest) {
         try { await refresh(); }
         catch (refreshError) { status(new Error(`${error.message} Balance/request refresh failed: ${refreshError.message}`)); return; }
@@ -1094,7 +1122,10 @@ async function mountFeatheralWallet(context) {
       if (!await ensureSession()) return;
       const symbol = $("send-symbol").value, raw = units($("send-amount").value, symbol, symbol === "FTHX");
       const account = owner, startingEpoch = epoch, recipient = $("recipient").value;
-      const reviewAmount = format(raw, symbol, symbol === "FTHX");
+      const fraction = symbol === "FTH$" ? (BigInt(raw) % (10n ** 18n)).toString().padStart(18, "0").replace(/0+$/, "") : "";
+      const reviewAmount = symbol === "FTH$"
+        ? `${(BigInt(raw) / (10n ** 18n)).toLocaleString()}${fraction ? "." + fraction : ""} FTH$`
+        : format(raw, symbol, symbol === "FTHX");
       if (!await review(`Send ${reviewAmount} to ${recipient}?\nNetwork: native Featheral ledger. This moves existing funds.`, "Approve transfer")) return;
       if (owner !== account || epoch !== startingEpoch) throw new Error("Wallet changed. Review the transfer again.");
       if (symbol === "FTH$") {
@@ -1542,7 +1573,13 @@ window.FeatheralWalletApp = { mount: mountFeatheralWallet };
 if (!document.currentScript?.hasAttribute("data-context-wallet")) mountFeatheralWallet().catch(error => {
   console.error("Central wallet initialization failed:", error);
   const status = document.getElementById("status");
-  if (status) status.textContent = error.message;
+  if (status) {
+    status.textContent = (error.name === "TimeoutError" ? "Wallet loading timed out. Check your connection and retry." : error.message) + " ";
+    const retry = document.createElement("button");
+    retry.type = "button"; retry.textContent = "Retry wallet loading";
+    retry.addEventListener("click", () => location.reload());
+    status.append(retry);
+  }
   const origin = new URLSearchParams(location.search).get("parentOrigin");
   const nonce = new URLSearchParams(location.search).get("authNonce");
   if (window.opener && origin && /^[0-9a-f]{32}$/.test(nonce || "") && document.referrer && new URL(document.referrer).origin === origin)

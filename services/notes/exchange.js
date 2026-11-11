@@ -7,6 +7,10 @@ const DOLLAR_POOL = `0x${crypto.createHash("sha256").update("featheral:exchange:
 const ESCROW = `0x${crypto.createHash("sha256").update("featheral:exchange:escrow").digest("hex")}`;
 const NOTE_POOL = "exchange:fth-dollar";
 const ratio = (input, from, to) => input * 9970n * to / (from * 10000n + input * 9970n);
+const marketAmount = value => {
+  if (value < 1n || value > 1000000000n) throw fail(400, "Trade amount must be a whole number from 1 to 1,000,000,000.");
+  return Number(value);
+};
 function amount(value, symbol) {
   if (typeof value !== "string" || !/^[1-9]\d{0,77}$/.test(value)) throw fail(400, "Enter a positive base-unit amount.");
   const n = BigInt(value);
@@ -38,10 +42,10 @@ class Exchange {
     this.markets.requireUnlocked();
     const available = new Set(["FTHX", ...this.markets.catalog().filter(market => market.funded).map(market => market.symbol)]);
     if (!available.has(from) || !available.has(to)) throw fail(409, "Choose FTHX or a funded native note. Ethereum FTHG conversion is separate.");
-    let output = Number(amount(input.amount, from));
+    let output = amount(input.amount, from);
     const legs = [];
-    if (from !== "FTHX") { const leg = this.markets.quote(from, "sell", output); legs.push(leg); output = leg.output; }
-    if (to !== "FTHX") { const leg = this.markets.quote(to, "buy", output); legs.push(leg); output = leg.output; }
+    if (from !== "FTHX") { const leg = this.markets.quote(from, "sell", marketAmount(output)); legs.push(leg); output = BigInt(leg.output); }
+    if (to !== "FTHX") { const leg = this.markets.quote(to, "buy", marketAmount(output)); legs.push(leg); output = BigInt(leg.output); }
     return { from, to, amount: input.amount, output: String(output), route: [from, ...(from !== "FTHX" && to !== "FTHX" ? ["FTHX"] : []), to],
       legs, hops: legs.length, feeBps: 30 };
   }
@@ -60,7 +64,7 @@ class Exchange {
     }
     const quote = this.swapQuote(input);
     if (BigInt(quote.output) < amount(input.minOutput, input.to)) throw fail(409, "Price moved below the minimum output. Request a new quote.");
-    if (this.creation.notes.balance(owner, input.from) < Number(input.amount)) throw fail(402, `Insufficient ${input.from}.`);
+    if (BigInt(this.creation.notes.balance(owner, input.from)) < amount(input.amount, input.from)) throw fail(402, `Insufficient ${input.from}.`);
     const id = crypto.randomUUID();
     this.db.prepare("INSERT INTO wallet_note_swaps VALUES (?,?,?,?,?,'prepared',?)")
       .run(id, owner, input.requestId, parameters, JSON.stringify(quote), Date.now());
@@ -89,7 +93,7 @@ class Exchange {
       const row = this.db.prepare("SELECT * FROM wallet_note_swaps WHERE id=? AND owner=?").get(id, owner);
       if (row.status === "complete") return this.noteSwapView(row);
       const parameters = JSON.parse(row.parameters), quote = this.swapQuote(parameters);
-      if (BigInt(quote.output) < BigInt(parameters.minOutput)) throw fail(409, "Price moved below the minimum output. Request a new quote.");
+      if (BigInt(quote.output) < amount(parameters.minOutput, parameters.to)) throw fail(409, "Price moved below the minimum output. Request a new quote.");
       for (const [index, leg] of quote.legs.entries()) this.markets.tradeInTransaction(owner, {
         symbol: leg.symbol, side: leg.side, amount: leg.amount, minOutput: leg.output, requestId: `swap-${id}-${index}`,
       });
@@ -166,18 +170,19 @@ class Exchange {
     this.validatePool(pool);
     const inputAmount = amount(input.amount, from), buying = from === "FTH$";
     let output = inputAmount, noteQuote = null;
-    if (!buying && note !== "FTHX") { noteQuote = this.markets.quote(note, "sell", Number(inputAmount)); output = BigInt(noteQuote.output); }
+    if (!buying && note !== "FTHX") { noteQuote = this.markets.quote(note, "sell", marketAmount(inputAmount)); output = BigInt(noteQuote.output); }
     const intermediate = buying
       ? ratio(output, BigInt(pool.dollars), BigInt(pool.fthx))
       : output;
     output = buying ? intermediate : ratio(output, BigInt(pool.fthx), BigInt(pool.dollars));
     if (buying && note !== "FTHX") {
       if (intermediate > 1000000000n) throw fail(400, "Routed amount exceeds note limits.");
-      noteQuote = this.markets.quote(note, "buy", Number(intermediate)); output = BigInt(noteQuote.output);
+      noteQuote = this.markets.quote(note, "buy", marketAmount(intermediate)); output = BigInt(noteQuote.output);
     }
     if (output < 1n || intermediate < 1n) throw fail(400, "Amount is too small for available liquidity.");
-    if (buying && !Number.isSafeInteger(pool.fthx - Number(intermediate))) throw fail(409, "Invalid pool reserves.");
-    if (!buying && !Number.isSafeInteger(pool.fthx + Number(intermediate))) throw fail(409, "Pool exceeds safe note limits.");
+    const nextFthx = BigInt(pool.fthx) + (buying ? -intermediate : intermediate);
+    if (nextFthx < 0n || nextFthx > BigInt(Number.MAX_SAFE_INTEGER))
+      throw fail(409, buying ? "Invalid pool reserves." : "Pool exceeds safe note limits.");
     return { from, to, amount: input.amount, output: output.toString(), intermediate: intermediate.toString(),
       route: note === "FTHX" ? [from, to] : [from, "FTHX", to], feeBps: 30, hops: note === "FTHX" ? 1 : 2,
       version: pool.version, noteQuote };
@@ -212,13 +217,13 @@ class Exchange {
       const dollars = amount(input.dollars, "FTH$"), fthx = amount(input.fthx, "FTHX");
       if (input.approval !== `FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`) throw fail(400, "Exact initial pool funding approval is required.");
       if (pool.funded) throw fail(409, "Dollar pool is already funded.");
-      if (this.creation.notes.balance(owner) < Number(fthx)) throw fail(402, "Insufficient existing FTHX for funding.");
+      if (BigInt(this.creation.notes.balance(owner)) < fthx) throw fail(402, "Insufficient existing FTHX for funding.");
       quote = { from: "FTH$", to: "FTHX", amount: dollars.toString(), output: "0", intermediate: fthx.toString(), version: pool.version };
     } else {
       quote = this.quote(input);
       const minimum = amount(input.minOutput, input.to);
       if (BigInt(quote.output) < minimum) throw fail(409, "Quote is below your minimum output.");
-      if (quote.from !== "FTH$" && this.creation.notes.balance(owner, quote.from) < Number(BigInt(quote.amount)))
+      if (quote.from !== "FTH$" && BigInt(this.creation.notes.balance(owner, quote.from)) < BigInt(quote.amount))
         throw fail(402, `Insufficient ${quote.from}.`);
     }
     const id = existing?.id || crypto.randomUUID();

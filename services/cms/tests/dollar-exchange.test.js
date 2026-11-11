@@ -197,6 +197,23 @@ test('wallet Dollar swaps use signed journaled settlement and preserve minimums 
   assert.equal((await exchange.completeSwap(owner, payout.id)).status, 'complete');
   assert.equal(exchange.account(owner).trades.length, 2);
 });
+test('Dollar swap quotes and prepared payments retain exact raw amounts above the safe Number range', async t => {
+  const { exchange, owner, fund } = await fixture(t);
+  await fund();
+  const rawAmount = (BigInt(Number.MAX_SAFE_INTEGER) * 100n).toString();
+  const quote = exchange.swapQuote({ from: 'FTH$', to: 'FTHX', amount: rawAmount });
+  const pool = exchange.pool();
+  const expected = (BigInt(rawAmount) * 9970n * BigInt(pool.fthx)
+    / (BigInt(pool.dollars) * 10000n + BigInt(rawAmount) * 9970n)).toString();
+  assert.equal(quote.amount, rawAmount);
+  assert.equal(quote.output, expected);
+
+  const request = exchange.prepareSwap(owner, {
+    ...quote, minOutput: quote.output, requestId: 'wallet-dollar-exact-amount1',
+  });
+  assert.equal(request.payment.amount, rawAmount);
+  assert.equal(request.output, expected);
+});
 test('Dollar routes buy and sell notes through FTHX with signatures, exact retries and no double charge', async t => {
   const { api, notes, creation, exchange, owner, complete, fund } = await fixture(t);
   await fund(); creation.markets.fund('FTHA', 'FUND FTHA 1000000 FTHX 1000000 NOTES');
