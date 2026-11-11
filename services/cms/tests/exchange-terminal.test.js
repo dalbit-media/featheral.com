@@ -376,15 +376,77 @@ class VisualElement {
   get options() { return this.children; }
 }
 const descendants = root => [root, ...root.children.flatMap(descendants)];
-test("Empty candle chart is illustrative, labeled, and never draws data candles or volume", () => {
-  const root = new VisualElement("div"), context = { window: {},
-    document: { createElement: tag => new VisualElement(tag), createElementNS: (_, tag) => new VisualElement(tag) } };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../../sites/ex.featheral.com/chart.js"), "utf8"), context);
-  context.window.FeatheralCandleChart.mount(root).update({ candles: [] });
-  const all = descendants(root);
-  assert.ok(all.some(node => node.textContent?.includes("No executed candles yet")));
-  assert.equal(all.filter(node => node.tag === "rect").length, 1, "Only the placeholder background, not candles");
-  assert.ok(all.some(node => node.textContent?.includes("Empty periods are not fabricated")));
+function chartFixture() {
+  const create = tag => {
+    const node = new VisualElement(tag);
+    node.querySelector = selector => selector === "[data-chart-volume]" || selector === "[data-chart-averages]" ? create("button") : null;
+    node.querySelectorAll = () => [];
+    return node;
+  };
+  const root = create("div"), context = { window: {}, ResizeObserver: class { observe() {} disconnect() {} },
+    document: { createElement: create, addEventListener() {}, removeEventListener() {} } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../../shared/trading-chart.js"), "utf8"), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../../sites/ex.featheral.com/chart.js"), "utf8"), context);
+  return { root, engine: context.FeatheralTradingChart, chart: context.window.FeatheralCandleChart.mount(root) };
+}
+test("Shared chart empty states never draw fabricated prices, candles, or volume", () => {
+  const { root, chart } = chartFixture();
+  chart.update({ candles: [] });
+  assert.match(root.children[1].innerHTML, /No executed candles yet/);
+  assert.doesNotMatch(root.children[1].innerHTML, /data-chart-candle|chart-volume"|<polyline/);
+  assert.match(root.children[1].innerHTML, /Empty periods are not fabricated/);
+  chart.update({ candles: [], referenceOnly: true });
+  assert.match(root.children[1].innerHTML, /Reference \/ conversion market/);
+});
+test("Exchange chart uses shared area renderer, exact volume scales and recorded clock disclosure", () => {
+  const { root, chart } = chartFixture(), ratio = value => ({ numerator: String(value), denominator: "1000000000" });
+  const candle = { at: 86400000, open: ratio(1), high: ratio(2), low: ratio(1), close: ratio(2), quoteVolume: "500000000000000000", trades: 2 };
+  chart.update({ symbol: "WORLD:metal", currency: "FTHX", interval: "all", quoteVolumeDecimals: 18,
+    clocks: ["historical-game-clock"], source: "world-executed-inventory", candles: [candle] });
+  const markup = root.children[1].innerHTML;
+  assert.match(markup, /chart-area/);
+  assert.match(markup, /chart-endpoint/);
+  assert.match(markup, /0\.5 FTHX/);
+  assert.doesNotMatch(markup, /NaN|Infinity|class="chart-body"/);
+  assert.match(root.children[2].textContent, /historical-game-clock/);
+  assert.throws(() => chart.update({ candles: [{ ...candle, close: { numerator: "1", denominator: "0" } }] }), /invalid/);
+  assert.equal(root.children[1].innerHTML, markup, "Malformed history does not replace the last successful chart");
+  chart.update({ symbol: "FTH$", currency: "FTHX", candles: [candle] });
+  assert.match(root.children[1].innerHTML, /0\.5 FTHX/);
+  chart.update({ symbol: "FTHA", currency: "FTHX", candles: [{ ...candle, quoteVolume: "5" }] });
+  assert.match(root.children[1].innerHTML, /Volume <strong>5 FTHX/);
+});
+test("Shared crosshair inspection scrubs the headline and signed return, then restores recorded latest values", () => {
+  const { engine } = chartFixture(), nodes = new Map(), make = selector => {
+    const node = new VisualElement("g"); nodes.set(selector, node); return node;
+  };
+  const svg = make(".trading-chart"), crosshair = make(".chart-crosshair");
+  svg.dataset = { chartTop: "20", chartLeft: "12", chartRight: "700" };
+  svg.viewBox = { baseVal: { height: 400 } }; svg.querySelector = selector => nodes.get(selector);
+  crosshair.querySelector = selector => nodes.get(selector);
+  for (const selector of ["[data-crosshair-x]", "[data-crosshair-y]", "circle", "text"]) make(selector);
+  const defaults = [
+    ["[data-chart-headline-price]", "106"],
+    ["[data-chart-headline-label]", "Latest recorded close"],
+    ["[data-chart-return-value]", "+6%"],
+    ["[data-chart-inspection]", "Hover or focus a candle for OHLC and volume."],
+  ].map(([selector, value]) => { const node = make(selector); node.dataset.chartDefault = value; return node; });
+  make(".ft-chart").dataset.chartDirection = "up"; const change = make(".chart-return");
+  const root = { querySelector: selector => nodes.get(selector), querySelectorAll: () => defaults };
+  const candle = { dataset: { chartX: "45", chartY: "100", chartPrice: "95", chartTime: "Jan 1, UTC", chartChange: "-5%" },
+    getAttribute: () => "Recorded OHLC and volume" };
+  engine.inspect(root, candle);
+  assert.equal(crosshair.attributes.visibility, "visible");
+  assert.equal(nodes.get("[data-crosshair-x]").attributes.d, "M45 20V370");
+  assert.equal(defaults[0].textContent, "95");
+  assert.equal(defaults[1].textContent, "Jan 1, UTC");
+  assert.equal(defaults[2].textContent, "-5%");
+  assert.equal(change.dataset.chartReturnDirection, "down");
+  engine.clearInspection(root);
+  assert.equal(crosshair.attributes.visibility, "hidden");
+  assert.equal(change.dataset.chartReturnDirection, "up");
+  for (const node of defaults) assert.equal(node.textContent, node.dataset.chartDefault);
 });
 test("Liquidity visuals use exact reserves, independent capped targets, honest statuses and currency filters", async () => {
   const root = new VisualElement("section"), errors = [], markets = [

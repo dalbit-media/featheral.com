@@ -1,9 +1,9 @@
 import { chartBounds, chartIntervals, constrainChartWindow, marketCandles, priceHistoryChart, zoomChartWindow } from './market-chart.ts';
 import type { ChartInterval, ChartStyle, ChartWindow } from './market-chart.ts';
 import type { MarketAsset, MarketFill } from './market.ts';
-import { formatResourcePrice } from './resource-units.ts';
-import { locale, translate } from './i18n.ts';
+import { translate } from './i18n.ts';
 import type { Language } from './i18n.ts';
+import '../../../../shared/trading-chart.css';
 
 const ranges = { '1D': 86400000, '1W': 604800000, '1M': 2592000000, All: Infinity };
 
@@ -11,7 +11,7 @@ export class MarketChartView {
   private history: MarketFill[] = [];
   private asset: MarketAsset = 'metal';
   private interval: ChartInterval = 'auto';
-  private style: ChartStyle = 'candles';
+  private style: ChartStyle = 'line';
   private range: keyof typeof ranges = 'All';
   private window: ChartWindow | undefined;
   private averages = false;
@@ -34,9 +34,9 @@ export class MarketChartView {
     this.content = card.querySelector<HTMLElement>('[data-market-chart]')!;
     card.querySelector('.exchange-section-title')!.insertAdjacentHTML('beforeend', `<button type="button" class="button chart-expand" data-chart-expand aria-haspopup="dialog">${t('Expand chart')}</button>`);
     this.content.insertAdjacentHTML('beforebegin', `<div class="chart-toolbar">
-      <div class="catalog-view-switch" role="group" aria-label="${t('Time range')}">${Object.keys(ranges).map(range => `<button type="button" data-chart-range="${range}" aria-pressed="${range === 'All'}">${t(range)}</button>`).join('')}</div>
+      <div class="catalog-view-switch chart-appearance-controls" role="group" aria-label="${t('Time range')}">${Object.keys(ranges).map(range => `<button type="button" data-chart-range="${range}" aria-pressed="${range === 'All'}">${t(range)}</button>`).join('')}</div>
       <label class="chart-interval-label">${t('Candle interval')}<select data-chart-interval>${chartIntervals.map(interval => `<option value="${interval}">${t(interval === 'auto' ? 'Auto' : interval)}</option>`).join('')}</select></label>
-      <div class="catalog-view-switch" role="group" aria-label="${t('Chart style')}"><button type="button" data-chart-style="candles" aria-pressed="true">${t('Candles')}</button><button type="button" data-chart-style="line" aria-pressed="false">${t('Line')}</button></div>
+      <div class="catalog-view-switch chart-appearance-controls" role="group" aria-label="${t('Chart style')}"><button type="button" data-chart-style="line" aria-pressed="true">${t('Line')}</button><button type="button" data-chart-style="candles" aria-pressed="false">${t('Candles')}</button></div>
       <button type="button" class="button" data-chart-averages aria-pressed="false">MA 5 / 20</button><button type="button" class="button" data-chart-volume aria-pressed="true">${t('Volume')}</button>
       <div class="chart-navigation" role="group" aria-label="${t('Chart navigation')}">${[['older', 'Earlier candles'], ['in', 'Zoom in'], ['out', 'Zoom out'], ['newer', 'Later candles'], ['reset', 'Reset chart']].map(([key, label]) => `<button type="button" class="button" data-chart-navigation="${key}" aria-label="${t(label)}" title="${t(label)}">${key === 'older' ? '&larr;' : key === 'newer' ? '&rarr;' : key === 'in' ? '+' : key === 'out' ? '-' : t('Reset')}</button>`).join('')}</div>
     </div><p class="chart-gesture-help">${t('Drag to pan. Pinch or Ctrl + scroll to zoom. Arrow keys inspect; + / - zoom.')}</p>`);
@@ -75,9 +75,9 @@ export class MarketChartView {
         const { bounds, duration } = this.series()!;
         if (points.length > 1 && gesture.distance > 0) {
           const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
-          this.window = zoomChartWindow(gesture.window, bounds, gesture.distance / Math.max(1, distance), (gesture.x - geometry.rect.left - geometry.left) / geometry.plotWidth, duration * 3);
+          this.window = zoomChartWindow(gesture.window, bounds, gesture.distance / Math.max(1, distance), geometry.anchor(gesture.x), duration * 3);
         } else {
-          const delta = (gesture.x - centre) / geometry.plotWidth * (gesture.window.end - gesture.window.start);
+          const delta = (gesture.x - centre) / geometry.pixelPlotWidth * (gesture.window.end - gesture.window.start);
           this.window = constrainChartWindow({ start: gesture.window.start + delta, end: gesture.window.end + delta }, bounds, duration * 3);
         }
         this.schedule();
@@ -92,12 +92,15 @@ export class MarketChartView {
       const geometry = this.geometry();
       if (!geometry) return;
       event.preventDefault();
-      this.zoom(Math.exp(Math.max(-1, Math.min(1, event.deltaY * .003))), (event.clientX - geometry.rect.left - geometry.left) / geometry.plotWidth);
+      this.zoom(Math.exp(Math.max(-1, Math.min(1, event.deltaY * .003))), geometry.anchor(event.clientX));
       this.schedule();
     }, { passive: false });
     this.content.addEventListener('focusin', event => {
       const candle = event.target instanceof Element ? event.target.closest<SVGElement>('[data-chart-candle]') : null;
       if (candle) this.showCandle(candle);
+    });
+    this.content.addEventListener('focusout', event => {
+      if (!(event.relatedTarget instanceof Node) || !this.content.contains(event.relatedTarget)) this.clearInspection();
     });
     this.content.addEventListener('keydown', event => {
       if (!(event.target instanceof Element) || !event.target.closest('.chart-canvas')) return;
@@ -176,7 +179,9 @@ export class MarketChartView {
     const svg = this.content.querySelector<SVGSVGElement>('.trading-chart');
     if (!svg) return null;
     const rect = svg.getBoundingClientRect(), left = Number(svg.dataset.chartLeft), right = Number(svg.dataset.chartRight);
-    return { svg, rect, left, right, plotWidth: right - left };
+    const scale = rect.width / svg.viewBox.baseVal.width;
+    return { svg, rect, left, right, pixelPlotWidth: (right - left) * scale,
+      anchor: (clientX: number) => ((clientX - rect.left) / scale - left) / (right - left) };
   }
   private beginGesture(): void {
     const series = this.series(), points = [...this.pointers.values()];
@@ -191,25 +196,13 @@ export class MarketChartView {
     if (x < geometry.left || x > geometry.right || y < Number(geometry.svg.dataset.chartTop) || y > Number(geometry.svg.dataset.chartBottom)) { this.clearInspection(); return; }
     const candles = [...this.content.querySelectorAll<SVGElement>('[data-chart-candle]')];
     const nearest = candles.reduce<SVGElement | null>((best, candle) => !best || Math.abs(Number(candle.dataset.chartX) - x) < Math.abs(Number(best.dataset.chartX) - x) ? candle : best, null);
-    if (nearest) this.showCandle(nearest, y);
+    if (nearest) this.showCandle(nearest);
   }
-  private showCandle(candle: SVGElement, pointerY?: number): void {
-    const geometry = this.geometry();
-    if (!geometry) return;
-    const { svg, left, right } = geometry, x = Number(candle.dataset.chartX), y = pointerY ?? Number(candle.dataset.chartY);
-    const crosshair = svg.querySelector('.chart-crosshair')!;
-    crosshair.setAttribute('visibility', 'visible');
-    crosshair.querySelector('[data-crosshair-x]')!.setAttribute('d', `M${x} ${svg.dataset.chartTop}V${svg.viewBox.baseVal.height - 30}`);
-    crosshair.querySelector('[data-crosshair-y]')!.setAttribute('d', `M${left} ${y}H${right}`);
-    const dot = crosshair.querySelector('circle')!; dot.setAttribute('cx', String(x)); dot.setAttribute('cy', candle.dataset.chartY!);
-    const price = Number(svg.dataset.chartMax) - (y - Number(svg.dataset.chartTop)) / (Number(svg.dataset.chartBottom) - Number(svg.dataset.chartTop)) * (Number(svg.dataset.chartMax) - Number(svg.dataset.chartMin));
-    const label = crosshair.querySelector('text')!; label.setAttribute('y', String(y - 7)); label.textContent = formatResourcePrice(this.asset, price, locale(this.language));
-    this.content.querySelector('[data-chart-inspection]')!.textContent = candle.getAttribute('aria-label');
+  private showCandle(candle: SVGElement): void {
+    FeatheralTradingChart.inspect(this.content, candle);
   }
   private clearInspection(): void {
-    this.content.querySelector('.chart-crosshair')?.setAttribute('visibility', 'hidden');
-    const inspection = this.content.querySelector('[data-chart-inspection]');
-    if (inspection) inspection.textContent = translate('Hover or focus a candle for OHLC and volume.', this.language);
+    FeatheralTradingChart.clearInspection(this.content);
   }
   private expand(): void {
     if (this.dialog?.open) { this.dialog.close(); return; }

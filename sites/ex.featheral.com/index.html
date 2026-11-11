@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/shared/site-colors.css">
   <link rel="stylesheet" href="/site/terminal.css">
   <link rel="stylesheet" href="/shared/market-activity.css">
+  <link rel="stylesheet" href="/shared/trading-chart.css">
 </head>
 <body data-site-brand="ex.featheral.com">
   <a class="skip-link" href="#main-content">Skip to exchange content</a>
@@ -33,10 +34,10 @@
       <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol or item"></label><label>Show<select id="market-filter"><option value="active">Active volume / 24h</option><option value="all">All markets &amp; placeholders</option></select></label><p id="market-list-status" role="status"></p><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
       <section class="chart-panel panel">
         <div class="chart-toolbar"><div><h2 id="market-title">FTH$ / FTHX</h2><strong id="spot-price">Loading price...</strong><small id="usd-price"></small></div><label>Timeframe<select id="chart-interval"><option value="1h">1h / 5m candles</option><option value="24h" selected>24h / 1h candles</option><option value="7d">7d / 6h candles</option><option value="30d">30d / 1d candles</option><option value="all">All history / daily candles</option></select></label><button id="refresh-market" type="button">Refresh</button></div>
-        <div class="chart-tools"><label><input id="chart-sma" type="checkbox" checked> SMA 20</label><button id="chart-reset" type="button">Reset zoom</button><button id="chart-fullscreen" type="button">Fullscreen</button><span>Scroll to zoom / drag to pan</span></div>
+        <div class="chart-tools"><button id="chart-fullscreen" type="button">Fullscreen</button><span>Drag to pan / pinch or Ctrl + scroll to zoom</span></div>
         <div id="candle-chart"></div>
         <p class="workspace-hint">This chart shows executed pool prices only. Game purchases and sales are shown in <a href="#world-market-activity">World market activity</a> and the <a href="#network-activity">full financial records</a>, even when this pool is unfunded.</p>
-        <div class="chart-legend"><span class="legend-up">Upward / flat close</span><span class="legend-down">Downward close</span><span class="legend-average">SMA 20</span><span>Executed data only</span></div>
+        <div class="chart-legend"><span class="legend-up">Upward / flat close</span><span class="legend-down">Downward close</span><span class="legend-average">MA 5 / 20</span><span>Executed data only</span></div>
         <p id="market-detail" class="muted"></p><p id="reference-detail" class="muted"></p>
         <div id="world-executions" hidden><a id="world-trade-link" href="https://world.featheral.com/market/">Trade inventory in World</a><div class="table-wrap"><table><caption>Executed World inventory trades · latest 100 in selected interval</caption><thead><tr><th>Time / clock</th><th>Quantity</th><th>Price (FTHX/item)</th><th>FTHX notional</th><th>Original FTH$ paid</th><th>Venue</th><th>Record / settlement</th></tr></thead><tbody id="world-trade-records"></tbody></table></div></div>
       </section>
@@ -80,6 +81,7 @@
     <footer>Internal ledger spot markets, not an order book or a deployed L3 blockchain. Estimates are not redemption guarantees. USD uses live FTHG/USD; initial references are 1 FTHG = 10,000 FTH$ and 1 FTH$ = 100 FTHX until verified funded pools supply prices.</footer>
   </main>
   <script src="/shared/asset-icons.js" defer></script>
+  <script src="/shared/trading-chart.js" defer></script>
   <script src="/site/chart.js" defer></script>
   <script src="/site/workspace.js" defer></script>
   <script src="/site/terminal.js" defer></script>

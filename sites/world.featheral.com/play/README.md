@@ -88,8 +88,15 @@ rarity and unlocked-recipe filters. Filters combine and Reset filters clears
 them all. Sorting supports both price directions, ownership, changes, supply,
 rarity and crafting tier; grid and sortable-table views share the same results.
 
-Price history defaults to OHLC candles with volume bars and a closing-price
-line alternative. Auto groups the available history into roughly 40 candles;
+Price history shares its renderer and visual system with Exchange
+(`shared/trading-chart.js` and `shared/trading-chart.css`). It defaults to a
+closing-price area line, with OHLC candles available from the style switch.
+The price header follows hover/keyboard inspection and restores the latest
+recorded close on exit. Both styles show optional volume bars and 5/20-candle
+moving averages, subtle axes, range returns, and an executed-close price badge.
+Line/area and moving-average paths break across empty intervals rather than
+implying prices between trades; isolated trades remain visible as points.
+Reduced-motion preferences disable the endpoint animation. Auto groups the available history into roughly 40 candles;
 5m, 15m, 1h, 4h and 1d intervals use the game clock in UTC. The chart spans the
 full marketplace width, appears before the mobile order ticket, and can open
 in a fullscreen dialog (Escape or Close restores focus). Its axes use actual

@@ -988,6 +988,19 @@ FTHG is also reserved and excluded from Notes trends and public note-market list
 Notes and Exchange show actual pool spot ratios with exact string numerators/denominators, and bucketed executed-trade prices. One interval selects 1 hour, 24 hours, 7 days or 30 days for all charts, without changing the real 24-hour volume ranking. Buy execution price is FTHX input/note output; sell price is FTHX output/note input. Each bucket retains its last executed price; missing buckets are not fabricated. Unfunded/no-pair notes (including native FTH$ and FTHX) show **No market price**. Empty histories explicitly say no executed trades. Spot ratios exclude execution fees and price impact; users must quote before swapping. Mock charts have been removed.
 
 The Notes market view is card-first: feather/symbol, price/change, history and compact real 24-hour volume. Trading controls link to Exchange instead of executing on Notes. Interval and refresh controls sit above the cards.
+Exchange and the in-game marketplace use the same `/shared/trading-chart.js`
+renderer and stylesheet. Both default to an area line with a candlestick
+alternative, optional executed volume and MA 5/20, keyboard/hover price
+inspection, bounded pan/zoom, and expanded viewing. Line/area and moving-average
+paths do not bridge missing candle intervals. Single executed points remain
+visible. Range returns use the first visible open and last visible close;
+the headline labels the latest recorded close, not a live quote. Hovering or
+keyboard inspection temporarily shows the selected candle's close and timestamp.
+Exchange retains its selected viewport on same-market refreshes and labels quote
+volume in the quote currency (including 18-decimal World/FTH$ quote amounts).
+Game charts retain their FTH$/resource trading units and game-clock UTC labels;
+Exchange discloses historical/execution clocks when provided. These are shared
+visuals, not merged order books, custody, prices or timestamps.
 Notes now leads with always-visible native currency charts, defaulting to all
 recorded history. When a currency has no executed prices in the selected window,
 its chart uses actual ledger-record counts, explicitly labelled as activity rather

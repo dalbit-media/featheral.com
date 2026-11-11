@@ -24,7 +24,7 @@ function fixture() {
   const window = { matchMedia: () => ({ matches: false, addEventListener() {} }), addEventListener() {} };
   let request = async () => ({ missions: [] });
   vm.runInNewContext(`${source.slice(0, source.indexOf("  const hasWorldHandoff"))}
-    window.test = { state, renderMissions, renderOverview, eligibilityText, editMission, loadMissions };
+    window.test = { state, renderMissions, renderOverview, renderOrganization, renderProposal, eligibilityText, editMission, loadMissions };
   })();`, { window, document, console, URL, crypto: require("node:crypto"), setInterval() {}, clearTimeout() {},
     history: { replaceState() {} }, location: { hash: "", origin: "http://app.localhost" },
     fetch: async (...args) => {
@@ -38,7 +38,7 @@ function fixture() {
     org: { divisions: [{ id: "engineering", name: "Engineering" }], teams: [{ id: "engineering-general", division: "engineering", name: "General" }],
       levels: ["learning"], states: ["draft", "ready", "in_progress", "review", "done", "cancelled"] } };
   ui.state.members = [{ address: owner, team: "engineering-general" }, { address: peer, team: "engineering-general" }];
-  return { ...ui, get, setRequest: value => { request = value; } };
+  return { ...ui, window, get, setRequest: value => { request = value; } };
 }
 const mission = (id, assignee, status, team = "engineering-general") => ({
   id, assignee, status, team, division: "engineering", min_level: "learning", title: `Mission ${id}`,
@@ -124,6 +124,40 @@ test("proposed organization covers every seeded site team without creating live 
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length, "controller IDs must remain unique");
   assert.match(html, /No new payout or stake-unlock flow is enabled/);
+});
+test("organization views render top-to-bottom icon cards for governance, divisions and teams", () => {
+  const ui = fixture();
+  const position = (id, parent, name, role, members = []) => ({ id, parent, name, role, members, responsibility: `${name} scope` });
+  ui.state.me.org.positions = [
+    position("foundation", null, "Foundation coordination", "director"),
+    position("division-engineering", "foundation", "Engineering", "manager"),
+    position("lead-wallet", "division-engineering", "Wallet lead", "lead"),
+    position("contributors-wallet", "lead-wallet", "Wallet contributors", "contributor", [{ address: owner, level: "practitioner" }]),
+  ];
+  ui.renderOrganization();
+  const liveText = ui.get("org-chart").children.flatMap(function walk(element) {
+    return [element.textContent, ...element.children.flatMap(walk)];
+  }).join(" ");
+  assert.ok(liveText.indexOf("Foundation coordination") < liveText.indexOf("Engineering"));
+  assert.ok(liveText.indexOf("Engineering") < liveText.indexOf("Wallet lead"));
+  assert.ok(liveText.indexOf("Wallet lead") < liveText.indexOf("Wallet contributors"));
+  assert.match(liveText, /🏛️|🧭|🛠️|👥/);
+  assert.match(liveText, /You \/ practitioner/);
+
+  ui.window.FeatheralOrgSetup = {
+      principles: [], levels: [], cadence: "",
+      coordination: { role: "Foundation coordinator", name: "Demo Atlas", experience: "Illustrative experience", focus: "Coordinates divisions." },
+      divisions: [{ id: "engineering", name: "Engineering", persona: "Demo Forge", experience: "Illustrative experience",
+        focus: "Builds products.", teams: [["wallet", "Wallet experience", "Demo Key", "6 years", "Wallet skills", "Wallet delivery."]] }],
+  };
+  ui.renderProposal();
+  const proposalText = ui.get("org-proposal").children.flatMap(function walk(element) {
+    return [element.textContent, ...element.children.flatMap(walk)];
+  }).join(" ");
+  assert.ok(proposalText.indexOf("Member governance") < proposalText.indexOf("Foundation coordinator"));
+  assert.ok(proposalText.indexOf("Foundation coordinator") < proposalText.indexOf("Engineering"));
+  assert.ok(proposalText.indexOf("Engineering") < proposalText.indexOf("Wallet experience"));
+  assert.match(proposalText, /🏛️|🧭|🏢|👥/);
 });
 test("shared animations stay paused until the page, fonts and app have loaded", async () => {
   const css = fs.readFileSync(path.join(root, "shared", "site-links.css"), "utf8");

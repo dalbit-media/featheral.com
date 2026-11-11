@@ -56,9 +56,10 @@ test('responsive chart geometry keeps pixel-sized axes, visible OHLC, volume tog
 test('chart styles override narrow grid placement and remove the late 140px layout cap', () => {
   const shell = readFileSync(new URL('./game-layout.css', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./market-chart.css', import.meta.url), 'utf8');
+  const shared = readFileSync(new URL('../../../../shared/trading-chart.css', import.meta.url), 'utf8');
   assert.doesNotMatch(shell, /#app \.market-chart\{[^}]*max-height:140px/);
   assert.match(css, /#app \.exchange-layout \.exchange-chart-card\{grid-column:1\/-1\}/);
-  assert.match(css, /\.chart-canvas\{height:clamp\(360px,52dvh,620px\)/);
+  assert.match(shared, /\.chart-canvas\{height:clamp\(280px,42vh,480px\)/);
   assert.match(css, /#app \.exchange-layout \.exchange-order-entry\{grid-row:1\/3;position:static\}/);
 });
 test('auto intervals bound density, fixed intervals use game clock and empty or flat prices render honestly', () => {
@@ -77,4 +78,41 @@ test('auto intervals bound density, fixed intervals use game clock and empty or 
   assert.match(priceHistoryChart(history, 'ko'), /시가/);
   assert.match(priceHistoryChart(history, 'ko'), /종가/);
   assert.match(priceHistoryChart(history, 'ko'), /거래량/);
+});
+test('shared line engine renders separate area segments across gaps and a point for isolated trades', () => {
+  const history = [fill(1, 0, 2), fill(2, 3600000, 3), fill(3, 10 * 3600000, 1)];
+  const markup = priceHistoryChart(history, 'en', '1h', 'line');
+  assert.equal((markup.match(/class="chart-area"/g) ?? []).length, 2);
+  assert.equal((markup.match(/class="chart-line"/g) ?? []).length, 2);
+  assert.match(markup, /data-chart-direction="down"/);
+  assert.match(markup, /class="chart-sample"[^>]+r="3"/);
+  assert.match(markup, /clip-path="url\(#world-market-clip\)"/);
+  assert.match(markup, /chart-price-tag/);
+  assert.match(markup, /tabindex="-1" data-chart-candle/);
+  assert.match(markup, /role="group" tabindex="0"/);
+  assert.doesNotMatch(markup, /NaN|Infinity/);
+});
+test('shared chart validates data, escapes labels and uses unique gradient ids', () => {
+  const engine = FeatheralTradingChart;
+  const candle = { time: 0, open: 1, high: 2, low: 1, close: 2, volume: 5, trades: 1 };
+  const options = { duration: 3600000, formatPrice: String, formatVolume: String, formatTime: String, unit: '<img onerror="bad">' };
+  const first = engine.render([candle], options), second = engine.render([candle], options);
+  assert.match(first, /&lt;img onerror=&quot;bad&quot;&gt;/);
+  assert.notEqual(first.match(/id="([^"]+)-area"/)?.[1], second.match(/id="([^"]+)-area"/)?.[1]);
+  assert.throws(() => engine.render([{ ...candle, close: Infinity }], options), /invalid/);
+  assert.throws(() => engine.render([{ ...candle, volume: -1 }], options), /invalid/);
+  assert.throws(() => engine.render([candle, candle], options), /unordered/);
+  assert.throws(() => engine.render([candle], { ...options, duration: 0 }), /positive/);
+  assert.match(engine.render([{ ...candle, open: 1e-12, high: 1e-12, low: 1e-12, close: 1e-12 }], options), /chart-endpoint/);
+  assert.doesNotMatch(engine.render([{ ...candle, open: 0, high: 0, low: 0, close: 0 }], options), /NaN|Infinity/);
+});
+test('both trading surfaces load the same renderer and reduced-motion visual system', () => {
+  const game = readFileSync(new URL('./market-chart-view.ts', import.meta.url), 'utf8');
+  const exchange = readFileSync(new URL('../../../ex.featheral.com/index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../../../../shared/trading-chart.css', import.meta.url), 'utf8');
+  assert.match(game, /style: ChartStyle = 'line'/);
+  assert.match(game, /shared\/trading-chart.css/);
+  assert.match(exchange, /shared\/trading-chart.js/);
+  assert.match(exchange, /shared\/trading-chart.css/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
 });

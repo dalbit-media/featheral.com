@@ -88,8 +88,22 @@ small { font-size: 11px; }
 .chart-tools label { flex-direction: row; align-items: center; font-size: 10px; }
 .chart-tools button { min-height: 32px; font-size: 10px; padding: 6px 9px; }
 #candle-chart { min-height: 380px; touch-action: pan-y; }
-#candle-chart svg { width: 100%; height: auto; min-height: 300px; display: block; cursor: crosshair; user-select: none; }
-#candle-chart:fullscreen { background: #0a1320; padding: 25px; }
+#candle-chart .chart-canvas svg { width: 100%; height: 100%; min-height: 0; display: block; cursor: crosshair; user-select: none; }
+#candle-chart:fullscreen { background: #0a1320; padding: 20px;display:flex;flex-direction:column;height:100dvh;min-height:0;overflow:auto; }
+#candle-chart:fullscreen .chart-content,#candle-chart:fullscreen .ft-chart { display:flex;flex-direction:column;flex:1;min-height:0; }
+#candle-chart:fullscreen .chart-canvas { flex:1;height:auto;min-height:180px; }
+#candle-chart:fullscreen .trading-chart { touch-action:none; }
+#candle-chart .chart-appearance-controls { margin-top:16px; }
+#candle-chart .chart-disclosure { color:var(--muted);font-size:10px;line-height:1.6; }
+@media(max-height:500px){
+  #candle-chart:fullscreen{padding:7px 16px}
+  #candle-chart:fullscreen .chart-appearance-controls{margin-top:0}
+  #candle-chart:fullscreen .chart-headline{margin:6px 0}
+  #candle-chart:fullscreen .chart-headline strong{font-size:22px}
+  #candle-chart:fullscreen .chart-summary{display:none}
+  #candle-chart:fullscreen .chart-inspection{min-height:20px;margin:4px 0;font-size:10px}
+  #candle-chart:fullscreen .chart-disclosure{margin:4px 0;font-size:9px}
+}
 #candle-chart .ohlc { min-height: 40px; padding-top: 8px; font: 10px/1.5 ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 15px; font-size: 9px; color: var(--muted); padding: 8px 0 12px; border-bottom: 1px solid var(--line); }
 .chart-legend span:before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 2px; background: #68819e; margin-right: 5px; }

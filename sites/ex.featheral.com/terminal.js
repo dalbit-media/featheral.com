@@ -7,7 +7,7 @@
     "terminal-status", "provider-connect", "disconnect", "trading-owner", "trading-total",
     "positions", "trade-history", "movement-history", "legacy-requests",
     "market-list", "market-search", "market-filter", "market-list-status", "market-title", "spot-price", "usd-price",
-    "market-detail", "reference-detail", "chart-interval", "chart-reset", "chart-sma", "chart-fullscreen", "refresh-market",
+    "market-detail", "reference-detail", "chart-interval", "chart-fullscreen", "refresh-market",
     "order-form", "order-side", "order-amount-label", "order-amount", "order-slippage", "order-preview", "execute-order",
     "deposit-form", "deposit-amount", "withdraw-form", "withdraw-symbol", "withdraw-amount",
     "liquidity-form", "liquidity-symbol", "liquidity-action", "liquidity-amount", "liquidity-positions",
@@ -482,8 +482,6 @@
   $("market-filter").addEventListener("change", renderMarkets);
   $("chart-interval").addEventListener("change", () => { invalidate(); run(refresh); });
   $("refresh-market").addEventListener("click", () => { invalidate(); run(refresh); });
-  $("chart-reset").addEventListener("click", () => chart.reset());
-  $("chart-sma").addEventListener("change", () => chart.sma($("chart-sma").checked));
   $("chart-fullscreen").addEventListener("click", () => run(async () => {
     if (!$("candle-chart").requestFullscreen) throw Error("Fullscreen is unavailable in this browser.");
     await $("candle-chart").requestFullscreen();

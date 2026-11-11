@@ -8,12 +8,37 @@ VIEWS.intranet = async (_q, token) => {
     canTasks = root || data.permissions.includes("workspace-tasks");
   const endpoint = "/api/intranet/admin";
   const memberOptions = selected => options(data.members.filter(member => member.status === "active").map(member => [member.address, `${member.address} / ${member.role}`]), selected, "Choose insider");
+  const positionById = new Map(org.positions.map(position => [position.id, position]));
+  const positionsByParent = new Map();
+  for (const position of org.positions) {
+    if (position.parent !== null && !positionById.has(position.parent)) continue;
+    const siblings = positionsByParent.get(position.parent) || [];
+    siblings.push(position); positionsByParent.set(position.parent, siblings);
+  }
+  const positionIcons = { director: "🏛️", manager: "🧭", lead: "🛠️", contributor: "👥" };
+  const divisionName = id => org.divisions.find(division => division.id === id)?.name || id;
+  const teamName = id => org.teams.find(team => team.id === id)?.name || id;
+  function renderPosition(position) {
+    const role = esc(position.role);
+    const scope = [divisionName(position.division), position.team && teamName(position.team)].filter(Boolean).map(esc).join(" / ");
+    const staffing = position.members.length
+      ? position.members.map(member => `<span class="org-member-chip"><code>${esc(member.address)}</code><small>${esc(member.level)}</small></span>`).join("")
+      : '<span class="org-vacant">Vacant / ready for responsible staffing</span>';
+    const children = (positionsByParent.get(position.id) || []).map(renderPosition).join("");
+    return `<section class="org-hierarchy-branch"><article class="org-hierarchy-card org-role-${role}">
+      <div class="org-hierarchy-heading"><span class="org-hierarchy-icon" aria-hidden="true">${positionIcons[position.role] || "◉"}</span><div><small>${role}</small><h3>${esc(position.name)}</h3></div></div>
+      <p class="org-position-responsibility">${esc(position.responsibility)}</p>
+      ${scope ? `<p class="org-position-scope"><b>Scope</b> / ${scope}</p>` : ""}
+      <div class="org-position-staffing"><b>Staffing</b><div class="org-member-list">${staffing}</div></div>
+    </article>${children ? `<div class="org-hierarchy-children">${children}</div>` : ""}</section>`;
+  }
+  const hierarchy = org.positions.filter(position => position.parent === null || !positionById.has(position.parent)).map(renderPosition).join("");
   setView(`<div class="card"><h2>Foundation members &amp; visitors</h2><p>Registration is open. Visitors qualify through ecosystem quizzes without approval. Learning levels unlock agendas; management roles and protected Admin credentials remain separately assigned.</p>
     <div class="table-wrap"><table><thead><tr><th>Wallet / introduction</th><th>Status</th><th>Role / level</th><th>Division / team</th><th></th></tr></thead><tbody>${data.members.map(member => {
       const enrollment = data.enrollments.find(row => row.address === member.address);
       return `<tr data-member="${esc(member.address)}"><td><code>${esc(member.address)}</code><p class="small">${esc(member.motivation)}</p>${enrollment ? `<p class="small">Experience: ${esc(enrollment.experience)} / Interests: ${esc(JSON.parse(enrollment.interests).join(", "))}</p>` : ""}</td><td><select name="status">${options(["visitor","active","suspended","rejected"], member.status)}</select></td><td><select name="role">${options(org.roles, member.role)}</select><select name="level">${options(org.levels, member.level)}</select></td><td><select name="division">${options(org.divisions.map(row => [row.id, row.name]), member.division)}</select><select name="team">${options(org.teams.filter(team => team.division === member.division).map(row => [row.id, row.name]), member.team)}</select></td><td><button class="btn sm" data-save-member>Save</button></td></tr>`;
     }).join("")}</tbody></table></div>${data.members.length ? "" : "<p>No visitors registered yet.</p>"}</div>
-    <div class="card"><h2>Full ecosystem organization</h2><p>Foundation → five lean divisions → site leads → contributors. The chart is visible to every active member; all divisions and site agendas remain visible here.</p><div class="table-wrap"><table><thead><tr><th>Position</th><th>Reports to</th><th>Scope</th><th>Responsibility</th><th>Staffing</th></tr></thead><tbody>${org.positions.map(position => `<tr><td>${esc(position.name)} / ${esc(position.role)}</td><td>${esc(position.parent || "Foundation")}</td><td>${esc(position.division)} / ${esc(position.team)}</td><td>${esc(position.responsibility)}</td><td>${position.members.map(member => esc(member.address)).join("<br>") || "Vacant"}</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="card"><h2>Full ecosystem organization</h2><p>Follow the connected cards from Foundation coordination through division owners, team leads and contributors. Empty staffing is marked as vacant.</p><div class="org-hierarchy" aria-label="Organization hierarchy">${hierarchy}</div></div>
     <div class="card"><h2>Teams</h2><form id="work-team" class="row"><label>Division<select name="division">${options(org.divisions.map(row => [row.id,row.name]))}</select></label><label>New team<input name="name" maxlength="80" required></label><button class="btn">Create team</button></form></div>
     <div class="card"><h2>All-site agenda &amp; review</h2><button class="btn sm" id="admin-new-mission">New task</button><div class="table-wrap"><table><thead><tr><th>Task / level</th><th>Division / team</th><th>Assignee</th><th>Status</th><th></th></tr></thead><tbody>${data.missions.map(mission => `<tr><td>${esc(mission.title)} / ${esc(mission.min_level)}</td><td>${esc(mission.division)} / ${esc(mission.team)}</td><td>${esc(mission.assignee)}</td><td>${esc(mission.status)}</td><td><button class="btn sm" data-edit-mission="${esc(mission.id)}">Review / edit</button></td></tr>`).join("")}</tbody></table></div></div>
     ${root ? `<div class="card"><h2>Explicit Admin promotion</h2><p>Only root administrators can approve an active App member. Assign people/team administration, task administration, or both. These permissions do not authorize funds, payroll, deployments, keys or other sites.</p>

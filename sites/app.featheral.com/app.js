@@ -367,28 +367,49 @@
     notice.append(node("strong", "Proposed operating model / fictional personnel"),
       node("p", "Every Demo persona, experience and skillset below is an illustrative staffing target. No accounts, positions or permissions are created. Actual members are in the Actual organization tab."));
     root.append(notice);
-    const rules = node("ul"); for (const principle of plan.principles) rules.append(node("li", principle)); root.append(rules);
-    function personaCard(persona, title) {
-      const card = node("article", undefined, "card proposal-person");
-      card.append(node("small", "FICTIONAL PLACEHOLDER"), node("h3", title), node("strong", persona.name),
-        node("p", persona.experience, "fine"), node("p", `Skills: ${persona.skills}`, "fine"), node("p", `Focus: ${persona.focus}`));
+    const hierarchy = node("div", undefined, "org-hierarchy proposal-hierarchy");
+    function hierarchyCard(icon, level, title, detail, persona, className = "") {
+      const card = node("article", undefined, `org-hierarchy-card ${className}`.trim());
+      const heading = node("div", undefined, "org-hierarchy-heading"), labels = node("div");
+      const iconNode = node("span", icon, "org-hierarchy-icon"); iconNode.setAttribute("aria-hidden", "true");
+      heading.append(iconNode);
+      labels.append(node("small", level), node("h3", title));
+      heading.append(labels); card.append(heading);
+      if (persona) card.append(node("strong", persona.name), node("p", persona.experience, "fine"));
+      if (detail) card.append(node("p", detail));
       return card;
     }
-    root.append(personaCard(plan.coordination, plan.coordination.role));
-    const divisions = node("div", undefined, "proposal-divisions");
+    const governance = hierarchyCard("🏛️", "TOP AUTHORITY", "Member governance",
+      "Sets member priorities and elects accountable stewardship.", null, "org-hierarchy-top");
+    const coordination = hierarchyCard("🧭", "FOUNDATION COORDINATION", plan.coordination.role,
+      plan.coordination.focus, plan.coordination, "org-hierarchy-coordination");
+    const divisionGrid = node("div", undefined, "org-hierarchy-children proposal-divisions");
     for (const division of plan.divisions) {
-      const section = node("details", undefined, "proposal-division"); section.open = division.id === state.me.member.division;
-      section.append(node("summary", `${division.name} / ${division.teams.length} delivery teams`),
-        personaCard({ ...division, name: division.persona }, "Proposed division manager"));
-      const teams = node("div", undefined, "proposal-teams");
-      for (const [id, name, alias, years, skills, focus] of division.teams) {
-        const card = personaCard({ name: alias, experience: `Illustrative ${years}`, skills, focus }, `${name} / proposed lead`);
-        card.append(node("p", `Team: ${division.id}-${id}. Lean pod: lead + 1–3 contributors; shared quality/reliability specialist and learning mentor.`, "fine"));
+      const section = node("section", undefined, "org-hierarchy-branch proposal-division");
+      section.append(hierarchyCard("🏢", "DIVISION OWNER", division.name,
+        division.focus, { name: division.persona, experience: division.experience }, "org-hierarchy-division"));
+      const teams = node("div", undefined, "org-hierarchy-children proposal-teams");
+      for (const [id, name, alias, years, , focus] of division.teams) {
+        const card = hierarchyCard("👥", "TEAM LEAD + CONTRIBUTORS", name,
+          `${focus} Team: ${division.id}-${id}. Lean pod of 1–3 contributors, supported by shared specialists.`,
+          { name: alias, experience: `Illustrative ${years}` }, "org-hierarchy-team");
         teams.append(card);
       }
-      section.append(teams); divisions.append(section);
+      section.append(teams); divisionGrid.append(section);
     }
-    root.append(divisions, node("h2", "Progression at every level"));
+    const coordinationChildren = node("div", undefined, "org-hierarchy-children proposal-coordination-children");
+    coordinationChildren.append(divisionGrid);
+    const coordinationBranch = node("section", undefined, "org-hierarchy-branch");
+    coordinationBranch.append(coordination, coordinationChildren);
+    const governanceChildren = node("div", undefined, "org-hierarchy-children proposal-governance-children");
+    governanceChildren.append(coordinationBranch);
+    const governanceBranch = node("section", undefined, "org-hierarchy-branch");
+    governanceBranch.append(governance, governanceChildren);
+    hierarchy.append(governanceBranch);
+    root.append(hierarchy, node("h2", "Progression at every level"));
+    const principles = node("div", undefined, "proposal-principles");
+    for (const principle of plan.principles) principles.append(node("p", principle, "fine"));
+    root.append(principles);
     const levels = node("div", undefined, "level-path");
     for (const [level, label, focus] of plan.levels) {
       const card = node("article", undefined, "card"); card.append(node("strong", `${level} / ${label}`), node("p", focus, "fine")); levels.append(card);
@@ -403,17 +424,36 @@
   function renderOrganization() {
     const root = $("org-chart"); root.replaceChildren();
     const positions = state.me.org.positions;
+    const ids = new Set(positions.map(position => position.id));
+    const children = new Map();
+    for (const position of positions) {
+      if (position.parent !== null && !ids.has(position.parent)) continue;
+      const siblings = children.get(position.parent) || [];
+      siblings.push(position); children.set(position.parent, siblings);
+    }
+    const icons = { director: "🏛️", manager: "🧭", lead: "🛠️", contributor: "👥" };
     function branch(parent) {
-      const list = node("ul", undefined, "org-branches");
-      for (const position of positions.filter(row => row.parent === parent)) {
-        const item = node("li"), card = node("details", undefined, "org-position");
-        card.open = parent === null || parent === "foundation";
-        card.append(node("summary", `${position.name} / ${position.role}`), node("p", position.responsibility, "fine"));
-        card.append(node("p", position.members.length ? position.members.map(member => `${personName(member.address)} / ${member.level}`).join(", ") : "Vacant / ready for responsible staffing", "fine"));
-        item.append(card, branch(position.id)); list.append(item);
+      const list = node("div", undefined, "org-hierarchy-children");
+      for (const position of children.get(parent) || []) {
+        const item = node("section", undefined, "org-hierarchy-branch");
+        const card = node("article", undefined, `org-hierarchy-card org-live-position org-role-${position.role}`);
+        const heading = node("div", undefined, "org-hierarchy-heading"), labels = node("div");
+        const icon = node("span", icons[position.role] || "◉", "org-hierarchy-icon"); icon.setAttribute("aria-hidden", "true");
+        heading.append(icon);
+        labels.append(node("small", position.role.toUpperCase()), node("h3", position.name));
+        heading.append(labels); card.append(heading, node("p", position.responsibility, "fine"));
+        const staffing = position.members.length
+          ? position.members.map(member => `${personName(member.address)} / ${member.level}`).join(", ")
+          : "Vacant / ready for responsible staffing";
+        card.append(node("p", staffing, "org-position-staffing"));
+        item.append(card);
+        const descendants = branch(position.id);
+        if (descendants.children.length) item.append(descendants);
+        list.append(item);
       }
       return list;
     }
+    root.className = "org-hierarchy org-live-hierarchy";
     root.append(branch(null));
   }
   function renderPeople() {
