@@ -198,6 +198,10 @@ class Exchange {
     const { parameters } = JSON.parse(row.payload);
     return this.prepare(owner, { ...parameters, requestId: row.request_id }, parameters.funding);
   }
+  validateInitialRatio(dollars, fthx) {
+    if (this.creation.notes.fthx.fixedSupply().initialized && BigInt(dollars) * 100n !== BigInt(fthx) * 10n ** 18n)
+      throw fail(400, "Initial liquidity must start at 1 FTH$ = 100 FTHX. Subsequent prices are set by pool trades.");
+  }
   prepare(owner, input, funding = false) {
     this.requireWriter();
     if (typeof input?.requestId !== "string" || !/^[a-zA-Z0-9-]{16,80}$/.test(input.requestId)) throw fail(400, "A unique request ID is required.");
@@ -217,6 +221,7 @@ class Exchange {
       const dollars = amount(input.dollars, "FTH$"), fthx = amount(input.fthx, "FTHX");
       if (input.approval !== `FUND FTH$ ${dollars} BASE_UNITS ${fthx} FTHX`) throw fail(400, "Exact initial pool funding approval is required.");
       if (pool.funded) throw fail(409, "Dollar pool is already funded.");
+      this.validateInitialRatio(dollars, fthx);
       if (BigInt(this.creation.notes.balance(owner)) < fthx) throw fail(402, "Insufficient existing FTHX for funding.");
       quote = { from: "FTH$", to: "FTHX", amount: dollars.toString(), output: "0", intermediate: fthx.toString(), version: pool.version };
     } else {
@@ -269,7 +274,10 @@ class Exchange {
         const current = this.quote(parameters);
         if (current.output !== payload.output || JSON.stringify(current.noteQuote) !== JSON.stringify(payload.noteQuote))
           throw fail(409, "Routed pool changed. Create a new quote.");
-      } else if (pool.funded) throw fail(409, "Pool is already funded.");
+      } else {
+        if (pool.funded) throw fail(409, "Pool is already funded.");
+        this.validateInitialRatio(parameters.dollars, parameters.fthx);
+      }
       if (row.payment) {
         const payment = { ...JSON.parse(row.payment), signature };
         if (this.dollar.verify(payment).wallet.toLowerCase() !== owner) throw fail(403, "Payment signature must belong to your wallet.");

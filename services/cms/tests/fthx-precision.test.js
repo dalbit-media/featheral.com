@@ -125,6 +125,65 @@ test("finite migration issuance needs signed immutable authority, is capped and 
   const changedSignature = crypto.sign(null, Buffer.from(canonical(bigger)), privateKey).toString("base64");
   assert.throws(() => token.authorizeIssuance(bigger, changedSignature, publicKey), /cannot be replaced/);
 });
+test("one-time fixed market supply starts from zero, survives reload and cannot be reissued or increased", t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "fthx-fixed-")), file = path.join(root, "notes.sqlite");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { token, notes } = fixture(t, file), owner = "0x" + "ab".repeat(20), actor = "0x" + "cd".repeat(20);
+  const input = { supply: "1000000", requestId: "fixed-market-supply-01", approval: `INITIALIZE FTHX 1000000 TO ${owner}` };
+  assert.equal(token.summary().circulating, "0");
+  const receipt = token.initializeSupply(owner, input, actor);
+  assert.equal(token.balance(owner), 1000000n * UNIT);
+  assert.equal(notes.balance(owner), 1000000);
+  assert.equal(receipt.issued, (1000000n * UNIT).toString());
+  assert.equal(receipt.actor, actor);
+  assert.equal(notes.balance(owner, "FTHS"), 0);
+  const reloaded = new (require("../../notes/fthx").Fthx)(notes.db);
+  assert.deepEqual(reloaded.initializeSupply(owner, input, actor), receipt);
+  assert.equal(notes.db.prepare("SELECT COUNT(*) AS n FROM fthx_base_entries").get().n, 1);
+  assert.throws(() => token.initializeSupply(owner, { ...input, requestId: "fixed-market-supply-02" }, actor), /already fixed/);
+  assert.throws(() => token.initializeSupply(owner, { ...input, supply: "2000000", approval: `INITIALIZE FTHX 2000000 TO ${owner}` }, actor), /already fixed/);
+  token.transfer(owner, { to: actor, amount: UNIT.toString(), requestId: "fixed-supply-transfer1" });
+  assert.equal(token.summary().circulating, (1000000n * UNIT).toString());
+  assert.equal(token.summary().fixedSupply.supply, token.summary().circulating);
+  notes.close();
+  const reopened = new Notes(file);
+  try {
+    assert.deepEqual(reopened.fthx.initializeSupply(owner, input, actor), receipt);
+    assert.equal(reopened.fthx.balance(owner), 999999n * UNIT);
+    assert.equal(reopened.fthx.balance(actor), UNIT);
+    assert.equal(reopened.db.prepare("SELECT COUNT(*) AS n FROM fthx_base_entries WHERE kind='initial_supply'").get().n, 1);
+  } finally { reopened.close(); }
+});
+test("fixed supply counts existing fractional balances and rejects invalid or partial initialization atomically", t => {
+  const { token, notes, add } = fixture(t), owner = "0x" + "ab".repeat(20), actor = "0x" + "cd".repeat(20);
+  add(owner, 10);
+  token.transfer(owner, { to: actor, amount: "1", requestId: "fixed-supply-fraction" });
+  const input = { supply: "100", requestId: "fixed-supply-rollback", approval: `INITIALIZE FTHX 100 TO ${owner}` };
+  for (const bad of [{ ...input, approval: "wrong" }, { ...input, supply: "1.5" },
+    { ...input, supply: "9", approval: `INITIALIZE FTHX 9 TO ${owner}` },
+    { ...input, supply: "9007199254740992", approval: `INITIALIZE FTHX 9007199254740992 TO ${owner}` }])
+    assert.throws(() => token.initializeSupply(owner, bad, actor));
+  notes.db.exec("CREATE TRIGGER reject_fixed_supply BEFORE INSERT ON fthx_supply_policy BEGIN SELECT RAISE(ABORT,'fixture policy failure'); END");
+  assert.throws(() => token.initializeSupply(owner, input, actor), /policy failure/);
+  assert.equal(token.summary().circulating, (10n * UNIT).toString());
+  assert.equal(token.fixedSupply().initialized, false);
+  notes.db.exec("DROP TRIGGER reject_fixed_supply");
+  const result = token.initializeSupply(owner, input, actor);
+  assert.equal(result.existing, (10n * UNIT).toString());
+  assert.equal(result.issued, (90n * UNIT).toString());
+  assert.equal(token.balance(actor), 1n);
+  assert.equal(token.summary().circulating, (100n * UNIT).toString());
+});
+test("fixing market supply blocks additional spendable migration issuance", t => {
+  const { token } = fixture(t), owner = "0x" + "ab".repeat(20), actor = "0x" + "cd".repeat(20);
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
+  const policy = { version: 1, symbol: "FTHX", decimals: 18, cap: (10n * UNIT).toString(), treasury: owner,
+    genesisHash: "0x" + "ab".repeat(32), snapshotHash: "0x" + "cd".repeat(32), snapshotHeight: 1 };
+  token.authorizeIssuance(policy, crypto.sign(null, Buffer.from(canonical(policy)), privateKey).toString("base64"), publicKey);
+  token.initializeSupply(owner, { supply: "100", approval: `INITIALIZE FTHX 100 TO ${owner}`, requestId: "fixed-supply-no-topup" }, actor);
+  assert.throws(() => token.issue({ amount: "1", requestId: "fixed-supply-extra-01" }), /Further spendable issuance is disabled/);
+  assert.equal(token.summary().circulating, (100n * UNIT).toString());
+});
 test("exact native balances and portfolio estimates include fractional-only holders without multiplying legacy market units", t => {
   const { token, creation, trading, add } = fixture(t); add("alice", 1);
   token.transfer("alice", { to: "bob", amount: (UNIT / 2n).toString(), requestId: "fraction-portfolio-01" });

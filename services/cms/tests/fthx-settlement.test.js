@@ -64,6 +64,20 @@ test("signed gameplay moves real fractional backing, retains displayed Dollar am
   assert.equal(notes.db.prepare("SELECT COUNT(*) AS n FROM fthx_base_entries").get().n, count);
   settlement.reconcile();
 });
+test("fixed market issuance is separate from locked backing and survives Dollar settlement and restart", async t => {
+  const { api, notes, game, attach } = await fixture(t);
+  const settlement = attach(), backing = notes.fthx.summary().reserved, owner = "0x" + "ab".repeat(20);
+  const input = { supply: "1000", approval: `INITIALIZE FTHX 1000 TO ${owner}`, requestId: "fixed-supply-backing1" };
+  notes.fthx.initializeSupply(owner, input, owner);
+  assert.equal(notes.fthx.summary().reserved, backing);
+  assert.equal(notes.fthx.balance(owner), 983n * UNIT);
+  api.ledger.commitGame(game([{ account: ALICE, delta: "-1" }, { account: BOB, delta: "1" }]));
+  assert.equal(notes.fthx.summary().circulating, (1000n * UNIT).toString());
+  assert.equal(notes.fthx.summary().reserved, backing);
+  attach();
+  assert.equal(notes.fthx.summary().circulating, (1000n * UNIT).toString());
+  settlement.reconcile();
+});
 test("unsealed Dollar activity never creates FTHX backing and batches settle exactly once", async t => {
   const { api, notes, attach } = await fixture(t);
   const settlement = attach();

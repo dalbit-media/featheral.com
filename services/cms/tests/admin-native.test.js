@@ -150,13 +150,15 @@ test('Notes uses one funding handler with exact budget, eligibility, approval an
       VIEWS: {}, state: { seq: 1 }, renderSidebar() {}, setCrumbs() {}, toast() {},
       setView: value => { html = value; }, fmtNum: String, esc: String,
       options: (list, selected) => { selectedMarket = selected; return ''; },
-      $: selector => selector === 'button' ? button : get(selector), $$: () => [],
+      $: selector => ['#fthx-supply', '#dollar-funding'].includes(selector) ? null : selector === 'button' ? button : get(selector), $$: () => [],
       console: { error() {} },
       confirm: () => { confirmed++; return scenario !== 'cancelled'; },
       api: async (url, init) => {
         if (init) { posts++; return {}; }
-        if (url === '/api/notes') return { reactions: { attempts: 0, awarded: 0 } };
+        if (url === '/api/notes') return { reactions: { attempts: 0, awarded: 0 },
+          fthx: { circulating: '0', reserved: '0', fixedSupply: { initialized: false } } };
         if (url === '/api/notes/sites') return [];
+        if (url === '/api/notes/dollar-pool') return { owner: '0x' + 'ab'.repeat(20), pool: { funded: false }, requests: [] };
         return { treasuryFthx: scenario === 'insufficient' ? 999999 : 1000000,
           markets: [{ symbol: 'ABC', targetFthx: 1000000, reserved: scenario === 'reserved', funded: false }] };
       },
@@ -175,4 +177,114 @@ test('Notes uses one funding handler with exact budget, eligibility, approval an
   const cms = fs.readFileSync(path.join(admin, 'js', 'cms.js'), 'utf8');
   assert.match(cms, /VIEWS\['note-markets'\] = .*VIEWS.notes\(q, token\)/);
   assert.doesNotMatch(cms, /\/markets\/.*\/fund/);
+});
+
+test('Admin funding resumes saved settlement without re-signing and blocks signatures after navigation', async () => {
+  const source = fs.readFileSync(path.join(admin, 'js', 'notes.js'), 'utf8');
+  for (const status of ['prepared', 'awaiting_signature', 'paying', 'paid', 'settling', 'stale']) {
+    const owner = '0x' + 'ab'.repeat(20), nodes = new Map(), calls = [], writes = [];
+    const button = { dataset: { resumeDollar: 'saved-funding' }, addEventListener(_type, handler) { this.click = handler; } };
+    const request = { id: 'saved-funding', status: status === 'stale' ? 'prepared' : status, message: 'exact funding message',
+      parameters: { funding: true, dollars: '1000000000000000000', fthx: '100' } };
+    const context = vm.createContext({
+      VIEWS: {}, state: { seq: 1 }, renderSidebar() {}, setCrumbs() {}, setView() {}, toast() {},
+      esc: String, fmtNum: String, options: () => '', confirm: () => true, TextEncoder, console: { error() {} },
+      $: selector => {
+        if (['#fthx-supply', '#dollar-funding'].includes(selector)) return null;
+        if (!nodes.has(selector)) nodes.set(selector, { addEventListener() {}, textContent: '' });
+        return nodes.get(selector);
+      },
+      $$: selector => selector === '[data-resume-dollar]' ? [button] : [],
+      window: { ethereum: { request: async ({ method }) => {
+        calls.push(method);
+        if (status === 'stale' && method === 'eth_requestAccounts') context.state.seq++;
+        return method === 'personal_sign' ? 'signed-payment' : [owner];
+      } } },
+      api: async (url, init) => {
+        if (init) {
+          writes.push({ url, body: init.json });
+          return url.endsWith('/refresh') ? request : { status: 'complete' };
+        }
+        if (url === '/api/notes') return { reactions: { attempts: 0, awarded: 0 }, fthx: { circulating: '1000000000000000000000',
+          reserved: '0', fixedSupply: { initialized: true, supply: '1000000000000000000000', issued: '1000000000000000000000', owner, requestId: 'original-supply' } } };
+        if (url === '/api/notes/sites') return [];
+        if (url === '/api/notes/dollar-pool') return { owner, pool: { funded: false, settlementEnabled: true }, requests: [request] };
+        return { treasuryFthx: 0, markets: [] };
+      },
+    });
+    await vm.runInContext(source + '\nVIEWS.notes({}, 1)', context);
+    await button.click();
+    const completions = writes.filter(row => row.url.endsWith('/complete'));
+    if (status === 'stale') {
+      assert.equal(calls.includes('personal_sign'), false);
+      assert.equal(completions.length, 0);
+      assert.match(nodes.get('#dollar-funding-status').textContent, /view changed/);
+    } else {
+      assert.equal(completions.length, 1, status);
+      assert.equal(completions[0].body.owner, owner);
+      const needsSignature = ['prepared', 'awaiting_signature'].includes(status);
+      assert.equal(calls.includes('personal_sign'), needsSignature, status);
+      assert.equal(completions[0].body.signature, needsSignature ? 'signed-payment' : undefined);
+    }
+  }
+});
+
+test('Admin launch form issues only on approval and funds exact whole-FTHX opening amounts', async () => {
+  const owner = '0x' + 'ab'.repeat(20), unit = 10n ** 18n, writes = [], signatures = [], nodes = new Map();
+  let html = '', fixed = { initialized: false }, funded = false;
+  const node = () => ({ value: '', handlers: {}, textContent: '', addEventListener(type, handler) { this.handlers[type] = handler; } });
+  const supply = node(), funding = node();
+  supply.elements = { owner: { value: owner }, supply: { value: '1000000' }, approval: { value: `INITIALIZE FTHX 1000000 TO ${owner}` } };
+  funding.elements = { dollars: node(), approval: node() };
+  const context = vm.createContext({
+    VIEWS: {}, state: { seq: 1 }, crypto: require('node:crypto'), TextEncoder, console: { error() {} },
+    renderSidebar() {}, setCrumbs() {}, toast() {}, confirm: () => true, fmtNum: String, esc: String, options: () => '',
+    setView: value => { html = value; }, $$: () => [],
+    $: (selector, scope) => {
+      if (selector === '#fthx-supply') return html.includes('id="fthx-supply"') ? supply : null;
+      if (selector === '#dollar-funding') return html.includes('id="dollar-funding"') ? funding : null;
+      const key = `${selector}:${scope === supply ? 'supply' : scope === funding ? 'funding' : ''}`;
+      if (!nodes.has(key)) nodes.set(key, node());
+      return nodes.get(key);
+    },
+    window: { ethereum: { request: async ({ method, params }) => {
+      if (method === 'personal_sign') { signatures.push(params); return 'payment-signature'; }
+      return [owner];
+    } } },
+    api: async (url, init) => {
+      if (init) {
+        writes.push({ url, body: JSON.parse(JSON.stringify(init.json)) });
+        if (url.endsWith('/fthx/supply')) fixed = { initialized: true, supply: (1000000n * unit).toString(),
+          issued: (1000000n * unit).toString(), owner, requestId: init.json.requestId };
+        if (url.endsWith('/fund')) return { id: 'initial-funding', status: 'prepared', message: 'exact payment' };
+        if (url.endsWith('/complete')) funded = true;
+        return { status: 'complete' };
+      }
+      if (url === '/api/notes') return { reactions: { attempts: 0, awarded: 0 }, fthx: {
+        circulating: fixed.supply || '0', reserved: '0', fixedSupply: fixed } };
+      if (url === '/api/notes/sites') return [];
+      if (url === '/api/notes/dollar-pool') return { owner, requests: [], pool: {
+        funded, settlementEnabled: true, dollars: '10000000000000000', fthx: 1 } };
+      return { treasuryFthx: 0, markets: [] };
+    },
+  });
+  await vm.runInContext(fs.readFileSync(path.join(admin, 'js', 'notes.js'), 'utf8') + '\nVIEWS.notes({}, 1)', context);
+  assert.equal(writes.length, 0);
+  await supply.handlers.submit({ preventDefault() {} });
+  assert.equal(writes[0].url, '/api/notes/fthx/supply');
+  assert.equal(writes[0].body.supply, '1000000');
+  funding.elements.dollars.value = '0.001';
+  await funding.handlers.submit({ preventDefault() {} });
+  assert.equal(writes.length, 1);
+  assert.match(nodes.get('#dollar-funding-status:').textContent, /whole FTHX/);
+  funding.elements.dollars.value = '0.01';
+  funding.elements.approval.value = 'FUND FTH$ 10000000000000000 BASE_UNITS 1 FTHX';
+  await funding.handlers.submit({ preventDefault() {} });
+  assert.equal(writes.length, 3);
+  assert.equal(writes[1].body.dollars, '10000000000000000');
+  assert.equal(writes[1].body.fthx, '1');
+  assert.equal(writes[2].body.signature, 'payment-signature');
+  assert.equal(signatures.length, 1);
+  assert.equal(signatures[0][1], owner);
+  assert.equal(funded, true);
 });

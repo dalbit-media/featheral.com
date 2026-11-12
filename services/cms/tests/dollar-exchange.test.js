@@ -44,7 +44,7 @@ test('Dollar wallet display rounds like World at two decimals without losing bas
   assert.equal(format('1', 'FTH$'), '<0.01 FTH$');
   assert.equal(format('55', 'FTHX'), '55 FTHX');
 });
-async function fixture(t) {
+async function fixture(t, existingFthx = true) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dollar-note-exchange-'));
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   const api = createDollarApi({ exchangeSigningKey: privateKey, env: { FTH_LEDGER_MODE: 'writer', FTH_LEDGER_DIR: path.join(root, 'dollar'),
@@ -54,7 +54,7 @@ async function fixture(t) {
   const exchange = new Exchange(creation); exchange.setDollar(api.exchangeSettlement);
   const wallet = ethers.Wallet.createRandom(), owner = wallet.address.toLowerCase();
   const credit = (address, units) => notes.db.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,?,'fixture',0,'test')").run(address, units);
-  credit(owner, 100000); credit(SYSTEM_TREASURY_ACCOUNT, 1000000);
+  if (existingFthx) { credit(owner, 100000); credit(SYSTEM_TREASURY_ACCOUNT, 1000000); }
   await api.ledger.submit({ id: 'fixture-dollar', kind: 'CREDIT', account: walletAccountId(owner), amount: ethers.parseUnits('10000', 18).toString(),
     data: { src: 'FthgConverted', tx: `0x${'ab'.repeat(32)}` } });
   t.after(() => { api.close(); notes.close(); fs.rmSync(root, { recursive: true, force: true }); });
@@ -106,6 +106,46 @@ test('Dollar pool stays disabled until explicit existing-fund funding and conser
   assert.equal(api.ledger.balance(DOLLAR_POOL).available, ethers.parseUnits('1000', 18).toString());
   assert.equal(api.ledger.summary().supply, dollarSupply);
   assert.equal(notes.db.prepare("SELECT SUM(amount) AS supply FROM notes_entries WHERE symbol='FTHX'").get().supply, noteSupply);
+});
+test('zero FTHX can launch once, fund at 100:1, recover funding and trade dynamically without minting', async t => {
+  const { api, notes, creation, exchange, owner, wallet, complete } = await fixture(t, false);
+  const dollarSupply = api.ledger.summary().supply;
+  assert.equal(notes.fthx.summary().circulating, '0');
+  const supply = notes.fthx.initializeSupply(owner, { supply: '1000000',
+    approval: `INITIALIZE FTHX 1000000 TO ${owner}`, requestId: 'exchange-fixed-supply1' }, owner);
+  const dollars = ethers.parseUnits('1000', 18).toString();
+  const input = { dollars, fthx: '100000', approval: `FUND FTH$ ${dollars} BASE_UNITS 100000 FTHX`, requestId: 'launch-pool-funding01' };
+  assert.throws(() => exchange.prepare(owner, { ...input, fthx: '10000',
+    approval: `FUND FTH$ ${dollars} BASE_UNITS 10000 FTHX` }, true), /1 FTH\$ = 100 FTHX/);
+  const prepared = exchange.prepare(owner, input, true);
+  const commit = exchange.dollar.commitSettlement;
+  exchange.dollar.commitSettlement = () => { throw Error('fixture funding receipt lost'); };
+  await assert.rejects(complete(prepared), /receipt lost/);
+  exchange.dollar.commitSettlement = commit;
+  const recovered = await complete(exchange.refresh(owner, prepared.id));
+  assert.equal(recovered.status, 'complete');
+  const restarted = new Exchange(creation); restarted.setDollar(exchange.dollar);
+  assert.deepEqual(await restarted.complete(owner, prepared.id), recovered);
+  assert.equal(exchange.pool().fthx, 100000);
+  assert.equal(notes.balance(owner), 900000);
+  const opening = exchange.market().referencePrice;
+  assert.equal(BigInt(opening.numerator) / BigInt(opening.denominator), 100n);
+  const quote = exchange.swapQuote({ from: 'FTH$', to: 'FTHX', amount: ethers.parseUnits('10', 18).toString() });
+  const trade = exchange.prepareSwap(owner, { ...quote, minOutput: quote.output, requestId: 'launch-first-swap-01' });
+  await exchange.completeSwap(owner, trade.id, await wallet.signMessage(trade.message));
+  assert.equal(exchange.pool().fthx, 100000 - Number(quote.output));
+  assert.ok(BigInt(exchange.pool().fthx) * 10n ** 18n < BigInt(exchange.pool().dollars) * 100n);
+  assert.equal(notes.fthx.summary().circulating, supply.supply);
+  assert.equal(api.ledger.summary().supply, dollarSupply);
+  assert.equal(exchange.walletTrades(owner).length, 1);
+  const reverse = exchange.swapQuote({ from: 'FTHX', to: 'FTH$', amount: quote.output });
+  const sale = exchange.prepareSwap(owner, { ...reverse, minOutput: reverse.output, requestId: 'launch-reverse-swap01' });
+  assert.equal((await exchange.completeSwap(owner, sale.id)).status, 'complete');
+  assert.equal(exchange.pool().fthx, 100000);
+  assert.ok(BigInt(exchange.pool().dollars) > BigInt(dollars), 'Swap fees remain in the reserves');
+  assert.equal(notes.fthx.summary().circulating, supply.supply);
+  assert.equal(api.ledger.summary().supply, dollarSupply);
+  exchange.validatePool(exchange.pool());
 });
 test('wallet swaps execute funded native pairs and two-hop routes as real Exchange trades without a Dollar writer', async t => {
   const { notes, creation, exchange, owner } = await fixture(t);

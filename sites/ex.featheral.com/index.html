@@ -16,7 +16,7 @@
   <a class="skip-link" href="#main-content">Skip to exchange content</a>
   <header><a class="logo" href="/"><img src="/shared/logo-ex.svg" alt="" width="34" height="34"><span>Featheral <strong>EX</strong></span></a><nav class="tabs" aria-label="Exchange workspace" data-exchange-tabs><a id="tab-trade" href="#terminal" data-exchange-tab="trade">Trade</a><a id="tab-activity" href="#network-activity" data-exchange-tab="activity">Activity</a><a id="tab-pools" href="#liquidity-network" data-exchange-tab="pools">Pools &amp; routes</a><a id="tab-portfolio" href="#trading-account" data-exchange-tab="portfolio">Portfolio</a></nav><a id="notes-link" href="https://notes.featheral.com/">Notes</a><button type="button" data-central-wallet>Wallet</button></header>
   <main id="main-content">
-    <div class="terminal-heading"><div><p class="eyebrow">THE FEATHERAL LIQUIDITY NETWORK</p><h1>Your network. <span>Your markets.</span></h1><p>Spot trading with transparent reserves and FTHX at the center.</p></div><div class="signin"><button id="provider-connect" type="button">Connect wallet</button><button id="disconnect" type="button" hidden>Disconnect trading</button><small id="trading-owner">Trading account not connected</small></div></div>
+    <div class="terminal-heading"><h1>Exchange</h1><div class="signin"><button id="provider-connect" type="button">Connect wallet</button><button id="disconnect" type="button" hidden>Disconnect trading</button><small id="trading-owner">Trading account not connected</small></div></div>
     <section class="exchange-overview" aria-label="Market overview">
       <article><span class="metric-label">Available markets</span><strong id="overview-markets">--</strong><small>FTHX quote pairs</small></article>
       <article><span class="metric-label">Executable pools</span><strong id="overview-funded">--</strong><small>Funded, recovery-free markets</small></article>
@@ -25,10 +25,6 @@
     </section>
     <p id="terminal-status" role="status" aria-live="polite"></p>
     <p id="recovery-notice" role="status" aria-live="polite" hidden></p>
-    <details class="panel exchange-guide"><summary>Getting started with Exchange</summary>
-      <ol><li>Connect the wallet you use across Featheral sites.</li><li>In <a href="#trading-account">Portfolio</a>, deposit existing whole FTHX from your wallet into your separate trading balance.</li><li>Choose a funded market, preview the trade and review the exact input and minimum output before confirming.</li><li>Withdraw acquired assets to the same wallet before spending them on other sites. Available assets and supported uses vary by site.</li></ol>
-      <p>If a transaction's result is uncertain, reconnect the same wallet and resume the original request instead of creating a replacement. World inventory and Gold reference markets are not direct Exchange orders.</p>
-    </details>
     <div id="workspace-trade" data-exchange-panel="trade" aria-labelledby="tab-trade">
     <section id="terminal" class="terminal-grid">
       <aside class="market-panel panel"><h2>Markets <small>/ FTHX</small></h2><label>Find a market<input id="market-search" type="search" placeholder="Symbol or item"></label><label>Show<select id="market-filter"><option value="active">Active volume / 24h</option><option value="all">All markets &amp; placeholders</option></select></label><p id="market-list-status" role="status"></p><div id="market-list"></div><p class="muted">FTHG is an Ethereum token, not an internal note. On-chain conversions require the dedicated Gold channel and deployed liquidity.</p><a id="gold-channel" href="/gold-channel/">Gold reserve channel</a><p><a href="/ethereum/">Ethereum bridge / staking</a></p></aside>
@@ -48,6 +44,10 @@
       </section>
     </section>
     <p class="workspace-hint">World settlements and Gold conversions are recorded in <a href="#network-activity">Activity</a>. Pool candles show only actual FTHX executions.</p>
+    <details class="panel exchange-guide"><summary>Getting started with Exchange</summary>
+      <ol><li>Connect the wallet you use across Featheral sites.</li><li>In <a href="#trading-account">Portfolio</a>, deposit existing whole FTHX from your wallet into your separate trading balance.</li><li>Choose a funded market, preview the trade and review the exact input and minimum output before confirming.</li><li>Withdraw acquired assets to the same wallet before spending them on other sites. Available assets and supported uses vary by site.</li></ol>
+      <p>If a transaction's result is uncertain, reconnect the same wallet and resume the original request instead of creating a replacement. World inventory and Gold reference markets are not direct Exchange orders.</p>
+    </details>
     </div>
     <div id="workspace-pools" data-exchange-panel="pools" aria-labelledby="tab-pools">
       <section class="panel" aria-labelledby="route-heading"><h2 id="route-heading">Swap routes and underlying pools</h2>
@@ -74,7 +74,7 @@
     <details class="panel"><summary>Liquidity provision</summary><p>Liquidity is provided from your main wallet, separate from trading deposits. Withdraw acquired notes first if needed. Pool fees and impermanent-loss risk apply. No pool is funded automatically.</p>
       <form id="liquidity-form" class="account-forms"><label>Community-note market<select id="liquidity-symbol"></select></label><label>Action<select id="liquidity-action"><option value="add">Add FTHX + notes</option><option value="remove">Remove LP shares</option></select></label><label>FTHX amount / LP shares<input id="liquidity-amount" type="number" min="1" max="1000000000" step="1" required></label><button type="submit">Preview liquidity</button></form><p id="liquidity-positions"></p>
     </details>
-    <details id="initial-dollar-funding" class="panel"><summary>Administrator / initial FTH$ pool funding</summary><p>Requires administrator authentication, the original authorized Dollar settlement writer, and the owning external wallet. Both currencies must already exist in your main wallet. This is committed pool capital, not a trading deposit or withdrawable LP position. No funds are supplied automatically.</p>
+    <details id="initial-dollar-funding" class="panel"><summary>Administrator / initial FTH$ pool funding</summary><p><a id="supply-admin-link" href="https://admin.featheral.com/#/notes">Initialize fixed FTHX supply and fund the pair in Admin</a>. Root Admin setup can issue the one-time market supply even when circulating FTHX is zero. Initial liquidity starts at 1 FTH$ = 100 FTHX; subsequent prices are dynamic. Locked FTH$ backing is separate and cannot fund this pool.</p><p>Funding requires administrator authentication, the original authorized Dollar settlement writer, and the owning external wallet. Both currencies must exist in the funding wallet before committing capital. This is not a trading deposit or withdrawable LP position. No FTH$ is created, and no funds are supplied automatically.</p>
       <form id="funding-form" class="account-forms"><label>Existing FTH$<input id="funding-dollar" inputmode="decimal" required></label><label>Existing whole FTHX<input id="funding-fthx" inputmode="numeric" pattern="[1-9][0-9]*" required></label><label>Approval (base units)<input id="funding-approval" autocomplete="off" required placeholder="FUND FTH$ ... BASE_UNITS ... FTHX"></label><button type="submit">Review initial funding</button></form>
     </details>
     </div>

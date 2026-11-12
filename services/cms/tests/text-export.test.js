@@ -135,7 +135,7 @@ async function startServer(t, config, cmsPassword, registryFile) {
     assert.equal(login.status, 200);
     return { ...headers, Cookie: login.headers['set-cookie'].find(value => value.startsWith('featheral_admin=')).split(';')[0] };
   }
-  return { base, app, auth: await signIn('admin.featheral.com'), localAuth: await signIn('admin.localhost'),
+  return { base, app, adminWallet, auth: await signIn('admin.featheral.com'), localAuth: await signIn('admin.localhost'),
     notesFile: path.join(pageData, 'notes.sqlite'), provision: input => siteManager.create(input) };
 }
 
@@ -180,6 +180,68 @@ test('public Notes ledger API lists currencies and uses bounded keyset paginatio
   assert.equal((await request('/api/notes/ledger/ART/entries?address=invalid')).status, 400);
   assert.equal((await request('/api/notes/ledger/UNKNOWN/entries')).status, 404);
   assert.equal((await request('/api/notes/ledger/FTH%24/entries')).status, 404);
+});
+
+test('root Admin initializes finite FTHX and signs recoverable 100:1 funding without exposing cross-origin issuance', async t => {
+  const { Wallet, parseUnits } = require('ethers'), crypto = require('node:crypto');
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'admin-fixed-fthx-'));
+  const registryFile = path.join(root, 'sites.json'); writeJson(registryFile, []);
+  const { base, app, auth, adminWallet, notesFile } = await startServer(t, { siteManagement: true }, 'fixed-fthx-test', registryFile);
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+  const dollar = require('../../notes/dollar').createDollarApi({ exchangeSigningKey: privateKey,
+    env: { FTH_LEDGER_MODE: 'writer', FTH_LEDGER_DIR: path.join(root, 'dollar'), FTH_LEDGER_BLOCK_INTERVAL_MS: '0',
+      FTH_GAME_PUBLIC_KEY: publicKey.export({ type: 'spki', format: 'pem' }).toString() } });
+  t.after(() => { dollar.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  app.setDollarWallet(dollar.walletAccount, dollar.exchangeSettlement);
+  const wallet = Wallet.createRandom(), owner = wallet.address.toLowerCase(), dollars = parseUnits('10', 18).toString();
+  await dollar.ledger.submit({ id: 'admin-launch-dollars', kind: 'CREDIT',
+    account: require('../../fth-ledger/transfer').walletAccountId(owner), amount: dollars,
+    data: { src: 'FthgConverted', tx: '0x' + 'ab'.repeat(32) } });
+  const request = async (route, body, headers = auth) => {
+    const response = await fetch(base + '/api/notes' + route, { method: body ? 'POST' : 'GET',
+      headers: { ...headers, Origin: 'https://admin.featheral.com', 'Content-Type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  const supply = { owner, supply: '1000000', approval: `INITIALIZE FTHX 1000000 TO ${owner}`, requestId: 'admin-fixed-supply01' };
+  assert.equal((await request('/fthx/supply', supply, { Host: 'admin.featheral.com', 'X-Forwarded-Proto': 'https' })).status, 401);
+  assert.equal((await request('/fthx/supply', supply, { ...auth, Host: 'ex.featheral.com' })).status, 401);
+  const crossOrigin = await fetch(base + '/api/notes/fthx/supply', { method: 'POST',
+    headers: { ...auth, Origin: 'https://ex.featheral.com' }, body: JSON.stringify(supply) });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal((await request('/fthx/supply', { ...supply, approval: 'wrong' })).status, 400);
+  const initialized = await request('/fthx/supply', supply);
+  assert.equal(initialized.status, 200);
+  assert.equal(initialized.body.actor, adminWallet.address.toLowerCase());
+  assert.equal(initialized.body.issued, parseUnits('1000000', 18).toString());
+  assert.deepEqual((await request('/fthx/supply', supply)).body, initialized.body);
+  assert.equal((await request('/fthx/supply', { ...supply, requestId: 'admin-fixed-supply02' })).status, 409);
+  assert.equal((await request('/dollar-pool')).body.owner, owner);
+  const input = { owner, dollars, fthx: '1000', approval: `FUND FTH$ ${dollars} BASE_UNITS 1000 FTHX`, requestId: 'admin-pool-funding01' };
+  assert.equal((await request('/dollar-pool/fund', { ...input, fthx: '100',
+    approval: `FUND FTH$ ${dollars} BASE_UNITS 100 FTHX` })).status, 400);
+  const funding = await request('/dollar-pool/fund', input);
+  assert.equal(funding.status, 200);
+  assert.equal(funding.body.status, 'prepared');
+  assert.equal((await request('/dollar-pool')).body.requests.length, 1);
+  assert.equal((await request(`/dollar-pool/${funding.body.id}/complete`,
+    { owner: adminWallet.address })).status, 404);
+  assert.equal((await request(`/dollar-pool/${funding.body.id}/complete`,
+    { owner, signature: await adminWallet.signMessage(funding.body.message) })).status, 401);
+  const refreshed = await request(`/dollar-pool/${funding.body.id}/refresh`, { owner });
+  assert.equal(refreshed.body.message, funding.body.message);
+  const completed = await request(`/dollar-pool/${funding.body.id}/complete`,
+    { owner, signature: await wallet.signMessage(refreshed.body.message) });
+  assert.equal(completed.status, 200);
+  assert.equal(completed.body.status, 'complete');
+  assert.deepEqual((await request(`/dollar-pool/${funding.body.id}/complete`, { owner })).body, completed.body);
+  const pool = (await request('/dollar-pool')).body;
+  assert.equal(pool.pool.fthx, 1000);
+  assert.equal(pool.pool.dollars, dollars);
+  assert.equal(pool.requests.length, 0);
+  const db = open(notesFile);
+  assert.equal(new (require('../../notes/fthx').Fthx)(db).summary().circulating, initialized.body.supply);
+  db.close();
 });
 
 test('public creation APIs enforce wallet ownership, fee signatures, origin and safe owner editing', async t => {

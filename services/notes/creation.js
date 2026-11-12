@@ -63,7 +63,8 @@ class Creation {
       { symbol: "FTH$", name: "Featheral Dollar", kind: "reserve-backed-ledger", native: true, ...dollar,
         circulating: dollar?.circulating ?? null, decimals: 18 },
       { symbol: "FTHX", name: "Featheral Exchange Token", kind: "global-credit", native: true,
-        supply: fthx.supply, circulating: fthx.circulating, reserved: fthx.reserved, decimals: 18, precisionVersion: 2 },
+        supply: fthx.supply, circulating: fthx.circulating, reserved: fthx.reserved, decimals: 18, precisionVersion: 2,
+        fixedSupply: fthx.fixedSupply },
       ...definitions.map(row => {
         const currency = { ...markets.find(market => market.symbol === row.symbol), ...row, kind: "unbacked-credit" };
         if (row.symbol !== "FTHS") return currency;

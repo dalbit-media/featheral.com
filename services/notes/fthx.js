@@ -41,9 +41,11 @@ class Fthx {
         result TEXT NOT NULL,at INTEGER NOT NULL,PRIMARY KEY(owner,request));
       CREATE TABLE IF NOT EXISTS fthx_issuance_policy(id INTEGER PRIMARY KEY CHECK(id=1),policy TEXT NOT NULL,
         signature TEXT NOT NULL,issued TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS fthx_supply_policy(id INTEGER PRIMARY KEY CHECK(id=1),policy TEXT NOT NULL);
     `);
     const installed = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fthx_precision'").get();
     this.installed = Boolean(installed);
+    this.supplyPolicyInstalled = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fthx_supply_policy'").get());
     if (installed) {
       const precision = db.prepare("SELECT version,decimals FROM fthx_precision WHERE id=1").get();
       if (precision?.version !== 2 || precision.decimals !== 18)
@@ -89,8 +91,42 @@ class Fthx {
     const supply = this.supply(), issuance = this.issuance();
     const reserved = issuance.settlement?.model === "locked-denomination" ? integer(issuance.issued) : 0n;
     if (reserved > supply) throw fail(503, "Locked FTHX backing exceeds total supply; restore the matching Notes dataset.");
+    const fixedSupply = this.fixedSupply();
+    if (fixedSupply.initialized && supply - reserved !== integer(fixedSupply.supply))
+      throw fail(503, "Circulating FTHX differs from its fixed supply policy. Administrator reconciliation is required.");
     return { version: 2, decimals: 18, supply: supply.toString(), circulating: (supply - reserved).toString(),
-      reserved: reserved.toString(), issuance };
+      reserved: reserved.toString(), issuance, fixedSupply };
+  }
+  fixedSupply() {
+    const row = this.supplyPolicyInstalled ? this.db.prepare("SELECT policy FROM fthx_supply_policy WHERE id=1").get() : null;
+    return row ? { initialized: true, ...JSON.parse(row.policy) } : { initialized: false };
+  }
+  initializeSupply(owner, input, actor) {
+    owner = account(owner); actor = account(actor);
+    if (![owner, actor].every(value => /^0x[0-9a-f]{40}$/.test(value) && !/^0x0{40}$/.test(value)))
+      throw fail(400, "Fixed FTHX supply requires an owner wallet and an administrator wallet.");
+    const id = request(input?.requestId), whole = integer(input?.supply, true);
+    if (whole > MAX_WHOLE) throw fail(400, "Fixed FTHX supply exceeds supported whole-token limits.");
+    const approval = `INITIALIZE FTHX ${whole} TO ${owner}`;
+    if (input?.approval !== approval) throw fail(400, `Exact approval required: ${approval}`);
+    if (!this.supplyPolicyInstalled || this.db.readOnlyReplica) throw fail(503, "Fixed FTHX supply requires the authoritative upgraded Notes writer.");
+    return this.atomic(() => {
+      const previous = this.fixedSupply(), supply = whole * UNIT;
+      if (previous.initialized) {
+        if (previous.requestId !== id || previous.owner !== owner || previous.supply !== supply.toString())
+          throw fail(409, "FTHX supply is already fixed. It cannot be reissued or increased.");
+        this.summary();
+        return previous;
+      }
+      const existing = integer(this.summary().circulating);
+      if (supply < existing) throw fail(409, "Fixed FTHX supply cannot be below existing circulating balances.");
+      const issued = supply - existing, at = Date.now();
+      if (issued) this.post(owner, issued, "initial_supply", id, at, "notes-launch");
+      const policy = { version: 1, symbol: "FTHX", decimals: 18, supply: supply.toString(),
+        existing: existing.toString(), issued: issued.toString(), owner, actor, requestId: id, approval, at };
+      this.db.prepare("INSERT INTO fthx_supply_policy VALUES (1,?)").run(canonical(policy));
+      return this.fixedSupply();
+    });
   }
   entries({ address, before, limit = 50 } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw fail(400, "Choose an FTHX entry limit from 1 to 100.");
@@ -214,6 +250,8 @@ class Fthx {
       if (previous.parameters !== parameters) throw fail(409, "FTHX issuance request ID already has different parameters.");
       return JSON.parse(previous.result);
     }
+    if (this.fixedSupply().initialized && policy.settlement?.model !== "locked-denomination")
+      throw fail(409, "FTHX market supply is fixed. Further spendable issuance is disabled.");
     const issued = integer(saved.issued) + amount;
     if (issued > integer(policy.cap)) throw fail(409, "Finite FTHX migration issuance cap is exhausted.");
     const at = Date.now();

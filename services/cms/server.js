@@ -940,6 +940,30 @@ app.get('/api/sites', wrap((req, res) => {
     .map(site => ({ ...site, managementLinks: require('./lib/site-management').managementFor(site) })));
 }));
 app.get('/api/notes', wrap((req, res) => res.json(notes.summary())));
+app.post('/api/notes/fthx/supply', wrap((req, res) => {
+  if (!creation) throw Object.assign(new Error('Fixed FTHX supply requires Notes site management.'), { status: 503 });
+  const owner = creation.address(req.body?.owner).toLowerCase();
+  res.json(notes.fthx.initializeSupply(owner, req.body, req.adminWallet));
+}));
+app.get('/api/notes/dollar-pool', wrap((req, res) => {
+  if (!dollarExchange) throw Object.assign(new Error('Dollar exchange is unavailable.'), { status: 503 });
+  const owner = creation.address(req.query.owner || notes.fthx.fixedSupply().owner || req.adminWallet).toLowerCase();
+  res.set('Cache-Control', 'no-store').json({ owner, pool: dollarExchange.pool(),
+    requests: dollarExchange.account(owner).requests.filter(request => request.parameters.funding) });
+}));
+app.post('/api/notes/dollar-pool/fund', wrap((req, res) => {
+  if (!dollarExchange) throw Object.assign(new Error('Dollar exchange is unavailable.'), { status: 503 });
+  const owner = creation.address(req.body?.owner).toLowerCase();
+  res.json(dollarExchange.prepare(owner, req.body, true));
+}));
+for (const action of ['refresh', 'complete']) app.post(`/api/notes/dollar-pool/:id/${action}`, wrap(async (req, res) => {
+  if (!dollarExchange) throw Object.assign(new Error('Dollar exchange is unavailable.'), { status: 503 });
+  const owner = creation.address(req.body?.owner).toLowerCase();
+  const request = creation.db.prepare('SELECT payload FROM dollar_note_requests WHERE id=? AND owner=?').get(req.params.id, owner);
+  if (!request || !JSON.parse(request.payload).parameters.funding) throw notFound('Initial pool funding request not found.');
+  res.json(action === 'refresh' ? dollarExchange.refresh(owner, req.params.id)
+    : await dollarExchange.complete(owner, req.params.id, req.body?.signature));
+}));
 function notesLedgerCurrencies() {
   const db = notes.db;
   const isNotesSymbol = symbol => symbol !== 'FTH$' && symbol !== 'FTHG' && !/^FTH[^A-Z0-9]$/.test(symbol);

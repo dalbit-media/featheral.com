@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id), unit = 10n ** 18n;
   const requiredElements = [
-    "notes-link", "gold-channel", "candle-chart", "initial-dollar-funding",
+    "notes-link", "gold-channel", "candle-chart", "initial-dollar-funding", "supply-admin-link",
     "overview-markets", "overview-funded", "overview-volume", "pending-movements",
     "terminal-status", "provider-connect", "disconnect", "trading-owner", "trading-total",
     "positions", "trade-history", "movement-history", "legacy-requests",
@@ -31,6 +31,7 @@
   $("notes-link").href = hostUrl("notes") + "/";
   $("gold-channel").href = "/gold-channel/";
   $("world-trade-link").href = hostUrl("world") + "/market/";
+  $("supply-admin-link").href = hostUrl("admin") + "/#/notes";
   let autoSelect = !new URLSearchParams(location.search).has("market"), firstHistory = true, displayedMarket = "";
   let token = "", owner = "", markets = [], selected = new URLSearchParams(location.search).get("market") || "FTH$", account, preview, quoteGeneration = 0, refreshing = false, busy = false;
   const chart = window.FeatheralCandleChart.mount($("candle-chart"));

@@ -490,6 +490,28 @@ stable snapshot pagination, excluding duplicate carry records. The Notes explore
 uses this view. Existing whole-unit AMM, LP and trading-custody request formats
 remain unchanged: sub-whole FTHX balances can be sent but cannot yet be traded.
 
+Root Admin's **Notes** screen (`https://admin.featheral.com/#/notes`, or the
+matching `admin.localhost` origin) can initialize the spendable FTHX market supply
+once, including when circulation is zero. Choose the final whole-token total and
+allocation wallet; approve `INITIALIZE FTHX <whole-total> TO <lowercase-wallet>`.
+Existing circulation counts toward that total; only the difference is issued.
+The immutable receipt survives restarts and retries, and further spendable
+issuance is rejected. No supply size is selected or issued at deployment.
+FTHG and FTHS policies are unchanged; FTH$ is not subject to this fixed-supply rule.
+
+On the same Admin screen, commit existing FTH$ and the matching FTHX from the
+allocation wallet, approving the displayed exact amounts and signing with that
+wallet. The new pool must open at **1 FTH$ = 100 FTHX**. For example, 1,000 FTH$
+requires 100,000 FTHX; whole-FTHX funding permits FTH$ increments of 0.01.
+Subsequent constant-product swaps set a dynamic price, with the existing 0.3% fee;
+100:1 is not a peg or redemption guarantee. Initial capital has no LP withdrawal
+interface. Resume saved funding requests after interruptions instead of starting
+another request. Already-funded pools and their prices are not reset.
+
+This fixes **circulating market supply**, not the combined ledger total including
+the separately capped, locked Dollar-settlement backing described below. Locked
+backing remains non-spendable and cannot provide AMM liquidity.
+
 The authoritative combined server migrates Dollar settlement backing before
 recovering World fund commits or accepting traffic. A signed, immutable policy
 binds the original game authority, source genesis/snapshot, denomination model
