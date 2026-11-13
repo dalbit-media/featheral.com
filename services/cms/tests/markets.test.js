@@ -31,6 +31,33 @@ test('placeholder catalog seeds 53 unique unfunded FTHX pairs without issuing an
   assert.throws(() => markets.fund('FTHA', 'FUND FTHA 1000000 FTHX 1000000 NOTES'), /existing treasury/);
   assert.equal(notes.db.prepare('SELECT COUNT(*) AS n FROM notes_entries').get().n, 0);
 });
+test('World item pools require approved funding, issue only trading notes and remain independent of World history', t => {
+  const { notes, markets, credit, supply } = fixture(t), symbol = 'WORLD:enhanced-torch-level-2';
+  markets.worldSource = { catalog: () => [{ symbol, asset: 'enhanced-torch-level-2', price: { numerator: '900', denominator: '1' }, volume: '500' }] };
+  const entries = notes.db.prepare('SELECT COUNT(*) AS n FROM notes_entries').get().n;
+  const market = markets.catalog().find(row => row.symbol === symbol);
+  assert.equal(market.tradingOnly, true);
+  assert.equal(market.gameUsable, false);
+  assert.equal(market.inventoryOnly, false);
+  assert.equal(market.price, null, 'Inventory fills cannot supply executable note prices');
+  assert.equal(market.volume, 0);
+  assert.equal(notes.db.prepare('SELECT COUNT(*) AS n FROM notes_entries').get().n, entries);
+  assert.equal(notes.db.prepare('SELECT 1 FROM note_markets WHERE symbol=?').get(symbol), undefined);
+  assert.throws(() => markets.quote(symbol, 'buy', 100), /unfunded/);
+  assert.throws(() => markets.fund('WORLD:unknown', 'FUND WORLD:unknown 1000000 FTHX 1000000 NOTES'), /Unknown/);
+  assert.throws(() => markets.fund(symbol, `FUND ${symbol} 1000000 FTHX 1000000 NOTES`), /existing treasury/);
+  assert.equal(notes.db.prepare('SELECT 1 FROM note_markets WHERE symbol=?').get(symbol), undefined, 'Failed funding cannot leave a registered or issued note');
+  credit(SYSTEM_TREASURY_ACCOUNT, TARGET);
+  const before = supply();
+  markets.fund(symbol, `FUND ${symbol} 1000000 FTHX 1000000 NOTES`);
+  assert.equal(notes.balance(markets.poolAccount(symbol), symbol), TARGET);
+  assert.equal(supply(), before);
+  assert.throws(() => markets.fund(symbol, `FUND ${symbol} 1000000 FTHX 1000000 NOTES`), /already funded/);
+  assert.throws(() => notes.setProgram('world-rewards', { symbol, chance: 10, amount: 1, enabled: true }), /currency symbol/);
+  const restarted = new Markets(notes);
+  assert.equal(restarted.catalog().find(row => row.symbol === symbol).tradingOnly, true);
+  assert.equal(restarted.quote(symbol, 'buy', 1000).output, 996, 'Funded notes trade without a connected game database');
+});
 test('placeholder seeding preserves existing currency definitions', t => {
   const { notes } = fixture(t);
   notes.db.exec("DELETE FROM note_markets WHERE symbol='FTHA'; CREATE TABLE note_currencies(symbol TEXT PRIMARY KEY,name TEXT,owner TEXT,at INTEGER)");
@@ -51,6 +78,12 @@ test('funding and buy/sell preserve FTHX supply, exact reserves, fees and retry 
   assert.throws(() => markets.fund('FTHA', 'FUND FTHA 1000000 FTHX 1000000 NOTES'), /already funded/);
   const quote = markets.quote('FTHA', 'buy', 1000);
   assert.equal(quote.output, 996);
+  const context = { window: {} };
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname, '../../../sites/ex.featheral.com/market-view.js'), 'utf8'), context);
+  const levels = context.window.FeatheralMarketView.depth(markets.catalog().find(row => row.symbol === 'FTHA'));
+  assert.equal(levels.length, 12);
+  for (const level of levels)
+    assert.equal(String(markets.quote('FTHA', level.side, Number(level.input)).output), level.output, 'Indicative depth matches executable note quotes');
   const input = { symbol: 'FTHA', side: 'buy', amount: 1000, minOutput: quote.output, requestId: 'market-buy-request-0001' };
   assert.throws(() => markets.trade('0xbuyer', { ...input, minOutput: 999 }), /minimum output/);
   assert.equal(notes.balance('0xbuyer'), 10000);

@@ -353,6 +353,15 @@ The Exchange workspace uses keyboard-accessible Trade, Activity, Pools & routes,
 and Portfolio tabs. Hash links select the containing workspace, including initial
 funding links; unresolved transactions remain signposted outside hidden panels.
 Without JavaScript the sections remain visible rather than hiding recovery controls.
+The compact dark terminal opens directly on the selected pair, with a searchable
+market dropdown, large candlestick chart, 24-hour recorded change/high/low/volume,
+reserve-derived AMM depth and actual recent Exchange executions. Depth rows are
+independent cumulative swap estimates including the 0.3% fee, **not an order book**.
+The change compares the first recorded open and last recorded close within 24 hours;
+no-trade periods stay unavailable. Buy/sell controls and 25/50/75/100% sizing use
+exact trading-custody balances, not main-wallet funds. Balances, executed trades
+and transfer records are accessible below the chart and from Portfolio. Failed
+reads explicitly mark data unavailable/stale and clear depth and recent executions.
 
 Notes places native circulation and executed-price charts first, followed by
 recorded economic history, then community notes ordered by actual 24-hour FTHX
@@ -469,6 +478,26 @@ Gross postings, custody movements and settlements are different accounting
 records, not unique user actions or net issuance. Neither these charts nor
 ordinary transfers alter OHLC prices, market liquidity, or trading volume.
 Only executed FTHX-pair trades do so.
+
+World items listed on Exchange also have separate **trading-only notes** with
+`WORLD:<asset>` symbols (including distinct enhanced-equipment levels).
+They can be bought and sold against FTHX through the normal trading account and
+wallet swap flows once their pool is explicitly funded. These are not game
+inventory or claims on inventory: they cannot be equipped, consumed, redeemed or
+transferred into World. Game inventory, budgets and gameplay remain unchanged.
+
+On the authoritative combined server, settled World history discovers eligible
+item types without issuing notes or funding liquidity. **Admin > Notes** lists
+their unfunded pools. The existing exact approval
+`FUND WORLD:<asset> 1000000 FTHX 1000000 NOTES` commits 1,000,000 existing treasury
+FTHX and issues 1,000,000 trading-only note units once. Unknown item types and
+insufficient treasury funds are rejected atomically. No FTHX is minted.
+These independent constant-product pools start at the approved note funding
+ratio, not a copied game price, then price dynamically with the existing 0.3%
+fee. Once funded, they remain tradable without the World history reader.
+Exchange charts use only their own note-pool executions; World inventory fills
+remain separately labeled historical records and never grant inventory to note
+holders.
 
 The accounting boundaries are deliberate: Notes owns 18-decimal FTHX and whole-unit
 community notes; Exchange routes pairs through FTHX and segregates trading custody;

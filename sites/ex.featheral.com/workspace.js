@@ -8,6 +8,7 @@
     return;
   }
   list.setAttribute("role", "tablist");
+  const includes = (panel, name) => panel.dataset.exchangePanel === name || (panel.dataset.exchangeAlso || "").split(" ").includes(name);
   function activate(name, focus = false) {
     for (const tab of tabs) {
       const selected = tab.dataset.exchangeTab === name;
@@ -15,7 +16,7 @@
       tab.tabIndex = selected ? 0 : -1;
       if (selected && focus) tab.focus();
     }
-    for (const panel of panels) panel.hidden = panel.dataset.exchangePanel !== name;
+    for (const panel of panels) panel.hidden = !includes(panel, name);
     window.dispatchEvent(new Event("resize"));
   }
   function fromHash() {
@@ -24,7 +25,7 @@
   }
   for (const [index, tab] of tabs.entries()) {
     tab.setAttribute("role", "tab");
-    const controlled = panels.filter(panel => panel.dataset.exchangePanel === tab.dataset.exchangeTab);
+    const controlled = panels.filter(panel => includes(panel, tab.dataset.exchangeTab));
     tab.setAttribute("aria-controls", controlled.map(panel => panel.id).join(" "));
     for (const panel of controlled) panel.setAttribute("role", "tabpanel");
     tab.addEventListener("click", event => {

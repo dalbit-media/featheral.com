@@ -26,11 +26,13 @@ test("Notes renders World execution charts with fractional prices and honest his
   assert.doesNotMatch(svg.attributes["aria-label"], /pool spot/);
   assert.ok(svg.children.every(node => !Object.values(node.attributes).some(value => String(value).includes("NaN"))));
 });
-function fixture(hash = "") {
+function fixture(hash = "", shared = false) {
   const location = { hash }, events = {};
   const panels = ["trade", "pools", "portfolio", "activity", "pools"].map((name, i) => ({
     id: `panel-${i}`, dataset: { exchangePanel: name }, setAttribute(name, value) { this[name] = value; },
   }));
+  if (shared) panels.push({ id: "ledger", dataset: { exchangePanel: "trade", exchangeAlso: "portfolio" },
+    setAttribute(name, value) { this[name] = value; } });
   const list = { setAttribute(name, value) { this[name] = value; } };
   const targets = new Map([["terminal", panels[0]], ["network-activity", panels[3]], ["trading-account", panels[2]],
     ["liquidity-network", panels[1]], ["initial-dollar-funding", panels[4]], ["world-market-activity", panels[3]]]);
@@ -52,6 +54,16 @@ function fixture(hash = "") {
   });
   return { tabs, panels, location, events, list };
 }
+test("The account ledger belongs to both Trade and Portfolio but not Activity or Pools", () => {
+  const ui = fixture("", true), ledger = ui.panels.at(-1);
+  assert.equal(ledger.hidden, false);
+  assert.match(ui.tabs[0]["aria-controls"], /ledger/);
+  assert.match(ui.tabs[3]["aria-controls"], /ledger/);
+  ui.tabs[3].click(); assert.equal(ledger.hidden, false);
+  ui.tabs[1].click(); assert.equal(ledger.hidden, true);
+  ui.tabs[2].click(); assert.equal(ledger.hidden, true);
+  ui.tabs[0].click(); assert.equal(ledger.hidden, false);
+});
 test("workspace tabs expose only the selected sections and support keyboard navigation", () => {
   const ui = fixture();
   assert.equal(ui.list.role, "tablist");

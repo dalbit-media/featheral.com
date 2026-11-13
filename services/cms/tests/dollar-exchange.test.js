@@ -102,6 +102,14 @@ test('Dollar pool stays disabled until explicit existing-fund funding and conser
   assert.throws(() => exchange.prepare('0xnone', { requestId: 'bad-funding-0001', dollars: '1', fthx: '1', approval: 'wrong' }, true), /approval/);
   await fund();
   assert.equal(exchange.pool().funded, true);
+  const context = { window: {} };
+  require('node:vm').runInNewContext(fs.readFileSync(path.join(__dirname, '../../../sites/ex.featheral.com/market-view.js'), 'utf8'), context);
+  const levels = context.window.FeatheralMarketView.depth(exchange.market().notes[0], exchange.pool());
+  assert.equal(levels.length, 12);
+  for (const level of levels) {
+    const from = level.side === 'buy' ? 'FTHX' : 'FTH$', to = level.side === 'buy' ? 'FTH$' : 'FTHX';
+    assert.equal(exchange.quote({ from, to, amount: level.input }).output, level.output, 'Indicative depth matches exact Dollar quotes');
+  }
   assert.equal(exchange.market().referencePrice.source, 'exchange');
   assert.equal(api.ledger.balance(DOLLAR_POOL).available, ethers.parseUnits('1000', 18).toString());
   assert.equal(api.ledger.summary().supply, dollarSupply);
@@ -146,6 +154,27 @@ test('zero FTHX can launch once, fund at 100:1, recover funding and trade dynami
   assert.equal(notes.fthx.summary().circulating, supply.supply);
   assert.equal(api.ledger.summary().supply, dollarSupply);
   exchange.validatePool(exchange.pool());
+});
+test('World trading-only notes support wallet swaps through FTHX without changing their approved supply', async t => {
+  const { notes, creation, exchange, owner, fund } = await fixture(t);
+  const symbol = 'WORLD:wood';
+  creation.markets.worldSource = { catalog: () => [{ symbol, asset: 'wood' }] };
+  creation.markets.fund(symbol, `FUND ${symbol} 1000000 FTHX 1000000 NOTES`);
+  await fund();
+  const supply = notes.fthx.supply();
+  const quote = exchange.swapQuote({ from: 'FTHX', to: symbol, amount: '1000' });
+  const buy = exchange.prepareSwap(owner, { ...quote, minOutput: quote.output, requestId: 'world-wallet-buy-001' });
+  const receipt = await exchange.completeSwap(owner, buy.id);
+  assert.deepEqual(await exchange.completeSwap(owner, buy.id), receipt);
+  assert.equal(creation.account(owner).holdings.find(asset => asset.symbol === symbol).gameUsable, false);
+  const reverse = exchange.swapQuote({ from: symbol, to: 'FTH$', amount: quote.output });
+  assert.deepEqual(reverse.route, [symbol, 'FTHX', 'FTH$']);
+  const sell = exchange.prepareSwap(owner, { ...reverse, minOutput: reverse.output, requestId: 'world-wallet-sell-01' });
+  assert.equal((await exchange.completeSwap(owner, sell.id)).status, 'complete');
+  assert.equal(notes.balance(owner, symbol), 0);
+  assert.equal(notes.fthx.supply(), supply);
+  assert.equal(notes.db.prepare('SELECT SUM(amount) AS supply FROM notes_entries WHERE symbol=?').get(symbol).supply, 1000000);
+  assert.equal(creation.markets.history(symbol).candles[0].trades, 2);
 });
 test('wallet swaps execute funded native pairs and two-hop routes as real Exchange trades without a Dollar writer', async t => {
   const { notes, creation, exchange, owner } = await fixture(t);

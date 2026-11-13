@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 const { walletAccountId } = require("../fth-ledger/transfer");
 const { DOLLAR_POOL } = require("./exchange");
+const { worldNote } = require("./markets");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 function positive(value, dollar = false) {
   if (typeof value !== "string" || !/^[1-9]\d{0,77}$/.test(value)
@@ -37,7 +38,7 @@ class Trading {
     const result = this.db.prepare("SELECT symbol,SUM(amount) AS balance FROM notes_entries WHERE address=? GROUP BY symbol HAVING SUM(amount)>0")
       .all(this.custody(owner)).map(row => {
         if (!Number.isSafeInteger(row.balance)) throw fail(409, "Trading note balance exceeds safe limits.");
-        return { symbol: row.symbol, balance: String(row.balance) };
+        return { symbol: row.symbol, balance: String(row.balance), ...worldNote(row.symbol) };
       });
     const dollars = this.dollarBalance(owner);
     if (dollars > 0n) result.push({ symbol: "FTH$", balance: dollars.toString() });
@@ -99,8 +100,6 @@ class Trading {
     });
   }
   quote(input) {
-    if (typeof input?.symbol === "string" && input.symbol.startsWith("WORLD:"))
-      throw fail(409, "World inventory trades must be placed in World. Inventory assets are not wallet notes.");
     this.ready();
     if (input?.symbol !== "FTH$") {
       const amount = Number(positive(input?.amount));

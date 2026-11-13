@@ -6,7 +6,7 @@ const { walletAccountId, transferMessage } = require("../fth-ledger/transfer");
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const SITE_COST = (500n * 10n ** 18n).toString();
 const NOTE_COST = 1000;
-const { Markets, isReservedMarket } = require("./markets");
+const { Markets, isReservedMarket, worldNote } = require("./markets");
 
 class Creation {
   constructor(notes, sites) {
@@ -73,8 +73,8 @@ class Creation {
         return { ...currency, native: true, kind: "approved-work-credit", alias: "Featheral Salary",
           supply: String(supply), circulating: String(supply), reserved: "0", decimals: 0 };
       }),
-      ...markets.filter(market => market.placeholder && !definitions.some(note => note.symbol === market.symbol))
-        .map(market => ({ ...market, kind: "unbacked-credit" })),
+      ...markets.filter(market => (market.placeholder || market.tradingOnly) && !definitions.some(note => note.symbol === market.symbol))
+        .map(market => ({ ...market, kind: market.tradingOnly ? "world-trading-note" : "unbacked-credit" })),
     ];
     const legacy = this.db.prepare("SELECT symbol FROM notes_programs UNION SELECT symbol FROM notes_entries").all();
     for (const { symbol } of legacy) if (!currencies.some(currency => currency.symbol === symbol))
@@ -264,7 +264,8 @@ class Creation {
   }
   account(owner) {
     const fthx = this.notes.fthx.view(owner);
-    const holdings = this.db.prepare("SELECT symbol,SUM(amount) AS balance FROM notes_entries WHERE address=? GROUP BY symbol HAVING SUM(amount)>0").all(owner);
+    const holdings = this.db.prepare("SELECT symbol,SUM(amount) AS balance FROM notes_entries WHERE address=? GROUP BY symbol HAVING SUM(amount)>0").all(owner)
+      .map(asset => ({ ...asset, ...worldNote(asset.symbol) }));
     const token = holdings.find(asset => asset.symbol === "FTHX");
     if (token) Object.assign(token, { baseBalance: fthx.balance, decimals: 18 });
     else if (BigInt(fthx.balance) > 0n) holdings.push({ symbol: "FTHX", balance: 0, baseBalance: fthx.balance, decimals: 18 });

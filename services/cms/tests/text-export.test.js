@@ -244,6 +244,76 @@ test('root Admin initializes finite FTHX and signs recoverable 100:1 funding wit
   db.close();
 });
 
+test('World item note HTTP trading uses funded Exchange pools and never grants game inventory', async t => {
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'world-note-http-'));
+  const registryFile = path.join(root, 'sites.json'); writeJson(registryFile, []);
+  const { base, app, auth, notesFile } = await startServer(t, { siteManagement: true }, 'world-note-test', registryFile);
+  const world = open(':memory:');
+  world.exec(`CREATE TABLE market_fills(id INTEGER PRIMARY KEY,asset TEXT,quantity INTEGER,dollars INTEGER,price REAL,time INTEGER,venue TEXT);
+    INSERT INTO market_fills VALUES (1,'enhanced-torch-level-2',1,90000,0,1,'system')`);
+  t.after(() => { world.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  app.setWorldMarketsSource(world);
+  const wallet = require('ethers').Wallet.createRandom(), owner = wallet.address.toLowerCase(), symbol = 'WORLD:enhanced-torch-level-2';
+  const db = open(notesFile), treasury = require('../../notes/game-funds').SYSTEM_TREASURY_ACCOUNT;
+  t.after(() => db.close());
+  db.prepare("INSERT INTO notes_entries(address,amount,kind,at,site) VALUES (?,1000000,'fixture',1,'test'),(?,10000,'fixture',1,'test')").run(treasury, owner);
+  const gameBefore = world.prepare('SELECT * FROM market_fills').all();
+  const call = async (route, body, token = '', host = 'ex.featheral.com', origin = `http://${host}`) => {
+    const response = await fetch(base + '/api/creation' + route, { method: body ? 'POST' : 'GET',
+      headers: { Host: host, Origin: origin, 'Content-Type': 'application/json', 'x-creation-token': token },
+      ...(body ? { body: JSON.stringify(body) } : {}) });
+    return { status: response.status, body: await response.json() };
+  };
+  const snapshot = (await call('/trading/markets')).body;
+  assert.equal(snapshot.pool.dollars, '0');
+  assert.equal(snapshot.pool.fthx, 0);
+  const listed = snapshot.markets.filter(row => row.symbol === symbol);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].tradingOnly, true);
+  assert.equal(listed[0].gameUsable, false);
+  assert.equal(listed[0].price, null);
+  assert.equal(db.prepare('SELECT 1 FROM note_markets WHERE symbol=?').get(symbol), undefined);
+  db.close();
+  assert.equal((await call('/trading/quote', { symbol, side: 'buy', amount: '1000' })).status, 409);
+  const funding = await fetch(base + `/api/notes/markets/${encodeURIComponent(symbol)}/fund`, { method: 'POST',
+    headers: { ...auth, Origin: 'https://admin.featheral.com' }, body: JSON.stringify({ approval: `FUND ${symbol} 1000000 FTHX 1000000 NOTES` }) });
+  assert.equal(funding.status, 200);
+  const challenge = await call('/challenge', { address: wallet.address });
+  const session = await call('/login', { address: wallet.address, signature: await wallet.signMessage(challenge.body.message) });
+  const token = session.body.token;
+  assert.equal((await call('/trading/deposit', { symbol: 'FTHX', amount: '1000', requestId: 'world-http-deposit01' }, token)).status, 200);
+  const quote = await call('/trading/quote', { symbol, side: 'buy', amount: '1000' }, token);
+  assert.equal(quote.status, 200);
+  assert.equal(quote.body.output, 996);
+  const input = { symbol, side: 'buy', amount: '1000', minOutput: '996', requestId: 'world-http-purchase1' };
+  assert.equal((await call('/trading/trade', input)).status, 401);
+  assert.equal((await call('/trading/trade', input, token, 'notes.featheral.com')).status, 403);
+  assert.equal((await call('/trading/trade', input, token, 'ex.featheral.com', 'https://elsewhere.test')).status, 403);
+  const bought = await call('/trading/trade', input, token);
+  assert.equal(bought.status, 200);
+  assert.deepEqual((await call('/trading/trade', input, token)).body, bought.body);
+  const holding = (await call('/trading/account', undefined, token)).body.holdings.find(row => row.symbol === symbol);
+  assert.equal(holding.balance, '996');
+  assert.equal(holding.gameUsable, false);
+  const tape = await call(`/market-tape?symbol=${encodeURIComponent(symbol)}&interval=all`);
+  assert.equal(tape.status, 200);
+  assert.ok(tape.body.rows.some(row => row.id.startsWith('note:') && row.symbol === symbol));
+  assert.ok(tape.body.rows.some(row => row.id.startsWith('world:') && row.symbol === symbol));
+  const exchangeTape = await call(`/market-tape?symbol=${encodeURIComponent(symbol)}&interval=all&venue=exchange`);
+  assert.equal(exchangeTape.status, 200);
+  assert.ok(exchangeTape.body.rows.some(row => row.id.startsWith('note:')));
+  assert.ok(exchangeTape.body.rows.every(row => !row.id.startsWith('world:')));
+  assert.equal((await call('/market-tape?venue=unknown')).status, 400);
+  const history = (await call(`/markets/${encodeURIComponent(symbol)}/history?interval=all`)).body;
+  assert.equal(history.source, 'executed-trades');
+  assert.equal(history.candles[0].trades, 1);
+  assert.equal(history.candles[0].quoteVolume, '1000');
+  const trending = (await call('/trending')).body;
+  assert.equal(trending.notes.find(row => row.symbol === symbol).volume, 1000);
+  assert.equal(trending.worldMarkets.find(row => row.symbol === symbol).inventoryOnly, true);
+  assert.deepEqual(world.prepare('SELECT * FROM market_fills').all(), gameBefore);
+});
+
 test('public creation APIs enforce wallet ownership, fee signatures, origin and safe owner editing', async t => {
   const { ethers } = require('ethers');
   const { createDollarApi } = require('../../notes/dollar');

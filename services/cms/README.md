@@ -1026,7 +1026,7 @@ Featheral Exchange uses `/api/creation` wallet sessions and real FTHX markets, n
 
 Exchange-only routes under `/api/creation/trading`:
 
-- `GET /markets?interval=24h`: verified public pools, executed OHLCV and valuation references.
+- `GET /markets?interval=24h`: verified public pools, executed OHLCV and valuation references; `pool` includes the actual FTH$/FTHX reserves and settlement availability.
 - `GET /account`: authenticated trading holdings/portfolio, completed trades, movements and recoverable legacy settlements.
 - `POST /deposit`: `{symbol:"FTHX",amount,requestId}` moves existing whole FTHX from the authenticated owner's wallet into isolated trading custody. Other deposit currencies are rejected.
 - `POST /quote`: `{symbol,side:"buy"|"sell",amount}` quotes the chosen FTHX pair.
@@ -1042,9 +1042,20 @@ an interrupted withdrawal blocks competing Dollar operations until retry/recover
 No new supply is issued. Main-wallet portfolio totals include trading holdings,
 but main-wallet spendable balances exclude them.
 
-The terminal provides spot candlesticks, volume, SMA20, four timeframes,
+The terminal provides spot candlesticks by default, volume, MA5/20, five timeframes,
 zoom/pan/fullscreen, quote expiry, minimum output/slippage confirmation, positions,
 trades and movement history. It preserves request IDs after uncertain submissions.
+Its compact ticker reports real 24-hour high/low, first-recorded-open to
+last-recorded-close change, executed FTHX volume and pool reserves, independent of
+the chart interval. Empty histories show no invented change. AMM depth uses exact
+reserve arithmetic and the 0.3% fee for each independent cumulative swap estimate;
+it is not resting liquidity or an order book. Recent trades use
+`GET /api/creation/market-tape?symbol=...&interval=24h&venue=exchange`, excluding
+World inventory records before the 100-record limit. Omitting `venue` retains the
+combined tape; supported values are `all` and `exchange`.
+Buy/sell controls and balance-percentage sizing use only trading custody, preserving
+whole note units and all 18 Dollar decimals. The account ledger is visible in both
+Trade and Portfolio; failed reads clear depth and trade rows and label stale data.
 Trading amounts, balances and confirmations show the full stored asset precision;
 submitted trades remain resumable even when a reference-only or World market is
 selected. The getting-started guide explains the separate wallet and trading
@@ -1098,6 +1109,29 @@ Dollar can display World guest funds without an injected wallet. `/wallet-sync.h
 Each of the 34 letter/digit placeholders requests **1,000,000 existing treasury FTHX + 1,000,000 newly issued placeholder units**. Funding is never automatic. In Admin, select Notes and open **Note markets & funding**. The protected `POST /api/notes/markets/:symbol/fund` requires same origin and the exact phrase `FUND <symbol> 1000000 FTHX 1000000 NOTES`. Funding debits the existing system treasury, credits the pool and records initial placeholder issuance in one SQLite transaction. Insufficient treasury balance fails without any issuance. Each pool can be funded once. The 34 eligible pools would require 34,000,000 FTHX; the current supply is insufficient and must not be replaced with demo liquidity or newly minted FTHX.
 
 Public `GET /api/creation/markets` lists funded/unfunded pools. On Notes, `POST /api/creation/markets/quote` returns a whole-unit constant-product quote with a 0.3% fee; `POST /api/creation/markets/trade` requires a wallet session, symbol, buy/sell direction, integer amount, minimum output and unique request ID. Buy spends real global FTHX; sell spends the selected placeholder. Four balanced entries, pool reserves and the trade record commit together. Retries return the original receipt and conflicting parameters are rejected. No Ethereum transaction or Dollar/demo balance is used. Fees remain in pool reserves. Trading does not mint FTHX; custom-note reward issuance remains separate. Existing system assets do not receive new placeholder pools.
+
+World item types discovered by the connected, settled World history reader appear
+as separate `WORLD:<asset>` **trading-only notes** in `/trading/markets` and
+`/markets`, including distinct enhanced-equipment levels. Metadata declares
+`tradingOnly: true`, `gameUsable: false`, `inventoryOnly: false`. Listing performs
+no writes or issuance. Root **Admin > Notes** can fund a known item pool through
+`POST /api/notes/markets/:symbol/fund`, with the exact approval
+`FUND WORLD:<asset> 1000000 FTHX 1000000 NOTES`. The normal one-time funding
+transaction debits 1,000,000 existing treasury FTHX and issues 1,000,000 trading-note
+units, not inventory. Unknown item types, insufficient funds and repeated funding
+fail without partial issuance. No additional FTHX is created.
+
+Funded World notes use the existing `/trading/quote`, `/trading/trade`, custody,
+withdrawal, wallet swap and LP routes just like other notes. Their supply resides
+only in Notes, never in World's stock/equipment tables, and there is no redemption
+or game-import endpoint. Their independent AMM price and 0.3% fee do not promise
+World inventory prices. Funded pools survive restart and loss of the World
+reader. `/markets/:symbol/history` contains only actual note-pool executions;
+`/world-markets/:asset/history` and `/world-trades` remain game inventory history.
+`/market-tape?symbol=WORLD:<asset>` includes both streams under distinct `note:`
+and `world:` record IDs with their original unit scales. Game fills never become
+note supply, Exchange purchases never become gameplay inventory, and neither
+stream is counted as the other's trading volume.
 
 The first content on the Notes homepage ranks all notes by **last-24-hour executed FTHX volume**, counting buy inputs and sell outputs once per trade, not reserves, reward activity or fabricated volume. FTHX shows aggregate quote volume across pairs; each other note shows its pair volume. These per-note volumes are not summed as independent totals. Native circulation is shown separately below the ranking. Unfunded markets show zero volume and disabled trading. Non-placeholder community currencies currently have no configured pool. A Refresh volumes control loads the latest ranking.
 

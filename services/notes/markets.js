@@ -6,6 +6,12 @@ const SPECIAL_SUFFIXES = "#$@!%^&*()-_+=.,:;?~";
 const PLACEHOLDERS = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", ..."0123456789", ...SPECIAL_SUFFIXES]
   .map(suffix => `FTH${suffix}`).filter(symbol => !["FTHX", "FTHG", "FTH$"].includes(symbol));
 const TARGET = 1000000;
+const worldNote = symbol => {
+  const asset = typeof symbol === "string" && /^WORLD:([a-z0-9][a-z0-9-]{0,79})$/.exec(symbol)?.[1];
+  return asset ? { asset, ticker: asset.toUpperCase(), name: `${asset.replaceAll("-", " ")} trading note`,
+    tradingOnly: true, gameUsable: false, inventoryOnly: false, venue: "exchange",
+    description: "Trading-only World item note. Separate from game inventory: cannot be equipped, consumed, redeemed or transferred into World. Its FTHX pool price is independent of World inventory prices." } : null;
+};
 const isReservedSpecial = symbol => typeof symbol === "string" && /^FTH[^A-Z0-9]$/.test(symbol) && symbol !== "FTH$";
 const isReservedMarket = symbol => symbol === "FTHG" || isReservedSpecial(symbol);
 const requireTradingSymbol = symbol => {
@@ -52,6 +58,8 @@ class Markets {
   pool(symbol) {
     if (typeof symbol !== "string") throw fail(400, "A note symbol is required.");
     const pool = this.db.prepare("SELECT * FROM note_markets WHERE symbol=?").get(symbol);
+    if (!pool && worldNote(symbol) && this.worldSource?.catalog().some(market => market.symbol === symbol))
+      return { symbol, placeholder: 0, base: 0, quote: 0, funded_at: null };
     if (!pool) throw fail(404, "Unknown note market.");
     return pool;
   }
@@ -61,10 +69,13 @@ class Markets {
       throw fail(409, "A Dollar route is settling. Retry after settlement recovery.");
   }
   catalog(now = Date.now(), includeReserved = false) {
-    return this.db.prepare(`SELECT m.*,COALESCE(v.volume,0) AS volume,COALESCE(v.trades,0) AS trades
+    const pools = this.db.prepare(`SELECT m.*,COALESCE(v.volume,0) AS volume,COALESCE(v.trades,0) AS trades
       FROM note_markets m LEFT JOIN (SELECT symbol,SUM(volume) AS volume,COUNT(*) AS trades
       FROM note_trades WHERE at>=? AND at<=? GROUP BY symbol) v ON v.symbol=m.symbol
-      ORDER BY volume DESC,m.symbol`).all(now - 86400000, now).map(pool => {
+      ORDER BY volume DESC,m.symbol`).all(now - 86400000, now);
+    for (const market of this.worldSource?.catalog(now) || []) if (!pools.some(pool => pool.symbol === market.symbol))
+      pools.push({ symbol: market.symbol, placeholder: 0, base: 0, quote: 0, volume: 0, trades: 0 });
+    return pools.map(pool => {
         if (!Number.isSafeInteger(pool.volume)) throw fail(409, "Market volume exceeds safe unit limits.");
         return {
         symbol: pool.symbol, name: pool.symbol === "FTHS" && !pool.placeholder ? "Featheral Silver" : `${pool.symbol} ${pool.placeholder ? "placeholder" : "community"} note`, placeholder: !!pool.placeholder,
@@ -72,6 +83,7 @@ class Markets {
         trades: pool.trades, funded: pool.base > 0, targetFthx: TARGET, targetNotes: TARGET, feeBps: 30,
         reserved: isReservedMarket(pool.symbol),
         price: pool.base > 0 ? { numerator: String(pool.base), denominator: String(pool.quote), currency: "FTHX" } : null,
+        ...worldNote(pool.symbol),
       }; }).filter(market => includeReserved || !market.reserved);
   }
   fund(symbol, approval) {
@@ -82,6 +94,7 @@ class Markets {
       const pool = this.pool(symbol);
       requireTradingSymbol(symbol);
       if (pool.base > 0) throw fail(409, "This market is already funded.");
+      if (worldNote(symbol)) this.db.prepare("INSERT OR IGNORE INTO note_markets(symbol) VALUES (?)").run(symbol);
       this.entry(SYSTEM_TREASURY_ACCOUNT, -TARGET, "market_funding_out", "FTHX", symbol);
       this.db.prepare("UPDATE note_markets SET base=?,quote=?,funded_at=? WHERE symbol=?")
         .run(TARGET, TARGET, Date.now(), symbol);
@@ -218,4 +231,4 @@ class Markets {
     }
   }
 }
-module.exports = { Markets, PLACEHOLDERS, TARGET, isReservedSpecial, isReservedMarket };
+module.exports = { Markets, PLACEHOLDERS, TARGET, isReservedSpecial, isReservedMarket, worldNote };

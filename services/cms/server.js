@@ -236,7 +236,10 @@ let dollarWalletReader;
 let dollarActivityReader;
 app.setMarketActivity = reader => { dollarActivityReader = reader; };
 let worldMarkets;
-app.setWorldMarketsSource = (db, ledger) => { worldMarkets = new (require('../notes/world-markets').WorldMarkets)(db, ledger); };
+app.setWorldMarketsSource = (db, ledger) => {
+  worldMarkets = new (require('../notes/world-markets').WorldMarkets)(db, ledger);
+  if (creation) creation.markets.worldSource = worldMarkets;
+};
 const worldCoverage = () => ({ available: Boolean(worldMarkets),
   description: worldMarkets ? require('../notes/world-markets').description : 'World execution database is not connected on this node.' });
 let portfolioGoldReader;
@@ -481,14 +484,16 @@ creationRouter.get('/settlement', wrap((req, res) => {
 }));
 creationRouter.get('/market-tape', wrap((req, res) => {
   res.set('Cache-Control', 'no-store');
+  if (req.query.venue && !['all', 'exchange'].includes(req.query.venue))
+    throw Object.assign(new Error('Choose all or exchange tape venue.'), { status: 400 });
   const isWorld = typeof req.query.symbol === 'string' && req.query.symbol.startsWith('WORLD:');
-  const pool = require('../notes/activity').trades(creation, isWorld ? { ...req.query, symbol: 'FTHX' } : req.query);
-  const world = worldMarkets && (!req.query.symbol || req.query.symbol === 'FTHX' || isWorld)
+  const pool = require('../notes/activity').trades(creation, req.query);
+  const world = req.query.venue !== 'exchange' && worldMarkets && (!req.query.symbol || req.query.symbol === 'FTHX' || isWorld)
     ? worldMarkets.tape({ interval: req.query.interval, asset: isWorld ? req.query.symbol.slice(6) : '' }).rows
       .map(row => ({ ...row, from: row.symbol, to: 'FTHX', amount: row.quantity, output: row.quoteAmount,
         fromDecimals: 0, toDecimals: 18 })) : [];
-  res.json({ rows: [...(isWorld ? [] : pool.rows), ...world].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id)).slice(0, 100),
-    description: pool.description + ' World inventory fills are separate executed trades denominated in FTHX, not internal note-pool swaps.',
+  res.json({ rows: [...pool.rows, ...world].sort((a, b) => b.at - a.at || b.id.localeCompare(a.id)).slice(0, 100),
+    description: pool.description + ' Trading-only World note swaps and World inventory fills are separate: only inventory fills use the internal FTHX denomination and neither grants game inventory to an Exchange holder.',
     worldCoverage: worldCoverage() });
 }));
 creationRouter.get('/world-markets', wrap((req, res) => {
@@ -522,10 +527,10 @@ creationRouter.get('/trading/account', wrap(async (req, res) => {
 }));
 creationRouter.get('/trading/operations/:requestId', wrap((req, res) => res.json(trading.operation(creationOwner(req), req.params.requestId))));
 creationRouter.get('/trading/markets', wrap(async (req, res) => {
-  const pair = dollarExchange.market(req.query.interval || '24h');
   const reference = await walletPortfolio([{ symbol: 'FTH$', balance: '1000000000000000000' }], {});
-  res.json({ markets: [pair.notes[0], ...creation.markets.catalog(), ...(worldMarkets?.catalog() || [])],
-    pair, reference, worldCoverage: worldCoverage() });
+  const pair = dollarExchange.market(req.query.interval || '24h');
+  res.json({ markets: [pair.notes[0], ...creation.markets.catalog()],
+    pair, pool: dollarExchange.pool(), reference, worldCoverage: worldCoverage() });
 }));
 for (const method of ['deposit', 'withdraw', 'trade']) {
   creationRouter.post(`/trading/${method}`, wrap((req, res) => res.json(trading[method](creationOwner(req), req.body))));

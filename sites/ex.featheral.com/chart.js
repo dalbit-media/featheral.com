@@ -3,12 +3,12 @@
   const engine = globalThis.FeatheralTradingChart;
   const intervals = { "1h": 300000, "24h": 3600000, "7d": 21600000, "30d": 86400000, all: 86400000 };
   function mount(root) {
-    let history = { candles: [] }, candles = [], window, style = "line", averages = true, volume = true, duration = 3600000;
+    let history = { candles: [] }, candles = [], window, style = "candles", averages = true, volume = true, duration = 3600000;
     let key, markup = "", frame = 0, gesture, observedCanvas;
     const pointers = new Map();
     const controls = document.createElement("div"); controls.className = "chart-appearance-controls";
     controls.setAttribute("role", "group"); controls.setAttribute("aria-label", "Chart appearance and navigation");
-    controls.innerHTML = `<button type="button" data-chart-style="line" aria-pressed="true">Line</button><button type="button" data-chart-style="candles" aria-pressed="false">Candles</button>
+    controls.innerHTML = `<button type="button" data-chart-style="line" aria-pressed="false">Line</button><button type="button" data-chart-style="candles" aria-pressed="true">Candles</button>
       <button type="button" data-chart-volume aria-pressed="true">Volume</button><button type="button" data-chart-averages aria-pressed="true">MA 5 / 20</button>
       <button type="button" data-chart-nav="older" aria-label="Earlier candles" title="Earlier candles">&larr;</button><button type="button" data-chart-nav="in" aria-label="Zoom in">+</button><button type="button" data-chart-nav="out" aria-label="Zoom out">&minus;</button><button type="button" data-chart-nav="newer" aria-label="Later candles" title="Later candles">&rarr;</button>
       <button type="button" data-chart-nav="reset">Reset</button><button type="button" data-chart-close hidden>Exit fullscreen</button>`;

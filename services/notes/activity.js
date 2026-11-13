@@ -1,5 +1,6 @@
 "use strict";
 const { period } = require("./candles");
+const { worldNote } = require("./markets");
 const fail = message => Object.assign(new Error(message), { status: 400 });
 const sources = ["world", "exchange", "wallet", "gold", "app", "silver", "notes", "other"];
 const noteSource = `CASE WHEN site='notes-market' THEN 'exchange' WHEN site='notes-wallet' THEN 'wallet'
@@ -11,7 +12,7 @@ function options(input = {}, now = Date.now()) {
   if (typeof interval !== "string") throw fail("Choose a supported chart interval.");
   const [duration, bucket] = interval === "all" ? [now, 86400000] : period(interval);
   const symbol = input.symbol || "", source = input.source || "";
-  if (typeof symbol !== "string" || symbol.length > 16 || /[\x00-\x20]/.test(symbol)) throw fail("Choose a valid currency.");
+  if (typeof symbol !== "string" || symbol.length > 16 && !worldNote(symbol) || /[\x00-\x20]/.test(symbol)) throw fail("Choose a valid currency.");
   if (typeof source !== "string" || source && !sources.includes(source)) throw fail("Choose a valid activity source.");
   const limit = input.limit === undefined ? 50 : Number(input.limit);
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw fail("Activity page size must be from 1 to 100.");
